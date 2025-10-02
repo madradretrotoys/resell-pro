@@ -7,18 +7,78 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
   if (!email) return json({ error: "Email required." }, 400);
 
   const sql = neon(env.DATABASE_URL as string);
+
   const rows = await sql<{ login_id: string }[]>
     `SELECT login_id FROM app.users WHERE email = ${email} LIMIT 1`;
 
-  // Do not leak existence. Always return 200 with a generic message.
-  // TODO: If using email, send the login_id here via your email provider.
-  // e.g., SendGrid using env.SENDGRID_KEY (omitted in this stub).
-  return json({ ok: true, message: "If that email exists, we sent the User ID." });
+  // Always generic response
+  const generic = { ok: true, message: "If that email exists, we sent the User ID." };
+
+  if (rows.length === 0) {
+    return json(generic);
+  }
+
+  const loginId = rows[0].login_id;
+
+  const subject = "Resell Pro: Your User ID";
+  const text =
+`You requested your Resell Pro User ID.
+
+User ID: ${loginId}
+
+If you didn't make this request, you can ignore this email.`;
+  const html =
+`<p>You requested your Resell Pro User ID.</p>
+<p><strong>User ID:</strong> ${escapeHtml(loginId)}</p>
+<p>If you didn't make this request, you can ignore this email.</p>`;
+
+  await sendMail(env, email, subject, text, html).catch(() => { /* swallow errors */ });
+
+  return json(generic);
 };
 
 function json(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), {
     status,
-    headers: { "content-type": "application/json" }
+    headers: { "content-type": "application/json" },
   });
+}
+
+// Minimal MailChannels helper
+async function sendMail(
+  env: Record<string, unknown>,
+  to: string,
+  subject: string,
+  text: string,
+  html?: string
+) {
+  const fromEmail = (env.MAIL_FROM as string) || "madradretrotoys@gail.com";
+  const fromName = (env.MAIL_FROM_NAME as string) || "Resell Pro";
+
+  const payload = {
+    personalizations: [{ to: [{ email: to }] }],
+    from: { email: fromEmail, name: fromName },
+    subject,
+    content: [
+      { type: "text/plain", value: text },
+      ...(html ? [{ type: "text/html", value: html }] : []),
+    ],
+  };
+
+  const res = await fetch("https://api.mailchannels.net/tx/v1/send", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+
+  if (!res.ok) {
+    const body = await res.text().catch(() => "");
+    throw new Error(`Mail send failed: ${res.status} ${body}`);
+  }
+}
+
+function escapeHtml(s: string) {
+  return s.replace(/[&<>"']/g, (c) =>
+    ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]!)
+  );
 }
