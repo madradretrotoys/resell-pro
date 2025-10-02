@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <title>Resell Pro • App</title>
+  <style>
+    :root { --bg:#0b0f19; --panel:#0f172a; --txt:#e7ecf3; --muted:#a6b3c6; --accent:#7dd3fc; }
+    *{box-sizing:border-box;font-family:system-ui,-apple-system,Segoe UI,Roboto,Inter,Arial}
+    body{margin:0;background:linear-gradient(180deg,#0b0f19, #0e1423); color:var(--txt); min-height:100dvh; display:flex; flex-direction:column}
+    header{display:flex; align-items:center; gap:12px; padding:14px 16px; background:#0e1524; position:sticky; top:0; z-index:5; border-bottom:1px solid #202a44}
+    .burger{width:44px;height:44px;border-radius:10px;border:1px solid #263149;background:#0e1524;color:var(--txt);font-size:20px}
+    .brand{font-weight:800; letter-spacing:.4px}
+    .user{margin-left:auto; color:var(--muted); font-size:14px}
+    nav{position:fixed; inset:0 30% 0 0; max-width:320px; transform:translateX(-100%); transition:.24s; background:#0f172a; border-right:1px solid #202a44; padding:14px}
+    nav.open{transform:translateX(0)}
+    nav h3{margin:6px 0 12px; font-size:13px; color:var(--muted)}
+    nav a{display:block; padding:12px 12px; margin:6px 0; border-radius:10px; text-decoration:none; color:var(--txt); border:1px solid #263149; background:#0e1524}
+    main{padding:18px; max-width:1100px; width:100%; margin:0 auto}
+    .tile{padding:18px; border:1px solid #263149; background:#0e1524; border-radius:16px; margin:10px 0}
+    @media(min-width:900px){ nav{position:static; transform:none; max-width:260px; width:260px} .wrap{display:grid; grid-template-columns:260px 1fr; gap:14px} }
+  </style>
+</head>
+<body>
+  <header>
+    <button class="burger" id="menu" aria-label="Menu">☰</button>
+    <div class="brand">Resell Pro</div>
+    <div class="user" id="who"></div>
+    <button class="burger" onclick="logout()" title="Sign out" aria-label="Sign out">⎋</button>
+  </header>
+  <div class="wrap">
+    <nav id="nav" aria-label="Primary">
+      <h3>Workspace</h3>
+      <a href="#" onclick="goto('pos')">Point of Sale</a>
+      <a href="#" onclick="goto('inventory')">Inventory</a>
+      <a href="#" onclick="goto('intake')">Intake</a>
+      <a href="#" onclick="goto('estimates')">Estimates / Buy Tickets</a>
+      <a href="#" onclick="goto('research')">Research</a>
+      <a href="#" onclick="goto('time')">Timekeeping</a>
+      <a href="#" onclick="goto('drawer')">Cash Drawer</a>
+      <a href="#" onclick="goto('payouts')">Payouts</a>
+      <h3>Admin</h3>
+      <a href="#" onclick="goto('settings')">Settings</a>
+    </nav>
+    <main id="main">
+      <div class="tile">
+        <h2 id="title">Welcome</h2>
+        <p>This is your app shell. Tap a menu item to switch sections. Everything is responsive for phone & tablet.</p>
+      </div>
+    </main>
+  </div>
+  <script>
+    // Gate: require “login”
+    (function(){
+      const tok = localStorage.getItem('rp_token');
+      if (!tok) location.replace('index.html');
+      const who = localStorage.getItem('rp_user') || 'User';
+      document.getElementById('who').textContent = who;
+    })();
+
+    const nav = document.getElementById('nav');
+    document.getElementById('menu').onclick = () => nav.classList.toggle('open');
+
+    function goto(section){
+      // Simple placeholder content per section
+      const T = {
+        pos: 'Point of Sale',
+        inventory: 'Inventory',
+        intake: 'Intake',
+        estimates: 'Estimates / Buy Tickets',
+        research: 'Research',
+        time: 'Timekeeping',
+        drawer: 'Cash Drawer',
+        payouts: 'Payouts',
+        settings: 'Settings'
+      }[section] || 'Welcome';
+      document.getElementById('title').textContent = T;
+      nav.classList.remove('open');
+      // Later we’ll mount real screens here
+    }
+    function logout(){
+      localStorage.removeItem('rp_token');
+      localStorage.removeItem('rp_user');
+      location.href = 'index.html';
+    }
+  </script>
+</body>
+</html>

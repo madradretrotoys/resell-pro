@@ -1,1 +1,45 @@
-<!doctype html><html><body>Resell Pro shell</body></html>
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <title>Resell Pro • Login</title>
+  <style>
+    :root { --bg:#0b0f19; --card:#131a2a; --txt:#e7ecf3; --muted:#9fb1c8; --accent:#7dd3fc; }
+    *{box-sizing:border-box;font-family:system-ui,-apple-system,Segoe UI,Roboto,Inter,Arial}
+    body{margin:0;background:linear-gradient(180deg,#0b0f19, #0e1423); color:var(--txt); min-height:100dvh; display:grid; place-items:center}
+    .card{background:var(--card); width:min(420px,92%); padding:28px; border-radius:18px; box-shadow:0 10px 30px rgba(0,0,0,.25)}
+    h1{margin:0 0 10px}
+    p{margin:6px 0 18px; color:var(--muted); font-size:14px}
+    label{display:block; font-size:13px; color:var(--muted); margin:16px 0 6px}
+    input{width:100%; padding:12px 14px; border-radius:12px; border:1px solid #263149; background:#0e1524; color:var(--txt)}
+    button{width:100%; margin-top:18px; padding:12px 14px; border-radius:12px; border:0; background:var(--accent); color:#002234; font-weight:700; cursor:pointer}
+    small{display:block; margin-top:12px; color:var(--muted)}
+    .hint{font-size:12px; opacity:.8}
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>Resell Pro</h1>
+    <p>Sign in to continue.</p>
+    <label for="email">Email</label>
+    <input id="email" type="email" placeholder="you@example.com" autocomplete="email"/>
+    <label for="code">Access Code</label>
+    <input id="code" type="password" placeholder="For now: 2468" />
+    <button id="btn">Sign in</button>
+    <small class="hint">Temporary login only. We’ll replace this with real Sign‑in (Clerk/Auth0 + social) later.</small>
+  </div>
+  <script>
+    document.getElementById('btn').onclick = () => {
+      const email = (document.getElementById('email').value||'').trim();
+      const code  = (document.getElementById('code').value||'').trim();
+      if (!email) { alert('Enter email'); return; }
+      if (code !== '2468') { alert('Wrong access code'); return; }
+      // “Log in”: set a simple session token (temporary)
+      localStorage.setItem('rp_token','demo');
+      localStorage.setItem('rp_user', email);
+      location.href = 'app.html';
+    };
+  </script>
+</body>
+</html>
