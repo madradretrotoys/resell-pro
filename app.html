@@ -22,6 +22,9 @@
   </style>
 </head>
 <body>
+  <!-- Screen mount point -->
+  <main id="app-view" class="content"></main>
+  
   <header>
     <button class="burger" id="menu" aria-label="Menu">☰</button>
     <div class="brand">Resell Pro</div>
@@ -31,16 +34,18 @@
   <div class="wrap">
     <nav id="nav" aria-label="Primary">
       <h3>Workspace</h3>
-      <a href="#" onclick="goto('pos')">Point of Sale</a>
-      <a href="#" onclick="goto('inventory')">Inventory</a>
-      <a href="#" onclick="goto('intake')">Intake</a>
-      <a href="#" onclick="goto('estimates')">Estimates / Buy Tickets</a>
-      <a href="#" onclick="goto('research')">Research</a>
-      <a href="#" onclick="goto('time')">Timekeeping</a>
-      <a href="#" onclick="goto('drawer')">Cash Drawer</a>
-      <a href="#" onclick="goto('payouts')">Payouts</a>
+      <a href="?page=dashboard" data-page="dashboard">Dashboard</a>
+      <a href="?page=pos"       data-page="pos">POS</a>
+      <a href="?page=drawer"       data-page="drawer">Cash Drawer</a>
+      <a href="?page=payouts" data-page="payouts">Cash Payouts</a>
+      <a href="?page=research"  data-page="research">Item Research</a>
+      <a href="?page=inventory" data-page="inventory">Inventory</a>
+      <a href="?page=intake"  data-page="intake">Inventory Intake</a>
+      <a href="?page=estimateDropFrm" data-page="estimateDropFrm">Drop Off Form</a>
+      <a href="?page=estimates" data-page="estimates">Estimates/Buy Tickets</a>
+      <a href="?page=time" data-page="time">Timekeeping</a>
       <h3>Admin</h3>
-      <a href="#" onclick="goto('settings')">Settings</a>
+      <a href="?page=settings" data-page="settings">Settings</a>
     </nav>
     <main id="main">
       <div class="tile">
@@ -84,5 +89,7 @@
       location.href = 'index.html';
     }
   </script>
+  <!-- Load the small client router -->
+  <script type="module" src="/assets/js/router.js"></script>
 </body>
 </html>
