@@ -1,0 +1,23 @@
+!doctype html>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Resell Pro – Schema Viewer</title>
+<style>
+  body{font:14px system-ui, sans-serif; margin:20px; max-width:900px}
+  textarea{width:100%; height:60vh}
+  input,button{font:14px inherit; padding:.5rem}
+</style>
+<h1>Schema Viewer</h1>
+<p>Enter your ADMIN key (never commit it):</p>
+<input id="k" type="password" placeholder="ADMIN_SCHEMA_KEY" style="width:60%">
+<button id="go">Fetch</button>
+<button id="cp">Copy JSON</button>
+<textarea id="out" placeholder="schema JSON will appear here…"></textarea>
+<script>
+  const k = document.getElementById('k'), out = document.getElementById('out');
+  document.getElementById('go').onclick = async () => {
+    out.value = 'Loading…';
+    const r = await fetch('/api/admin/schema', { headers: { 'x-admin-key': k.value } });
+    out.value = await r.text();
+  };
+  document.getElementById('cp').onclick = () => navigator.clipboard.writeText(out.value);
+</script>
