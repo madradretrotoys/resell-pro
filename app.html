@@ -58,7 +58,7 @@
     // Gate: require “login”
     (function(){
       const tok = localStorage.getItem('rp_token');
-      if (!tok) location.replace('index.html');
+      if (!tok) location.replace('/index.html');
       const who = localStorage.getItem('rp_user') || 'User';
       document.getElementById('who').textContent = who;
     })();
