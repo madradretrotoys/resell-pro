@@ -1,1 +1,3 @@
-/app   /app.html   200
+# rewrite /app to the shell (no 301/302)
+ /app    /app.html    200
+ /app/   /app.html    200
