@@ -188,6 +188,83 @@
       finally{ setBusy($('#fpw_submit'), false); }
     });
   </script>
+  <script type="module">
+    // Avoid double-binding if this script is included twice
+    if (!window.__rp_signin_bound) {
+      window.__rp_signin_bound = true;
+  
+      // Helper: run login -> verify session -> navigate
+      async function runLoginFlow(id, password, navAfter = true) {
+        const r = await fetch('/api/auth/login', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify({ id, password })
+        });
+        if (!r.ok) throw new Error('Invalid credentials');
+  
+        const s = await fetch('/api/auth/session', { credentials: 'include' }).then(x => x.json());
+        if (!s || !s.user) throw new Error('Session not established');
+        if (navAfter) location.href = '/app';
+        return s.user;
+      }
+  
+      // Extract fields from the nearest form (or the first form on page)
+      function getCreds(fromEl) {
+        const form = fromEl?.closest?.('form') || document.querySelector('form');
+        const idInput =
+          form?.querySelector('input[name="id"], input[name="email"], input[type="email"], #login_id, #email');
+        const pwInput =
+          form?.querySelector('input[name="password"], input[type="password"], #password');
+        const id = (idInput?.value || '').trim();
+        const password = pwInput?.value || '';
+        return { id, password, form };
+      }
+  
+      // 1) Intercept **form submit** (covers Enter key, etc.)
+      document.addEventListener('submit', async (e) => {
+        const form = e.target;
+        // Only intercept the sign-in form (has a password field)
+        if (!form.querySelector('input[type="password"]')) return;
+        e.preventDefault();
+        const { id, password } = getCreds(form);
+        const btn = form.querySelector('[type="submit"], button');
+        const txt = btn?.textContent;
+        if (btn) { btn.disabled = true; btn.textContent = 'Signing in…'; }
+        try { await runLoginFlow(id, password); }
+        catch (err) { console.error(err); alert('Sign-in failed. Check your ID/password and try again.'); }
+        finally { if (btn) { btn.disabled = false; btn.textContent = txt; } }
+      }, true);
+  
+      // 2) Intercept **clicks** on anchors/buttons that would jump to /app
+      document.addEventListener('click', async (e) => {
+        const a = e.target.closest('a[href^="/app"] , [data-signin], button[type="submit"]');
+        if (!a) return;
+  
+        // Only hijack if this is within the sign-in area (has a password nearby)
+        const wrapper = a.closest('form') || document;
+        if (!wrapper.querySelector('input[type="password"]')) return;
+  
+        // If it's a plain anchor to /app, prevent the premature navigation
+        if (a.matches('a[href="/app"]')) {
+          e.preventDefault();
+          e.stopPropagation();
+        }
+  
+        // If it's a submit button inside a form, let the submit listener handle it
+        if (a.matches('button[type="submit"]')) return;
+  
+        // Otherwise treat it like a "Sign In" click
+        const { id, password, form } = getCreds(a);
+        const btn = a;
+        const txt = btn?.textContent;
+        if (btn) { btn.disabled = true; btn.textContent = 'Signing in…'; }
+        try { await runLoginFlow(id, password); }
+        catch (err) { console.error(err); alert('Sign-in failed. Check your ID/password and try again.'); }
+        finally { if (btn) { btn.disabled = false; btn.textContent = txt; } }
+      }, true);
+    }
+  </script>
 
 </body>
 </html>
