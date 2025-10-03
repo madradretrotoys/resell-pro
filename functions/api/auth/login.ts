@@ -26,21 +26,22 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
     const payload = { sub: u.user_id, lid: u.login_id, email: u.email, iat: now, exp };
     const token = await signJwt(payload, env.JWT_SECRET as string);
 
+    // Host-only cookie (no Domain=) so it works on preview and production hosts.
     const cookie = [
       `rp_jwt=${token}`,
       "Path=/",
-      "Domain=.resell-pro.pages.dev",
       "HttpOnly",
       "Secure",
       "SameSite=Lax",
       `Max-Age=${14 * 24 * 60 * 60}`
     ].join("; ");
-
+    
     return new Response(JSON.stringify({ ok: true, user: { user_id: u.user_id, login_id: u.login_id, email: u.email } }), {
       status: 200,
       headers: {
         "content-type": "application/json",
-        "set-cookie": cookie
+        "set-cookie": cookie,
+        "cache-control": "no-store"
       }
     });
   } catch (err: any) {
