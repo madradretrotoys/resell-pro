@@ -20,7 +20,7 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
     const ok = await bcrypt.compare(password, u.password_hash);
     if (!ok) return json({ error: "Invalid credentials." }, 401);
 
-    // Create a signed JWT and set as HttpOnly cookie
+    // Issue a signed cookie
     const now = Math.floor(Date.now() / 1000);
     const exp = now + 14 * 24 * 60 * 60; // 14 days
     const payload = { sub: u.user_id, lid: u.login_id, email: u.email, iat: now, exp };
@@ -54,7 +54,7 @@ function json(body: unknown, status = 200) {
   });
 }
 
-// --- Minimal HS256 JWT helpers for Cloudflare Workers ---
+// HS256 JWT signer using Web Crypto
 async function signJwt(payload: Record<string, unknown>, secret: string): Promise<string> {
   const enc = new TextEncoder();
   const header = { alg: "HS256", typ: "JWT" };
