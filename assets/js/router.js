@@ -25,17 +25,17 @@ async function loadScreen(name){
   if(!view) throw new Error('#app-view not found');
 
   let session = await ensureSession();
-  const hasJwt = (document.cookie || '').includes('rp_jwt=');
-
-  // If we have a JWT but the session endpoint hasn't caught up yet, retry briefly.
-  if (!session?.user && hasJwt) {
+  // JWT cookie is HttpOnly (not visible to JS). Just retry session briefly.
+  if (!session?.user) {
     for (let i = 0; i < 4 && !session?.user; i++) {
       await new Promise(r => setTimeout(r, 150)); // ~600ms total
       session = await ensureSession();
     }
   }
-
-  if (!session?.user) { location.href = '/index.html'; return; }
+  if (!session?.user) {
+    location.href = '/index.html';
+    return;
+  }
   
   if(current.mod?.destroy) try{ current.mod.destroy(); }catch{}
 
