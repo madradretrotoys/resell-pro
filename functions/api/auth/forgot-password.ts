@@ -48,7 +48,7 @@ If you did not request this, you can ignore this email.`;
 <p><a href="${link}">${link}</a></p>
 <p>If you did not request this, you can ignore this email.</p>`;
 
-    await sendMail(env, user.email!, subject, text, html).catch(() => {});
+    await sendMail(env, user.email!, subject, text, html);
 
     return json(generic);
   } catch (err) {
