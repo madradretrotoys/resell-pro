@@ -88,5 +88,19 @@ async function sendMail(
     headers: { "content-type": "application/json" },
     body: JSON.stringify(payload),
   });
-  if (!res.ok) throw new Error(`Mail send failed: ${res.status}`);
+
+  // Log details so we can debug in Pages Function logs
+  if (!res.ok) {
+    const body = await res.text().catch(() => "");
+    console.error("MailChannels send failed", {
+      status: res.status,
+      statusText: res.statusText,
+      bodySnippet: body.slice(0, 500),
+      to,
+      fromEmail,
+    });
+    throw new Error(`Mail send failed: ${res.status} ${res.statusText}`);
+  } else {
+    console.log("MailChannels send ok", { to, subject });
+  }
 }
