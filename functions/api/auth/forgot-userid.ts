@@ -30,7 +30,7 @@ If you didn't make this request, you can ignore this email.`;
 <p><strong>User ID:</strong> ${escapeHtml(loginId)}</p>
 <p>If you didn't make this request, you can ignore this email.</p>`;
 
-    await sendMail(env, email, subject, text, html).catch(() => {});
+    await sendMail(env, email, subject, text, html);
     return json(generic);
   } catch (err) {
     return json({ error: "Could not send email." }, 500);
@@ -69,7 +69,21 @@ async function sendMail(
     headers: { "content-type": "application/json" },
     body: JSON.stringify(payload),
   });
-  if (!res.ok) throw new Error(`Mail send failed: ${res.status}`);
+
+  // Log details so we can debug in Pages Function logs
+  if (!res.ok) {
+    const body = await res.text().catch(() => "");
+    console.error("MailChannels send failed", {
+      status: res.status,
+      statusText: res.statusText,
+      bodySnippet: body.slice(0, 500),
+      to,
+      fromEmail,
+    });
+    throw new Error(`Mail send failed: ${res.status} ${res.statusText}`);
+  } else {
+    console.log("MailChannels send ok", { to, subject });
+  }
 }
 
 function escapeHtml(s: string) {
