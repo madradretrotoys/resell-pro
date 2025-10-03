@@ -59,7 +59,7 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
       status: 200,
       headers
     });
-    });
+
   } catch (err: any) {
     return json({ error: err?.message || "Server error." }, 500);
   }
