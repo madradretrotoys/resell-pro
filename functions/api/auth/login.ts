@@ -29,6 +29,7 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
     const cookie = [
       `rp_jwt=${token}`,
       "Path=/",
+      "Domain=.resell-pro.pages.dev",
       "HttpOnly",
       "Secure",
       "SameSite=Lax",
