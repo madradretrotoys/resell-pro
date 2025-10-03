@@ -3,7 +3,7 @@ type SessionUser = { user_id: string; login_id: string; email: string | null };
 /** GET /api/auth/session -> { user: SessionUser|null, memberships: [] } */
 export const onRequestGet: PagesFunction = async ({ request, env }) => {
   try {
-    const token = getCookie(request.headers.get("cookie") || "", "rp_jwt");
+    const token = readCookie(request.headers.get("cookie") || "", "rp_jwt");
     if (!token) return json({ user: null, memberships: [] });
 
     const payload = await verifyJwt(token, env.JWT_SECRET as string).catch(() => null);
@@ -23,13 +23,18 @@ export const onRequestGet: PagesFunction = async ({ request, env }) => {
 function json(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), {
     status,
-    headers: { "content-type": "application/json" }
+    headers: { "content-type": "application/json" },
   });
 }
 
-function getCookie(cookieHeader: string, name: string): string | null {
-  const m = cookieHeader.match(new RegExp(`(?:^|; )${name.replace(/([.$?*|{}()\\[\\]\\\\/+^])/g, "\\$1")}=([^;]*)`));
-  return m ? decodeURIComponent(m[1]) : null;
+// Simple cookie parser (avoids tricky RegExp escaping)
+function readCookie(header: string, name: string): string | null {
+  if (!header) return null;
+  for (const part of header.split(/; */)) {
+    const [k, ...rest] = part.split("=");
+    if (k === name) return decodeURIComponent(rest.join("="));
+  }
+  return null;
 }
 
 // --- Minimal HS256 JWT verify ---
@@ -51,6 +56,7 @@ async function verifyJwt(token: string, secret: string): Promise<unknown> {
   if (!ok) throw new Error("bad sig");
 
   const payload = JSON.parse(new TextDecoder().decode(base64urlToBytes(p)));
-  if (payload?.exp && Date.now() / 1000 > payload.exp) throw new Error("expired");
+  if ((payload as any)?.exp && Date.now() / 1000 > (payload as any).exp) throw new Error("expired");
   return payload;
 }
+
