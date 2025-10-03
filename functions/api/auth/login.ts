@@ -26,8 +26,9 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
     const payload = { sub: u.user_id, lid: u.login_id, email: u.email, iat: now, exp };
     const token = await signJwt(payload, env.JWT_SECRET as string);
 
-    // Host-only cookie (no Domain=) so it works on preview and production hosts.
-    const cookie = [
+    // 1) Set a host-only cookie (works on preview + prod)
+    // 2) Proactively remove any old domain-scoped cookie still hanging around
+    const hostCookie = [
       `rp_jwt=${token}`,
       "Path=/",
       "HttpOnly",
@@ -36,14 +37,29 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
       `Max-Age=${14 * 24 * 60 * 60}`
     ].join("; ");
     
+    const killDomainCookie = [
+      "rp_jwt=",
+      "Path=/",
+      "Domain=.resell-pro.pages.dev",
+      "HttpOnly",
+      "Secure",
+      "SameSite=Lax",
+      "Max-Age=0",
+      "Expires=Thu, 01 Jan 1970 00:00:00 GMT"
+    ].join("; ");
+    
+    const headers = new Headers({
+      "content-type": "application/json",
+      "cache-control": "no-store"
+    });
+    headers.append("set-cookie", hostCookie);
+    headers.append("set-cookie", killDomainCookie);
+    
     return new Response(JSON.stringify({ ok: true, user: { user_id: u.user_id, login_id: u.login_id, email: u.email } }), {
       status: 200,
-      headers: {
-        "content-type": "application/json",
-        "set-cookie": cookie,
-        "cache-control": "no-store"
-      }
+      headers
     });
+
   } catch (err: any) {
     return json({ error: err?.message || "Server error." }, 500);
   }
