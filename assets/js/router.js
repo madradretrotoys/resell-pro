@@ -24,9 +24,7 @@ async function loadScreen(name){
   const view = document.getElementById('app-view');
   if(!view) throw new Error('#app-view not found');
 
-  const session = await ensureSession();
-
-  // replace the guard with this:
+    // replace the guard with this:
   let session = await ensureSession();
   const hasJwt = document.cookie.includes('rp_jwt=');
   
