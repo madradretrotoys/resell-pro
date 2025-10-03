@@ -34,7 +34,7 @@ async function loadScreen(name){
     session = await ensureSession();
   }
   
-  if(!session?.user){ location.href = '/index.html'; return; }
+  //if(!session?.user){ location.href = '/index.html'; return; }
 
   if(current.mod?.destroy) try{ current.mod.destroy(); }catch{}
 
