@@ -24,20 +24,21 @@ async function loadScreen(name){
   const view = document.getElementById('app-view');
   if(!view) throw new Error('#app-view not found');
 
-  const session = await ensureSession();
+  if(!view) throw new Error('#app-view not found');
 
-    // replace the guard with this:
   let session = await ensureSession();
-  const hasJwt = document.cookie.includes('rp_jwt=');
-  
-  // If we have a JWT but the session endpoint hasn't caught up yet, retry once after a tiny delay.
-  if (!session?.user && hasJwt) {
-    await new Promise(r => setTimeout(r, 200));
-    session = await ensureSession();
-  }
-  
-  if(!session?.user){ location.href = '/index.html'; return; }
+  const hasJwt = (document.cookie || '').includes('rp_jwt=');
 
+  // If we have a JWT but the session endpoint hasn't caught up yet, retry briefly.
+  if (!session?.user && hasJwt) {
+    for (let i = 0; i < 4 && !session?.user; i++) {
+      await new Promise(r => setTimeout(r, 150)); // ~600ms total
+      session = await ensureSession();
+    }
+  }
+
+  if (!session?.user) { location.href = '/index.html'; return; }
+  
   if(current.mod?.destroy) try{ current.mod.destroy(); }catch{}
 
   view.innerHTML = 'Loading…';
