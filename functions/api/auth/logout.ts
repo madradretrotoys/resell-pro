@@ -1,5 +1,5 @@
 export const onRequestPost: PagesFunction = async () => {
-  const cookie = [
+    const cookie = [
     "rp_jwt=",
     "Path=/",
     "HttpOnly",
