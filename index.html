@@ -188,5 +188,60 @@
       finally{ setBusy($('#fpw_submit'), false); }
     });
   </script>
+  <script type="module">
+  // Prevent default submit; log in, then go to /app only after the cookie is set.
+  async function handleSignInSubmit(e) {
+    const form = e.target;
+    // Heuristic: only intercept the main sign-in form (has a password input)
+    if (!form.querySelector('input[type="password"]')) return;
+
+    e.preventDefault();
+
+    const idInput =
+      form.querySelector('input[name="id"], input[name="email"], input[type="email"], input[id="login_id"], input[id="email"]');
+    const pwInput =
+      form.querySelector('input[name="password"], input[type="password"], input[id="password"]');
+
+    const id = (idInput?.value || '').trim();
+    const password = pwInput?.value || '';
+
+    const btn = form.querySelector('[type="submit"], button');
+    const orig = btn ? btn.textContent : null;
+    if (btn) { btn.disabled = true; btn.textContent = 'Signing in…'; }
+
+    try {
+      // Call login and wait for the Set-Cookie to be processed
+      const r = await fetch('/api/auth/login', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ id, password })
+      });
+      // If credentials are bad, show a simple message
+      if (!r.ok) {
+        alert('Invalid credentials.');
+        return;
+      }
+
+      // Double-check we actually have a session (avoids races)
+      const s = await fetch('/api/auth/session', { credentials: 'include' }).then(x => x.json());
+      if (s && s.user) {
+        location.href = '/app';
+      } else {
+        alert('Sign-in did not complete. Please try again.');
+      }
+    } catch (err) {
+      console.error(err);
+      alert('Sign-in error. Please try again.');
+    } finally {
+      if (btn) { btn.disabled = false; btn.textContent = orig; }
+    }
+  }
+
+  // Attach once, capture phase so we win over any default navigation
+  document.addEventListener('submit', handleSignInSubmit, true);
+</script>
+
+  
 </body>
 </html>
