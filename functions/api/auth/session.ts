@@ -1,35 +1,31 @@
 type SessionUser = { user_id: string; login_id: string; email: string | null };
 
-/** GET /api/auth/session -> { user: SessionUser|null, memberships: [], reason?: string } */
+/** GET /api/auth/session -> { user: SessionUser|null, memberships: [] } */
 export const onRequestGet: PagesFunction = async ({ request, env }) => {
   try {
     const cookieHeader = request.headers.get("cookie") || "";
-    const token = readCookie(cookieHeader, "rp_jwt");
-    if (!token) return json({ user: null, memberships: [], reason: "no_cookie" });
+    const tokens = readCookies(cookieHeader, "rp_jwt"); // may contain multiple
+    if (tokens.length === 0) return json({ user: null, memberships: [] });
 
     const secret = String(env.JWT_SECRET ?? "");
-    if (!secret) return json({ user: null, memberships: [], reason: "missing_jwt_secret_env" });
-
-    let payload: any;
-    try {
-      payload = await verifyJwt(token, secret);
-    } catch (e: any) {
-      return json({ user: null, memberships: [], reason: e?.message || "verify_failed" });
+    for (const token of tokens) {
+      try {
+        const payload = await verifyJwt(token, secret);
+        if (payload && typeof payload === "object") {
+          const user: SessionUser = {
+            user_id: String((payload as any).sub),
+            login_id: String((payload as any).lid),
+            email: (payload as any).email ?? null,
+          };
+          return json({ user, memberships: [] });
+        }
+      } catch {
+        // try next token
+      }
     }
-
-    if (!payload || typeof payload !== "object") {
-      return json({ user: null, memberships: [], reason: "bad_payload" });
-    }
-
-    const user: SessionUser = {
-      user_id: String(payload.sub),
-      login_id: String(payload.lid),
-      email: payload.email ?? null,
-    };
-
-    return json({ user, memberships: [] });
-  } catch (e: any) {
-    return json({ user: null, memberships: [], reason: e?.message || "unknown_error" });
+    return json({ user: null, memberships: [] });
+  } catch {
+    return json({ user: null, memberships: [] });
   }
 };
 
@@ -39,26 +35,27 @@ function json(body: unknown, status = 200) {
     headers: {
       "content-type": "application/json",
       "cache-control": "no-store",
-      "vary": "Cookie"
+      "vary": "Cookie",
     },
   });
 }
 
-// Simple cookie parser (avoids tricky RegExp escaping)
-function readCookie(header: string, name: string): string | null {
-  if (!header) return null;
+// Return all cookie values that match the name (order preserved)
+function readCookies(header: string, name: string): string[] {
+  const out: string[] = [];
+  if (!header) return out;
   for (const part of header.split(/; */)) {
     const [k, ...rest] = part.split("=");
-    if (k === name) return decodeURIComponent(rest.join("="));
+    if (k === name) out.push(decodeURIComponent(rest.join("=")));
   }
-  return null;
+  return out;
 }
 
 // --- Minimal HS256 JWT verify ---
 async function verifyJwt(token: string, secret: string): Promise<any> {
   const enc = new TextEncoder();
   const [h, p, s] = token.split(".");
-  if (!h || !p || !s) throw new Error("bad_token");
+  if (!h || !p || !s) throw new Error("bad token");
   const base64urlToBytes = (str: string) => {
     const pad = "=".repeat((4 - (str.length % 4)) % 4);
     const b64 = (str + pad).replace(/-/g, "+").replace(/_/g, "/");
@@ -74,7 +71,7 @@ async function verifyJwt(token: string, secret: string): Promise<any> {
     ["verify"]
   );
   const ok = await crypto.subtle.verify("HMAC", key, base64urlToBytes(s), enc.encode(data));
-  if (!ok) throw new Error("bad_sig");
+  if (!ok) throw new Error("bad sig");
   const payload = JSON.parse(new TextDecoder().decode(base64urlToBytes(p)));
   if ((payload as any)?.exp && Date.now() / 1000 > (payload as any).exp) throw new Error("expired");
   return payload;
