@@ -1,4 +1,4 @@
-import { ensureSession } from '/assets/js/auth.js';
+import { ensureSession, waitForSession } from '/assets/js/auth.js';
 import { showToast } from '/assets/js/ui.js';
 
 const SCREENS = {
