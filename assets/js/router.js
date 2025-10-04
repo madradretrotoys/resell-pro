@@ -11,6 +11,8 @@ const SCREENS = {
 let current = { name: null, mod: null };
 const qs = (k) => new URLSearchParams(location.search).get(k);
 
+function log(...args){ try{ console.log('[router]', ...args); }catch{} }
+
 function setActiveLink(name){
   document.querySelectorAll('[data-page]').forEach(a => {
     a.classList.toggle('active', a.getAttribute('data-page') === name);
@@ -18,36 +20,42 @@ function setActiveLink(name){
 }
 
 async function loadHTML(url){
+  log('loadHTML:begin', url);
   const r = await fetch(url, { credentials:'include' });
+  log('loadHTML:resp', { ok: r.ok, status: r.status });
   if(!r.ok) throw new Error(url);
-  return r.text();
+  const text = await r.text();
+  log('loadHTML:end', { bytes: text.length });
+  return text;
 }
 
 export async function loadScreen(name){
   const meta = SCREENS[name] || SCREENS.dashboard;
   const view = document.getElementById('app-view');
   if(!view) throw new Error('#app-view not found');
+  log('loadScreen:start', { name, href: location.href, cookie: document.cookie });
 
   // 1) Check session (handles tiny race right after login)
   let session = await ensureSession();
+  if (!session?.user) session = await waitForSession(1500);
+
   if (!session?.user) {
-    session = await waitForSession(1500);
-  }
-  if (!session?.user) {
-    console.warn('Auth check failed; redirecting.', { reason: session?.reason, status: session?.status });
+    log('auth:fail->redirect', { reason: session?.reason, status: session?.status, debug: session?.debug });
     location.href = '/index.html';
     return;
   }
+  log('auth:ok', { user: session.user });
 
   // 2) Swap screen
   if(current.mod?.destroy) {
-    try { current.mod.destroy(); } catch {}
+    try { current.mod.destroy(); } catch(e){ log('destroy:error', e); }
   }
   view.innerHTML = 'Loading…';
 
   try {
     view.innerHTML = await loadHTML(meta.html + `?v=${Date.now()}`);
   } catch (e) {
+    log('screen:html:error', e);
     view.innerHTML = `\nFailed to load screen.\n`;
     return;
   }
@@ -56,13 +64,15 @@ export async function loadScreen(name){
     const mod = await import(meta.js + `?v=${Date.now()}`);
     if(mod?.init) await mod.init({ container:view, session });
     current = { name, mod };
+    log('screen:script:ok', { name });
   } catch (e) {
-    console.error(e);
+    log('screen:script:error', e);
     showToast('Screen script error');
   }
 
   document.title = `Resell Pro — ${meta.title}`;
   setActiveLink(name);
+  log('loadScreen:end', { name });
 }
 
 function goto(name){
@@ -81,4 +91,5 @@ document.addEventListener('click', (e) => {
   goto(a.getAttribute('data-page'));
 });
 
+log('boot');
 loadScreen(qs('page') || 'dashboard');
