@@ -1,4 +1,4 @@
-import { ensureSession } from '/assets/js/auth.js';
+import { ensureSession, waitForSession } from '/assets/js/auth.js';
 import { showToast } from '/assets/js/ui.js';
 
 const SCREENS = {
@@ -32,7 +32,12 @@ async function loadScreen(name){
       session = await ensureSession();
     }
   }
+  // Wait briefly to avoid a race right after login; also surface why it failed.
   if (!session?.user) {
+    session = await waitForSession(1500); // up to ~1.5s
+  }
+  if (!session?.user) {
+    console.warn('Auth check failed; redirecting.', { reason: session?.reason, status: session?.status });
     location.href = '/index.html';
     return;
   }
