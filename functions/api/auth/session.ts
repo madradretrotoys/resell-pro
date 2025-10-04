@@ -1,35 +1,46 @@
 type SessionUser = { user_id: string; login_id: string; email: string | null };
 
-// GET /api/auth/session -> 200 { user }  OR  401 { reason }
+// GET /api/auth/session -> 200 { user }  OR  401 { reason }  (with debug trail)
 export const onRequestGet: PagesFunction = async ({ request, env }) => {
+  const dbg: string[] = [];
+  const started = new Date().toISOString();
+  dbg.push(`session:start:${started}`);
+
   try {
     const cookieHeader = request.headers.get("cookie") || "";
-    const token = readCookie(cookieHeader, "__Host-rp_session");
-    if (!token) return json({ reason: "no_cookie" }, 401);
+    dbg.push(`session:cookies:${cookieHeader ? "present" : "missing"}`);
 
+    const token = readCookie(cookieHeader, "__Host-rp_session");
+    dbg.push(`session:token:${token ? "found" : "none"}`);
+    if (!token) return send(401, { reason: "no_cookie" });
+
+    dbg.push("session:verify:begin");
     const payload = await verifyJwt(token, String(env.JWT_SECRET));
+    dbg.push("session:verify:ok");
+
     const user: SessionUser = {
       user_id: String((payload as any).sub),
       login_id: String((payload as any).lid),
       email: (payload as any).email ?? null,
     };
-    return json({ user }, 200);
+    dbg.push("session:done:200");
+    return send(200, { user });
   } catch (e: any) {
     const reason = e?.message || "verify_failed";
-    return json({ reason }, 401);
+    dbg.push(`session:error:${reason}`);
+    return send(401, { reason });
   }
-};
 
-function json(body: unknown, status = 200) {
-  return new Response(JSON.stringify(body), {
-    status,
-    headers: {
+  function send(status: number, body: Record<string, unknown>) {
+    const headers = new Headers({
       "content-type": "application/json",
       "cache-control": "no-store",
-      "vary": "Cookie"
-    },
-  });
-}
+      "vary": "Cookie",
+      "x-rp-debug": dbg.join("|"),
+    });
+    return new Response(JSON.stringify({ ...body, debug: dbg }), { status, headers });
+  }
+};
 
 function readCookie(header: string, name: string): string | null {
   if (!header) return null;
