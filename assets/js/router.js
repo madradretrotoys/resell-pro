@@ -29,7 +29,6 @@ async function loadHTML(url){
 }
 export async function loadScreen(name){
   const meta = SCREENS[name] || SCREENS.dashboard;
-  const meta = SCREENS[name] || SCREENS.dashboard;
   // Defensive: pick the last #app-view in case multiple exist
   const candidates = Array.from(document.querySelectorAll('#app-view'));
   const view = candidates[candidates.length - 1] || document.getElementById('app-view');
