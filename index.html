@@ -38,36 +38,33 @@
   </style>
 </head>
 <body class="rp-bg">
-  <main class="rp-center">
-    <section class="rp-card" role="dialog" aria-labelledby="signin-title" aria-describedby="signin-desc">
-      <h1 id="signin-title" class="rp-title">Welcome to Resell Pro</h1>
-      <p id="signin-desc" class="rp-subtitle">Sign in with your User ID or Email</p>
+  <main class="card" role="main" aria-labelledby="title">
+    <h1 id="title">Sign in</h1>
+    <p class="sub">Use your <strong>User ID</strong> or <strong>Email</strong> and your password.</p>
 
-      <form id="signin-form" class="rp-form" novalidate>
-        <label class="rp-label" for="userid">User ID or Email</label>
-        <input id="userid" name="userid" type="text" autocomplete="username" class="rp-input" placeholder="e.g. melissa or melissa@example.com" required />
+    <form id="loginForm" novalidate>
+      <label for="id">User ID or Email</label>
+      <input id="id" name="id" class="in" inputmode="email" autocomplete="username" placeholder="e.g. mblock or melissa@example.com" required>
 
-        <label class="rp-label" for="password">Password</label>
-        <div class="rp-password-row">
-          <input id="password" name="password" type="password" autocomplete="current-password" class="rp-input rp-input-password" required />
-          <button type="button" id="togglePassword" class="rp-btn-secondary" aria-label="Show password">Show</button>
-        </div>
-
-        <div id="form-error" class="rp-error" role="alert" aria-live="assertive" hidden></div>
-
-        <button id="signin-submit" type="submit" class="rp-btn">Sign In</button>
-      </form>
-
-      <div class="rp-links">
-        <a href="/screens/forgot-userid.html">Forgot User ID?</a>
-        <span>·</span>
-        <a href="/screens/forgot-password.html">Forgot Password?</a>
+      <label for="pw">Password</label>
+      <div class="pw-wrap">
+        <input id="pw" name="pw" class="in" type="password" autocomplete="current-password" placeholder="Enter your password" required>
+        <span id="togglePw" class="eye" aria-label="Show password" role="button">👁</span>
       </div>
-    </section>
 
-    <footer class="rp-footer">
-      <small>© <span id="year"></span> Resell Pro · <span class="rp-domain">resellpros.com</span></small>
-    </footer>
+      <div class="links">
+        <a class="a" href="#" id="forgotIdLink">Forgot User ID?</a>
+        <a class="a" href="#" id="forgotPwLink">Forgot Password?</a>
+      </div>
+
+      <div class="divider"></div>
+
+      <button id="submitBtn" class="btn primary" type="submit">Sign In</button>
+      <div id="err" class="err" role="alert"></div>
+      <div id="ok" class="ok" role="status"></div>
+    </form>
+
+    <p class="foot">Having trouble? Ask a manager to reset your account.</p>
   </main>
 
   <script src="/assets/js/app.js" defer></script>
