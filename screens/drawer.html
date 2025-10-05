@@ -1,10 +1,22 @@
 <style>
-  /* Local to this fragment: keeps labels stuck to inputs and improves rhythm */
+  /* Local to this fragment */
   .cd-controls { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
   .cd-card { border: 1px solid var(--border, #2a2a2a); border-radius: 6px; padding: 12px; }
-  .cd-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; }
-  .cd-field { display: inline-flex; align-items: center; justify-content: space-between; gap: 10px; white-space: nowrap; }
-  .cd-field > input { width: 110px; }
+  .cd-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 12px; }
+
+  /* Keep label + input together in two columns with a small gap */
+  .cd-field {
+    display: grid;
+    grid-template-columns: auto 120px;
+    align-items: center;
+    column-gap: 12px;
+    white-space: nowrap;
+  }
+  .cd-field > input { width: 120px; }
+
+  /* Notes full width and taller */
+  .cd-card textarea { width: 100%; min-height: 88px; }
+
   .cd-totals { display: grid; gap: 6px; }
   .cd-actions { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
   @media (max-width: 640px) {
