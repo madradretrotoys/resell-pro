@@ -55,14 +55,7 @@
     </main>
   </div>
   <script>
-    // Gate: require “login”
-    (function(){
-      const tok = localStorage.getItem('rp_token');
-      if (!tok) location.replace('/index.html');
-      const who = localStorage.getItem('rp_user') || 'User';
-      document.getElementById('who').textContent = who;
-    })();
-
+    
     const nav = document.getElementById('nav');
     document.getElementById('menu').onclick = () => nav.classList.toggle('open');
 
@@ -83,11 +76,7 @@
       nav.classList.remove('open');
       // Later we’ll mount real screens here
     }
-    function logout(){
-      localStorage.removeItem('rp_token');
-      localStorage.removeItem('rp_user');
-      location.href = 'index.html';
-    }
+    
   </script>
   <!-- Load the small client router -->
   <script type="module" src="/assets/js/router.js"></script>
