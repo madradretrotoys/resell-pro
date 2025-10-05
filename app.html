@@ -5,20 +5,87 @@
   <meta name="viewport" content="width=device-width,initial-scale=1"/>
   <title>Resell Pro • App</title>
   <style>
-    :root { --bg:#0b0f19; --panel:#0f172a; --txt:#e7ecf3; --muted:#a6b3c6; --accent:#7dd3fc; }
+    /* Theme tokens — light is default */
+    :root {
+      --bg: #f6f8fb;
+      --panel: #ffffff;
+      --txt: #0b1220;
+      --muted: #5b6b80;
+      --accent: #0ea5e9;
+      --border: #d6dee8;
+    }
+  
+    /* Respect user dark preference without changing your default */
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg:#0b0f19;
+        --panel:#0f172a;
+        --txt:#e7ecf3;
+        --muted:#a6b3c6;
+        --accent:#7dd3fc;
+        --border:#202a44;
+      }
+    }
+  
     *{box-sizing:border-box;font-family:system-ui,-apple-system,Segoe UI,Roboto,Inter,Arial}
-    body{margin:0;background:linear-gradient(180deg,#0b0f19, #0e1423); color:var(--txt); min-height:100dvh; display:flex; flex-direction:column}
-    header{display:flex; align-items:center; gap:12px; padding:14px 16px; background:#0e1524; position:sticky; top:0; z-index:5; border-bottom:1px solid #202a44}
-    .burger{width:44px;height:44px;border-radius:10px;border:1px solid #263149;background:#0e1524;color:var(--txt);font-size:20px}
+  
+    body{
+      margin:0;
+      background:linear-gradient(180deg, var(--bg), color-mix(in srgb, var(--bg) 85%, #fff 15%));
+      color:var(--txt);
+      min-height:100dvh;
+      display:flex;
+      flex-direction:column;
+    }
+  
+    header{
+      display:flex; align-items:center; gap:12px; padding:14px 16px;
+      background:var(--panel);
+      position:sticky; top:0; z-index:5;
+      border-bottom:1px solid var(--border);
+    }
+  
+    .burger{
+      width:44px;height:44px;border-radius:10px;
+      border:1px solid var(--border);
+      background:var(--panel);
+      color:var(--txt);
+      font-size:20px;
+    }
+  
     .brand{font-weight:800; letter-spacing:.4px}
     .user{margin-left:auto; color:var(--muted); font-size:14px}
-    nav{position:fixed; inset:0 30% 0 0; max-width:320px; transform:translateX(-100%); transition:.24s; background:#0f172a; border-right:1px solid #202a44; padding:14px}
+  
+    nav{
+      position:fixed; inset:0 30% 0 0; max-width:320px;
+      transform:translateX(-100%); transition:.24s;
+      background:var(--panel);
+      border-right:1px solid var(--border);
+      padding:14px;
+    }
     nav.open{transform:translateX(0)}
     nav h3{margin:6px 0 12px; font-size:13px; color:var(--muted)}
-    nav a{display:block; padding:12px 12px; margin:6px 0; border-radius:10px; text-decoration:none; color:var(--txt); border:1px solid #263149; background:#0e1524}
+    nav a{
+      display:block; padding:12px 12px; margin:6px 0; border-radius:10px;
+      text-decoration:none; color:var(--txt);
+      border:1px solid var(--border);
+      background:var(--panel);
+    }
+  
     main{padding:18px; max-width:1100px; width:100%; margin:0 auto}
-    .tile{padding:18px; border:1px solid #263149; background:#0e1524; border-radius:16px; margin:10px 0}
-    @media(min-width:900px){ nav{position:static; transform:none; max-width:260px; width:260px} .wrap{display:grid; grid-template-columns:260px 1fr; gap:14px} }
+  
+    .tile{
+      padding:18px;
+      border:1px solid var(--border);
+      background:var(--panel);
+      border-radius:16px;
+      margin:10px 0;
+    }
+  
+    @media(min-width:900px){
+      nav{position:static; transform:none; max-width:260px; width:260px}
+      .wrap{display:grid; grid-template-columns:260px 1fr; gap:14px}
+    }
   </style>
 </head>
 <body>
