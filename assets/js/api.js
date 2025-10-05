@@ -1,4 +1,10 @@
-function getCookie(name){ const m = document.cookie.match(new RegExp('(?:^|; )' + name.replace(/([.$?*|{}()[\\]\\\\/+^])/g,'\\$1') + '=([^;]*)')); return m ? decodeURIComponent(m[1]) : null; }
+// getCookie helper (fixed: properly escaped character class, includes [] and /)
+function getCookie(name) {
+  const safe = name.replace(/([.[\]$?*|{}()\\/+^])/g, '\\$1'); // escape . [ ] $ ? * | { } ( ) \ / + ^
+  const re = new RegExp('(?:^|; )' + safe + '=([^;]*)');
+  const matches = document.cookie.match(re);
+  return matches ? decodeURIComponent(matches[1]) : undefined;
+}
 export async function api(path, opts={}){
   const headers = new Headers(opts.headers||{});
   if (!headers.has('content-type') && opts.body && typeof opts.body === 'object') headers.set('content-type','application/json');
