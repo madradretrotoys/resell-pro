@@ -29,7 +29,10 @@ async function loadHTML(url){
 }
 export async function loadScreen(name){
   const meta = SCREENS[name] || SCREENS.dashboard;
-  const view = document.getElementById('app-view');
+  const meta = SCREENS[name] || SCREENS.dashboard;
+  // Defensive: pick the last #app-view in case multiple exist
+  const candidates = Array.from(document.querySelectorAll('#app-view'));
+  const view = candidates[candidates.length - 1] || document.getElementById('app-view');
   if(!view) throw new Error('#app-view not found');
 
   log('loadScreen:start', { name, href: location.href, cookie: document.cookie });
