@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Resell Pro — Forgot User ID</title>
+  <link rel="stylesheet" href="/assets/css/styles.css">
+</head>
+<body class="rp-bg">
+  <main class="rp-center">
+    <section class="rp-card">
+      <h1 class="rp-title">Find your User ID</h1>
+      <p class="rp-subtitle">Enter the email associated with your account.</p>
+
+      <form id="fu-form" class="rp-form">
+        <label class="rp-label" for="fu-email">Email</label>
+        <input id="fu-email" type="email" class="rp-input" autocomplete="email" required />
+        <div id="fu-error" class="rp-error" role="alert" hidden></div>
+        <div id="fu-success" class="rp-success" role="status" hidden></div>
+        <button class="rp-btn" type="submit">Email My User ID</button>
+      </form>
+
+      <div class="rp-links">
+        <a href="/index.html">Back to Sign In</a>
+      </div>
+    </section>
+  </main>
+
+  <script src="/assets/js/app.js" defer></script>
+  <script>
+    (function(){
+      const form = document.getElementById('fu-form');
+      const email = document.getElementById('fu-email');
+      const err = document.getElementById('fu-error');
+      const ok = document.getElementById('fu-success');
+
+      function show(el, msg){ el.textContent = msg; el.hidden = false; }
+      function hide(el){ el.textContent = ''; el.hidden = true; }
+
+      form.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        hide(err); hide(ok);
+        const val = (email.value || '').trim();
+        if (!val) { show(err, 'Please enter your email.'); return; }
+
+        const { ok: success, data } = await RP.request(RP.routes.forgotUserId, {
+          method: 'POST',
+          body: { email: val }
+        });
+
+        if (success) show(ok, 'If we found a match, you’ll receive an email with your User ID.');
+        else show(err, (data && data.error) || 'Unable to process request.');
+      });
+    })();
+  </script>
+</body>
+</html>
