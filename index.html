@@ -37,7 +37,7 @@
     @media (prefers-reduced-motion:no-preference){.btn.primary:active{transform:translateY(1px)}}
   </style>
 </head>
-<body class="rp-bg">
+<body>
   <main class="card" role="main" aria-labelledby="title">
     <h1 id="title">Sign in</h1>
     <p class="sub">Use your <strong>User ID</strong> or <strong>Email</strong> and your password.</p>
@@ -67,7 +67,126 @@
     <p class="foot">Having trouble? Ask a manager to reset your account.</p>
   </main>
 
-  <script src="/assets/js/app.js" defer></script>
-  <script src="/assets/js/auth.js" defer></script>
+  <!-- Forgot User ID Modal -->
+  <dialog id="dlgId">
+    <form method="dialog" class="modal" id="forgotIdForm">
+      <button class="x" aria-label="Close" onclick="dlgId.close()">×</button>
+      <h2>Forgot User ID</h2>
+      <p class="muted">Enter the email on your account and we’ll send your User ID.</p>
+      <label for="fid_email">Email</label>
+      <input id="fid_email" name="email" class="in" type="email" placeholder="you@example.com" autocomplete="email" required>
+      <div class="actions">
+        <button class="btn" value="cancel" type="button" onclick="dlgId.close()">Cancel</button>
+        <button id="fid_submit" class="btn primary" type="submit">Send</button>
+      </div>
+      <div id="fid_msg" class="muted" style="margin-top:8px"></div>
+    </form>
+  </dialog>
+
+  <!-- Forgot Password Modal -->
+  <dialog id="dlgPw">
+    <form method="dialog" class="modal" id="forgotPwForm">
+      <button class="x" aria-label="Close" onclick="dlgPw.close()">×</button>
+      <h2>Reset Password</h2>
+      <p class="muted">Enter your User ID or Email. We’ll send a reset link if email is on file.</p>
+      <label for="fpw_id">User ID or Email</label>
+      <input id="fpw_id" name="id" class="in" placeholder="user id or email" required>
+      <div class="actions">
+        <button class="btn" value="cancel" type="button" onclick="dlgPw.close()">Cancel</button>
+        <button id="fpw_submit" class="btn primary" type="submit">Send Link</button>
+      </div>
+      <div id="fpw_msg" class="muted" style="margin-top:8px"></div>
+    </form>
+  </dialog>
+
+  <script>
+    // ——— UI helpers ———
+    const $ = (s, d=document)=>d.querySelector(s);
+    const form = $('#loginForm'), btn = $('#submitBtn'), err = $('#err'), ok = $('#ok');
+    const togglePw = $('#togglePw'), pw = $('#pw');
+    const dlgId = $('#dlgId'), dlgPw = $('#dlgPw');
+    const fidForm = $('#forgotIdForm'), fpwForm = $('#forgotPwForm');
+
+    togglePw.addEventListener('click', () => {
+      const shown = pw.type === 'text';
+      pw.type = shown ? 'password' : 'text';
+      togglePw.textContent = shown ? '👁' : '🙈';
+      togglePw.setAttribute('aria-label', shown ? 'Show password' : 'Hide password');
+      pw.focus();
+    });
+
+    function setBusy(el, on=true, label='Working…'){
+      if(!el) return;
+      if(on){ el.dataset._label = el.textContent; el.textContent = label; el.disabled = true; }
+      else{ el.textContent = el.dataset._label || 'Submit'; el.disabled = false; }
+    }
+    function showMsg(node, msg, good=false){
+      err.style.display = 'none'; ok.style.display = 'none';
+      if(!msg) return;
+      const target = good ? ok : err;
+      target.textContent = msg;
+      target.style.display = 'block';
+    }
+
+    // ——— Sign In ———
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      showMsg(null, '');
+      const id = $('#id').value.trim();
+      const password = $('#pw').value;
+      if(!id || !password){ showMsg(err, 'Please enter your ID/Email and password.', false); return; }
+
+      setBusy(btn, true, 'Signing in…');
+      try{
+        // POST to your Worker (Hono) auth route. Accepts either login_id or email.
+        const res = await fetch('/api/auth/login', {
+          method:'POST',
+          headers:{'Content-Type':'application/json'},
+          body: JSON.stringify({ id, password })
+        });
+        const data = await res.json().catch(()=>({}));
+        if(!res.ok){ throw new Error(data.error || 'Invalid credentials'); }
+
+        // Navigate to the app shell (same Pages project)
+        window.location.href = '/app.html';
+      }catch(ex){
+        showMsg(err, ex.message || 'Sign-in failed.');
+      }finally{
+        setBusy(btn, false);
+      }
+    });
+
+    // ——— Forgot User ID ———
+    $('#forgotIdLink').addEventListener('click', (e)=>{ e.preventDefault(); $('#fid_email').value=''; $('#fid_msg').textContent=''; dlgId.showModal(); });
+    fidForm.addEventListener('submit', async (e)=>{
+      e.preventDefault();
+      const email = $('#fid_email').value.trim();
+      if(!email){ $('#fid_msg').textContent='Enter an email.'; return; }
+      const s = $('#fid_submit'); setBusy(s,true,'Sending…');
+      try{
+        const r = await fetch('/api/auth/forgot-userid', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ email })});
+        const j = await r.json().catch(()=>({}));
+        if(!r.ok) throw new Error(j.error || 'Could not send email.');
+        $('#fid_msg').textContent = 'If that email exists, we sent the User ID.';
+      }catch(ex){ $('#fid_msg').textContent = ex.message; }
+      finally{ setBusy($('#fid_submit'), false); }
+    });
+
+    // ——— Forgot Password ———
+    $('#forgotPwLink').addEventListener('click', (e)=>{ e.preventDefault(); $('#fpw_id').value=''; $('#fpw_msg').textContent=''; dlgPw.showModal(); });
+    fpwForm.addEventListener('submit', async (e)=>{
+      e.preventDefault();
+      const id = $('#fpw_id').value.trim();
+      if(!id){ $('#fpw_msg').textContent='Enter your User ID or Email.'; return; }
+      const s = $('#fpw_submit'); setBusy(s,true,'Sending…');
+      try{
+        const r = await fetch('/api/auth/forgot-password', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ id })});
+        const j = await r.json().catch(()=>({}));
+        if(!r.ok) throw new Error(j.error || 'Could not start reset.');
+        $('#fpw_msg').textContent = 'If the account has email, a reset link was sent.';
+      }catch(ex){ $('#fpw_msg').textContent = ex.message; }
+      finally{ setBusy($('#fpw_submit'), false); }
+    });
+  </script>
 </body>
 </html>
