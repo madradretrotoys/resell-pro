@@ -1,36 +1,192 @@
-<script>
-  (function(){
-    function log(){ try{ console.log('[index]', ...arguments); }catch{} }
-    log('boot', { href: location.href, when: new Date().toISOString(), cookie: document.cookie });
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <title>Resell Pro • Sign In</title>
+  <meta name="color-scheme" content="dark light">
+  <style>
+    :root{--bg:#0b0f19;--panel:#0f172a;--txt:#e7ecf3;--muted:#a6b3c6;--accent:#7dd3fc;--danger:#ef4444;--ok:#22c55e}
+    *{box-sizing:border-box;font-family:system-ui,-apple-system,Segoe UI,Roboto,Inter,Arial}
+    body{margin:0;background:linear-gradient(180deg,#0b0f19,#0e1423);color:var(--txt);min-height:100dvh;display:grid;place-items:center;padding:24px}
+    .card{width:min(480px,100%);background:rgba(15,23,42,.8);border:1px solid rgba(125,211,252,.18);border-radius:20px;box-shadow:0 10px 40px rgba(0,0,0,.35);padding:20px 18px}
+    h1{margin:0 0 6px;font-size:22px}
+    p.sub{margin:0 0 16px;color:var(--muted);font-size:14px}
+    label{display:block;font-size:13px;color:var(--muted);margin:14px 0 6px}
+    .row{display:flex;gap:10px;align-items:center}
+    .in{width:100%;padding:12px 14px;border-radius:12px;border:1px solid #22304a;background:#0b1529;color:var(--txt);font-size:16px;outline:none}
+    .in:focus{border-color:var(--accent);box-shadow:0 0 0 3px rgba(125,211,252,.18)}
+    .btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;padding:12px 14px;border-radius:12px;border:1px solid #27415c;background:#112036;color:var(--txt);font-weight:600;cursor:pointer;width:100%}
+    .btn.primary{background:linear-gradient(180deg,#24b2e7,#1686b8);border-color:#1d9fd3}
+    .btn:disabled{opacity:.6;cursor:not-allowed}
+    .muted{color:var(--muted);font-size:13px}
+    .links{display:flex;justify-content:space-between;gap:8px;margin-top:10px}
+    .a{color:var(--accent);text-decoration:none;font-size:13px}
+    .a:hover{text-decoration:underline}
+    .err{color:var(--danger);font-size:13px;margin-top:8px;display:none}
+    .ok{color:var(--ok);font-size:13px;margin-top:8px;display:none}
+    .eye{cursor:pointer;user-select:none;padding:0 8px}
+    .pw-wrap{display:flex;align-items:center;gap:8px}
+    .divider{height:1px;background:#1b2942;margin:16px 0}
+    .foot{margin-top:12px;text-align:center;font-size:12px;color:var(--muted)}
+    dialog{border:none;border-radius:16px;padding:0;width:min(420px,94%);background:#0f172a;color:var(--txt)}
+    .modal{padding:16px}
+    .modal h2{margin:0 0 8px;font-size:18px}
+    .modal .actions{display:flex;gap:8px;margin-top:14px}
+    .x{position:absolute;top:8px;right:10px;background:transparent;border:none;color:var(--muted);font-size:18px;cursor:pointer}
+    @media (prefers-reduced-motion:no-preference){.btn.primary:active{transform:translateY(1px)}}
+  </style>
+</head>
+<body>
+  <main class="card" role="main" aria-labelledby="title">
+    <h1 id="title">Sign in</h1>
+    <p class="sub">Use your <strong>User ID</strong> or <strong>Email</strong> and your password.</p>
 
-    // Log all form submissions on the page, mask passwords
-    document.addEventListener('submit', (e) => {
-      const fd = new FormData(e.target);
-      const entries = {};
-      for (const [k,v] of fd.entries()) entries[k] = k.toLowerCase().includes('pass') ? '***' : String(v);
-      log('form:submit', { target: e.target.tagName, entries });
-    }, true);
+    <form id="loginForm" novalidate>
+      <label for="id">User ID or Email</label>
+      <input id="id" name="id" class="in" inputmode="email" autocomplete="username" placeholder="e.g. mblock or melissa@example.com" required>
 
-    // Wrap fetch to log every /api/auth/* call + surface server debug headers
-    const _fetch = window.fetch;
-    window.fetch = async function(input, init){
-      const url = (typeof input === 'string') ? input : (input?.url || '');
-      const isAuth = url.includes('/api/auth/');
-      if (isAuth) log('fetch:req', { url, method: init?.method || 'GET', creds: init?.credentials, headers: init?.headers });
-      const resp = await _fetch.apply(this, arguments);
-      if (isAuth) {
-        const debug = resp.headers.get('x-rp-debug');
-        log('fetch:resp', { url, ok: resp.ok, status: resp.status, debug });
-        // Also try to peek at JSON body to get `debug` field when present
-        try {
-          const clone = resp.clone();
-          const text = await clone.text();
-          let data = null;
-          try { data = text ? JSON.parse(text) : null; } catch {}
-          if (data && data.debug) log('fetch:resp:json.debug', data.debug);
-        } catch {}
+      <label for="pw">Password</label>
+      <div class="pw-wrap">
+        <input id="pw" name="pw" class="in" type="password" autocomplete="current-password" placeholder="Enter your password" required>
+        <span id="togglePw" class="eye" aria-label="Show password" role="button">👁</span>
+      </div>
+
+      <div class="links">
+        <a class="a" href="#" id="forgotIdLink">Forgot User ID?</a>
+        <a class="a" href="#" id="forgotPwLink">Forgot Password?</a>
+      </div>
+
+      <div class="divider"></div>
+
+      <button id="submitBtn" class="btn primary" type="submit">Sign In</button>
+      <div id="err" class="err" role="alert"></div>
+      <div id="ok" class="ok" role="status"></div>
+    </form>
+
+    <p class="foot">Having trouble? Ask a manager to reset your account.</p>
+  </main>
+
+  <!-- Forgot User ID Modal -->
+  <dialog id="dlgId">
+    <form method="dialog" class="modal" id="forgotIdForm">
+      <button class="x" aria-label="Close" onclick="dlgId.close()">×</button>
+      <h2>Forgot User ID</h2>
+      <p class="muted">Enter the email on your account and we’ll send your User ID.</p>
+      <label for="fid_email">Email</label>
+      <input id="fid_email" name="email" class="in" type="email" placeholder="you@example.com" autocomplete="email" required>
+      <div class="actions">
+        <button class="btn" value="cancel" type="button" onclick="dlgId.close()">Cancel</button>
+        <button id="fid_submit" class="btn primary" type="submit">Send</button>
+      </div>
+      <div id="fid_msg" class="muted" style="margin-top:8px"></div>
+    </form>
+  </dialog>
+
+  <!-- Forgot Password Modal -->
+  <dialog id="dlgPw">
+    <form method="dialog" class="modal" id="forgotPwForm">
+      <button class="x" aria-label="Close" onclick="dlgPw.close()">×</button>
+      <h2>Reset Password</h2>
+      <p class="muted">Enter your User ID or Email. We’ll send a reset link if email is on file.</p>
+      <label for="fpw_id">User ID or Email</label>
+      <input id="fpw_id" name="id" class="in" placeholder="user id or email" required>
+      <div class="actions">
+        <button class="btn" value="cancel" type="button" onclick="dlgPw.close()">Cancel</button>
+        <button id="fpw_submit" class="btn primary" type="submit">Send Link</button>
+      </div>
+      <div id="fpw_msg" class="muted" style="margin-top:8px"></div>
+    </form>
+  </dialog>
+
+  <script>
+    // ——— UI helpers ———
+    const $ = (s, d=document)=>d.querySelector(s);
+    const form = $('#loginForm'), btn = $('#submitBtn'), err = $('#err'), ok = $('#ok');
+    const togglePw = $('#togglePw'), pw = $('#pw');
+    const dlgId = $('#dlgId'), dlgPw = $('#dlgPw');
+    const fidForm = $('#forgotIdForm'), fpwForm = $('#forgotPwForm');
+
+    togglePw.addEventListener('click', () => {
+      const shown = pw.type === 'text';
+      pw.type = shown ? 'password' : 'text';
+      togglePw.textContent = shown ? '👁' : '🙈';
+      togglePw.setAttribute('aria-label', shown ? 'Show password' : 'Hide password');
+      pw.focus();
+    });
+
+    function setBusy(el, on=true, label='Working…'){
+      if(!el) return;
+      if(on){ el.dataset._label = el.textContent; el.textContent = label; el.disabled = true; }
+      else{ el.textContent = el.dataset._label || 'Submit'; el.disabled = false; }
+    }
+    function showMsg(node, msg, good=false){
+      err.style.display = 'none'; ok.style.display = 'none';
+      if(!msg) return;
+      const target = good ? ok : err;
+      target.textContent = msg;
+      target.style.display = 'block';
+    }
+
+    // ——— Sign In ———
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      showMsg(null, '');
+      const id = $('#id').value.trim();
+      const password = $('#pw').value;
+      if(!id || !password){ showMsg(err, 'Please enter your ID/Email and password.', false); return; }
+
+      setBusy(btn, true, 'Signing in…');
+      try{
+        // POST to your Worker (Hono) auth route. Accepts either login_id or email.
+        const res = await fetch('/api/auth/login', {
+          method:'POST',
+          headers:{'Content-Type':'application/json'},
+          body: JSON.stringify({ id, password })
+        });
+        const data = await res.json().catch(()=>({}));
+        if(!res.ok){ throw new Error(data.error || 'Invalid credentials'); }
+
+        // Navigate to the app shell (same Pages project)
+        window.location.href = '/app.html';
+      }catch(ex){
+        showMsg(err, ex.message || 'Sign-in failed.');
+      }finally{
+        setBusy(btn, false);
       }
-      return resp;
-    };
-  })();
-</script>
+    });
+
+    // ——— Forgot User ID ———
+    $('#forgotIdLink').addEventListener('click', (e)=>{ e.preventDefault(); $('#fid_email').value=''; $('#fid_msg').textContent=''; dlgId.showModal(); });
+    fidForm.addEventListener('submit', async (e)=>{
+      e.preventDefault();
+      const email = $('#fid_email').value.trim();
+      if(!email){ $('#fid_msg').textContent='Enter an email.'; return; }
+      const s = $('#fid_submit'); setBusy(s,true,'Sending…');
+      try{
+        const r = await fetch('/api/auth/forgot-userid', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ email })});
+        const j = await r.json().catch(()=>({}));
+        if(!r.ok) throw new Error(j.error || 'Could not send email.');
+        $('#fid_msg').textContent = 'If that email exists, we sent the User ID.';
+      }catch(ex){ $('#fid_msg').textContent = ex.message; }
+      finally{ setBusy($('#fid_submit'), false); }
+    });
+
+    // ——— Forgot Password ———
+    $('#forgotPwLink').addEventListener('click', (e)=>{ e.preventDefault(); $('#fpw_id').value=''; $('#fpw_msg').textContent=''; dlgPw.showModal(); });
+    fpwForm.addEventListener('submit', async (e)=>{
+      e.preventDefault();
+      const id = $('#fpw_id').value.trim();
+      if(!id){ $('#fpw_msg').textContent='Enter your User ID or Email.'; return; }
+      const s = $('#fpw_submit'); setBusy(s,true,'Sending…');
+      try{
+        const r = await fetch('/api/auth/forgot-password', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ id })});
+        const j = await r.json().catch(()=>({}));
+        if(!r.ok) throw new Error(j.error || 'Could not start reset.');
+        $('#fpw_msg').textContent = 'If the account has email, a reset link was sent.';
+      }catch(ex){ $('#fpw_msg').textContent = ex.message; }
+      finally{ setBusy($('#fpw_submit'), false); }
+    });
+  </script>
+</body>
+</html>
