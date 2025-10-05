@@ -19,11 +19,6 @@
   .cd-totals { display: grid; gap: 6px; }
   .cd-actions { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 
-  /* Save button: larger, green when enabled; muted when disabled */
-  #btnSave { padding: 10px 18px; border-radius: 10px; border: 1px solid #1b3327; opacity: 0.7; }
-  #btnSave:not(:disabled) { background: #16a34a; color: #0b1a10; border-color: #13803a; opacity: 1; cursor: pointer; }
-  #btnSave:disabled { background: #23303f; color: #8aa0b6; border-color: #2a3a4d; cursor: not-allowed; }
-
   @media (max-width: 640px) {
     .cd-actions { flex-direction: column; align-items: stretch; }
     #btnSave { width: 100%; }
