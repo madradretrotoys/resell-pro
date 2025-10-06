@@ -51,6 +51,7 @@ async function load(){
 }
 
 function collect(){
+  const user_id = $('user_id').value; // from hidden input set during prefill
   const name = $('name').value.trim();
   const email = $('email').value.trim();
   const login_id = $('login_id').value.trim();
