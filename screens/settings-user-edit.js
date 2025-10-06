@@ -32,24 +32,25 @@ async function load(){
 
   $('discount_max').value = (u.discount_max ?? '');
 
-  $('userForm').onsubmit = async (e) => {
-    e.preventDefault();
+  // Hard guard: prevent any accidental native submit
+  $('userForm').onsubmit = (e) => e.preventDefault();
+
+  // Save via explicit click handler
+  $('save').onclick = async () => {
     const payload = collect();
     if (!payload) return;
 
     $('save').disabled = true; $('save').textContent = 'Saving…';
     try {
-      // Use create endpoint as upsert for now
+      // Upsert: backend should treat presence of user_id as "update"
       await api('/api/settings/users/create', { method:'POST', body: payload });
-      location.href = '?page=settings';
+      location.href = '?page=settings'; // back to list after success
     } catch (e2) {
       alert(`Save failed${e2?.data?.error ? `: ${e2.data.error}` : ''}.`);
     } finally {
       $('save').disabled = false; $('save').textContent = 'Save';
     }
   };
-}
-
 function collect(){
   const user_id = $('user_id').value; // from hidden input set during prefill
   const name = $('name').value.trim();
