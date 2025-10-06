@@ -1,25 +1,26 @@
 import { ensureSession, waitForSession } from '/assets/js/auth.js';
 import { showToast } from '/assets/js/ui.js';
 
+// ---- SCREENS (replaces existing SCREENS) ----
 const SCREENS = {
   dashboard: { html: '/screens/dashboard.html', js: '/screens/dashboard.js', title: 'Dashboard' },
   pos:       { html: '/screens/pos.html',       js: '/screens/pos.js',       title: 'POS' },
-  // NEW: Cash Drawer screen (Phase 1)
   drawer:    { html: '/screens/drawer.html',    js: '/screens/drawer.js',    title: 'Cash Drawer' },
   inventory: { html: '/screens/inventory.html', js: '/screens/inventory.js', title: 'Inventory' },
   research:  { html: '/screens/research.html',  js: '/screens/research.js',  title: 'Research' },
 
-  // Settings as a resolver: users list, new, edit
-  settings: {
-    resolve: () => {
-      const url = new URL(location.href);
-      const view = url.searchParams.get('view') || 'users';
-      if (view === 'user-new')  return { html: '/screens/settings-user-new.html',  js: '/screens/settings-user-new.js',  title: 'Settings — Add User' };
-      if (view === 'user-edit') return { html: '/screens/settings-user-edit.html', js: '/screens/settings-user-edit.js', title: 'Settings — Edit User' };
-      return { html: '/screens/settings-users.html', js: '/screens/settings-users.js', title: 'Settings — Users' };
-    }
-  },
+  // Settings screens as explicit routes (no resolver)
+  settings:            { html: '/screens/settings-users.html',      js: '/screens/settings-users.js',      title: 'Settings — Users' },
+  'settings-user-new': { html: '/screens/settings-user-new.html',   js: '/screens/settings-user-new.js',   title: 'Settings — Add User' },
+  'settings-user-edit':{ html: '/screens/settings-user-edit.html',  js: '/screens/settings-user-edit.js',  title: 'Settings — Edit User' },
 };
+
+// ---- loadScreen (only the first line changes; rest of function stays the same) ----
+export async function loadScreen(name){
+  const meta = SCREENS[name] || SCREENS.dashboard;
+  // ...existing loadScreen body remains exactly as you have it...
+}
+
 
 let current = { name: null, mod: null };
 const qs = (k) => new URLSearchParams(location.search).get(k);
