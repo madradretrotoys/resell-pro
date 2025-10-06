@@ -8,6 +8,7 @@ const SCREENS = {
   drawer:    { html: '/screens/drawer.html',    js: '/screens/drawer.js',    title: 'Cash Drawer' },
   inventory: { html: '/screens/inventory.html', js: '/screens/inventory.js', title: 'Inventory' },
   research:  { html: '/screens/research.html',  js: '/screens/research.js',  title: 'Research' },
+  settings:  { html: '/screens/settings-users.html',  js: '/screens/settings-users.js' },
 };
 
 let current = { name: null, mod: null };
