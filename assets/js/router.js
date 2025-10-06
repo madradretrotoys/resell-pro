@@ -8,7 +8,15 @@ const SCREENS = {
   drawer:    { html: '/screens/drawer.html',    js: '/screens/drawer.js',    title: 'Cash Drawer' },
   inventory: { html: '/screens/inventory.html', js: '/screens/inventory.js', title: 'Inventory' },
   research:  { html: '/screens/research.html',  js: '/screens/research.js',  title: 'Research' },
-  settings:  { html: '/screens/settings-users.html',  js: '/screens/settings-users.js' },
+  // Settings routes are split into subviews
+  settings: {
+    resolve: () => {
+      const view = new URL(window.location.href).searchParams.get('view') || 'users';
+      if (view === 'user-new')  return { html: '/screens/settings-user-new.html',  js: '/screens/settings-user-new.js'  };
+      if (view === 'user-edit') return { html: '/screens/settings-user-edit.html', js: '/screens/settings-user-edit.js' };
+      return { html: '/screens/settings-users.html',     js: '/screens/settings-users.js' }; // list
+    }
+  },
 };
 
 let current = { name: null, mod: null };
