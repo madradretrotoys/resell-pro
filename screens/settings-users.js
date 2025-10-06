@@ -31,7 +31,7 @@ async function refresh(){
 
 function renderTable(users){
   if (!users.length) return '<div>No users yet.</div>';
-  const rows = users.map(u => `
+    const rows = users.map(u => `
     <tr>
       <td>${escapeHtml(u.name)}</td>
       <td>${escapeHtml(u.email)}</td>
@@ -39,7 +39,8 @@ function renderTable(users){
       <td>${escapeHtml(u.role)}</td>
       <td>${u.active ? 'Yes' : 'No'}</td>
       <td style="text-align:right; white-space:nowrap;">
-        <a class="btn btn--neutral btn--sm" href="?page=settings&view=user-edit&user_id=${encodeURIComponent(u.user_id)}">Edit</a>
+        <a class="btn btn--neutral btn--sm"
+           href="?page=settings&view=user-edit&user_id=${encodeURIComponent(u.user_id)}">Edit</a>
         <button class="btn btn--ghost btn--sm" data-toggle="${u.user_id}">
           ${u.active ? 'Deactivate' : 'Activate'}
         </button>
