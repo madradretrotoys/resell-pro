@@ -52,10 +52,12 @@ function bindEls(){
 
 async function refresh(){
   els.table.innerHTML = 'Loading…';
-  const res = await apiFetch('/api/settings/users/list');
-  if (!res.ok) { els.table.innerHTML = 'Failed to load users.'; return; }
-  const data = await res.json();
-  els.table.innerHTML = renderTable(data.users || []);
+  try {
+    const data = await api('/api/settings/users/list');
+    els.table.innerHTML = renderTable(data.users || []);
+  } catch (e) {
+    els.table.innerHTML = 'Failed to load users.';
+  }
 }
 
 function renderTable(users){
@@ -185,13 +187,14 @@ async function submitForm(ev, session){
   }
 
   setSaving(true);
-  const res = await apiFetch('/api/settings/users/create', { method:'POST', body: JSON.stringify(payload) });
-  setSaving(false);
-
-  if (!res.ok) {
-    const err = await safeJson(res);
-    alert(`Save failed${err?.error ? `: ${err.error}` : ''}.`);
-    return;
+  try {
+    await api('/api/settings/users/create', { method:'POST', body: payload });
+    closeModal();
+    refresh();
+  } catch (e) {
+    alert(`Save failed${e?.data?.error ? `: ${e.data.error}` : ''}.`);
+  } finally {
+    setSaving(false);
   }
 
   closeModal();
@@ -199,11 +202,11 @@ async function submitForm(ev, session){
 }
 
 async function toggleActive(user_id){
-  const res = await apiFetch('/api/settings/users/toggle-active', { method:'POST', body: JSON.stringify({ user_id }) });
-  if (!res.ok) {
-    const err = await safeJson(res);
-    alert(`Update failed${err?.error ? `: ${err.error}` : ''}.`);
-    return;
+  try {
+    await api('/api/settings/users/toggle-active', { method:'POST', body: { user_id } });
+    refresh();
+  } catch (e) {
+    alert(`Update failed${e?.data?.error ? `: ${e.data.error}` : ''}.`);
   }
   refresh();
 }
