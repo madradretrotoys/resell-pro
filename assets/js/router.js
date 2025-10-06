@@ -8,13 +8,15 @@ const SCREENS = {
   drawer:    { html: '/screens/drawer.html',    js: '/screens/drawer.js',    title: 'Cash Drawer' },
   inventory: { html: '/screens/inventory.html', js: '/screens/inventory.js', title: 'Inventory' },
   research:  { html: '/screens/research.html',  js: '/screens/research.js',  title: 'Research' },
-  // Settings routes are split into subviews
+
+  // Settings as a resolver: users list, new, edit
   settings: {
     resolve: () => {
-      const view = new URL(window.location.href).searchParams.get('view') || 'users';
-      if (view === 'user-new')  return { html: '/screens/settings-user-new.html',  js: '/screens/settings-user-new.js'  };
-      if (view === 'user-edit') return { html: '/screens/settings-user-edit.html', js: '/screens/settings-user-edit.js' };
-      return { html: '/screens/settings-users.html',     js: '/screens/settings-users.js' }; // list
+      const url = new URL(location.href);
+      const view = url.searchParams.get('view') || 'users';
+      if (view === 'user-new')  return { html: '/screens/settings-user-new.html',  js: '/screens/settings-user-new.js',  title: 'Settings — Add User' };
+      if (view === 'user-edit') return { html: '/screens/settings-user-edit.html', js: '/screens/settings-user-edit.js', title: 'Settings — Edit User' };
+      return { html: '/screens/settings-users.html', js: '/screens/settings-users.js', title: 'Settings — Users' };
     }
   },
 };
