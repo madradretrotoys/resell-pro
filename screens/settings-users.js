@@ -31,7 +31,8 @@ async function refresh(){
 
 function renderTable(users){
   if (!users.length) return '<div>No users yet.</div>';
-    const rows = users.map(u => `
+
+  const rows = users.map(u => `
     <tr>
       <td>${escapeHtml(u.name)}</td>
       <td>${escapeHtml(u.email)}</td>
@@ -55,9 +56,14 @@ function renderTable(users){
       </tr></thead>
       <tbody>${rows}</tbody>
     </table>`;
+
+  // (re)bind activate/deactivate buttons after inject
   setTimeout(() => {
-    els.table.querySelectorAll('[data-toggle]').forEach(b => b.onclick = () => toggleActive(b.dataset.toggle));
+    document.querySelectorAll('#usersTable [data-toggle]').forEach(b => {
+      b.onclick = () => toggleActive(b.dataset.toggle);
+    });
   }, 0);
+
   return html;
 }
 
