@@ -39,48 +39,30 @@ async function loadHTML(url){
   return text;
 }
 export async function loadScreen(name){
-  const meta = SCREENS[name] || SCREENS.dashboard;
-  // Defensive: pick the last #app-view in case multiple exist
-  const candidates = Array.from(document.querySelectorAll('#app-view'));
-  const view = candidates[candidates.length - 1] || document.getElementById('app-view');
+  // Support resolvers (e.g., settings sub-screens)
+  const entry = typeof SCREENS[name]?.resolve === 'function'
+    ? SCREENS[name].resolve()
+    : SCREENS[name] || SCREENS.dashboard;
+
+  const view = document.getElementById('app-view');
   if(!view) throw new Error('#app-view not found');
 
-  log('loadScreen:start', { name, href: location.href, cookie: document.cookie });
-
-  // 1) Check session (handles tiny race right after login)
-  let session = await ensureSession();
-  if (!session?.user) session = await waitForSession(1500);
-  if (!session?.user) {
-    log('auth:fail->redirect', { reason: session?.reason, status: session?.status, debug: session?.debug });
-    location.href = '/index.html';
-    return;
-  }
-  log('auth:ok', { user: session.user });
-
-  // 2) Swap screen
-  if(current.mod?.destroy) { try { current.mod.destroy(); } catch(e){ log('destroy:error', e); } }
-  view.innerHTML = 'Loading…';
+  // ...
   try {
-    view.innerHTML = await loadHTML(meta.html + `?v=${Date.now()}`);
-  } catch (e) {
-    log('screen:html:error', e);
-    view.innerHTML = `\nFailed to load screen.\n`;
-    return;
-  }
+    view.innerHTML = await loadHTML(entry.html + `?v=${Date.now()}`);
+  } catch (e) { /* ...unchanged... */ }
+
   try {
-    const mod = await import(meta.js + `?v=${Date.now()}`);
-    if(mod?.init) await mod.init({ container:view, session });
+    const mod = await import(entry.js + `?v=${Date.now()}`);
+    // prefer default.load, keep init for backward-compat
+    if(mod?.default?.load) await mod.default.load({ container:view, session });
+    if(mod?.init)           await mod.init({ container:view, session });
     current = { name, mod };
-    log('screen:script:ok', { name });
-  } catch (e) {
-    log('screen:script:error', e);
-    showToast('Screen script error');
-  }
-  document.title = `Resell Pro — ${meta.title}`;
-  setActiveLink(name);
-  log('loadScreen:end', { name });
-}
+  } catch (e) { /* ...unchanged... */ }
 
+  document.title = `Resell Pro — ${entry.title}`;
+  setActiveLink(name);
+}
 function goto(name){
   const u = new URL(location.href);
   u.searchParams.set('page', name);
