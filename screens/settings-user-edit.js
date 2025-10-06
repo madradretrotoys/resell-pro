@@ -65,6 +65,7 @@ function collect(){
   }
 
   return {
+    user_id,                            // <-- include target user
     name, email, login_id, role,
     permissions: {
       can_pos: $('can_pos').checked,
