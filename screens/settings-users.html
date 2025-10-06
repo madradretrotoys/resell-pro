@@ -1,0 +1,70 @@
+<section class="tile">
+  <h2>Users</h2>
+  <p class="text-muted">Manage users in this tenant. Only authorized roles can add users.</p>
+
+  <div class="flex" style="gap:10px; flex-wrap:wrap; margin:10px 0 16px;">
+    <button id="btnRefresh" class="btn btn--neutral btn--sm">Refresh</button>
+    <button id="btnAddUser" class="btn btn--primary btn--sm">Add user</button>
+    <button id="btnInvite" class="btn btn--ghost btn--sm" title="Coming soon">Send invite (email)</button>
+  </div>
+
+  <div id="usersTable" class="tile" style="overflow:auto;">
+    <!-- populated by JS -->
+  </div>
+</section>
+
+<!-- Add/Edit modal (simple inline) -->
+<section id="userModal" class="tile" style="display:none; position:sticky; top:10px;">
+  <h3 id="umTitle">Add user</h3>
+  <form id="userForm" style="display:grid; grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); gap:12px;">
+    <label> Name
+      <input id="umName" type="text" required />
+    </label>
+    <label> Email
+      <input id="umEmail" type="email" required />
+    </label>
+    <label> Login ID
+      <input id="umLogin" type="text" required />
+    </label>
+    <label> Role
+      <select id="umRole">
+        <option value="clerk">Clerk</option>
+        <option value="manager">Manager</option>
+        <option value="admin">Admin</option>
+        <option value="owner">Owner</option>
+      </select>
+    </label>
+
+    <fieldset style="grid-column:1/-1; border:1px solid var(--border); border-radius:10px; padding:10px;">
+      <legend>Screen access</legend>
+      <div style="display:grid; grid-template-columns:repeat(auto-fit,minmax(180px,1fr)); gap:8px;">
+        <label><input type="checkbox" id="can_pos"> POS</label>
+        <label><input type="checkbox" id="can_cash_drawer" checked> Cash Drawer</label>
+        <label><input type="checkbox" id="can_cash_payouts"> Cash Payouts</label>
+        <label><input type="checkbox" id="can_item_research" checked> Item Research</label>
+        <label><input type="checkbox" id="can_inventory"> Inventory</label>
+        <label><input type="checkbox" id="can_inventory_intake"> Inventory Intake</label>
+        <label><input type="checkbox" id="can_drop_off_form"> Drop Off Form</label>
+        <label><input type="checkbox" id="can_estimates_buy_tickets"> Estimates/Buy Tickets</label>
+        <label><input type="checkbox" id="can_timekeeping" checked> Timekeeping</label>
+        <label><input type="checkbox" id="can_settings"> Settings</label>
+      </div>
+    </fieldset>
+
+    <fieldset style="grid-column:1/-1; border:1px solid var(--border); border-radius:10px; padding:10px;">
+      <legend>Notifications & limits</legend>
+      <div style="display:grid; grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); gap:8px;">
+        <label><input type="checkbox" id="notify_cash_drawer"> Notify: Cash Drawer</label>
+        <label><input type="checkbox" id="notify_daily_sales_summary"> Notify: Daily Sales Summary</label>
+        <label>Max discount (%) — blank = unlimited
+          <input id="discount_max" type="number" step="0.01" min="0" max="100" placeholder="">
+        </label>
+      </div>
+    </fieldset>
+
+    <div style="display:flex; gap:10px;">
+      <button type="submit" class="btn btn--success btn--md" id="umSave">Save</button>
+      <button type="button" class="btn btn--ghost btn--md" id="umCancel">Cancel</button>
+    </div>
+  </form>
+</section>
