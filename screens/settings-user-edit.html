@@ -1,0 +1,51 @@
+<section class="tile">
+  <h2>Edit user</h2>
+  <p class="text-muted">Update user details and permissions.</p>
+
+  <form id="userForm" style="display:grid; grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); gap:12px;">
+    <input id="user_id" type="hidden" />
+    <label> Name <input id="name" required></label>
+    <label> Email <input id="email" type="email" required></label>
+    <label> Login ID <input id="login_id" required></label>
+    <label> Role
+      <select id="role">
+        <option value="clerk">Clerk</option>
+        <option value="manager">Manager</option>
+        <option value="admin">Admin</option>
+        <option value="owner">Owner</option>
+      </select>
+    </label>
+
+    <fieldset style="grid-column:1/-1; border:1px solid var(--border); border-radius:10px; padding:10px;">
+      <legend>Screen access</legend>
+      <div style="display:grid; grid-template-columns:repeat(auto-fit,minmax(180px,1fr)); gap:8px;">
+        <label><input type="checkbox" id="can_pos"> POS</label>
+        <label><input type="checkbox" id="can_cash_drawer"> Cash Drawer</label>
+        <label><input type="checkbox" id="can_cash_payouts"> Cash Payouts</label>
+        <label><input type="checkbox" id="can_item_research"> Item Research</label>
+        <label><input type="checkbox" id="can_inventory"> Inventory</label>
+        <label><input type="checkbox" id="can_inventory_intake"> Inventory Intake</label>
+        <label><input type="checkbox" id="can_drop_off_form"> Drop Off Form</label>
+        <label><input type="checkbox" id="can_estimates_buy_tickets"> Estimates/Buy Tickets</label>
+        <label><input type="checkbox" id="can_timekeeping"> Timekeeping</label>
+        <label><input type="checkbox" id="can_settings"> Settings</label>
+      </div>
+    </fieldset>
+
+    <fieldset style="grid-column:1/-1; border:1px solid var(--border); border-radius:10px; padding:10px;">
+      <legend>Notifications & limits</legend>
+      <div style="display:grid; grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); gap:8px;">
+        <label><input type="checkbox" id="notify_cash_drawer"> Notify: Cash Drawer</label>
+        <label><input type="checkbox" id="notify_daily_sales_summary"> Notify: Daily Sales Summary</label>
+        <label> Max discount (%) — blank = unlimited
+          <input id="discount_max" type="number" step="0.01" min="0" max="100" placeholder="">
+        </label>
+      </div>
+    </fieldset>
+
+    <div style="display:flex; gap:10px;">
+      <button id="save" class="btn btn--success btn--md" type="submit">Save</button>
+      <a class="btn btn--ghost btn--md" href="?page=settings">Cancel</a>
+    </div>
+  </form>
+</section>
