@@ -36,9 +36,10 @@ function bindEls(){
   els.btnAdd = $('btnAddUser');
   els.btnInvite = $('btnInvite');
 
-  els.modal = $('userModal');
-  els.form  = $('userForm');
-  els.title = $('umTitle');
+  els.overlay = $('userOverlay');          // <-- NEW
+  els.modal   = $('userModal');
+  els.form    = $('userForm');
+  els.title   = $('umTitle');
   els.btnCancel = $('umCancel');
 
   // inputs
@@ -96,8 +97,11 @@ function renderTable(users){
 }
 
 function openModal(user, session){
-  els.modal.style.display = 'block';
+  els.overlay.style.display = 'flex';          // show the fixed overlay
   els.title.textContent = user ? 'Edit user' : 'Add user';
+  els.overlay.onclick = (e) => {                // click outside to close
+    if (e.target === els.overlay) closeModal();
+  };
 
   // Role gate for creator — restrict selectable roles per your policy
   const actor = (session?.membership_role || 'clerk').toLowerCase();
@@ -132,7 +136,7 @@ function openModal(user, session){
 }
 
 function closeModal(){
-  els.modal.style.display = 'none';
+  els.overlay.style.display = 'none';
 }
 
 async function submitForm(ev, session){
