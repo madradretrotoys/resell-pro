@@ -1,3 +1,5 @@
+import { api } from '/assets/js/api.js';
+import { ensureSession } from '/assets/js/auth.js';
 import { apiFetch, ensureSession } from '/assets/js/api.js';
 
 const els = {};
