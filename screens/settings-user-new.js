@@ -20,8 +20,9 @@ async function load(){
   [...$('role').options].forEach(opt => opt.disabled = !allowed.includes(opt.value));
   if (allowed.length) $('role').value = allowed[0];
 
-  $('userForm').onsubmit = async (e) => {
-    e.preventDefault();
+  $('userForm').onsubmit = (e) => e.preventDefault();
+
+  $('save').onclick = async () => {
     const payload = collect();
     if (!payload) return;
 
