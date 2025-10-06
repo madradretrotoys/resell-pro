@@ -8,6 +8,10 @@ const SCREENS = {
   drawer:    { html: '/screens/drawer.html',    js: '/screens/drawer.js',    title: 'Cash Drawer' },
   inventory: { html: '/screens/inventory.html', js: '/screens/inventory.js', title: 'Inventory' },
   research:  { html: '/screens/research.html',  js: '/screens/research.js',  title: 'Research' },
+
+  // TEMP: keep Settings link harmless until we reintroduce sub-screens
+  settings:  { html: '/screens/dashboard.html', js: '/screens/dashboard.js', title: 'Dashboard' },
+
 };
 
 let current = { name: null, mod: null };
