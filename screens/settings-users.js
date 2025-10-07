@@ -43,11 +43,8 @@ async function refresh() {
 }
 
 function renderTable(users) {
-  if (!users.length) return '
-
-No users yet.
-';
-  const rows = users.map(u => `
+  if (!users.length) return '<p>No users yet.</p>';
+  const rows = users.map(u =>
     ${escapeHtml(u.name)}
     ${escapeHtml(u.email)}
     ${escapeHtml(u.login_id)}
