@@ -1,3 +1,4 @@
+import { neon } from "@neondatabase/serverless";
 type SessionUser = { user_id: string; login_id: string; email: string | null };
 
 // GET /api/auth/session -> 200 { user, active_tenant_id } OR 401 { reason } (with debug trail)
