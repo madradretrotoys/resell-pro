@@ -4,7 +4,7 @@ import { showToast } from '/assets/js/ui.js';
 const SCREENS = {
   dashboard: { html: '/screens/dashboard.html', js: '/screens/dashboard.js', title: 'Dashboard' },
   pos:       { html: '/screens/pos.html',       js: '/screens/pos.js',       title: 'POS' },
-  // NEW: Cash Drawer screen (Phase 1)
+  // NEW: Cash Drawer
   drawer:    { html: '/screens/drawer.html',    js: '/screens/drawer.js',    title: 'Cash Drawer' },
   inventory: { html: '/screens/inventory.html', js: '/screens/inventory.js', title: 'Inventory' },
   research:  { html: '/screens/research.html',  js: '/screens/research.js',  title: 'Research' },
@@ -29,7 +29,9 @@ async function loadHTML(url){
 }
 export async function loadScreen(name){
   const meta = SCREENS[name] || SCREENS.dashboard;
-  const view = document.getElementById('app-view');
+  // Defensive: pick the last #app-view in case multiple exist
+  const candidates = Array.from(document.querySelectorAll('#app-view'));
+  const view = candidates[candidates.length - 1] || document.getElementById('app-view');
   if(!view) throw new Error('#app-view not found');
 
   log('loadScreen:start', { name, href: location.href, cookie: document.cookie });

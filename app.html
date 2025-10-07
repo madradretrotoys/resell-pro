@@ -4,27 +4,176 @@
   <meta charset="utf-8"/>
   <meta name="viewport" content="width=device-width,initial-scale=1"/>
   <title>Resell Pro • App</title>
-  <style>
-    :root { --bg:#0b0f19; --panel:#0f172a; --txt:#e7ecf3; --muted:#a6b3c6; --accent:#7dd3fc; }
+    <style>
+    /* Theme tokens — light is default */
+    :root {
+      --bg: #f6f8fb;
+      --panel: #ffffff;
+      --txt: #0b1220;
+      --muted: #5b6b80;
+      --accent: #0ea5e9;
+      --border: #d6dee8;
+  
+      /* Button palette (light) */
+      --info:   #0ea5e9;  /* primary blue */
+      --ok:     #00BB55;  /* success green */
+      --warn:   #f59e0b;  /* warning amber */
+      --danger: #ef4444;  /* danger red */
+      --neutral-bg: #f2f5f9;
+      --neutral-ink: #223042;
+      --ink-on-color: #ffffff; /* text on colored buttons */
+    }
+  
+    /* Respect user dark preference without changing your default */
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg:#0b0f19;
+        --panel:#0f172a;
+        --txt:#e7ecf3;
+        --muted:#a6b3c6;
+        --accent:#7dd3fc;
+        --border:#202a44;
+  
+        /* Button palette (dark) */
+        --info:   #38bdf8;
+        --ok:     #00BB55;
+        --warn:   #fbbf24;
+        --danger: #f87171;
+        --neutral-bg: #0f172a;
+        --neutral-ink: #e7ecf3;
+        --ink-on-color: #0b1220; /* darker ink on bright colors for dark mode comfort */
+      }
+    }
+  
     *{box-sizing:border-box;font-family:system-ui,-apple-system,Segoe UI,Roboto,Inter,Arial}
-    body{margin:0;background:linear-gradient(180deg,#0b0f19, #0e1423); color:var(--txt); min-height:100dvh; display:flex; flex-direction:column}
-    header{display:flex; align-items:center; gap:12px; padding:14px 16px; background:#0e1524; position:sticky; top:0; z-index:5; border-bottom:1px solid #202a44}
-    .burger{width:44px;height:44px;border-radius:10px;border:1px solid #263149;background:#0e1524;color:var(--txt);font-size:20px}
+  
+    body{
+      margin:0;
+      background:linear-gradient(180deg, var(--bg), color-mix(in srgb, var(--bg) 85%, #fff 15%));
+      color:var(--txt);
+      min-height:100dvh;
+      display:flex;
+      flex-direction:column;
+    }
+  
+    header{
+      display:flex; align-items:center; gap:12px; padding:14px 16px;
+      background:var(--panel);
+      position:sticky; top:0; z-index:5;
+      border-bottom:1px solid var(--border);
+    }
+  
+    .burger{
+      width:44px;height:44px;border-radius:10px;
+      border:1px solid var(--border);
+      background:var(--panel);
+      color:var(--txt);
+      font-size:20px;
+    }
+  
     .brand{font-weight:800; letter-spacing:.4px}
     .user{margin-left:auto; color:var(--muted); font-size:14px}
-    nav{position:fixed; inset:0 30% 0 0; max-width:320px; transform:translateX(-100%); transition:.24s; background:#0f172a; border-right:1px solid #202a44; padding:14px}
+  
+    nav{
+      position:fixed; inset:0 30% 0 0; max-width:320px;
+      transform:translateX(-100%); transition:.24s;
+      background:var(--panel);
+      border-right:1px solid var(--border);
+      padding:14px;
+    }
     nav.open{transform:translateX(0)}
     nav h3{margin:6px 0 12px; font-size:13px; color:var(--muted)}
-    nav a{display:block; padding:12px 12px; margin:6px 0; border-radius:10px; text-decoration:none; color:var(--txt); border:1px solid #263149; background:#0e1524}
+    nav a{
+      display:block; padding:12px 12px; margin:6px 0; border-radius:10px;
+      text-decoration:none; color:var(--txt);
+      border:1px solid var(--border);
+      background:var(--panel);
+    }
+  
     main{padding:18px; max-width:1100px; width:100%; margin:0 auto}
-    .tile{padding:18px; border:1px solid #263149; background:#0e1524; border-radius:16px; margin:10px 0}
-    @media(min-width:900px){ nav{position:static; transform:none; max-width:260px; width:260px} .wrap{display:grid; grid-template-columns:260px 1fr; gap:14px} }
+  
+    .tile{
+      padding:18px;
+      border:1px solid var(--border);
+      background:var(--panel);
+      border-radius:16px;
+      margin:10px 0;
+    }
+  
+    @media(min-width:900px){
+      nav{position:static; transform:none; max-width:260px; width:260px}
+      .wrap{display:grid; grid-template-columns:260px 1fr; gap:14px}
+    }
+  
+    /* ===============================
+       Global Button System (reusable)
+       =============================== */
+  
+    .btn {
+      --btn-bg: var(--neutral-bg);
+      --btn-ink: var(--neutral-ink);
+      --btn-bd: var(--border);
+  
+      display:inline-flex;
+      align-items:center;
+      justify-content:center;
+      gap:.5rem;
+  
+      font-weight:600;
+      line-height:1;
+      padding:10px 16px;
+      border-radius:10px;
+  
+      border:1px solid var(--btn-bd);
+      background:var(--btn-bg);
+      color:var(--btn-ink);
+  
+      text-decoration:none;
+      user-select:none;
+      white-space:nowrap;
+  
+      transition: transform .12s ease, box-shadow .12s ease,
+                  background-color .12s ease, border-color .12s ease, color .12s ease;
+    }
+  
+    /* Sizes */
+    .btn--sm { padding:8px 12px; font-size:.92rem; border-radius:9px; }
+    .btn--md { /* default */ }
+    .btn--lg { padding:12px 18px; font-size:1rem; border-radius:12px; }
+    .btn--block { width:100%; }
+  
+    /* Variants */
+    .btn--primary { --btn-bg: var(--info);   --btn-ink: var(--ink-on-color); --btn-bd: color-mix(in srgb, var(--info) 78%, #000 22%); }
+    .btn--success { --btn-bg: var(--ok);     --btn-ink: var(--ink-on-color); --btn-bd: color-mix(in srgb, var(--ok) 78%, #000 22%); }
+    .btn--warning { --btn-bg: var(--warn);   --btn-ink: var(--ink-on-color); --btn-bd: color-mix(in srgb, var(--warn) 78%, #000 22%); }
+    .btn--danger  { --btn-bg: var(--danger); --btn-ink: var(--ink-on-color); --btn-bd: color-mix(in srgb, var(--danger) 78%, #000 22%); }
+  
+    /* Neutral / ghost */
+    .btn--neutral { --btn-bg: var(--neutral-bg); --btn-ink: var(--neutral-ink); --btn-bd: var(--border); }
+    .btn--ghost   { --btn-bg: transparent;       --btn-ink: var(--txt);         --btn-bd: var(--border); }
+  
+    /* Hover & active motion (respect reduced motion) */
+    @media (prefers-reduced-motion: no-preference) {
+      .btn:not(:disabled):hover { transform: translateY(-1px); box-shadow: 0 2px 6px color-mix(in srgb, var(--btn-bd) 40%, transparent); }
+      .btn:not(:disabled):active { transform: translateY(0); box-shadow: none; }
+    }
+  
+    /* Focus ring */
+    .btn:focus-visible {
+      outline: 2px solid var(--accent);
+      outline-offset: 2px;
+    }
+  
+    /* Disabled */
+    .btn:disabled {
+      opacity: .55;
+      cursor: not-allowed;
+      transform: none;
+      box-shadow: none;
+    }
   </style>
 </head>
 <body>
-  <!-- Screen mount point -->
-  <main id="app-view" class="content"></main>
-  
   <header>
     <button class="burger" id="menu" aria-label="Menu">☰</button>
     <div class="brand">Resell Pro</div>
@@ -47,12 +196,7 @@
       <h3>Admin</h3>
       <a href="?page=settings" data-page="settings">Settings</a>
     </nav>
-    <main id="main">
-      <div class="tile">
-        <h2 id="title">Welcome</h2>
-        <p>This is your app shell. Tap a menu item to switch sections. Everything is responsive for phone & tablet.</p>
-      </div>
-    </main>
+    <main id="app-view" class="content"></main>
   </div>
   <script>
     

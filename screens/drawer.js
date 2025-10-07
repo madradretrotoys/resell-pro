@@ -30,14 +30,13 @@ function wire(){
   els.period.addEventListener('change', () => els.btnSave.disabled = !els.period.value);
 
   // Recalculate on every input
-  [
-    'pennies','nickels','dimes','quarters','halfdollars',
-    'ones','twos','fives','tens','twenties','fifties','hundreds'
-  ].forEach(id => els[id].addEventListener('input', recalc));
+  ['pennies','nickels','dimes','quarters','halfdollars',
+   'ones','twos','fives','tens','twenties','fifties','hundreds']
+    .forEach(id => els[id].addEventListener('input', recalc));
 
   els.btnLoad.addEventListener('click', loadToday);
   els.btnSave.addEventListener('click', save);
-  els.btnPing.addEventListener('click', ping);
+  if (els.btnPing) els.btnPing.addEventListener('click', ping); // <-- safe if missing
 }
 
 function autosize(root){
