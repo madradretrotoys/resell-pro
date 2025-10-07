@@ -46,13 +46,13 @@ function renderTable(users) {
   if (!users.length) return '<p>No users yet.</p>';
 
   const rows = users.map(u => `
-    <tr>
+    <tr style="border-top:1px solid #e5e7eb">
       <td>${escapeHtml(u.name)}</td>
       <td>${escapeHtml(u.email)}</td>
       <td>${escapeHtml(u.login_id)}</td>
       <td>${escapeHtml(u.role)}</td>
       <td>${u.active ? 'Yes' : 'No'}</td>
-      <td class="text-right">
+      <td style="text-align:right">
         <a
           class="btn btn--ghost btn--sm"
           href="?page=settings&view=user-edit&user_id=${encodeURIComponent(u.user_id)}"
@@ -67,15 +67,15 @@ function renderTable(users) {
 
   const html = `
     <div class="table-wrap">
-      <table class="table table--compact">
+      <table class="table table--compact" style="border-collapse:collapse;width:100%">
         <thead>
           <tr>
-            <th>Name</th>
-            <th>Email</th>
-            <th>Login</th>
-            <th>Role</th>
-            <th>Active</th>
-            <th class="text-right"></th>
+            <th style="text-align:left">Name</th>
+            <th style="text-align:left">Email</th>
+            <th style="text-align:left">Login</th>
+            <th style="text-align:left">Role</th>
+            <th style="text-align:left">Active</th>
+            <th style="text-align:right"></th>
           </tr>
         </thead>
         <tbody>${rows}</tbody>
@@ -92,6 +92,7 @@ function renderTable(users) {
 
   return html;
 }
+
 
 async function toggleActive(user_id) {
   try {
