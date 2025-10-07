@@ -37,7 +37,7 @@ function wire(){
 
   els.btnLoad.addEventListener('click', loadToday);
   els.btnSave.addEventListener('click', save);
-  els.btnPing.addEventListener('click', ping);
+  if (els.btnPing) els.btnPing.addEventListener('click', onPing);
 }
 
 function autosize(root){
