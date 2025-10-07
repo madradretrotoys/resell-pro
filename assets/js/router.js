@@ -8,6 +8,23 @@ const SCREENS = {
   drawer:    { html: '/screens/drawer.html',    js: '/screens/drawer.js',    title: 'Cash Drawer' },
   inventory: { html: '/screens/inventory.html', js: '/screens/inventory.js', title: 'Inventory' },
   research:  { html: '/screens/research.html',  js: '/screens/research.js',  title: 'Research' },
+
+  // Settings → Users
+  settings: {
+    html: '/screens/settings-users.html',
+    js: '/screens/settings-users.js',
+    title: 'Settings · Users',
+  },
+  'settings-user-new': {
+    html: '/screens/settings-user-new.html',
+    js: '/screens/settings-user-new.js',
+    title: 'Settings · Add User',
+  },
+  'settings-user-edit': {
+    html: '/screens/settings-user-edit.html',
+    js: '/screens/settings-user-edit.js',
+    title: 'Settings · Edit User',
+  },
 };
 
 let current = { name: null, mod: null };
