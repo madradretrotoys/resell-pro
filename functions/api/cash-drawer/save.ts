@@ -16,6 +16,43 @@ function todayKeyTZ(tz = "America/Denver") {
 
 function asInt(n: any){ const x = Number(n || 0); return Number.isFinite(x) ? Math.max(0, Math.floor(x)) : 0; }
 
+function readCookie(header: string, name: string): string | null {
+  if (!header) return null;
+  for (const part of header.split(/; */)) {
+    const [k, ...rest] = part.split("=");
+    if (k === name) return decodeURIComponent(rest.join("="));
+  }
+  return null;
+}
+
+// Minimal HS256 verify (same as /api/auth/session)
+async function verifyJwt(token: string, secret: string): Promise<any> {
+  const enc = new TextEncoder();
+  const [h, p, s] = token.split(".");
+  if (!h || !p || !s) throw new Error("bad_token");
+  const base64urlToBytes = (str: string) => {
+    const pad = "=".repeat((4 - (str.length % 4)) % 4);
+    const b64 = (str + pad).replace(/-/g, "+").replace(/_/g, "/");
+    const bin = atob(b64);
+    return Uint8Array.from(bin, (c) => c.charCodeAt(0));
+  };
+  const data = `${h}.${p}`;
+  const key = await crypto.subtle.importKey(
+    "raw",
+    enc.encode(secret),
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["verify"]
+  );
+  const ok = await crypto.subtle.verify("HMAC", key, base64urlToBytes(s), enc.encode(data));
+  if (!ok) throw new Error("bad_sig");
+  const payload = JSON.parse(new TextDecoder().decode(base64urlToBytes(p)));
+  if ((payload as any)?.exp && Date.now() / 1000 > (payload as any).exp) throw new Error("expired");
+  return payload;
+}
+
+
+
 export const onRequestPost: PagesFunction = async ({ request, env }) => {
   try {
     const body = await request.json();
@@ -50,6 +87,25 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
 
     const sql = neon(env.DATABASE_URL);
 
+    // Resolve actor (prefer full name; fallback to login/email/sub)
+    let actor_name = "unknown";
+    try {
+      const cookieHeader = request.headers.get("cookie") || "";
+      const token = readCookie(cookieHeader, "__Host-rp_session");
+      if (token && env.JWT_SECRET) {
+        const payload = await verifyJwt(token, String(env.JWT_SECRET));
+        const uid = String((payload as any).sub);
+        const rowsActor = await sql/*sql*/`
+          SELECT name, login_id, email FROM app.users WHERE user_id = ${uid} LIMIT 1
+        `;
+        actor_name =
+          rowsActor[0]?.name ||
+          rowsActor[0]?.login_id ||
+          rowsActor[0]?.email ||
+          uid;
+      }
+    } catch { /* non-fatal: keep "unknown" */ }
+    
     // First-write wins (Phase 1): insert if not exists, else 409
     // count_id is the PK in app.cash_drawer_counts
     try {
@@ -60,7 +116,7 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
            ones, twos, fives, tens, twenties, fifties, hundreds,
            coin_total, bill_total, grand_total, notes, updated_at)
         VALUES
-          (${count_id}, now(), ${period}, ${drawer}, ${"${user}"},
+          (${count_id}, now(), ${period}, ${drawer}, ${actor_name},
            ${pennies}, ${nickels}, ${dimes}, ${quarters}, ${halfdollars},
            ${ones}, ${twos}, ${fives}, ${tens}, ${twenties}, ${fifties}, ${hundreds},
            ${coin_total}, ${bill_total}, ${grand_total}, ${notes}, now())
