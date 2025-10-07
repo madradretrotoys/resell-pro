@@ -69,7 +69,7 @@ export async function init({ container, session }) {
 
   // Load columns + defaults + tax
   await loadColumns();
-  await loadTax();
+  
 
   // Initial fetch
   await refresh();
