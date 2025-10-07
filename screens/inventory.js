@@ -51,8 +51,17 @@ export async function init({ container, session }) {
   els.filterArea = $('invFilterRows');
   els.filterAdd = $('invAddFilter');
   els.filterApply = $('invFilterApply');
-
-  // Events
+  // Apply app-wide styles to controls (protocol classes)
+  els.search?.classList?.add('input', 'input-sm');
+  els.btnFilter?.classList?.add('btn', 'btn-sm');
+  els.btnColumns?.classList?.add('btn', 'btn-sm');
+  els.prev?.classList?.add('btn', 'btn-sm');
+  els.next?.classList?.add('btn', 'btn-sm');
+  els.pageSize?.classList?.add('select', 'select-sm');
+  // Optional: if you have a standard table class, uncomment the next two lines
+  // document.getElementById('invTable')?.classList?.add('table', 'table-sm');
+  // document.getElementById('invTableWrap')?.classList?.add('card');
+  
   if (els.search) {
     els.search.oninput = debounce(() => { state.search = els.search.value.trim(); state.offset = 0; refresh(); }, 300);
   }
@@ -67,6 +76,7 @@ export async function init({ container, session }) {
   if (els.filterAdd) els.filterAdd.onclick = addFilterRow;
   if (els.filterApply) els.filterApply.onclick = applyFilters;
 
+  
   // Load columns + defaults + tax
   await loadColumns();
   
@@ -160,7 +170,8 @@ function renderRows(items){
         return `<td style="padding:6px; border-bottom:1px solid #f4f4f4;"><a href="${escapeHtml(v)}" target="_blank" rel="noopener">View</a></td>`;
       }
       if (name === 'price' || name === 'cost_cogs') {
-        return `<td style="padding:6px; border-bottom:1px solid #f4f4f4;">${fmtCurrency(v)}</td>`;
+        // Display exactly what DB returns; no numeric coercion or formatting.
+        return `<td style="padding:6px; border-bottom:1px solid #f4f4f4;">${escapeHtml(v)}</td>`;
       }
       if (name === 'updated_at' && v) {
         const d = new Date(v);
