@@ -36,10 +36,10 @@ async function refresh() {
     const data = await api('/api/settings/users/list');
     els.table.innerHTML = renderTable(data.users || []);
   } catch (e) {
-    els.table.innerHTML = (e && e.status === 403)
-      ? 'Access denied. Ask an owner to grant Settings access.'
-      : 'Failed to load users.';
-  }
+  els.table.innerHTML = (e && e.status === 403)
+    ? 'Access denied. Ask an owner to grant Settings access.'
+    : 'Failed to load users.';
+}
 }
 
 function renderTable(users) {
