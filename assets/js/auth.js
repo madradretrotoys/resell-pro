@@ -1,4 +1,4 @@
-import { api } from '/assets/js/api.js';
+import { api, setActiveTenant } from '/assets/js/api.js';
 
 function log(...args){ try{ console.log('[auth]', ...args); }catch{} }
 
@@ -7,6 +7,9 @@ export async function ensureSession() {
   log('ensureSession:begin', { time: new Date().toISOString(), location: location.href });
   try {
     const data = await api('/api/auth/session');
+    // NEW: propagate active tenant to api.js so all future calls carry x-tenant-id
+    if (data && 'active_tenant_id' in data) setActiveTenant(data.active_tenant_id || null);
+
     log('ensureSession:ok', { user: !!data?.user, debug: data?.debug });
     return data;
   } catch (e) {
