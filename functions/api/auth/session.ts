@@ -24,11 +24,32 @@ export const onRequestGet: PagesFunction = async ({ request, env }) => {
       email: (payload as any).email ?? null,
     };
 
-    // Read active tenant from secure cookie if present
-    const active_tenant_id = readCookie(cookieHeader, "__Host-rp_tenant") || null;
-
+    // Read active tenant from secure cookie if present; if missing, auto-select
+    // a single active membership and set cookie once (self-heal).
+    let active_tenant_id = readCookie(cookieHeader, "__Host-rp_tenant") || null;
+    let setCookieHeader: string | null = null;
+    
+    if (!active_tenant_id) {
+      const sql = neon(String(env.DATABASE_URL));
+      const rows = await sql/*sql*/`
+        SELECT tenant_id
+        FROM app.memberships
+        WHERE user_id = ${user.user_id} AND active = true
+        LIMIT 2
+      `;
+      if (rows.length === 1) {
+        active_tenant_id = String(rows[0].tenant_id);
+        setCookieHeader = `__Host-rp_tenant=${encodeURIComponent(
+          active_tenant_id
+        )}; Path=/; Secure; HttpOnly; SameSite=Lax; Max-Age=2592000`;
+        dbg.push("session:auto-tenant:set");
+      } else {
+        dbg.push("session:auto-tenant:skipped");
+      }
+    }
+    
     dbg.push("session:done:200");
-    return send(200, { user, active_tenant_id });
+    return send(200, { user, active_tenant_id }, setCookieHeader);
   } catch (e: any) {
     const reason = e?.message || "verify_failed";
     dbg.push(`session:error:${reason}`);
