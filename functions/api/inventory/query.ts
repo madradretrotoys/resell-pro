@@ -142,8 +142,9 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
     const limitSql = `LIMIT ${limit} OFFSET ${offset}`;
 
     // Data + Count (Phase 1 exact; we will auto-approx in a follow-up if needed)
-    const rows = await neon(String(env.DATABASE_URL)).any(`SELECT * FROM app.inventory ${whereSql} ${orderSql} ${limitSql}`, params);
-    const cnt  = await neon(String(env.DATABASE_URL)).any(`SELECT COUNT(*)::bigint AS count FROM app.inventory ${whereSql}`, params);
+    const rows = await sql(`SELECT * FROM app.inventory ${whereSql} ${orderSql} ${limitSql}`, params);
+    const cnt  = await sql(`SELECT COUNT(*)::bigint AS count FROM app.inventory ${whereSql}`, params);
+ 
     const total = Number((cnt[0] && (cnt[0].count as any)) || 0);
 
     return json({
