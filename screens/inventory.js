@@ -58,9 +58,40 @@ export async function init({ container, session }) {
   els.prev?.classList?.add('btn', 'btn-sm');
   els.next?.classList?.add('btn', 'btn-sm');
   els.pageSize?.classList?.add('select', 'select-sm');
+  
+  // Assign color roles to keep consistency with Settings:
+  // - First actionable button in a group: blue (btn-primary)
+  // - Neighbors: ghost (btn-ghost)
+  (function applyButtonGroupColors() {
+    // helper: only add a color if none is present yet
+    const ensureColor = (btn, isPrimary) => {
+      if (!btn) return;
+      const hasRole =
+        btn.classList.contains('btn-primary') ||
+        btn.classList.contains('btn-secondary') ||
+        btn.classList.contains('btn-ghost');
+      if (hasRole) return; // don't override explicit choices
+      btn.classList.add(isPrimary ? 'btn-primary' : 'btn-ghost');
+    };
+  
+    // Group 1: toolbar controls at the top (Filter, Columns, ...)
+    const controls = document.getElementById('invControls');
+    if (controls) {
+      const groupBtns = Array.from(controls.querySelectorAll('button.btn'));
+      groupBtns.forEach((btn, i) => ensureColor(btn, i === 0)); // first = primary
+    }
+  
+    // Group 2: pager (Prev/Next) — both ghost by default
+    const pager = document.getElementById('invPager');
+    if (pager) {
+      const pagerBtns = Array.from(pager.querySelectorAll('button.btn'));
+      pagerBtns.forEach((btn) => ensureColor(btn, false));
+    }
+  })();
+  
   // Optional: if you have a standard table class, uncomment the next two lines
-  // document.getElementById('invTable')?.classList?.add('table', 'table-sm');
-  // document.getElementById('invTableWrap')?.classList?.add('card');
+  document.getElementById('invTable')?.classList?.add('table', 'table-sm');
+  document.getElementById('invTableWrap')?.classList?.add('card');
   
   if (els.search) {
     els.search.oninput = debounce(() => { state.search = els.search.value.trim(); state.offset = 0; refresh(); }, 300);
