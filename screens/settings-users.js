@@ -52,24 +52,35 @@ function renderTable(users) {
       <td>${escapeHtml(u.login_id)}</td>
       <td>${escapeHtml(u.role)}</td>
       <td>${u.active ? 'Yes' : 'No'}</td>
-      <td>
-        <a href="?page=settings-user-edit&user_id=${encodeURIComponent(u.user_id)}">Edit</a>
-        <button type="button" data-toggle="${u.user_id}">
-          ${u.active ? 'Deactivate' : 'Activate'}
-        </button>
+      <td class="text-right">
+        <a
+          class="btn btn--ghost btn--sm"
+          href="?page=settings&view=user-edit&user_id=${encodeURIComponent(u.user_id)}"
+        >Edit</a>
+        <button
+          class="btn btn--neutral btn--sm"
+          data-toggle="${u.user_id}"
+        >${u.active ? 'Deactivate' : 'Activate'}</button>
       </td>
     </tr>
   `).join('');
 
   const html = `
-    <table class="table">
-      <thead>
-        <tr>
-          <th>Name</th><th>Email</th><th>Login</th><th>Role</th><th>Active</th><th></th>
-        </tr>
-      </thead>
-      <tbody>${rows}</tbody>
-    </table>
+    <div class="table-wrap">
+      <table class="table table--compact">
+        <thead>
+          <tr>
+            <th>Name</th>
+            <th>Email</th>
+            <th>Login</th>
+            <th>Role</th>
+            <th>Active</th>
+            <th class="text-right"></th>
+          </tr>
+        </thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </div>
   `;
 
   // Bind activate/deactivate buttons after inject
