@@ -18,7 +18,7 @@ const state = {
   offset: 0,
   total: 0,
   approximate: false,
-  taxRate: 0,           // decimal fraction (0.0825)
+  
 };
 
 const COL_PREF_KEY = (uid) => `rp.inventory.visibleCols.${uid || 'anon'}`;
@@ -91,14 +91,7 @@ async function loadColumns(){
   buildColumnsDialog();
 }
 
-async function loadTax(){
-  try {
-    const t = await api('/api/settings/tax');
-    state.taxRate = Number(t?.rate || 0);
-  } catch {
-    state.taxRate = 0;
-  }
-}
+
 
 async function refresh(){
   if (!els.body) return;
@@ -167,8 +160,7 @@ function renderRows(items){
         return `<td style="padding:6px; border-bottom:1px solid #f4f4f4;"><a href="${escapeHtml(v)}" target="_blank" rel="noopener">View</a></td>`;
       }
       if (name === 'price' || name === 'cost_cogs') {
-        const withTax = Number(v || 0) * (1 + (state.taxRate || 0));
-        return `<td style="padding:6px; border-bottom:1px solid #f4f4f4;" title="Tax inclusive">${fmtCurrency(v)} <small style="opacity:.7">(${fmtCurrency(withTax)})</small></td>`;
+        return `<td style="padding:6px; border-bottom:1px solid #f4f4f4;">${fmtCurrency(v)}</td>`;
       }
       if (name === 'updated_at' && v) {
         const d = new Date(v);
