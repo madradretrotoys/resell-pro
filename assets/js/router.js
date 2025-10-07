@@ -2,18 +2,14 @@
 import { ensureSession, waitForSession } from '/assets/js/auth.js';
 import { showToast } from '/assets/js/ui.js';
 
-// Simple one-route-per-screen map.
-// NOTE: 'settings' temporarily points to dashboard to keep the app stable.
 const SCREENS = {
   dashboard: { html: '/screens/dashboard.html', js: '/screens/dashboard.js', title: 'Dashboard' },
   pos:       { html: '/screens/pos.html',       js: '/screens/pos.js',       title: 'POS' },
+  // NEW: Cash Drawer
   drawer:    { html: '/screens/drawer.html',    js: '/screens/drawer.js',    title: 'Cash Drawer' },
   inventory: { html: '/screens/inventory.html', js: '/screens/inventory.js', title: 'Inventory' },
   research:  { html: '/screens/research.html',  js: '/screens/research.js',  title: 'Research' },
-
-  // TEMP: keep Settings link harmless until we reintroduce sub-screens
-  settings:  { html: '/screens/dashboard.html', js: '/screens/dashboard.js', title: 'Dashboard' },
-};
+}
 
 let current = { name: null, mod: null };
 const qs = (k) => new URLSearchParams(location.search).get(k);
