@@ -1,4 +1,3 @@
-// Router — baseline, stable version (no resolver logic)
 import { ensureSession, waitForSession } from '/assets/js/auth.js';
 import { showToast } from '/assets/js/ui.js';
 
@@ -9,19 +8,16 @@ const SCREENS = {
   drawer:    { html: '/screens/drawer.html',    js: '/screens/drawer.js',    title: 'Cash Drawer' },
   inventory: { html: '/screens/inventory.html', js: '/screens/inventory.js', title: 'Inventory' },
   research:  { html: '/screens/research.html',  js: '/screens/research.js',  title: 'Research' },
-}
+};
 
 let current = { name: null, mod: null };
 const qs = (k) => new URLSearchParams(location.search).get(k);
-
 function log(...args){ try{ console.log('[router]', ...args); }catch{} }
-
 function setActiveLink(name){
   document.querySelectorAll('[data-page]').forEach(a => {
     a.classList.toggle('active', a.getAttribute('data-page') === name);
   });
 }
-
 async function loadHTML(url){
   log('loadHTML:begin', url);
   const r = await fetch(url, { credentials:'include' });
@@ -31,56 +27,49 @@ async function loadHTML(url){
   log('loadHTML:end', { bytes: text.length });
   return text;
 }
-
 export async function loadScreen(name){
   const meta = SCREENS[name] || SCREENS.dashboard;
-  const view = document.getElementById('app-view');
+  // Defensive: pick the last #app-view in case multiple exist
+  const candidates = Array.from(document.querySelectorAll('#app-view'));
+  const view = candidates[candidates.length - 1] || document.getElementById('app-view');
   if(!view) throw new Error('#app-view not found');
 
-  log('loadScreen:start', { name, href: location.href });
+  log('loadScreen:start', { name, href: location.href, cookie: document.cookie });
 
-  // Session gate (as before)
+  // 1) Check session (handles tiny race right after login)
   let session = await ensureSession();
   if (!session?.user) session = await waitForSession(1500);
   if (!session?.user) {
-    log('auth:fail->redirect', { reason: session?.reason, status: session?.status });
+    log('auth:fail->redirect', { reason: session?.reason, status: session?.status, debug: session?.debug });
     location.href = '/index.html';
     return;
   }
   log('auth:ok', { user: session.user });
 
-  // Unmount previous
-  if(current.mod?.destroy) {
-    try { current.mod.destroy(); } catch(e){ log('destroy:error', e); }
-  }
-
-  // Load HTML
+  // 2) Swap screen
+  if(current.mod?.destroy) { try { current.mod.destroy(); } catch(e){ log('destroy:error', e); } }
   view.innerHTML = 'Loading…';
   try {
     view.innerHTML = await loadHTML(meta.html + `?v=${Date.now()}`);
   } catch (e) {
     log('screen:html:error', e);
-    view.innerHTML = `Failed to load screen.`;
+    view.innerHTML = `\nFailed to load screen.\n`;
     return;
   }
-
-  // Load JS module (baseline: call init if present)
   try {
     const mod = await import(meta.js + `?v=${Date.now()}`);
-    if (mod?.init) await mod.init({ container:view, session });
+    if(mod?.init) await mod.init({ container:view, session });
     current = { name, mod };
     log('screen:script:ok', { name });
   } catch (e) {
     log('screen:script:error', e);
     showToast('Screen script error');
   }
-
   document.title = `Resell Pro — ${meta.title}`;
   setActiveLink(name);
   log('loadScreen:end', { name });
 }
 
-// Navigation wiring (unchanged)
 function goto(name){
   const u = new URL(location.href);
   u.searchParams.set('page', name);
@@ -89,7 +78,6 @@ function goto(name){
 }
 
 window.addEventListener('popstate', () => loadScreen(qs('page') || 'dashboard'));
-
 document.addEventListener('click', (e) => {
   const a = e.target.closest('[data-page]');
   if(!a) return;
