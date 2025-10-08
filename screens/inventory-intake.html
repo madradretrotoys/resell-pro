@@ -19,132 +19,116 @@
   <section class="card rounded-2xl shadow p-4 mb-4">
     <form id="intakeForm" autocomplete="off">
       <!-- A) Basic Item Details -->
-      <div class="card border rounded-2xl p-4 mb-4">
-        <h2 class="text-lg font-semibold mb-3">Basic Item Details</h2>
-        <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
-          <!-- Item Name / Description -->
-          <label class="block">
-            <span class="text-sm">Item Name / Description</span>
-            <input id="titleInput" type="text" class="input w-full mt-1" placeholder="e.g., Monster High Doll - Frankie Stein" />
-          </label>
-
-          <!-- Price (USD) -->
-          <label class="block">
-            <span class="text-sm">Price (USD)</span>
-            <input id="priceInput" type="number" step="0.01" min="0" class="input w-full mt-1" placeholder="0.00" />
-          </label>
-
-          <!-- Qty -->
-          <label class="block">
-            <span class="text-sm">Qty</span>
-            <input id="qtyInput" type="number" step="1" min="0" class="input w-full mt-1" placeholder="1" />
-          </label>
-
-          <!-- Cost of Goods (USD) -->
-          <label class="block">
-            <span class="text-sm">Cost of Goods (USD)</span>
-            <input id="costInput" type="number" step="0.01" min="0" class="input w-full mt-1" placeholder="0.00" />
-          </label>
-
-          <!-- Category -->
-          <label class="block">
-            <span class="text-sm">Category</span>
-            <select id="categorySelect" class="select w-full mt-1"></select>
-            <div class="text-xs text-gray-500 mt-1" id="categoryCodeHint"></div>
-          </label>
-
-          <!-- Store Location -->
-          <label class="block">
-            <span class="text-sm">Store Location</span>
-            <select id="storeLocationSelect" class="select w-full mt-1"></select>
-          </label>
-
-          <!-- Case#/Bin#/Shelf# -->
-          <label class="block">
-            <span class="text-sm">Case#/Bin#/Shelf#</span>
-            <input id="caseBinShelfInput" type="text" class="input w-full mt-1" placeholder="e.g., Case 1 / Bin A" />
-          </label>
-
-          <!-- Sales Channel -->
-          <label class="block">
-            <span class="text-sm">Sales Channel</span>
-            <select id="salesChannelSelect" class="select w-full mt-1"></select>
-          </label>
+      <div class="card">
+        <h2 class="sectionTitle">Basic Item Details</h2>
+        <div class="legacy-grid-2">
+          <div class="field">
+            <label>Item Name / Description</label>
+            <input id="titleInput" type="text" placeholder="e.g., Monster High Doll - Frankie Stein" />
+          </div>
+      
+          <div class="field">
+            <label>Price (USD)</label>
+            <input id="priceInput" type="number" step="0.01" min="0" placeholder="0.00" />
+          </div>
+      
+          <div class="field">
+            <label>Qty</label>
+            <input id="qtyInput" type="number" step="1" min="0" placeholder="1" />
+          </div>
+      
+          <div class="field">
+            <label>Cost of Goods (USD)</label>
+            <input id="costInput" type="number" step="0.01" min="0" placeholder="0.00" />
+          </div>
+      
+          <div class="field">
+            <label>Category</label>
+            <select id="categorySelect"></select>
+            <div class="muted mono" id="categoryCodeHint"></div>
+          </div>
+      
+          <div class="field">
+            <label>Store Location</label>
+            <select id="storeLocationSelect"></select>
+          </div>
+      
+          <div class="field">
+            <label>Case#/Bin#/Shelf#</label>
+            <input id="caseBinShelfInput" type="text" placeholder="e.g., Case 1 / Bin A" />
+          </div>
+      
+          <div class="field">
+            <label>Sales Channel</label>
+            <select id="salesChannelSelect"></select>
+          </div>
         </div>
       </div>
 
       <!-- B) Marketplace Listing Details (renamed from Vendoo) -->
-      <div id="marketplaceSection" class="card border rounded-2xl p-4 mb-4">
-        <h2 class="text-lg font-semibold mb-3">Marketplace Listing Details</h2>
-
-        <!-- Marketplace Category + path helper -->
-        <label class="block mb-3">
-          <span class="text-sm">Marketplace Category</span>
-          <select id="marketplaceCategorySelect" class="select w-full mt-1"></select>
-          <div class="text-xs text-gray-500 mt-1">
-            Category Path: <span id="marketplaceCategoryPath" class="font-mono">—</span>
-          </div>
-        </label>
-
-        <!-- Condition / Brand / Primary Color -->
-        <div class="grid grid-cols-1 md:grid-cols-3 gap-3 mb-3">
-          <label class="block">
-            <span class="text-sm">Condition</span>
-            <select id="conditionSelect" class="select w-full mt-1"></select>
-          </label>
-          <label class="block">
-            <span class="text-sm">Brand</span>
-            <select id="brandSelect" class="select w-full mt-1"></select>
-          </label>
-          <label class="block">
-            <span class="text-sm">Primary Color</span>
-            <select id="colorSelect" class="select w-full mt-1"></select>
-          </label>
+      <div id="marketplaceSection" class="card">
+        <h2 class="sectionTitle">Marketplace Listing Details</h2>
+      
+        <div class="field">
+          <label>Marketplace Category</label>
+          <select id="marketplaceCategorySelect"></select>
+          <div class="muted">Category Path: <span id="marketplaceCategoryPath" class="mono">—</span></div>
         </div>
-
-        <!-- Long Description + copy helpers (visible, disabled for Phase 1) -->
-        <div class="mb-3">
-          <span class="text-sm">Long Description</span>
-          <textarea id="longDescriptionTextarea" class="textarea w-full mt-1" rows="6" placeholder="Enter a detailed description…"></textarea>
-          <div class="mt-2 flex flex-wrap gap-2">
-            <button class="btn btn-sm" id="copyTitleBtn" disabled title="Enabled in Phase 2">Copy Title</button>
-            <button class="btn btn-sm" id="copySkuBtn" disabled title="Enabled in Phase 2">Copy SKU</button>
-            <button class="btn btn-sm" id="copySkuLocationBtn" disabled title="Enabled in Phase 2">Copy SKU + Location</button>
-            <button class="btn btn-sm" id="copyPriceBtn" disabled title="Enabled in Phase 2">Copy Price</button>
-            <button class="btn btn-sm" id="copyXeasyBtn" disabled title="Enabled in Phase 2">Copy for Xeasy</button>
-            <button class="btn btn-sm" id="copyBusinessDetailsBtn" disabled title="Enabled in Phase 2">Copy Business Details</button>
+      
+        <div class="legacy-grid-3" style="margin-top:10px">
+          <div class="field">
+            <label>Condition</label>
+            <select id="conditionSelect"></select>
+          </div>
+          <div class="field">
+            <label>Brand</label>
+            <select id="brandSelect"></select>
+          </div>
+          <div class="field">
+            <label>Primary Color</label>
+            <select id="colorSelect"></select>
           </div>
         </div>
-
-        <!-- Shipping (inside Marketplace card, like legacy) -->
-        <div id="shippingBlock" class="mt-2">
-          <h3 class="text-sm font-semibold mb-2">Shipping</h3>
-          <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
-            <label class="block md:col-span-1">
-              <span class="text-sm">Shipping Box</span>
-              <select id="shippingBoxSelect" class="select w-full mt-1"></select>
-            </label>
-            <div class="grid grid-cols-3 gap-3 md:col-span-2">
-              <label class="block">
-                <span class="text-sm">Weight (lb)</span>
-                <input id="weightLbInput" type="number" class="input w-full mt-1" min="0" step="1" readonly />
-              </label>
-              <label class="block">
-                <span class="text-sm">Weight (oz)</span>
-                <input id="weightOzInput" type="number" class="input w-full mt-1" min="0" step="1" readonly />
-              </label>
-              <label class="block">
-                <span class="text-sm">Length</span>
-                <input id="lengthInput" type="number" class="input w-full mt-1" min="0" step="1" readonly />
-              </label>
-              <label class="block">
-                <span class="text-sm">Width</span>
-                <input id="widthInput" type="number" class="input w-full mt-1" min="0" step="1" readonly />
-              </label>
-              <label class="block">
-                <span class="text-sm">Height</span>
-                <input id="heightInput" type="number" class="input w-full mt-1" min="0" step="1" readonly />
-              </label>
+      
+        <div class="field" style="margin-top:10px">
+          <label>Long Description</label>
+          <textarea id="longDescriptionTextarea" placeholder="Enter a detailed description…"></textarea>
+          <div class="actions" style="margin-top:8px">
+            <button class="btn btn-ghost btn-sm" id="copyTitleBtn" disabled title="Enabled in Phase 2">Copy Title</button>
+            <button class="btn btn-ghost btn-sm" id="copySkuBtn" disabled title="Enabled in Phase 2">Copy SKU</button>
+            <button class="btn btn-ghost btn-sm" id="copySkuLocationBtn" disabled title="Enabled in Phase 2">Copy SKU + Location</button>
+            <button class="btn btn-ghost btn-sm" id="copyPriceBtn" disabled title="Enabled in Phase 2">Copy Price</button>
+            <button class="btn btn-ghost btn-sm" id="copyXeasyBtn" disabled title="Enabled in Phase 2">Copy for Xeasy</button>
+            <button class="btn btn-ghost btn-sm" id="copyBusinessDetailsBtn" disabled title="Enabled in Phase 2">Copy Business Details</button>
+          </div>
+        </div>
+      
+        <div id="shippingBlock" style="margin-top:10px">
+          <h3 class="sectionTitle" style="margin:0 0 8px">Shipping</h3>
+          <div class="legacy-grid-3">
+            <div class="field">
+              <label>Shipping Box</label>
+              <select id="shippingBoxSelect"></select>
+            </div>
+            <div class="field">
+              <label>Weight (lb)</label>
+              <input id="weightLbInput" type="number" min="0" step="1" readonly />
+            </div>
+            <div class="field">
+              <label>Weight (oz)</label>
+              <input id="weightOzInput" type="number" min="0" step="1" readonly />
+            </div>
+            <div class="field">
+              <label>Length</label>
+              <input id="lengthInput" type="number" min="0" step="1" readonly />
+            </div>
+            <div class="field">
+              <label>Width</label>
+              <input id="widthInput" type="number" min="0" step="1" readonly />
+            </div>
+            <div class="field">
+              <label>Height</label>
+              <input id="heightInput" type="number" min="0" step="1" readonly />
             </div>
           </div>
         </div>
