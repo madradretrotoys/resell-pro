@@ -77,4 +77,79 @@ async function init() {
       });
     }
 
-    setCtasEnabled
+    setCtasEnabled(allOk);
+    document.dispatchEvent(new CustomEvent("intake:validity-changed", { detail: { valid: allOk } }));
+    return allOk;
+  }
+  function wireValidation() {
+    const ids = [
+      "categorySelect",
+      "storeLocationSelect",
+      "salesChannelSelect",
+      "marketplaceCategorySelect",
+      "conditionSelect",
+      "brandSelect",
+      "colorSelect",
+    ];
+    ids.forEach((id) => {
+      const el = getEl(id);
+      if (el) el.addEventListener("change", computeValidity);
+    });
+  }
+  // --- end validation helpers ---
+
+  try {
+    const meta = await loadMeta();
+
+    // Populate Category (+ show its code hint)
+    fillSelect($("categorySelect"), meta.categories, {
+      textKey: "category_name",
+      valueKey: "category_name",
+      extras: (row) => ({ code: row.category_code }),
+    });
+    wireCategoryCodeHint(meta);
+
+    // Marketplace lists
+    fillSelect($("marketplaceCategorySelect"), meta.marketplace.categories, {
+      textKey: "display_name",
+      valueKey: "display_name",
+      extras: (row) => ({ path: row.path || "" }),
+    });
+    wireMarketplaceCategoryPath();
+
+    fillSelect($("brandSelect"), meta.marketplace.brands);
+    fillSelect($("conditionSelect"), meta.marketplace.conditions);
+    fillSelect($("colorSelect"), meta.marketplace.colors);
+
+    // Shipping
+    fillSelect($("shippingBoxSelect"), meta.shipping_boxes, {
+      textKey: "box_name",
+      valueKey: "box_name",
+    });
+    wireShippingBoxAutofill(meta);
+
+    // Store + channel
+    fillSelect($("storeLocationSelect"), meta.store_locations);
+    fillSelect($("salesChannelSelect"), meta.sales_channels);
+
+    // Apply placeholders if any list was empty
+    ensurePlaceholder($("categorySelect"));
+    ensurePlaceholder($("marketplaceCategorySelect"));
+    ensurePlaceholder($("brandSelect"));
+    ensurePlaceholder($("conditionSelect"));
+    ensurePlaceholder($("colorSelect"));
+    ensurePlaceholder($("shippingBoxSelect"));
+    ensurePlaceholder($("storeLocationSelect"));
+    ensurePlaceholder($("salesChannelSelect"));
+
+    // Wire and run initial validation
+    wireValidation();
+    computeValidity();
+  } catch (err) {
+    console.error("Meta load failed:", err);
+    const denied = $("intake-access-denied");
+    if (denied) denied.classList.remove("hidden");
+  } finally {
+    try { document.body.classList.remove('loading'); } catch {}
+  }
+}
