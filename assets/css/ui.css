@@ -1,166 +1,113 @@
-/* =========================
-   Global Visual System (VSC)
-   Source of truth: Settings ▸ Users
-   ========================= */
+<style id="ui-tokens">
+  .btn{display:inline-flex;align-items:center;gap:.5rem;padding:.375rem .75rem;border:1px solid #e5e7eb;border-radius:.5rem;background:#f3f4f6;color:#111;font-weight:600;cursor:pointer}
+  .btn:hover{background:#e5e7eb}
+  .btn-sm{padding:.25rem .5rem;font-size:.875rem}
+  .btn-primary{background:#2563eb;border-color:#2563eb;color:#fff}
+  .btn-primary:hover{background:#1d4ed8;border-color:#1d4ed8}
+  .btn-ghost{background:transparent;border-color:#e5e7eb;color:#374151}
+  .btn-ghost:hover{background:#f9fafb}
+  .input{border:1px solid #e5e7eb;border-radius:.5rem;padding:.375rem .5rem}
+  .input-sm{padding:.25rem .5rem;font-size:.875rem}
+  .select{border:1px solid #e5e7eb;border-radius:.5rem;padding:.375rem .5rem;background:#fff}
+  .select-sm{padding:.25rem .5rem;font-size:.875rem}
+  .table{width:100%;border-collapse:separate;border-spacing:0}
+  .table-sm th,.table-sm td{padding:.375rem .5rem;border-bottom:1px solid #f3f4f6}
+  .card{background:#fff;border:1px solid #f3f4f6;border-radius:.75rem;padding:1rem}
+</style>
 
-/* Design tokens */
-:root{
-  --page-max-w: 1140px;
-  --page-pad-d: 24px;
-  --page-pad-m: 16px;
-
+/* === Inventory Intake (legacy-aligned; scoped) — professional spacing pass === */
+#inventory-intake-screen {
+  /* Roomier layout per request */
   --card-radius: 12px;
-  --card-pad-d: 24px;
-  --card-pad-m: 16px;
-  --card-border: #e5e7eb; /* neutral-200 */
-  --card-shadow: 0 1px 2px rgba(16,24,40,.06);
-
-  --field-h: 40px;
-  --field-radius: 12px;
-  --field-pad-x: 12px;
-
-  --gap-16: 16px;
-  --gap-24: 24px;
-
-  --text: #111827;         /* neutral-900 */
-  --muted: #6b7280;        /* neutral-500/600 */
-  --bg: #f9fafb;           /* neutral-50-ish */
-  --border: #e5e7eb;       /* neutral-200 */
-
-  --brand: #0ea5e9;        /* primary */
-  --brand-h: #0284c7;
-
-  --danger: #dc2626;
-  --danger-h: #b91c1c;
-}
-
-/* Page shell */
-.page{
-  max-width: var(--page-max-w);
-  margin: 0 auto;
-  padding: var(--page-pad-d);
-}
-@media (max-width: 640px){
-  .page{ padding: var(--page-pad-m); }
-}
-
-/* Card */
-.card{
-  background: #fff;
-  border: 1px solid var(--card-border);
-  border-radius: var(--card-radius);
-  box-shadow: var(--card-shadow);
-  padding: var(--card-pad-d);
-}
-@media (max-width: 640px){
-  .card{ padding: var(--card-pad-m); }
-}
-
-/* Stack utilities */
-.stack-16 > * + *{ margin-top: var(--gap-16); }
-.stack-24 > * + *{ margin-top: var(--gap-24); }
-
-/* Typography helpers */
-.muted{ color: var(--muted); }
-
-/* Fields */
-input[type="text"], input[type="number"], input[type="email"], select, textarea{
-  display: block;
-  width: 100%;
-  height: var(--field-h);
-  border: 1px solid var(--border);
-  border-radius: var(--field-radius);
-  padding: 0 var(--field-pad-x);
-  box-sizing: border-box;
-  font: inherit;
-  color: var(--text);
-  background: #fff;
-}
-textarea{
-  height: auto;
-  min-height: 132px;
-  padding: 10px var(--field-pad-x);
-}
-
-/* Labels */
-label{
-  display: inline-block;
-  margin-bottom: 8px;
-  font-size: 14px;
-}
-
-/* Buttons */
-.btn{
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  height: 40px; /* default = md */
-  padding: 0 16px;
-  border-radius: 10px;
-  border: 1px solid transparent;
-  cursor: pointer;
-  font-weight: 600;
-  text-decoration: none;
-}
-.btn-sm{ height: 32px; padding: 0 12px; }
-.btn-primary{ background: var(--brand); color: #fff; border-color: var(--brand); }
-.btn-primary:hover{ background: var(--brand-h); border-color: var(--brand-h); }
-.btn-ghost{ background: #fff; color: var(--text); border-color: var(--border); }
-.btn-ghost:hover{ background: #f3f4f6; }
-.btn-danger{ background: var(--danger); color: #fff; border-color: var(--danger); }
-.btn-danger:hover{ background: var(--danger-h); border-color: var(--danger-h); }
-
-/* Tables (Users reference) */
-.table{ width: 100%; border-collapse: separate; border-spacing: 0; }
-.table th, .table td{ text-align: left; padding: 12px 16px; }
-.table thead th{ font-weight: 600; }
-.table tbody tr + tr td{ border-top: 1px solid var(--border); }
-
-/* ===== Existing Intake-specific styles (kept for now; screen can migrate) ===== */
-#inventory-intake-screen{
-  --card-radius: 12px;
-  --card-pad: 26px;
-  --gap: 20px;
+  --card-pad: 26px;   /* was 22 */
+  --gap: 20px;        /* was 18 */
   font-size: 14px;
   line-height: 1.45;
 }
-#inventory-intake-screen .card{
+
+#inventory-intake-screen .card {
   background: #fff;
   border: 1px solid #eee;
   border-radius: var(--card-radius);
   padding: var(--card-pad);
   margin: 14px 0;
 }
-#inventory-intake-screen .card:first-of-type{ margin-top: 0; }
-#inventory-intake-screen .sectionTitle{ font-size: 16px; font-weight: 600; margin: 0 0 12px; }
-#inventory-intake-screen .legacy-grid-2{ display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--gap); }
-#inventory-intake-screen .legacy-grid-3{ display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--gap); }
-#inventory-intake-screen .field{ display: flex; flex-direction: column; padding: 2px 2px; min-width: 0; }
-#inventory-intake-screen .field.wide{ grid-column: 1 / -1; }
-#inventory-intake-screen label{ font-size: 12px; margin: 0 0 8px; }
-#inventory-intake-screen input, #inventory-intake-screen select, #inventory-intake-screen textarea{
-  background: #fff; border: 1px solid #ddd; border-radius: 8px; padding: 10px 12px; width: 100%; box-sizing: border-box;
-}
-#inventory-intake-screen .field > * + *{ margin-top: 8px; }
-#inventory-intake-screen textarea{ min-height: 132px; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace; }
-#inventory-intake-screen .actions{ display: flex; gap: 10px; align-items: center; }
-#inventory-intake-screen .btn{ background: #0ea5e9; color: #fff; border: 1px solid #0ea5e9; border-radius: 8px; padding: 8px 12px; cursor: pointer; }
-#inventory-intake-screen .btn.btn-ghost{ background: #fff; color: #111; border: 1px solid #ddd; }
-#inventory-intake-screen .btn.btn-sm{ padding: 6px 10px; font-size: 13px; }
-#inventory-intake-screen .muted{ color: #6b7280; font-size: 12px; }
-#inventory-intake-screen .mono{ font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace; }
-#inventory-intake-screen .tabs{ display: flex; gap: 6px; margin-bottom: 10px; }
-#inventory-intake-screen .tab{ background: #fff; border: 1px solid #ddd; border-bottom: none; border-radius: 8px 8px 0 0; padding: 6px 10px; cursor: pointer; }
-#inventory-intake-screen .tab.active{ background: #0ea5e9; color: #fff; border-color: #0ea5e9; }
-#inventory-intake-screen .tabpanes{ border: 1px solid #eee; border-radius: 0 12px 12px 12px; padding: 14px; }
-#inventory-intake-screen .right{ text-align: right; }
-#inventory-intake-screen .hidden{ display: none !important; }
-@media (max-width: 768px){
-  #inventory-intake-screen{ --gap: 20px; }
-  #inventory-intake-screen .sectionTitle{ margin-bottom: 14px; }
+
+/* first card should sit snug under the header */
+#inventory-intake-screen .card:first-of-type { margin-top: 0; }
+
+/* Section headings */
+#inventory-intake-screen .sectionTitle {
+  font-size: 16px;
+  font-weight: 600;
+  margin: 0 0 12px; /* more breathing room under title */
 }
 
+/* Field grids */
+#inventory-intake-screen .legacy-grid-2 {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--gap);
+}
+#inventory-intake-screen .legacy-grid-3 {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--gap);
+}
 
+/* Individual field blocks get micro-padding so rows don’t feel cramped */
+#inventory-intake-screen .field {
+  display: flex;
+  flex-direction: column;
+  padding: 2px 2px;       /* adds subtle space around each field */
+  min-width: 0;           /* prevents overflow in tight grids */
+}
+#inventory-intake-screen .field.wide { grid-column: 1 / -1; }
 
+/* Labels + controls */
+#inventory-intake-screen label { font-size: 12px; margin: 0 0 8px; }
 
+#inventory-intake-screen input,
+#inventory-intake-screen select,
+#inventory-intake-screen textarea {
+  background: #fff;
+  border: 1px solid #ddd;
+  border-radius: 8px;
+  padding: 10px 12px;     /* larger, comfortable control padding */
+  width: 100%;
+  box-sizing: border-box;
+}
 
+/* Ensures stacked bits inside same field never collide */
+#inventory-intake-screen .field > * + * { margin-top: 8px; }
+
+#inventory-intake-screen textarea {
+  min-height: 132px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+}
+
+/* Buttons */
+#inventory-intake-screen .actions { display: flex; gap: 10px; align-items: center; }
+#inventory-intake-screen .btn { background: #0ea5e9; color: #fff; border: 1px solid #0ea5e9; border-radius: 8px; padding: 8px 12px; cursor: pointer; }
+#inventory-intake-screen .btn.btn-ghost { background: #fff; color: #111; border: 1px solid #ddd; }
+#inventory-intake-screen .btn.btn-sm { padding: 6px 10px; font-size: 13px; }
+
+/* Subtle text helpers */
+#inventory-intake-screen .muted { color: #6b7280; font-size: 12px; }
+#inventory-intake-screen .mono  { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace; }
+
+/* Tabs */
+#inventory-intake-screen .tabs { display: flex; gap: 6px; margin-bottom: 10px; }
+#inventory-intake-screen .tab { background: #fff; border: 1px solid #ddd; border-bottom: none; border-radius: 8px 8px 0 0; padding: 6px 10px; cursor: pointer; }
+#inventory-intake-screen .tab.active { background: #0ea5e9; color: #fff; border-color: #0ea5e9; }
+#inventory-intake-screen .tabpanes { border: 1px solid #eee; border-radius: 0 12px 12px 12px; padding: 14px; }
+
+/* Utilities */
+#inventory-intake-screen .right { text-align: right; }
+#inventory-intake-screen .hidden { display: none !important; }
+
+/* Responsive comfort: on narrow screens, add even more vertical rhythm */
+@media (max-width: 768px) {
+  #inventory-intake-screen { --gap: 20px; }
+  #inventory-intake-screen .sectionTitle { margin-bottom: 14px; }
+}
