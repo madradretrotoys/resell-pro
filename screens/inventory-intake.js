@@ -2,10 +2,8 @@ async function init() {
   await ensure();
   disableWrites();
 
-  // Lightweight loading state on <body> to prevent flicker.
   try { document.body.classList.add('loading'); } catch {}
 
-  // Helper: ensure a select shows a placeholder if it ended up empty
   function ensurePlaceholder(selectEl, placeholderText = "— Select —") {
     if (!selectEl) return;
     const hasOptions = selectEl.options && selectEl.options.length > 0;
@@ -14,9 +12,84 @@ async function init() {
     opt.value = "";
     opt.textContent = placeholderText;
     selectEl.appendChild(opt);
-    // Keep it selected to hint the user
     selectEl.value = "";
   }
+
+  // --- Validation helpers (dropdown-only gating) ---
+  function getEl(id) { try { return document.getElementById(id); } catch { return null; } }
+  function nonEmptySelect(el) { return !!el && el.value !== ""; }
+  function markValidity(el, ok) {
+    if (!el) return;
+    el.setAttribute("aria-invalid", ok ? "false" : "true");
+  }
+  function setCtasEnabled(isValid) {
+    const ids = ["intake-submit", "intake-save", "intake-next"];
+    ids.forEach((id) => {
+      const btn = getEl(id);
+      if (btn) btn.disabled = !isValid;
+    });
+  }
+  function marketplaceActive() {
+    const sales = getEl("salesChannelSelect");
+    const v = (sales?.value || "").toLowerCase();
+    return v.includes("marketplace") || v.includes("both");
+  }
+  function computeValidity() {
+    const cat = getEl("categorySelect");
+    const store = getEl("storeLocationSelect");
+    const sales = getEl("salesChannelSelect");
+
+    const reqBase = [
+      [cat, nonEmptySelect(cat)],
+      [store, nonEmptySelect(store)],
+      [sales, nonEmptySelect(sales)],
+    ];
+
+    let allOk = reqBase.every(([, ok]) => ok);
+    reqBase.forEach(([el, ok]) => markValidity(el, ok));
+
+    if (marketplaceActive()) {
+      const mcat = getEl("marketplaceCategorySelect");
+      const cond = getEl("conditionSelect");
+      const brand = getEl("brandSelect");
+      const color = getEl("colorSelect");
+
+      const reqMk = [
+        [mcat, nonEmptySelect(mcat)],
+        [cond, nonEmptySelect(cond)],
+        [brand, nonEmptySelect(brand)],
+        [color, nonEmptySelect(color)],
+      ];
+      allOk = allOk && reqMk.every(([, ok]) => ok);
+      reqMk.forEach(([el, ok]) => markValidity(el, ok));
+    } else {
+      // Clear invalid state if marketplace not required
+      ["marketplaceCategorySelect","conditionSelect","brandSelect","colorSelect"].forEach((id) => {
+        const el = getEl(id);
+        if (el) el.setAttribute("aria-invalid", "false");
+      });
+    }
+
+    setCtasEnabled(allOk);
+    document.dispatchEvent(new CustomEvent("intake:validity-changed", { detail: { valid: allOk } }));
+    return allOk;
+  }
+  function wireValidation() {
+    const ids = [
+      "categorySelect",
+      "storeLocationSelect",
+      "salesChannelSelect",
+      "marketplaceCategorySelect",
+      "conditionSelect",
+      "brandSelect",
+      "colorSelect",
+    ];
+    ids.forEach((id) => {
+      const el = getEl(id);
+      if (el) el.addEventListener("change", computeValidity);
+    });
+  }
+  // --- end validation helpers ---
 
   try {
     const meta = await loadMeta();
@@ -61,6 +134,10 @@ async function init() {
     ensurePlaceholder($("shippingBoxSelect"));
     ensurePlaceholder($("storeLocationSelect"));
     ensurePlaceholder($("salesChannelSelect"));
+
+    // Wire and run initial validation
+    wireValidation();
+    computeValidity();
   } catch (err) {
     console.error("Meta load failed:", err);
     const denied = $("intake-access-denied");
