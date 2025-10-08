@@ -17,10 +17,10 @@
 
 /* === Inventory Intake (legacy-aligned; scoped) — professional spacing pass === */
 #inventory-intake-screen {
-  /* Bigger interior padding + gaps so fields don’t hug the edges */
+  /* Roomier layout per request */
   --card-radius: 12px;
-  --card-pad: 22px;   /* was 16 */
-  --gap: 18px;        /* was 14 */
+  --card-pad: 26px;   /* was 22 */
+  --gap: 20px;        /* was 18 */
   font-size: 14px;
   line-height: 1.45;
 }
