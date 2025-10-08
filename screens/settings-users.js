@@ -1,24 +1,21 @@
 import { api } from '/assets/js/api.js';
 import { ensureSession } from '/assets/js/auth.js';
+import { applyButtonGroupColors } from '/assets/js/ui.js';
 
 const els = {};
-function $(id) { return document.getElementById(id); }
+function $(id){ return document.getElementById(id); }
 
 // Router expects an `init` entrypoint: mod.init({ container, session })
-export async function init({ container, session }) {
+export async function init({ container, session }){
   // Ensure we have session (router already does, but safe to double-check)
-  if (!session?.user) {
-    session = await ensureSession();
-  }
+  if (!session?.user){ session = await ensureSession(); }
 
   // Bind elements (IDs must exist in settings-users.html)
   els.table = $('usersTable');
   const btnInvite = $('btnInvite');
   const btnRefresh = $('btnRefresh');
 
-  if (btnInvite) {
-    btnInvite.onclick = () => alert('Email invite will be added in a later phase.');
-  }
+  if (btnInvite){ btnInvite.onclick = () => alert('Email invite will be added in a later phase.'); }
 
   // Permission gate handled server-side by /api/settings/users/list.
   // Proceed and show a friendly message only if the API returns 403.
