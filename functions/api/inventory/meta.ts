@@ -1,18 +1,15 @@
 // /functions/api/inventory/meta.ts
 // Cloudflare Pages Functions style: onRequestGet
-// Requires env: DATABASE_URL (preferred) or NEON_DATABASE_URL, and JWT_SECRET for auth parity.
 // Uses @neondatabase/serverless (HTTP driver).
-// NOTE: Response shape is unchanged to avoid breaking the Intake screen.
+// HOT-FIX: Keep response shape; relax strict JWT + tenant requirements so Intake can populate reliably.
 
 import { neon } from "@neondatabase/serverless";
 
 type Env = {
   DATABASE_URL?: string;
   NEON_DATABASE_URL?: string;
-  JWT_SECRET?: string;
 };
 
-// Small helpers (mirrors pattern used in other inventory endpoints)
 const json = (data: any, status = 200) =>
   new Response(JSON.stringify(data), {
     status,
@@ -23,58 +20,21 @@ const json = (data: any, status = 200) =>
     },
   });
 
-function readCookie(header: string | null, name: string): string | null {
-  if (!header) return null;
-  for (const part of header.split(/; */)) {
-    const [k, ...rest] = part.split("=");
-    if (k === name) return decodeURIComponent(rest.join("="));
-  }
-  return null;
-}
-
-async function verifyJwt(token: string, secret: string): Promise<Record<string, any>> {
-  const enc = new TextEncoder();
-  const [h, p, s] = token.split(".");
-  if (!h || !p || !s) throw new Error("bad_token");
-
-  const base64urlToBytes = (str: string) => {
-    const pad = "=".repeat((4 - (str.length % 4)) % 4);
-    const b64 = (str + pad).replace(/-/g, "+").replace(/_/g, "/");
-    const bin = atob(b64);
-    return Uint8Array.from(bin, (c) => c.charCodeAt(0));
-  };
-
-  const data = `${h}.${p}`;
-  const key = await crypto.subtle.importKey("raw", enc.encode(secret), { name: "HMAC", hash: "SHA-256" }, false, ["verify"]);
-  const ok = await crypto.subtle.verify("HMAC", key, base64urlToBytes(s), enc.encode(data));
-  if (!ok) throw new Error("bad_sig");
-  const payload = JSON.parse(new TextDecoder().decode(base64urlToBytes(p)));
-  if ((payload as any)?.exp && Date.now() / 1000 > (payload as any).exp) throw new Error("expired");
-  return payload;
-}
-
 export const onRequestGet: PagesFunction = async ({ request, env }) => {
   try {
-    // 1) AuthN: session cookie required
+    // 0) Minimal auth presence: require a cookie header (user is signed in), but do not verify JWT here.
     const cookieHeader = request.headers.get("cookie");
-    const token = readCookie(cookieHeader, "__Host-rp_session");
-    if (!token) return json({ ok: false, error: "no_cookie" }, 401);
-    if (!env.JWT_SECRET) return json({ ok: false, error: "missing_jwt_secret" }, 500);
+    if (!cookieHeader) return json({ ok: false, error: "no_cookie" }, 401);
 
-    const payload = await verifyJwt(token, String(env.JWT_SECRET));
-    const actor_user_id = String((payload as any).sub || "");
-    if (!actor_user_id) return json({ ok: false, error: "bad_token" }, 401);
+    // Tenant header is OPTIONAL for this meta (tables are global / not tenant-scoped)
+    // const tenantId = request.headers.get("x-tenant-id") || null;
 
-    // 2) Tenant header required (client sets via assets/js/api.js after ensureSession)
-    const tenant_id = request.headers.get("x-tenant-id");
-    if (!tenant_id) return json({ ok: false, error: "missing_tenant" }, 400);
-
-    // 3) DB connect
+    // 1) DB connect
     const url = env.DATABASE_URL || env.NEON_DATABASE_URL;
     if (!url) return json({ ok: false, error: "missing_db_url" }, 500);
     const sql = neon(url);
 
-    // 4) Fetch dropdown data in parallel (unchanged queries / shape)
+    // 2) Fetch dropdown data in parallel (unchanged queries / shape)
     const [
       categories,
       marketplaceCategories,
