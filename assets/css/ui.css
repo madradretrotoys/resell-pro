@@ -14,3 +14,105 @@
   .table-sm th,.table-sm td{padding:.375rem .5rem;border-bottom:1px solid #f3f4f6}
   .card{background:#fff;border:1px solid #f3f4f6;border-radius:.75rem;padding:1rem}
 </style>
+
+/* === Inventory Intake (legacy-aligned; scoped) — professional spacing pass === */
+#inventory-intake-screen {
+  /* Roomier layout per request */
+  --card-radius: 12px;
+  --card-pad: 26px;   /* was 22 */
+  --gap: 20px;        /* was 18 */
+  font-size: 14px;
+  line-height: 1.45;
+}
+
+#inventory-intake-screen .card {
+  background: #fff;
+  border: 1px solid #eee;
+  border-radius: var(--card-radius);
+  padding: var(--card-pad);
+  margin: 14px 0;
+}
+
+/* first card should sit snug under the header */
+#inventory-intake-screen .card:first-of-type { margin-top: 0; }
+
+/* Section headings */
+#inventory-intake-screen .sectionTitle {
+  font-size: 16px;
+  font-weight: 600;
+  margin: 0 0 12px; /* more breathing room under title */
+}
+
+/* Field grids */
+#inventory-intake-screen .legacy-grid-2 {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--gap);
+}
+#inventory-intake-screen .legacy-grid-3 {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--gap);
+}
+
+/* Individual field blocks get micro-padding so rows don’t feel cramped */
+#inventory-intake-screen .field {
+  display: flex;
+  flex-direction: column;
+  padding: 2px 2px;       /* adds subtle space around each field */
+  min-width: 0;           /* prevents overflow in tight grids */
+}
+#inventory-intake-screen .field.wide { grid-column: 1 / -1; }
+
+/* Labels + controls */
+#inventory-intake-screen label { font-size: 12px; margin: 0 0 8px; }
+
+#inventory-intake-screen input,
+#inventory-intake-screen select,
+#inventory-intake-screen textarea {
+  background: #fff;
+  border: 1px solid #ddd;
+  border-radius: 8px;
+  padding: 10px 12px;     /* larger, comfortable control padding */
+  width: 100%;
+  box-sizing: border-box;
+}
+
+/* Ensures stacked bits inside same field never collide */
+#inventory-intake-screen .field > * + * { margin-top: 8px; }
+
+#inventory-intake-screen textarea {
+  min-height: 132px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+}
+
+/* Buttons */
+#inventory-intake-screen .actions { display: flex; gap: 10px; align-items: center; }
+#inventory-intake-screen .btn { background: #0ea5e9; color: #fff; border: 1px solid #0ea5e9; border-radius: 8px; padding: 8px 12px; cursor: pointer; }
+#inventory-intake-screen .btn.btn-ghost { background: #fff; color: #111; border: 1px solid #ddd; }
+#inventory-intake-screen .btn.btn-sm { padding: 6px 10px; font-size: 13px; }
+
+/* Subtle text helpers */
+#inventory-intake-screen .muted { color: #6b7280; font-size: 12px; }
+#inventory-intake-screen .mono  { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace; }
+
+/* Tabs */
+#inventory-intake-screen .tabs { display: flex; gap: 6px; margin-bottom: 10px; }
+#inventory-intake-screen .tab { background: #fff; border: 1px solid #ddd; border-bottom: none; border-radius: 8px 8px 0 0; padding: 6px 10px; cursor: pointer; }
+#inventory-intake-screen .tab.active { background: #0ea5e9; color: #fff; border-color: #0ea5e9; }
+#inventory-intake-screen .tabpanes { border: 1px solid #eee; border-radius: 0 12px 12px 12px; padding: 14px; }
+
+/* Utilities */
+#inventory-intake-screen .right { text-align: right; }
+#inventory-intake-screen .hidden { display: none !important; }
+
+/* Responsive comfort: on narrow screens, add even more vertical rhythm */
+@media (max-width: 768px) {
+  #inventory-intake-screen { --gap: 20px; }
+  #inventory-intake-screen .sectionTitle { margin-bottom: 14px; }
+}
+
+
+
+
+

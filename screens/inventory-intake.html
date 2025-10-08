@@ -1,0 +1,171 @@
+<!-- /screens/inventory-intake.html -->
+<div id="inventory-intake-screen" class="screen px-4 py-4 max-w-6xl mx-auto">
+  <!-- Header + actions (top, like legacy) -->
+  <div class="mb-3 flex items-center justify-between">
+    <h1 class="text-2xl font-semibold">Inventory ▸ Intake</h1>
+  </div>
+
+  <!-- Access denied (if API 403) -->
+  <div id="intake-access-denied" class="hidden border border-red-300 bg-red-50 text-red-800 rounded p-3 mb-4">
+    Access denied. You do not have permission to view this screen.
+  </div>
+
+  <!-- Main form card (mirrors legacy sectioning) -->
+  <section class="card rounded-2xl shadow p-4 mb-4">
+    <form id="intakeForm" autocomplete="off">
+      <!-- A) Basic Item Details -->
+      <div class="card">
+        <h2 class="sectionTitle">Basic Item Details</h2>
+        <div class="legacy-grid-2">
+          <div class="field">
+            <label>Item Name / Description</label>
+            <input id="titleInput" type="text" placeholder="e.g., Monster High Doll - Frankie Stein" />
+          </div>
+      
+          <div class="field">
+            <label>Price (USD)</label>
+            <input id="priceInput" type="number" step="0.01" min="0" placeholder="0.00" />
+          </div>
+      
+          <div class="field">
+            <label>Qty</label>
+            <input id="qtyInput" type="number" step="1" min="0" placeholder="1" />
+          </div>
+      
+          <div class="field">
+            <label>Cost of Goods (USD)</label>
+            <input id="costInput" type="number" step="0.01" min="0" placeholder="0.00" />
+          </div>
+      
+          <div class="field">
+            <label>Category</label>
+            <select id="categorySelect"></select>
+            <div class="muted mono" id="categoryCodeHint"></div>
+          </div>
+      
+          <div class="field">
+            <label>Store Location</label>
+            <select id="storeLocationSelect"></select>
+          </div>
+      
+          <div class="field">
+            <label>Case#/Bin#/Shelf#</label>
+            <input id="caseBinShelfInput" type="text" placeholder="e.g., Case 1 / Bin A" />
+          </div>
+      
+          <div class="field">
+            <label>Sales Channel</label>
+            <select id="salesChannelSelect"></select>
+          </div>
+        </div>
+      </div>
+
+      <!-- B) Marketplace Listing Details (renamed from Vendoo) -->
+      <div id="marketplaceSection" class="card">
+        <h2 class="sectionTitle">Marketplace Listing Details</h2>
+      
+        <div class="field">
+          <label>Marketplace Category</label>
+          <select id="marketplaceCategorySelect"></select>
+          <div class="muted">Category Path: <span id="marketplaceCategoryPath" class="mono">—</span></div>
+        </div>
+      
+        <div class="legacy-grid-3" style="margin-top:10px">
+          <div class="field">
+            <label>Condition</label>
+            <select id="conditionSelect"></select>
+          </div>
+          <div class="field">
+            <label>Brand</label>
+            <select id="brandSelect"></select>
+          </div>
+          <div class="field">
+            <label>Primary Color</label>
+            <select id="colorSelect"></select>
+          </div>
+        </div>
+      
+        <div class="field" style="margin-top:10px">
+          <label>Long Description</label>
+          <textarea id="longDescriptionTextarea" placeholder="Enter a detailed description…"></textarea>
+          <div class="actions" style="margin-top:8px">
+            <button class="btn btn-ghost btn-sm" id="copyTitleBtn" disabled title="Enabled in Phase 2">Copy Title</button>
+            <button class="btn btn-ghost btn-sm" id="copySkuBtn" disabled title="Enabled in Phase 2">Copy SKU</button>
+            <button class="btn btn-ghost btn-sm" id="copySkuLocationBtn" disabled title="Enabled in Phase 2">Copy SKU + Location</button>
+            <button class="btn btn-ghost btn-sm" id="copyPriceBtn" disabled title="Enabled in Phase 2">Copy Price</button>
+            <button class="btn btn-ghost btn-sm" id="copyXeasyBtn" disabled title="Enabled in Phase 2">Copy for Xeasy</button>
+            <button class="btn btn-ghost btn-sm" id="copyBusinessDetailsBtn" disabled title="Enabled in Phase 2">Copy Business Details</button>
+          </div>
+        </div>
+      
+        <div id="shippingBlock" style="margin-top:10px">
+          <h3 class="sectionTitle" style="margin:0 0 8px">Shipping</h3>
+          <div class="legacy-grid-3">
+            <div class="field">
+              <label>Shipping Box</label>
+              <select id="shippingBoxSelect"></select>
+            </div>
+            <div class="field">
+              <label>Weight (lb)</label>
+              <input id="weightLbInput" type="number" min="0" step="1" readonly />
+            </div>
+            <div class="field">
+              <label>Weight (oz)</label>
+              <input id="weightOzInput" type="number" min="0" step="1" readonly />
+            </div>
+            <div class="field">
+              <label>Length</label>
+              <input id="lengthInput" type="number" min="0" step="1" readonly />
+            </div>
+            <div class="field">
+              <label>Width</label>
+              <input id="widthInput" type="number" min="0" step="1" readonly />
+            </div>
+            <div class="field">
+              <label>Height</label>
+              <input id="heightInput" type="number" min="0" step="1" readonly />
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- C) Actions row (duplicated here for visual parity; still disabled) -->
+      <div class="actions flex gap-2">
+        <button id="btnAddSingle_bottom" class="btn btn-primary btn-sm opacity-60 cursor-not-allowed" disabled title="Enabled in Phase 2">Add Single Item</button>
+        <button id="btnAddBulk_bottom" class="btn btn-ghost btn-sm opacity-60 cursor-not-allowed" disabled title="Enabled in Phase 2">Add to Bulk List</button>
+      </div>
+    </form>
+  </section>
+
+  <!-- Bottom tabs (shell for Phase 1; wired in later phases) -->
+  <section class="card rounded-2xl shadow p-4">
+    <div class="tabs flex gap-2 mb-3" role="tablist" aria-label="Bulk & Draft lists">
+      <button id="tabBulk"   class="tab btn btn-ghost btn-sm" role="tab" aria-controls="paneBulk">Bulk Entry</button>
+      <button id="tabDrafts" class="tab btn btn-ghost btn-sm" role="tab" aria-controls="paneDrafts">Recent Drafts</button>
+    </div>
+
+    <div class="tabpanes border rounded-2xl p-3">
+      <div id="paneBulk">
+        <p class="text-sm text-gray-600">Bulk Entry list will appear here in Phase 2.</p>
+      </div>
+      <div id="paneDrafts" class="hidden" aria-hidden="true">
+        <div class="overflow-auto">
+          <table class="table w-full">
+            <thead>
+              <tr class="border-b">
+                <th class="text-left px-3 py-2">Saved</th>
+                <th class="text-left px-3 py-2">Title</th>
+                <th class="text-left px-3 py-2">Price</th>
+              </tr>
+            </thead>
+            <tbody id="recentDraftsTbody">
+              <tr>
+                <td class="px-3 py-2 text-gray-500" colspan="3">No drafts yet (Phase 2).</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </section>
+</div>

@@ -7,6 +7,7 @@ const SCREENS = {
   // NEW: Cash Drawer
   drawer:    { html: '/screens/drawer.html',    js: '/screens/drawer.js',    title: 'Cash Drawer' },
   inventory: { html: '/screens/inventory.html', js: '/screens/inventory.js', title: 'Inventory' },
+  intake: { html: '/screens/inventory-intake.html', js: '/screens/inventory-intake.js', title: 'Inventory Intake' },
   research:  { html: '/screens/research.html',  js: '/screens/research.js',  title: 'Research' },
 
   // Settings → Users
