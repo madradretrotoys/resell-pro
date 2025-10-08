@@ -1,1 +1,91 @@
+<!-- Screen Template (Design + Router Contract)
+  Usage:
+  1) Duplicate this file and its JS sibling as /screens/<your-screen>.html/.js
+  2) Replace data-screen, IDs, and the <h1> text with your screen name.
+  3) Do NOT add custom inline styles; use classes from assets/css/ui.css only.
+-->
+
+<section class="page" data-screen="template">
+  <!-- Global banner slot (error/success). Keep hidden until toggled by JS. -->
+  <div id="screen-banner" class="banner hidden" role="status" aria-live="polite"></div>
+
+  <!-- Breadcrumb + Title -->
+  <header class="page-header">
+    <nav class="crumbs">
+      <a href="?page=dashboard" class="crumb">Dashboard</a>
+      <span class="crumb-sep">›</span>
+      <span class="crumb current">Template</span>
+    </nav>
+    <h1 class="page-title">Template Screen</h1>
+  </header>
+
+  <!-- Access denied (toggled by JS on 401/403) -->
+  <div id="screen-access-denied" class="banner banner-error hidden" role="alert">
+    Access denied. You do not have permission to view this screen.
+  </div>
+
+  <!-- Primary content -->
+  <div class="page-content">
+    <div class="card">
+      <div class="card-header">
+        <h2 class="card-title">Example Card</h2>
+        <div class="card-actions">
+          <button id="template-refresh" class="btn btn-ghost btn-sm">Refresh</button>
+        </div>
+      </div>
+
+      <div class="card-body">
+        <!-- 12-col responsive grid (desktop: 2–3 cols, mobile: 1 col) -->
+        <div class="form-grid">
+          <div class="field">
+            <label class="field-label" for="exampleText">Example Text</label>
+            <input id="exampleText" class="input" type="text" placeholder="Type here…" />
+            <div class="field-hint">Helpful hint text lives here.</div>
+          </div>
+
+          <div class="field">
+            <label class="field-label" for="exampleSelect">Example Select</label>
+            <select id="exampleSelect" class="select"></select>
+          </div>
+
+          <div class="field">
+            <label class="field-label" for="exampleNumber">Example Number</label>
+            <input id="exampleNumber" class="input" type="number" min="0" step="1" />
+          </div>
+        </div>
+      </div>
+
+      <div class="card-footer">
+        <div class="cta-row">
+          <button id="template-cancel" class="btn btn-ghost">Cancel</button>
+          <button id="template-save" class="btn btn-primary">Save</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Example table block (optional) -->
+    <div class="card">
+      <div class="card-header">
+        <h3 class="card-title">Example Table</h3>
+      </div>
+      <div class="card-body">
+        <div class="table-wrap">
+          <table class="table w-full">
+            <thead>
+              <tr>
+                <th>Column A</th>
+                <th>Column B</th>
+                <th>Column C</th>
+              </tr>
+            </thead>
+            <tbody id="template-table-body">
+              <!-- rows injected by JS -->
+            </tbody>
+          </table>
+          <div id="template-empty" class="empty-state hidden">No rows yet.</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
 
