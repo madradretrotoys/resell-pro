@@ -45,7 +45,7 @@ export const onRequestGet: PagesFunction = async ({ request, env }) => {
       storeLocations,
       salesChannels,
     ] = await Promise.all([
-      sql`SELECT category_name, category_code FROM sku_categories ORDER BY category_name ASC`,
+      sql`SELECT category_name, category_code FROM app.sku_categories ORDER BY category_name ASC`
       sql`
         SELECT
           display_name,
@@ -61,12 +61,12 @@ export const onRequestGet: PagesFunction = async ({ request, env }) => {
         FROM marketplace_categories
         ORDER BY display_name ASC
       `,
-      sql`SELECT brand_name FROM marketplace_brands ORDER BY brand_name ASC`,
-      sql`SELECT condition_name FROM marketplace_conditions ORDER BY condition_name ASC`,
-      sql`SELECT color_name FROM marketplace_colors ORDER BY color_name ASC`,
-      sql`SELECT box_name, weight_lb, weight_oz, length, width, height FROM shipping_boxes ORDER BY box_name ASC`,
-      sql`SELECT instore_locations FROM instore_locations_1 ORDER BY instore_locations ASC`,
-      sql`SELECT sales_channel FROM sales_channels ORDER BY sales_channel ASC`,
+      sql` SELECT display_name, CONCAT_WS(' | ', NULLIF(cat_leaf_1, ''), NULLIF(cat_leaf_2, ''), NULLIF(cat_leaf_3, ''), NULLIF(cat_leaf_4, ''), NULLIF(cat_leaf_5, ''), NULLIF(cat_leaf_6, ''), NULLIF(cat_leaf_7, '') ) AS path FROM app.marketplace_categories ORDER BY display_name ASC `
+      sql`SELECT condition_name FROM app.marketplace_conditions ORDER BY condition_name ASC`,
+      sql`SELECT color_name FROM app.marketplace_colors ORDER BY color_name ASC`,
+      sql`SELECT box_name, weight_lb, weight_oz, length, width, height app.FROM shipping_boxes ORDER BY box_name ASC`,
+      sql`SELECT instore_locations FROM app.instore_locations_1 ORDER BY instore_locations ASC`,
+      sql`SELECT sales_channel FROM app.sales_channels ORDER BY sales_channel ASC`,
     ]);
 
     const payloadOut = {
