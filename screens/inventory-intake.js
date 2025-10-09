@@ -88,10 +88,59 @@ export async function init() {
     }
   }
   
-  function setMarketplaceVisibility() {
-    const hide = !marketplaceActive();
-    MARKETPLACE_FIELD_IDS.forEach((id) => hideShowFieldById(id, hide));
+  // Helper: find a control by its label text (fallback when no ID exists)
+function findControlByLabel(labelText) {
+  const labels = Array.from(document.querySelectorAll("label"));
+  const lbl = labels.find(l => (l.textContent || "").trim().toLowerCase() === labelText.toLowerCase());
+  if (!lbl) return null;
+  if (lbl.htmlFor) return document.getElementById(lbl.htmlFor) || null;
+  // fallback: input/select/textarea right after the label
+  let n = lbl.nextElementSibling;
+  while (n && !(n instanceof HTMLInputElement || n instanceof HTMLSelectElement || n instanceof HTMLTextAreaElement)) {
+    n = n.nextElementSibling;
   }
+  return n || null;
+}
+
+// Helper: hide/show a field container by its label text
+function hideShowFieldByLabel(labelText, hide) {
+  const ctl = findControlByLabel(labelText);
+  if (!ctl) return;
+  const container = ctl.closest(".field") || ctl.closest("div, section, fieldset, .group, .card") || ctl.parentElement;
+  if (container) container.classList.toggle("hidden", hide);
+}
+
+// Helper: hide/show a section/card by heading text (e.g., "Shipping")
+function hideShowSectionByHeading(headingText, hide) {
+  const candidates = Array.from(document.querySelectorAll("h1,h2,h3,h4,h5,h6,.card-title,.section-title"));
+  const h = candidates.find(el => (el.textContent || "").trim().toLowerCase() === headingText.toLowerCase());
+  const container = h ? (h.closest(".card") || h.closest("section, .group, fieldset, div")) : null;
+  if (container) container.classList.toggle("hidden", hide);
+}
+
+// Expanded toggle: include Marketplace Long Description + all Shipping fields + Shipping card
+function setMarketplaceVisibility() {
+  const hide = !marketplaceActive();
+
+  // Previous ID-based fields
+  const MARKETPLACE_FIELD_IDS = [
+    "marketplaceCategorySelect", "conditionSelect", "brandSelect", "colorSelect",
+    "marketplaceCategoryPath", "categoryPath"
+  ];
+  MARKETPLACE_FIELD_IDS.forEach((id) => hideShowFieldById(id, hide));
+
+  // Fields that don’t have stable IDs — target by label text:
+  hideShowFieldByLabel("Long Description", hide);
+
+  // Shipping group: individual fields + the Shipping section/card
+  hideShowFieldById("shippingBoxSelect", hide);
+  hideShowFieldByLabel("Weight (lb)", hide);
+  hideShowFieldByLabel("Weight (oz)", hide);
+  hideShowFieldByLabel("Length", hide);
+  hideShowFieldByLabel("Width", hide);
+  hideShowFieldByLabel("Height", hide);
+  hideShowSectionByHeading("Shipping", hide); // hide the container/card that holds shipping fields
+}
 
   
 
@@ -172,53 +221,51 @@ export async function init() {
     const sel = document.getElementById("shippingBoxSelect");
     if (!sel) return;
   
-    const lb  = document.getElementById("shipWeightLb");
-    const oz  = document.getElementById("shipWeightOz");
-    const len = document.getElementById("shipLength");
-    const wid = document.getElementById("shipWidth");
-    const hei = document.getElementById("shipHeight");
+    // Resolve controls by ID OR label text (robust to markup differences)
+    const resolve = (id, labelText) =>
+      document.getElementById(id) || findControlByLabel(labelText);
+  
+    const lb  = resolve("shipWeightLb", "Weight (lb)");
+    const oz  = resolve("shipWeightOz", "Weight (oz)");
+    const len = resolve("shipLength",   "Length");
+    const wid = resolve("shipWidth",    "Width");
+    const hei = resolve("shipHeight",   "Height");
   
     const inputs = [lb, oz, len, wid, hei].filter(Boolean);
   
     const map = Object.create(null);
     for (const r of (meta.shipping_boxes || [])) {
       map[r.box_name] = {
-        lb: r.weight_lb,
-        oz: r.weight_oz,
-        len: r.length,
-        wid: r.width,
-        hei: r.height,
+        lb: r.weight_lb, oz: r.weight_oz, len: r.length, wid: r.width, hei: r.height,
       };
     }
   
-    const enableAll = () => { inputs.forEach((el) => (el.disabled = false)); };
-    const clearAll  = () => { inputs.forEach((el) => (el.value = "")); };
+    const enableAll = () => { inputs.forEach((el) => { el.disabled = false; el.readOnly = false; }); };
+    const clearAll  = () => { inputs.forEach((el) => { el.value = ""; }); };
   
-    const hasMetaValues = (m) =>
-      m && (m.lb ?? m.oz ?? m.len ?? m.wid ?? m.hei) !== null &&
-      !([m.lb, m.oz, m.len, m.wid, m.hei].every(v => v === null || v === undefined || v === ""));
+    const hasMetaValues = (m) => !!m && ![m.lb, m.oz, m.len, m.wid, m.hei].every(v => v == null || v === "");
   
     const update = () => {
-      enableAll(); // inputs must always be editable
+      enableAll(); // always allow typing
       const key = sel.value;
       const m = map[key];
   
-      // If placeholder or no row -> manual entry
+      // No selection or unknown row => manual
       if (!key || !m) { clearAll(); return; }
   
-      // If row exists but all values are null/empty (e.g., "Custom Box") -> manual entry
+      // Row exists but empty (e.g., "Custom Box") => manual
       if (!hasMetaValues(m)) { clearAll(); return; }
   
-      // Otherwise, prefill
-      if (lb)  lb.value  = (m.lb  ?? "").toString();
-      if (oz)  oz.value  = (m.oz  ?? "").toString();
-      if (len) len.value = (m.len ?? "").toString();
-      if (wid) wid.value = (m.wid ?? "").toString();
-      if (hei) hei.value = (m.hei ?? "").toString();
+      // Prefill numbers (still editable)
+      if (lb)  lb.value  = `${m.lb ?? ""}`;
+      if (oz)  oz.value  = `${m.oz ?? ""}`;
+      if (len) len.value = `${m.len ?? ""}`;
+      if (wid) wid.value = `${m.wid ?? ""}`;
+      if (hei) hei.value = `${m.hei ?? ""}`;
     };
   
     sel.addEventListener("change", update);
-    update(); // run once on load
+    update();
   }
 
 
