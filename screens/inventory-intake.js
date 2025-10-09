@@ -48,26 +48,50 @@ export async function init() {
 
  
   function getMarketplaceSection() {
-  // Anchor on any known marketplace control; expand to its nearest section-like container
-  const anchor = document.getElementById("marketplaceCategorySelect")
-    || document.getElementById("conditionSelect")
-    || document.getElementById("brandSelect")
-    || document.getElementById("colorSelect");
-  if (!anchor) return null;
-  return anchor.closest("section, .card, .group, fieldset, .panel, .container, div") || anchor.parentElement;
-}
-function getBasicSection() {
-  const anchor = document.getElementById("categorySelect")
-    || document.getElementById("storeLocationSelect")
-    || document.getElementById("salesChannelSelect");
-  if (!anchor) return null;
-  return anchor.closest("section, .card, .group, fieldset, .panel, .container, div") || anchor.parentElement;
-}
-function setMarketplaceVisibility() {
-  const section = getMarketplaceSection();
-  if (!section) return;
-  section.classList.toggle("hidden", !marketplaceActive());
-}
+    // Anchor on any known marketplace control; expand to its nearest section-like container
+    const anchor = document.getElementById("marketplaceCategorySelect")
+      || document.getElementById("conditionSelect")
+      || document.getElementById("brandSelect")
+      || document.getElementById("colorSelect");
+    if (!anchor) return null;
+    return anchor.closest("section, .card, .group, fieldset, .panel, .container, div") || anchor.parentElement;
+  }
+  function getBasicSection() {
+    const anchor = document.getElementById("categorySelect")
+      || document.getElementById("storeLocationSelect")
+      || document.getElementById("salesChannelSelect");
+    if (!anchor) return null;
+    return anchor.closest("section, .card, .group, fieldset, .panel, .container, div") || anchor.parentElement;
+  }
+
+  // Explicitly toggle each Marketplace field container by ID (no wrappers needed)
+  const MARKETPLACE_FIELD_IDS = [
+    "marketplaceCategorySelect",
+    "conditionSelect",
+    "brandSelect",
+    "colorSelect",
+    // Also hide the path display element if present
+    "marketplaceCategoryPath",
+    "categoryPath"
+  ];
+  
+  function hideShowFieldById(id, hide) {
+    const el = document.getElementById(id);
+    if (!el) return;
+    // Prefer the `.field` wrapper if present; otherwise use the nearest block-level container
+    const container =
+      el.closest(".field") ||
+      el.closest("div, section, fieldset, .group, .card") ||
+      el.parentElement;
+    if (container) {
+      container.classList.toggle("hidden", hide);
+    }
+  }
+  
+  function setMarketplaceVisibility() {
+    const hide = !marketplaceActive();
+    MARKETPLACE_FIELD_IDS.forEach((id) => hideShowFieldById(id, hide));
+  }
 
   
 
@@ -145,48 +169,58 @@ function setMarketplaceVisibility() {
   }
 
   function wireShippingBoxAutofill(meta) {
-    const sel = $("shippingBoxSelect");
+    const sel = document.getElementById("shippingBoxSelect");
     if (!sel) return;
-    const lb = $("shipWeightLb");
-    const oz = $("shipWeightOz");
-    const len = $("shipLength");
-    const wid = $("shipWidth");
-    const hei = $("shipHeight");
+  
+    const lb  = document.getElementById("shipWeightLb");
+    const oz  = document.getElementById("shipWeightOz");
+    const len = document.getElementById("shipLength");
+    const wid = document.getElementById("shipWidth");
+    const hei = document.getElementById("shipHeight");
+  
+    const inputs = [lb, oz, len, wid, hei].filter(Boolean);
   
     const map = Object.create(null);
-    for (const r of meta.shipping_boxes || []) {
+    for (const r of (meta.shipping_boxes || [])) {
       map[r.box_name] = {
-        lb: r.weight_lb ?? "",
-        oz: r.weight_oz ?? "",
-        len: r.length ?? "",
-        wid: r.width ?? "",
-        hei: r.height ?? "",
+        lb: r.weight_lb,
+        oz: r.weight_oz,
+        len: r.length,
+        wid: r.width,
+        hei: r.height,
       };
     }
   
-    const enableAll = () => {
-      [lb, oz, len, wid, hei].forEach((el) => { if (el) el.disabled = false; });
-    };
-    const clearAll = () => {
-      [lb, oz, len, wid, hei].forEach((el) => { if (el) el.value = ""; });
-    };
+    const enableAll = () => { inputs.forEach((el) => (el.disabled = false)); };
+    const clearAll  = () => { inputs.forEach((el) => (el.value = "")); };
+  
+    const hasMetaValues = (m) =>
+      m && (m.lb ?? m.oz ?? m.len ?? m.wid ?? m.hei) !== null &&
+      !([m.lb, m.oz, m.len, m.wid, m.hei].every(v => v === null || v === undefined || v === ""));
   
     const update = () => {
-      enableAll();
+      enableAll(); // inputs must always be editable
       const key = sel.value;
       const m = map[key];
-      if (!key || !m) { clearAll(); return; } // allow manual entry when no meta
-      if (lb) lb.value = m.lb;
-      if (oz) oz.value = m.oz;
-      if (len) len.value = m.len;
-      if (wid) wid.value = m.wid;
-      if (hei) hei.value = m.hei;
+  
+      // If placeholder or no row -> manual entry
+      if (!key || !m) { clearAll(); return; }
+  
+      // If row exists but all values are null/empty (e.g., "Custom Box") -> manual entry
+      if (!hasMetaValues(m)) { clearAll(); return; }
+  
+      // Otherwise, prefill
+      if (lb)  lb.value  = (m.lb  ?? "").toString();
+      if (oz)  oz.value  = (m.oz  ?? "").toString();
+      if (len) len.value = (m.len ?? "").toString();
+      if (wid) wid.value = (m.wid ?? "").toString();
+      if (hei) hei.value = (m.hei ?? "").toString();
     };
   
     sel.addEventListener("change", update);
-    // Run once on load to ensure fields aren’t left disabled
-    update();
+    update(); // run once on load
   }
+
 
   // --- Validation helpers (unchanged) ---
   function getEl(id) { try { return document.getElementById(id); } catch { return null; } }
@@ -234,19 +268,29 @@ function setMarketplaceVisibility() {
   }
 
   function computeValidity() {
-    // BASIC card: all fields required, per requirement #4
+    // BASIC: all fields inside the Basic section are always required
     const basicSection = getBasicSection();
     const basicControls = controlsIn(basicSection);
     const basicOk = markBatchValidity(basicControls, hasValue);
   
-    // MARKETPLACE card: required only when active, per #2/#3
-    const marketSection = getMarketplaceSection();
+    // MARKETPLACE: only required when Sales Channel is Both/Marketplace
     let marketOk = true;
     if (marketplaceActive()) {
-      const marketControls = controlsIn(marketSection);
+      const marketControls = MARKETPLACE_FIELD_IDS
+        .map((id) => document.getElementById(id))
+        .filter(Boolean) // only existing elements
+        // validate the actual inputs/selects, not the path display span
+        .map((el) => (el.tagName === "SELECT" || el.tagName === "INPUT" || el.tagName === "TEXTAREA") ? el : null)
+        .filter(Boolean);
       marketOk = markBatchValidity(marketControls, hasValue);
     } else {
-      controlsIn(marketSection).forEach(n => n.setAttribute("aria-invalid", "false"));
+      // Clear invalid state on marketplace fields when not required
+      MARKETPLACE_FIELD_IDS.forEach((id) => {
+        const el = document.getElementById(id);
+        if (!el) return;
+        const control = (el.tagName === "SELECT" || el.tagName === "INPUT" || el.tagName === "TEXTAREA") ? el : null;
+        if (control) control.setAttribute("aria-invalid", "false");
+      });
     }
   
     const allOk = basicOk && marketOk;
@@ -254,6 +298,7 @@ function setMarketplaceVisibility() {
     document.dispatchEvent(new CustomEvent("intake:validity-changed", { detail: { valid: allOk } }));
     return allOk;
   }
+
 
 
 
