@@ -44,7 +44,7 @@ export const onRequestGet: PagesFunction = async ({ request, env }) => {
       shippingBoxes,
       storeLocations,
       salesChannels,
-    await Promise.all([
+    ] = await Promise.all([
     sql`SELECT category_name, category_code FROM app.sku_categories ORDER BY category_name ASC`,
     sql`
       SELECT
