@@ -46,29 +46,28 @@ export async function init() {
     selectEl.value = "";
   }
 
-  // Find a .card by its <h3 class="card-title"> text
-  function getCardByTitle(titleText) {
-    const titles = document.querySelectorAll(".card .card-header .card-title, .card h3.card-title");
-    for (const t of titles) {
-      if ((t.textContent || "").trim().toLowerCase() === titleText.toLowerCase()) {
-        // card could be the header's parent or an ancestor
-        return t.closest(".card") || t.parentElement?.closest(".card");
-      }
-    }
-    return null;
-  }
-  
-  function marketplaceActive() {
-    const sales = document.getElementById("salesChannelSelect");
-    const v = (sales?.value || "").toLowerCase();
-    return v.includes("marketplace") || v.includes("both");
-  }
-  
-  function setMarketplaceVisibility() {
-    const card = getCardByTitle("Marketplace Listing Details");
-    if (!card) return;
-    card.classList.toggle("hidden", !marketplaceActive());
-  }
+ 
+  function getMarketplaceSection() {
+  // Anchor on any known marketplace control; expand to its nearest section-like container
+  const anchor = document.getElementById("marketplaceCategorySelect")
+    || document.getElementById("conditionSelect")
+    || document.getElementById("brandSelect")
+    || document.getElementById("colorSelect");
+  if (!anchor) return null;
+  return anchor.closest("section, .card, .group, fieldset, .panel, .container, div") || anchor.parentElement;
+}
+function getBasicSection() {
+  const anchor = document.getElementById("categorySelect")
+    || document.getElementById("storeLocationSelect")
+    || document.getElementById("salesChannelSelect");
+  if (!anchor) return null;
+  return anchor.closest("section, .card, .group, fieldset, .panel, .container, div") || anchor.parentElement;
+}
+function setMarketplaceVisibility() {
+  const section = getMarketplaceSection();
+  if (!section) return;
+  section.classList.toggle("hidden", !marketplaceActive());
+}
 
   
 
@@ -153,6 +152,7 @@ export async function init() {
     const len = $("shipLength");
     const wid = $("shipWidth");
     const hei = $("shipHeight");
+  
     const map = Object.create(null);
     for (const r of meta.shipping_boxes || []) {
       map[r.box_name] = {
@@ -163,17 +163,28 @@ export async function init() {
         hei: r.height ?? "",
       };
     }
+  
+    const enableAll = () => {
+      [lb, oz, len, wid, hei].forEach((el) => { if (el) el.disabled = false; });
+    };
+    const clearAll = () => {
+      [lb, oz, len, wid, hei].forEach((el) => { if (el) el.value = ""; });
+    };
+  
     const update = () => {
+      enableAll();
       const key = sel.value;
       const m = map[key];
-      if (!m) return;
+      if (!key || !m) { clearAll(); return; } // allow manual entry when no meta
       if (lb) lb.value = m.lb;
       if (oz) oz.value = m.oz;
       if (len) len.value = m.len;
       if (wid) wid.value = m.wid;
       if (hei) hei.value = m.hei;
     };
+  
     sel.addEventListener("change", update);
+    // Run once on load to ensure fields aren’t left disabled
     update();
   }
 
@@ -193,29 +204,57 @@ export async function init() {
     return v.includes("marketplace") || v.includes("both");
   }
   
+  // Helpers needed by computeValidity (top-level so they are always in scope)
+  function controlsIn(el) {
+    if (!el) return [];
+    return Array.from(el.querySelectorAll("input, select, textarea"))
+      .filter(n => !n.disabled && n.type !== "hidden");
+  }
+  function markBatchValidity(nodes, isValidFn) {
+    let allOk = true;
+    for (const n of nodes) {
+      const ok = isValidFn(n);
+      n.setAttribute("aria-invalid", ok ? "false" : "true");
+      if (!ok) allOk = false;
+    }
+    return allOk;
+  }
+  function hasValue(n) {
+    if (!n) return false;
+    if (n.tagName === "SELECT") return n.value !== "";
+    if (n.type === "checkbox" || n.type === "radio") return n.checked;
+    return String(n.value ?? "").trim() !== "";
+  }
+  function setCtasEnabled(isValid) {
+    const ids = ["intake-submit", "intake-save", "intake-next", "intake-add-single", "intake-add-bulk"];
+    const foundById = ids.map(id => document.getElementById(id)).filter(Boolean);
+    const foundByText = Array.from(document.querySelectorAll("button, a[role='button']"))
+      .filter(b => /add single item|add to bulk list/i.test((b.textContent || "").trim()));
+    [...foundById, ...foundByText].forEach(btn => { btn.disabled = !isValid; });
+  }
+
   function computeValidity() {
     // BASIC card: all fields required, per requirement #4
-    const basicCard = getCardByTitle("Basic Item Details");
-    const basicControls = controlsIn(basicCard);
+    const basicSection = getBasicSection();
+    const basicControls = controlsIn(basicSection);
     const basicOk = markBatchValidity(basicControls, hasValue);
   
     // MARKETPLACE card: required only when active, per #2/#3
-    const marketCard = getCardByTitle("Marketplace Listing Details");
+    const marketSection = getMarketplaceSection();
     let marketOk = true;
     if (marketplaceActive()) {
-      const marketControls = controlsIn(marketCard);
+      const marketControls = controlsIn(marketSection);
       marketOk = markBatchValidity(marketControls, hasValue);
     } else {
-      // clear invalid state when not required
-      controlsIn(marketCard).forEach(n => n.setAttribute("aria-invalid", "false"));
+      controlsIn(marketSection).forEach(n => n.setAttribute("aria-invalid", "false"));
     }
   
     const allOk = basicOk && marketOk;
-  
     setCtasEnabled(allOk);
     document.dispatchEvent(new CustomEvent("intake:validity-changed", { detail: { valid: allOk } }));
     return allOk;
   }
+
 
 
   
