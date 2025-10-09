@@ -306,6 +306,13 @@ function setMarketplaceVisibility() {
     { id: "brandSelect",                label: "Brand" },
     { id: "colorSelect",                label: "Primary Color" },
     { id: null,                         label: "Long Description" },
+    // Shipping fields are required only when Sales Channel is Both/Marketplace
+    { id: "shippingBoxSelect",          label: "Shipping Box" },
+    { id: "shipWeightLb",               label: "Weight (lb)" },
+    { id: "shipWeightOz",               label: "Weight (oz)" },
+    { id: "shipLength",                 label: "Length" },
+    { id: "shipWidth",                  label: "Width" },
+    { id: "shipHeight",                 label: "Height" },
   ];
   
   function getBasicRequiredControls() {
