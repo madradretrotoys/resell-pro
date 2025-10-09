@@ -15,11 +15,20 @@ export async function init() {
     return res;
   }
 
-  // Generic select filler; supports arrays of strings OR objects
+  // Generic select filler; supports arrays of strings OR objects.
+  // Adds a placeholder at the top and leaves the select unselected.
   function fillSelect(selectEl, rows = [], opts = {}) {
     if (!selectEl) return;
     const { textKey = null, valueKey = null, extras = null } = opts;
     selectEl.innerHTML = "";
+  
+    // 1) placeholder first
+    const ph = document.createElement("option");
+    ph.value = "";
+    ph.textContent = "<select>";
+    selectEl.appendChild(ph);
+  
+    // 2) then options
     for (const row of rows || []) {
       const opt = document.createElement("option");
       const text = textKey ? row?.[textKey] : String(row ?? "");
@@ -32,6 +41,67 @@ export async function init() {
       }
       selectEl.appendChild(opt);
     }
+  
+    // 3) keep placeholder selected
+    selectEl.value = "";
+  }
+
+  // Find a .card by its <h3 class="card-title"> text
+  function getCardByTitle(titleText) {
+    const titles = document.querySelectorAll(".card .card-header .card-title, .card h3.card-title");
+    for (const t of titles) {
+      if ((t.textContent || "").trim().toLowerCase() === titleText.toLowerCase()) {
+        // card could be the header's parent or an ancestor
+        return t.closest(".card") || t.parentElement?.closest(".card");
+      }
+    }
+    return null;
+  }
+  
+  function marketplaceActive() {
+    const sales = document.getElementById("salesChannelSelect");
+    const v = (sales?.value || "").toLowerCase();
+    return v.includes("marketplace") || v.includes("both");
+  }
+  
+  function setMarketplaceVisibility() {
+    const card = getCardByTitle("Marketplace Listing Details");
+    if (!card) return;
+    card.classList.toggle("hidden", !marketplaceActive());
+  }
+
+  
+
+  
+  // Generic select filler; supports arrays of strings OR objects.
+  // Adds a placeholder at the top and leaves the select unselected.
+  function fillSelect(selectEl, rows = [], opts = {}) {
+    if (!selectEl) return;
+    const { textKey = null, valueKey = null, extras = null } = opts;
+    selectEl.innerHTML = "";
+  
+    // 1) placeholder first
+    const ph = document.createElement("option");
+    ph.value = "";
+    ph.textContent = "<select>";
+    selectEl.appendChild(ph);
+  
+    // 2) then options
+    for (const row of rows || []) {
+      const opt = document.createElement("option");
+      const text = textKey ? row?.[textKey] : String(row ?? "");
+      const value = valueKey ? row?.[valueKey] : String(row ?? "");
+      opt.textContent = text ?? "";
+      opt.value = value ?? "";
+      if (extras && typeof extras === "function") {
+        const ex = extras(row) || {};
+        for (const k in ex) opt.dataset[k] = ex[k];
+      }
+      selectEl.appendChild(opt);
+    }
+  
+    // 3) keep placeholder selected
+    selectEl.value = "";
   }
 
   function ensurePlaceholder(selectEl, placeholderText = "— Select —") {
@@ -210,6 +280,14 @@ export async function init() {
     // Store + channel
     fillSelect($("storeLocationSelect"), meta.store_locations);
     fillSelect($("salesChannelSelect"), meta.sales_channels);
+    
+    // Toggle marketplace card on load + when channel changes
+    setMarketplaceVisibility();
+    const salesSel = $("salesChannelSelect");
+    if (salesSel) salesSel.addEventListener("change", () => {
+      setMarketplaceVisibility();
+      computeValidity(); // re-check requireds when channel changes
+    });
 
     // Apply placeholders if any list was empty
     ensurePlaceholder($("categorySelect"));
