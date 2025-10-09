@@ -450,6 +450,14 @@ function setMarketplaceVisibility() {
       computeValidity(); // re-check requireds when channel changes
     });
 
+    // [NEW] Default QTY to 1 if empty
+    {
+      const qty = resolveControl(null, "Qty");
+      if (qty && String(qty.value || "").trim() === "") {
+        qty.value = "1";
+      }
+    }
+
     // Collect all controls inside a container (inputs, selects, textareas)
     function controlsIn(el) {
       if (!el) return [];
