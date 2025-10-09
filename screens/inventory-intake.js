@@ -192,45 +192,33 @@ export async function init() {
     const v = (sales?.value || "").toLowerCase();
     return v.includes("marketplace") || v.includes("both");
   }
+  
   function computeValidity() {
-    const cat = getEl("categorySelect");
-    const store = getEl("storeLocationSelect");
-    const sales = getEl("salesChannelSelect");
-
-    const reqBase = [
-      [cat, nonEmptySelect(cat)],
-      [store, nonEmptySelect(store)],
-      [sales, nonEmptySelect(sales)],
-    ];
-
-    let allOk = reqBase.every(([, ok]) => ok);
-    reqBase.forEach(([el, ok]) => markValidity(el, ok));
-
+    // BASIC card: all fields required, per requirement #4
+    const basicCard = getCardByTitle("Basic Item Details");
+    const basicControls = controlsIn(basicCard);
+    const basicOk = markBatchValidity(basicControls, hasValue);
+  
+    // MARKETPLACE card: required only when active, per #2/#3
+    const marketCard = getCardByTitle("Marketplace Listing Details");
+    let marketOk = true;
     if (marketplaceActive()) {
-      const mcat = getEl("marketplaceCategorySelect");
-      const cond = getEl("conditionSelect");
-      const brand = getEl("brandSelect");
-      const color = getEl("colorSelect");
-
-      const reqMk = [
-        [mcat, nonEmptySelect(mcat)],
-        [cond, nonEmptySelect(cond)],
-        [brand, nonEmptySelect(brand)],
-        [color, nonEmptySelect(color)],
-      ];
-      allOk = allOk && reqMk.every(([, ok]) => ok);
-      reqMk.forEach(([el, ok]) => markValidity(el, ok));
+      const marketControls = controlsIn(marketCard);
+      marketOk = markBatchValidity(marketControls, hasValue);
     } else {
-      ["marketplaceCategorySelect", "conditionSelect", "brandSelect", "colorSelect"].forEach((id) => {
-        const el = getEl(id);
-        if (el) el.setAttribute("aria-invalid", "false");
-      });
+      // clear invalid state when not required
+      controlsIn(marketCard).forEach(n => n.setAttribute("aria-invalid", "false"));
     }
-
+  
+    const allOk = basicOk && marketOk;
+  
     setCtasEnabled(allOk);
     document.dispatchEvent(new CustomEvent("intake:validity-changed", { detail: { valid: allOk } }));
     return allOk;
   }
+
+
+  
   function wireValidation() {
     [
       "categorySelect",
@@ -288,6 +276,45 @@ export async function init() {
       setMarketplaceVisibility();
       computeValidity(); // re-check requireds when channel changes
     });
+
+    // Collect all controls inside a container (inputs, selects, textareas)
+    function controlsIn(el) {
+      if (!el) return [];
+      return Array.from(el.querySelectorAll("input, select, textarea"))
+        // exclude deliberately disabled controls
+        .filter(n => !n.disabled && n.type !== "hidden");
+    }
+    
+    // Mark invalid/valid for a batch
+    function markBatchValidity(nodes, isValidFn) {
+      let allOk = true;
+      for (const n of nodes) {
+        const ok = isValidFn(n);
+        n.setAttribute("aria-invalid", ok ? "false" : "true");
+        if (!ok) allOk = false;
+      }
+      return allOk;
+    }
+    
+    // Generic value check for required controls
+    function hasValue(n) {
+      if (!n) return false;
+      if (n.tagName === "SELECT") return n.value !== "";
+      if (n.type === "checkbox" || n.type === "radio") return n.checked;
+      return String(n.value ?? "").trim() !== "";
+    }
+    
+    // Enable/disable CTAs
+    function setCtasEnabled(isValid) {
+      // Prefer explicit IDs if you have them
+      const ids = ["intake-submit", "intake-save", "intake-next", "intake-add-single", "intake-add-bulk"];
+      const foundById = ids.map(id => document.getElementById(id)).filter(Boolean);
+      const foundByText = Array.from(document.querySelectorAll("button, a[role='button']"))
+        .filter(b => /add single item|add to bulk list/i.test((b.textContent || "").trim()));
+    
+      [...foundById, ...foundByText].forEach(btn => { btn.disabled = !isValid; });
+    }
+
 
     // Apply placeholders if any list was empty
     ensurePlaceholder($("categorySelect"));
