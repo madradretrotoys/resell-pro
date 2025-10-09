@@ -279,6 +279,50 @@ function setMarketplaceVisibility() {
       if (btn) btn.disabled = !isValid;
     });
   }
+
+  // === [ADD] resolvers + explicit required-field lists (by ID or label) ===
+  function resolveControl(id, labelText) {
+    // Prefer ID, fall back to label text (using existing findControlByLabel)
+    return (id && document.getElementById(id)) || (labelText && findControlByLabel(labelText)) || null;
+  }
+  
+  // All Basic Item Details are always required.
+  // Use ID where we know it; otherwise rely on the visible label text from the HTML screen.
+  const BASIC_REQUIRED = [
+    { id: null, label: "Item Name / Description" },
+    { id: null, label: "Price (USD)" },
+    { id: null, label: "Qty" },
+    { id: null, label: "Cost of Goods (USD)" },
+    { id: "categorySelect", label: "Category" },
+    { id: "storeLocationSelect", label: "Store Location" },
+    { id: null, label: "Case#/Bin#/Shelf#" },
+    { id: "salesChannelSelect", label: "Sales Channel" },
+  ];
+  
+  // Marketplace details are required only when Sales Channel is Both / Marketplace Only.
+  const MARKETPLACE_REQUIRED = [
+    { id: "marketplaceCategorySelect", label: "Marketplace Category" },
+    { id: "conditionSelect",            label: "Condition" },
+    { id: "brandSelect",                label: "Brand" },
+    { id: "colorSelect",                label: "Primary Color" },
+    { id: null,                         label: "Long Description" },
+  ];
+  
+  function getBasicRequiredControls() {
+    return BASIC_REQUIRED
+      .map(({ id, label }) => resolveControl(id, label))
+      .filter(Boolean)
+      .filter(n => !n.disabled && n.type !== "hidden");
+  }
+  
+  function getMarketplaceRequiredControls() {
+    return MARKETPLACE_REQUIRED
+      .map(({ id, label }) => resolveControl(id, label))
+      .filter(Boolean)
+      .filter(n => !n.disabled && n.type !== "hidden");
+  }
+  // === [END ADD] ===
+  
   function marketplaceActive() {
     const sales = getEl("salesChannelSelect");
     const v = (sales?.value || "").toLowerCase();
@@ -315,29 +359,18 @@ function setMarketplaceVisibility() {
   }
 
   function computeValidity() {
-    // BASIC: all fields inside the Basic section are always required
-    const basicSection = getBasicSection();
-    const basicControls = controlsIn(basicSection);
+    // BASIC — always required (explicit control list)
+    const basicControls = getBasicRequiredControls();
     const basicOk = markBatchValidity(basicControls, hasValue);
   
-    // MARKETPLACE: only required when Sales Channel is Both/Marketplace
+    // MARKETPLACE — required only when active
     let marketOk = true;
     if (marketplaceActive()) {
-      const marketControls = MARKETPLACE_FIELD_IDS
-        .map((id) => document.getElementById(id))
-        .filter(Boolean) // only existing elements
-        // validate the actual inputs/selects, not the path display span
-        .map((el) => (el.tagName === "SELECT" || el.tagName === "INPUT" || el.tagName === "TEXTAREA") ? el : null)
-        .filter(Boolean);
+      const marketControls = getMarketplaceRequiredControls();
       marketOk = markBatchValidity(marketControls, hasValue);
     } else {
-      // Clear invalid state on marketplace fields when not required
-      MARKETPLACE_FIELD_IDS.forEach((id) => {
-        const el = document.getElementById(id);
-        if (!el) return;
-        const control = (el.tagName === "SELECT" || el.tagName === "INPUT" || el.tagName === "TEXTAREA") ? el : null;
-        if (control) control.setAttribute("aria-invalid", "false");
-      });
+      // clear invalid state for marketplace when not required
+      getMarketplaceRequiredControls().forEach(n => n.setAttribute("aria-invalid", "false"));
     }
   
     const allOk = basicOk && marketOk;
@@ -351,19 +384,21 @@ function setMarketplaceVisibility() {
 
   
   function wireValidation() {
-    [
-      "categorySelect",
-      "storeLocationSelect",
-      "salesChannelSelect",
-      "marketplaceCategorySelect",
-      "conditionSelect",
-      "brandSelect",
-      "colorSelect",
-    ].forEach((id) => {
-      const el = getEl(id);
-      if (el) el.addEventListener("change", computeValidity);
-    });
+    // Always (re)validate when any required control changes/inputs
+    const controls = [
+      ...getBasicRequiredControls(),
+      ...getMarketplaceRequiredControls(),
+    ];
+  
+    const listen = (el) => {
+      if (!el) return;
+      const evt = (el.tagName === "SELECT") ? "change" : "input";
+      el.addEventListener(evt, computeValidity);
+    };
+  
+    controls.forEach(listen);
   }
+  
   // --- end validation helpers ---
 
   try {
