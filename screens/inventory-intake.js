@@ -577,6 +577,9 @@ function setMarketplaceVisibility() {
       } catch {}
       // Success UX is up to you (toast, clear form, or route back to Inventory)
     }
+
+    // Remember original actions-row HTML so we can restore the 3 CTAs after editing
+    let __originalCtasHTML = null;
     
     function wireCtas() {
       const activeIds = ["intake-submit", "intake-save", "intake-add-single", "intake-add-bulk"];
@@ -666,38 +669,71 @@ function setMarketplaceVisibility() {
           const actionsRow = document.querySelector(".actions.flex.gap-2");
           if (actionsRow) {
             const itemId = res?.item_id || "";
-            const isDraft = String(res?.status || "").toLowerCase() === "draft";
-  
+
+            // Capture original CTAs the first time we swap them out
+            if (__originalCtasHTML == null) {
+              __originalCtasHTML = actionsRow.innerHTML;
+            }
+
+            // Swap to Edit / Add New
             actionsRow.innerHTML = `
               <button id="btnEditItem" class="btn btn-primary btn-sm">Edit Item</button>
               <button id="btnAddNew" class="btn btn-ghost btn-sm">Add New Item</button>
             `;
-  
+
             const btnEdit = document.getElementById("btnEditItem");
             const btnNew  = document.getElementById("btnAddNew");
-  
+
             if (btnEdit) {
               btnEdit.addEventListener("click", (e) => {
                 e.preventDefault();
-                // Navigate to inventory item detail or edit; adjust route to your app’s pattern.
-                // Uses querystring with item_id for now.
-                const target = isDraft
-                  ? `/screens/inventory.html?draft=1&item_id=${encodeURIComponent(itemId)}`
-                  : `/screens/inventory.html?item_id=${encodeURIComponent(itemId)}`;
-                window.location.href = target;
+
+                // (1) Re-enable form fields
+                try {
+                  const form = document.getElementById("intakeForm");
+                  if (form) {
+                    const ctrls = Array.from(form.querySelectorAll("input, select, textarea"));
+                    ctrls.forEach(el => {
+                      el.disabled = false;
+                      el.readOnly = false;
+                      el.removeAttribute("aria-disabled");
+                    });
+                  }
+                } catch {}
+
+                // (2) Restore the original 3 CTAs and re-wire their handlers
+                try {
+                  if (__originalCtasHTML != null) {
+                    actionsRow.innerHTML = __originalCtasHTML;
+                  }
+                  // Reattach events to the restored buttons
+                  wireCtas();
+                } catch {}
+
+                // (3) Remove success banner (if present) and re-validate to toggle button disabled states
+                try {
+                  const banner = document.getElementById("intake-save-banner");
+                  if (banner) banner.remove();
+                } catch {}
+                computeValidity();
+
+                // (4) Optional: focus the first field for convenience
+                try {
+                  const first = document.querySelector("#intakeForm input, #intakeForm select, #intakeForm textarea");
+                  if (first) first.focus();
+                } catch {}
               });
             }
-  
+
             if (btnNew) {
               btnNew.addEventListener("click", (e) => {
                 e.preventDefault();
-                // Easiest: reload the intake screen to start a fresh item
+                // Reload the intake screen to start a fresh item
                 window.location.reload();
               });
             }
           }
         } catch {}
-      }
   
     
   
