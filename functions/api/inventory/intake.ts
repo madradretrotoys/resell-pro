@@ -140,7 +140,8 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
     `;
 
     // 4) Return success
-    return json({ ok: true, item_id, sku, ms: Date.now() - t0 }, 200);
+    return json({ ok: true, item_id, sku, status, ms: Date.now() - t0 }, 200);
+
   } catch (e: any) {
     // Try a friendlier error
     const msg = String(e?.message || e);
