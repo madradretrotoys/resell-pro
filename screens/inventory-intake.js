@@ -557,6 +557,10 @@ function setMarketplaceVisibility() {
       if (mode === "draft") {
         payload.status = "draft";
       }
+      // If we’re editing an existing item, send its id so the server updates it
+      if (__currentItemId) {
+        payload.item_id = __currentItemId;
+      }
 
       const res = await api("/api/inventory/intake", {
         method: "POST",
@@ -617,8 +621,14 @@ function setMarketplaceVisibility() {
         });
       });
     }
+
     // Remember original actions-row HTML so we can restore the 3 CTAs after editing
-    let __originalCtasHTML = null;    
+    let __originalCtasHTML = null;
+    
+    // Hold the current item id across edits so the next save updates, not creates
+    let __currentItemId = null;
+
+    
     wireCtas();
 
       // After successful save: confirm, disable form controls, and swap CTAs
@@ -630,6 +640,14 @@ function setMarketplaceVisibility() {
             ? `Saved draft (#${res?.item_id || "?"}).`
             : `Saved item ${skuPart} (#${res?.item_id || "?"}).`;
           alert(msg);
+          // Remember the item id for subsequent edits/saves
+          __currentItemId = res?.item_id || __currentItemId;
+          // Also stash on the form for resilience (not strictly required)
+          try {
+            const form = document.getElementById("intakeForm");
+            if (form && __currentItemId) form.dataset.itemId = __currentItemId;
+          } catch (e) {}
+          
         } catch {}
   
         // 2) Disable all form fields (inputs/selects/textareas)
