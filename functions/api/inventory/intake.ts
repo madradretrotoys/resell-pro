@@ -71,6 +71,11 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
     const inv = body?.inventory || {};
     const lst = body?.listing || {};
 
+    // Status: support Option A drafts; default to 'active' for existing flows
+    const rawStatus = (body?.status || inv?.item_status || "active");
+    const status = String(rawStatus).toLowerCase() === "draft" ? "draft" : "active";
+    const isDraft = status === "draft";
+
     // Look up category_code from sku_categories
     const catRows = await sql<{ category_code: string }[]>`
       SELECT category_code FROM app.sku_categories WHERE category_name = ${inv.category_nm} LIMIT 1
@@ -78,44 +83,47 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
     if (catRows.length === 0) return json({ ok: false, error: "bad_category" }, 400);
     const category_code = catRows[0].category_code;
 
-    // Begin "transaction" (serverless best-effort: use explicit locks/constraints)
-    // 1) Allocate next SKU via sku_sequence
-    const seqRows = await sql<{ last_number: number }[]>`
-      SELECT last_number FROM app.sku_sequence
-      WHERE tenant_id = ${tenant_id} AND category_code = ${category_code}
-      FOR UPDATE
-    `;
-    let next = 0;
-    if (seqRows.length === 0) {
-      await sql/*sql*/`
-        INSERT INTO app.sku_sequence (tenant_id, category_code, last_number)
-        VALUES (${tenant_id}, ${category_code}, 0)
-        ON CONFLICT (tenant_id, category_code) DO NOTHING
-      `;
-      next = 1;
-      await sql/*sql*/`
-        UPDATE app.sku_sequence
-        SET last_number = ${next}
-        WHERE tenant_id = ${tenant_id} AND category_code = ${category_code}
-      `;
-    } else {
-      next = Number(seqRows[0].last_number || 0) + 1;
-      await sql/*sql*/`
-        UPDATE app.sku_sequence
-        SET last_number = ${next}
-        WHERE tenant_id = ${tenant_id} AND category_code = ${category_code}
-      `;
-    }
-    const sku = `${category_code}${String(next).padStart(4, "0")}`;
+        // Begin "transaction" (serverless best-effort: use explicit locks/constraints)
+        // 1) Allocate next SKU via sku_sequence (ACTIVE only). Drafts skip SKU.
+        let sku: string | null = null;
+        if (!isDraft) {
+          const seqRows = await sql<{ last_number: number }[]>`
+            SELECT last_number FROM app.sku_sequence
+            WHERE tenant_id = ${tenant_id} AND category_code = ${category_code}
+            FOR UPDATE
+          `;
+          let next = 0;
+          if (seqRows.length === 0) {
+            await sql/*sql*/`
+              INSERT INTO app.sku_sequence (tenant_id, category_code, last_number)
+              VALUES (${tenant_id}, ${category_code}, 0)
+              ON CONFLICT (tenant_id, category_code) DO NOTHING
+            `;
+            next = 1;
+            await sql/*sql*/`
+              UPDATE app.sku_sequence
+              SET last_number = ${next}
+              WHERE tenant_id = ${tenant_id} AND category_code = ${category_code}
+            `;
+          } else {
+            next = Number(seqRows[0].last_number || 0) + 1;
+            await sql/*sql*/`
+              UPDATE app.sku_sequence
+              SET last_number = ${next}
+              WHERE tenant_id = ${tenant_id} AND category_code = ${category_code}
+            `;
+          }
+          sku = `${category_code}${String(next).padStart(4, "0")}`;
+        }
 
-    // 2) Insert into inventory
-    // price & cost_of_goods are NUMERIC in your updated schema
+
+    // 2) Insert into inventory (drafts carry NULL sku; active allocates)
     const invRows = await sql<{ item_id: string }[]>`
       INSERT INTO app.inventory
-        (sku, product_short_title, price, qty, cost_of_goods, category_nm, instore_loc, case_bin_shelf, instore_online)
+        (sku, product_short_title, price, qty, cost_of_goods, category_nm, instore_loc, case_bin_shelf, instore_online, item_status)
       VALUES
         (${sku}, ${inv.product_short_title}, ${inv.price}, ${inv.qty}, ${inv.cost_of_goods},
-         ${inv.category_nm}, ${inv.instore_loc}, ${inv.case_bin_shelf}, ${inv.instore_online})
+         ${inv.category_nm}, ${inv.instore_loc}, ${inv.case_bin_shelf}, ${inv.instore_online}, ${status})
       RETURNING item_id
     `;
     const item_id = invRows[0].item_id;
