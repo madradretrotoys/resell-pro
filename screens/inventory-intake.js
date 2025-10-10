@@ -675,6 +675,7 @@ function setMarketplaceVisibility() {
             actionsRow.innerHTML = `
               <button id="btnEditItem" class="btn btn-primary btn-sm">Edit Item</button>
               <button id="btnAddNew" class="btn btn-ghost btn-sm">Add New Item</button>
+              <button id="btnDeleteItem" class="btn btn-danger btn-sm">Delete</button>
             `;
         
             const btnEdit = document.getElementById("btnEditItem");
@@ -728,6 +729,35 @@ function setMarketplaceVisibility() {
                 window.location.reload();
               });
             }
+
+            const btnDel = document.getElementById("btnDeleteItem");
+            if (btnDel) {
+              btnDel.addEventListener("click", async (e) => {
+                e.preventDefault();
+                try {
+                  if (!__currentItemId) return alert("No item to delete.");
+                  const sure = confirm("Delete this item? This cannot be undone.");
+                  if (!sure) return;
+                  btnDel.disabled = true;
+                  const resDel = await api("/api/inventory/intake", {
+                    method: "POST",
+                    headers: { "content-type": "application/json" },
+                    body: JSON.stringify({ action: "delete", item_id: __currentItemId }),
+                  });
+                  if (!resDel || resDel.ok === false) {
+                    throw new Error(resDel?.error || "delete_failed");
+                  }
+                  alert("Item deleted.");
+                  window.location.reload();
+                } catch (err) {
+                  console.error("intake:delete:error", err);
+                  alert("Failed to delete item.");
+                } finally {
+                  btnDel.disabled = false;
+                }
+              });
+            }
+            
           }
         } catch (err) { /* no-op */ }
       }
