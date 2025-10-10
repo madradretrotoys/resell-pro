@@ -617,10 +617,8 @@ function setMarketplaceVisibility() {
         });
       });
     }
-
-     // Remember original actions-row HTML so we can restore the 3 CTAs after editing
-    let __originalCtasHTML = null;
-    
+    // Remember original actions-row HTML so we can restore the 3 CTAs after editing
+    let __originalCtasHTML = null;    
     wireCtas();
 
       // After successful save: confirm, disable form controls, and swap CTAs
@@ -643,44 +641,44 @@ function setMarketplaceVisibility() {
           }
         } catch {}
   
-                // 3) Replace the three CTAs with: Edit Item + Add New Item
+        // 3) Replace the three CTAs with: Edit Item + Add New Item
         try {
           // Find the first actions row that contains our intake buttons
           const actionsRow = document.querySelector(".actions.flex.gap-2");
           if (actionsRow) {
             const itemId = res?.item_id || "";
-
+        
             // Capture original CTAs the first time we swap them out
             if (__originalCtasHTML == null) {
               __originalCtasHTML = actionsRow.innerHTML;
             }
-
+        
             // Swap to Edit / Add New
             actionsRow.innerHTML = `
               <button id="btnEditItem" class="btn btn-primary btn-sm">Edit Item</button>
               <button id="btnAddNew" class="btn btn-ghost btn-sm">Add New Item</button>
             `;
-
+        
             const btnEdit = document.getElementById("btnEditItem");
             const btnNew  = document.getElementById("btnAddNew");
-
+        
             if (btnEdit) {
               btnEdit.addEventListener("click", (e) => {
                 e.preventDefault();
-
+        
                 // (1) Re-enable form fields
                 try {
                   const form = document.getElementById("intakeForm");
                   if (form) {
                     const ctrls = Array.from(form.querySelectorAll("input, select, textarea"));
-                    ctrls.forEach(el => {
+                    ctrls.forEach((el) => {
                       el.disabled = false;
                       el.readOnly = false;
                       el.removeAttribute("aria-disabled");
                     });
                   }
-                } catch {}
-
+                } catch (err) { /* no-op */ }
+        
                 // (2) Restore the original 3 CTAs and re-wire their handlers
                 try {
                   if (__originalCtasHTML != null) {
@@ -688,23 +686,23 @@ function setMarketplaceVisibility() {
                   }
                   // Reattach events to the restored buttons
                   wireCtas();
-                } catch {}
-
+                } catch (err) { /* no-op */ }
+        
                 // (3) Remove success banner (if present) and re-validate to toggle button disabled states
                 try {
                   const banner = document.getElementById("intake-save-banner");
                   if (banner) banner.remove();
-                } catch {}
+                } catch (err) { /* no-op */ }
                 computeValidity();
-
+        
                 // (4) Optional: focus the first field for convenience
                 try {
                   const first = document.querySelector("#intakeForm input, #intakeForm select, #intakeForm textarea");
                   if (first) first.focus();
-                } catch {}
+                } catch (err) { /* no-op */ }
               });
             }
-
+        
             if (btnNew) {
               btnNew.addEventListener("click", (e) => {
                 e.preventDefault();
@@ -713,8 +711,8 @@ function setMarketplaceVisibility() {
               });
             }
           }
-        } catch {}
-
+        } catch (err) { /* no-op */ }
+      }
   
     
   
