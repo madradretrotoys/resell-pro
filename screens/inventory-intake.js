@@ -526,7 +526,7 @@ function setMarketplaceVisibility() {
         price: Number(valByIdOrLabel(null, "Price (USD)") || 0),
         qty: Number(valByIdOrLabel(null, "Qty") || 0),
         cost_of_goods: Number(valByIdOrLabel(null, "Cost of Goods (USD)") || 0),
-        category_nm: valByIdOrLabel("categorySelect", "Category") || __currentCategoryNm || "",
+        category_nm: valByIdOrLabel("categorySelect", "Category"),
         instore_loc: valByIdOrLabel("storeLocationSelect", "Store Location"),
         case_bin_shelf: valByIdOrLabel(null, "Case#/Bin#/Shelf#"),
         instore_online: valByIdOrLabel("salesChannelSelect", "Sales Channel"),
@@ -628,54 +628,28 @@ function setMarketplaceVisibility() {
     // Hold the current item id across edits so the next save updates, not creates
     let __currentItemId = null;
 
-    // Track current SKU; if present, category remains locked on edit
-    let __currentSku = null;
-
-    let __currentCategoryNm = null;
     
     wireCtas();
 
       // After successful save: confirm, disable form controls, and swap CTAs
       function postSaveSuccess(res, mode) {
         try {
-            // 1) Confirmation — show SKU when present, otherwise draft notice
-            const skuPart = res?.sku ? `SKU ${res.sku}` : `Draft saved`;
-            const msg = mode === "draft"
-              ? `Saved draft (#${res?.item_id || "?"}).`
-              : `Saved item ${skuPart} (#${res?.item_id || "?"}).`;
-            alert(msg);
+          // 1) Confirmation — show SKU when present, otherwise draft notice
+          const skuPart = res?.sku ? `SKU ${res.sku}` : `Draft saved`;
+          const msg = mode === "draft"
+            ? `Saved draft (#${res?.item_id || "?"}).`
+            : `Saved item ${skuPart} (#${res?.item_id || "?"}).`;
+          alert(msg);
+          // Remember the item id for subsequent edits/saves
+          __currentItemId = res?.item_id || __currentItemId;
+          // Also stash on the form for resilience (not strictly required)
+          try {
+            const form = document.getElementById("intakeForm");
+            if (form && __currentItemId) form.dataset.itemId = __currentItemId;
+          } catch (e) {}
           
-            // Remember the item id / SKU for subsequent edits/saves
-            __currentItemId = res?.item_id || __currentItemId;
-            __currentSku    = (res && typeof res.sku !== "undefined") ? res.sku : __currentSku; // may be null for drafts
-          
-            // Also remember the current Category from the select (used as fallback if the control is disabled later)
-            try {
-              const catSel = document.getElementById("categorySelect");
-              if (catSel && catSel.value) {
-                if (typeof __currentCategoryNm !== "undefined") {
-                  __currentCategoryNm = catSel.value;
-                } else {
-                  // safe fallback if the global wasn't declared yet
-                  window.__currentCategoryNm = catSel.value;
-                }
-              }
-            } catch (e) {}
-          
-            // Stash to the form dataset for resilience
-            try {
-              const form = document.getElementById("intakeForm");
-              if (form) {
-                if (__currentItemId) form.dataset.itemId = __currentItemId;
-                if (__currentSku != null) form.dataset.sku = String(__currentSku);
-                const catVal = (typeof __currentCategoryNm !== "undefined") ? __currentCategoryNm : window.__currentCategoryNm;
-                if (catVal) form.dataset.categoryNm = catVal;
-              }
-            } catch (e) {}
-          
-          } catch (err) { /* no-op */ }  
-        
-        
+        } catch {}
+  
         // 2) Disable all form fields (inputs/selects/textareas)
         try {
           const form = document.getElementById("intakeForm");
@@ -701,7 +675,6 @@ function setMarketplaceVisibility() {
             actionsRow.innerHTML = `
               <button id="btnEditItem" class="btn btn-primary btn-sm">Edit Item</button>
               <button id="btnAddNew" class="btn btn-ghost btn-sm">Add New Item</button>
-              <button id="btnDeleteItem" class="btn btn-danger btn-sm">Delete</button>
             `;
         
             const btnEdit = document.getElementById("btnEditItem");
@@ -711,26 +684,16 @@ function setMarketplaceVisibility() {
               btnEdit.addEventListener("click", (e) => {
                 e.preventDefault();
         
-                // (1) Re-enable form fields (but lock Category if a SKU exists)
+                // (1) Re-enable form fields
                 try {
                   const form = document.getElementById("intakeForm");
                   if (form) {
                     const ctrls = Array.from(form.querySelectorAll("input, select, textarea"));
-                    ctrls.forEach(el => {
+                    ctrls.forEach((el) => {
                       el.disabled = false;
                       el.readOnly = false;
                       el.removeAttribute("aria-disabled");
                     });
-                
-                    // Lock Category when SKU is present
-                    const cat = document.getElementById("categorySelect");
-                    if ((__currentSku && __currentSku !== "") && cat) {
-                      cat.disabled = true;
-                      cat.setAttribute("aria-disabled", "true");
-                      // Optional: visual hint next to the helper span if you have one
-                      const hint = document.getElementById("categoryCodeHint");
-                      if (hint) hint.textContent = "Category locked because SKU is assigned";
-                    }
                   }
                 } catch (err) { /* no-op */ }
         
@@ -765,35 +728,6 @@ function setMarketplaceVisibility() {
                 window.location.reload();
               });
             }
-
-            const btnDel = document.getElementById("btnDeleteItem");
-            if (btnDel) {
-              btnDel.addEventListener("click", async (e) => {
-                e.preventDefault();
-                try {
-                  if (!__currentItemId) return alert("No item to delete.");
-                  const sure = confirm("Delete this item? This cannot be undone.");
-                  if (!sure) return;
-                  btnDel.disabled = true;
-                  const resDel = await api("/api/inventory/intake", {
-                    method: "POST",
-                    headers: { "content-type": "application/json" },
-                    body: JSON.stringify({ action: "delete", item_id: __currentItemId }),
-                  });
-                  if (!resDel || resDel.ok === false) {
-                    throw new Error(resDel?.error || "delete_failed");
-                  }
-                  alert("Item deleted.");
-                  window.location.reload();
-                } catch (err) {
-                  console.error("intake:delete:error", err);
-                  alert("Failed to delete item.");
-                } finally {
-                  btnDel.disabled = false;
-                }
-              });
-            }
-            
           }
         } catch (err) { /* no-op */ }
       }
