@@ -76,13 +76,110 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
     const status = String(rawStatus).toLowerCase() === "draft" ? "draft" : "active";
     const isDraft = status === "draft";
 
+    // Optional: if present, we update instead of insert
+    const item_id_in: string | null = body?.item_id ? String(body.item_id) : null;
+
     // Look up category_code from sku_categories
     const catRows = await sql<{ category_code: string }[]>`
       SELECT category_code FROM app.sku_categories WHERE category_name = ${inv.category_nm} LIMIT 1
     `;
     if (catRows.length === 0) return json({ ok: false, error: "bad_category" }, 400);
-    const category_code = catRows[0].category_code;
+      const category_code = catRows[0].category_code;
 
+        // If item_id was provided, UPDATE existing rows instead of INSERT
+        if (item_id_in) {
+          // Load existing inventory row to check current SKU & status and tenant ownership
+          const existing = await sql<{ item_id: string; sku: string | null; item_status: string | null }[]>`
+            SELECT item_id, sku, item_status
+            FROM app.inventory
+            WHERE tenant_id = ${tenant_id} AND item_id = ${item_id_in}
+            LIMIT 1
+          `;
+          if (existing.length === 0) {
+            return json({ ok: false, error: "not_found" }, 404);
+          }
+        
+          // Decide SKU: if promoting draft → active and no SKU yet, allocate one; otherwise keep existing SKU
+          let sku: string | null = existing[0].sku;
+          if (!isDraft && !sku) {
+            // Allocate a SKU (same logic as create)
+            const seqRows = await sql<{ last_number: number }[]>`
+              SELECT last_number FROM app.sku_sequence
+              WHERE tenant_id = ${tenant_id} AND category_code = ${category_code}
+              FOR UPDATE
+            `;
+            let next = 0;
+            if (seqRows.length === 0) {
+              await sql/*sql*/`
+                INSERT INTO app.sku_sequence (tenant_id, category_code, last_number)
+                VALUES (${tenant_id}, ${category_code}, 0)
+                ON CONFLICT (tenant_id, category_code) DO NOTHING
+              `;
+              next = 1;
+              await sql/*sql*/`
+                UPDATE app.sku_sequence
+                SET last_number = ${next}
+                WHERE tenant_id = ${tenant_id} AND category_code = ${category_code}
+              `;
+            } else {
+              next = Number(seqRows[0].last_number || 0) + 1;
+              await sql/*sql*/`
+                UPDATE app.sku_sequence
+                SET last_number = ${next}
+                WHERE tenant_id = ${tenant_id} AND category_code = ${category_code}
+              `;
+            }
+            sku = `${category_code}${String(next).padStart(4, "0")}`;
+          }
+        
+          // Update inventory
+          const updInv = await sql<{ item_id: string; sku: string | null }[]>`
+            UPDATE app.inventory
+            SET
+              sku = ${sku},
+              product_short_title = ${inv.product_short_title},
+              price = ${inv.price},
+              qty = ${inv.qty},
+              cost_of_goods = ${inv.cost_of_goods},
+              category_nm = ${inv.category_nm},
+              instore_loc = ${inv.instore_loc},
+              case_bin_shelf = ${inv.case_bin_shelf},
+              instore_online = ${inv.instore_online},
+              item_status = ${status}
+            WHERE tenant_id = ${tenant_id} AND item_id = ${item_id_in}
+            RETURNING item_id, sku
+          `;
+          const item_id = updInv[0].item_id;
+          const retSku  = updInv[0].sku;
+        
+          // Upsert listing profile for this item_id
+          await sql/*sql*/`
+            INSERT INTO app.item_listing_profile
+              (item_id, tenant_id, listing_category, item_condition, brand_name, primary_color,
+               product_description, shipping_box, weight_lb, weight_oz, shipbx_length, shipbx_width, shipbx_height)
+            VALUES
+              (${item_id}, ${tenant_id}, ${lst.listing_category}, ${lst.item_condition}, ${lst.brand_name}, ${lst.primary_color},
+               ${lst.product_description}, ${lst.shipping_box}, ${lst.weight_lb}, ${lst.weight_oz},
+               ${lst.shipbx_length}, ${lst.shipbx_width}, ${lst.shipbx_height})
+            ON CONFLICT (item_id) DO UPDATE SET
+              listing_category = EXCLUDED.listing_category,
+              item_condition   = EXCLUDED.item_condition,
+              brand_name       = EXCLUDED.brand_name,
+              primary_color    = EXCLUDED.primary_color,
+              product_description = EXCLUDED.product_description,
+              shipping_box     = EXCLUDED.shipping_box,
+              weight_lb        = EXCLUDED.weight_lb,
+              weight_oz        = EXCLUDED.weight_oz,
+              shipbx_length    = EXCLUDED.shipbx_length,
+              shipbx_width     = EXCLUDED.shipbx_width,
+              shipbx_height    = EXCLUDED.shipbx_height
+          `;
+        
+          return json({ ok: true, item_id, sku: retSku, status, ms: Date.now() - t0 }, 200);
+        }
+
+
+    
         // Begin "transaction" (serverless best-effort: use explicit locks/constraints)
         // 1) Allocate next SKU via sku_sequence (ACTIVE only). Drafts skip SKU.
         let sku: string | null = null;
