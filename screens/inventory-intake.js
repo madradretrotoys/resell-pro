@@ -526,7 +526,7 @@ function setMarketplaceVisibility() {
         price: Number(valByIdOrLabel(null, "Price (USD)") || 0),
         qty: Number(valByIdOrLabel(null, "Qty") || 0),
         cost_of_goods: Number(valByIdOrLabel(null, "Cost of Goods (USD)") || 0),
-        category_nm: valByIdOrLabel("categorySelect", "Category"),
+        category_nm: valByIdOrLabel("categorySelect", "Category") || __currentCategoryNm || "",
         instore_loc: valByIdOrLabel("storeLocationSelect", "Store Location"),
         case_bin_shelf: valByIdOrLabel(null, "Case#/Bin#/Shelf#"),
         instore_online: valByIdOrLabel("salesChannelSelect", "Sales Channel"),
@@ -630,32 +630,52 @@ function setMarketplaceVisibility() {
 
     // Track current SKU; if present, category remains locked on edit
     let __currentSku = null;
+
+    let __currentCategoryNm = null;
     
     wireCtas();
 
       // After successful save: confirm, disable form controls, and swap CTAs
       function postSaveSuccess(res, mode) {
         try {
-          // 1) Confirmation — show SKU when present, otherwise draft notice
-          const skuPart = res?.sku ? `SKU ${res.sku}` : `Draft saved`;
-          const msg = mode === "draft"
-            ? `Saved draft (#${res?.item_id || "?"}).`
-            : `Saved item ${skuPart} (#${res?.item_id || "?"}).`;
-          alert(msg);
-          // Remember the item id for subsequent edits/saves
-          __currentItemId = res?.item_id || __currentItemId;
-          __currentSku = res?.sku || __currentSku; // keep last known SKU (may be null for drafts)
+            // 1) Confirmation — show SKU when present, otherwise draft notice
+            const skuPart = res?.sku ? `SKU ${res.sku}` : `Draft saved`;
+            const msg = mode === "draft"
+              ? `Saved draft (#${res?.item_id || "?"}).`
+              : `Saved item ${skuPart} (#${res?.item_id || "?"}).`;
+            alert(msg);
           
-          try {
-            const form = document.getElementById("intakeForm");
-            if (form) {
-              if (__currentItemId) form.dataset.itemId = __currentItemId;
-              if (__currentSku != null) form.dataset.sku = String(__currentSku);
-            }
-          } catch (e) {}
+            // Remember the item id / SKU for subsequent edits/saves
+            __currentItemId = res?.item_id || __currentItemId;
+            __currentSku    = (res && typeof res.sku !== "undefined") ? res.sku : __currentSku; // may be null for drafts
           
-        } catch {}
-  
+            // Also remember the current Category from the select (used as fallback if the control is disabled later)
+            try {
+              const catSel = document.getElementById("categorySelect");
+              if (catSel && catSel.value) {
+                if (typeof __currentCategoryNm !== "undefined") {
+                  __currentCategoryNm = catSel.value;
+                } else {
+                  // safe fallback if the global wasn't declared yet
+                  window.__currentCategoryNm = catSel.value;
+                }
+              }
+            } catch (e) {}
+          
+            // Stash to the form dataset for resilience
+            try {
+              const form = document.getElementById("intakeForm");
+              if (form) {
+                if (__currentItemId) form.dataset.itemId = __currentItemId;
+                if (__currentSku != null) form.dataset.sku = String(__currentSku);
+                const catVal = (typeof __currentCategoryNm !== "undefined") ? __currentCategoryNm : window.__currentCategoryNm;
+                if (catVal) form.dataset.categoryNm = catVal;
+              }
+            } catch (e) {}
+          
+          } catch (err) { /* no-op */ }  
+        
+        
         // 2) Disable all form fields (inputs/selects/textareas)
         try {
           const form = document.getElementById("intakeForm");
