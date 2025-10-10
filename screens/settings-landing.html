@@ -1,0 +1,41 @@
+<!-- Settings Landing (Chooser) -->
+<!-- Based on screens/_template/screen-template.html structure -->
+<section class="screen" data-screen="settings-landing">
+  <header class="screen-header">
+    <h1>Settings</h1>
+    <p class="subtitle">Choose what you want to manage</p>
+  </header>
+
+  <!-- Global banner area (success/error/info) -->
+  <div id="settings-landing-banner" class="banner" hidden></div>
+
+  <!-- Access denied panel (defense-in-depth; should rarely show here) -->
+  <div id="settings-landing-denied" class="card error" hidden>
+    <h2>Access denied</h2>
+    <p>You do not have permission to view Settings.</p>
+  </div>
+
+  <!-- Loading state -->
+  <div id="settings-landing-loading" class="loading" hidden>Loading…</div>
+
+  <!-- Content -->
+  <div id="settings-landing-content" class="content" hidden>
+    <div class="grid grid-2">
+      <div class="card action" id="goto-user-settings" tabindex="0" role="button" aria-label="User Settings">
+        <h3>User Settings</h3>
+        <p>Manage users, roles, and activation.</p>
+        <div class="actions">
+          <button class="btn primary">Open</button>
+        </div>
+      </div>
+
+      <div class="card action" id="goto-marketplace-settings" tabindex="0" role="button" aria-label="Marketplace Settings">
+        <h3>Marketplace Settings</h3>
+        <p>Connect accounts and configure listing defaults.</p>
+        <div class="actions">
+          <button class="btn">Open</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
