@@ -685,18 +685,30 @@ function setMarketplaceVisibility() {
               btnEdit.addEventListener("click", (e) => {
                 e.preventDefault();
         
-                // (1) Re-enable form fields
-                try {
-                  const form = document.getElementById("intakeForm");
-                  if (form) {
-                    const ctrls = Array.from(form.querySelectorAll("input, select, textarea"));
-                    ctrls.forEach((el) => {
-                      el.disabled = false;
-                      el.readOnly = false;
-                      el.removeAttribute("aria-disabled");
-                    });
+               // (1) Re-enable form fields, and lock Category ONLY if a SKU already exists
+              try {
+                const form = document.getElementById("intakeForm");
+                if (form) {
+                  const ctrls = Array.from(form.querySelectorAll("input, select, textarea"));
+                  ctrls.forEach((el) => {
+                    el.disabled = false;
+                    el.readOnly = false;
+                    el.removeAttribute("aria-disabled");
+                  });
+              
+                  // If the last save returned a SKU, do not allow Category edits
+                  const hasSku = !!(res && res.sku);
+                  if (hasSku) {
+                    const cat = document.getElementById("categorySelect");
+                    if (cat) {
+                      cat.disabled = true;
+                      cat.setAttribute("aria-disabled", "true");
+                      const hint = document.getElementById("categoryCodeHint");
+                      if (hint) hint.textContent = "Category locked (SKU assigned)";
+                    }
                   }
-                } catch (err) { /* no-op */ }
+                }
+              } catch (err) { /* no-op */ }
         
                 // (2) Restore the original 3 CTAs and re-wire their handlers
                 try {
