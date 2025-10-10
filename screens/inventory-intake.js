@@ -628,6 +628,8 @@ function setMarketplaceVisibility() {
     // Hold the current item id across edits so the next save updates, not creates
     let __currentItemId = null;
 
+    // Track current SKU; if present, category remains locked on edit
+    let __currentSku = null;
     
     wireCtas();
 
