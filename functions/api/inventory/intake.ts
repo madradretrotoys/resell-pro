@@ -110,6 +110,7 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
           if (existing.length === 0) {
             return json({ ok: false, error: "not_found" }, 404);
           }
+
           // Once a SKU exists, the category is locked. Only enforce if client actually sent a category value.
           if (
             existing[0].sku &&
