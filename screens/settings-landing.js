@@ -19,9 +19,15 @@ export async function init(ctx) {
   try {
     // ✅ Use router-provided session (do NOT re-fetch)
     const session = ctx?.session;
-    const role = session?.user?.role || session?.role || "";
-    const isOwnerOrAdmin = role?.toLowerCase?.() === "owner" || role?.toLowerCase?.() === "admin";
-
+    const roleRaw = session?.user?.role ?? session?.role ?? "";
+    const rl = roleRaw?.toLowerCase?.();
+    const knowsRole = Boolean(rl);
+    const isOwnerOrAdmin = rl === "owner" || rl === "admin";
+    // Only redirect when we POSITIVELY know user is NOT owner/admin
+    if (knowsRole && !isOwnerOrAdmin) {
+      return routeToUsers();
+    }
+    
     // If not privileged, send them straight to Users
     if (!isOwnerOrAdmin) {
       return routeToUsers();
