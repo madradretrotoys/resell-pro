@@ -274,7 +274,7 @@ function setMarketplaceVisibility() {
   function nonEmptySelect(el) { return !!el && el.value !== ""; }
   function markValidity(el, ok) { if (!el) return; el.setAttribute("aria-invalid", ok ? "false" : "true"); }
   function setCtasEnabled(isValid) {
-    ["intake-submit", "intake-save", "intake-next"].forEach((id) => {
+    ["intake-submit", "intake-save", "intake-next", "intake-draft"].forEach((id) => {
       const btn = getEl(id);
       if (btn) btn.disabled = !isValid;
     });
@@ -357,13 +357,14 @@ function setMarketplaceVisibility() {
     if (n.type === "checkbox" || n.type === "radio") return n.checked;
     return String(n.value ?? "").trim() !== "";
   }
+
   function setCtasEnabled(isValid) {
-    const ids = ["intake-submit", "intake-save", "intake-next", "intake-add-single", "intake-add-bulk"];
-    const foundById = ids.map(id => document.getElementById(id)).filter(Boolean);
-    const foundByText = Array.from(document.querySelectorAll("button, a[role='button']"))
-      .filter(b => /add single item|add to bulk list/i.test((b.textContent || "").trim()));
-    [...foundById, ...foundByText].forEach(btn => { btn.disabled = !isValid; });
-  }
+      const ids = ["intake-submit", "intake-save", "intake-next", "intake-add-single", "intake-add-bulk", "intake-draft"];
+      const foundById = ids.map(id => document.getElementById(id)).filter(Boolean);
+      const foundByText = Array.from(document.querySelectorAll("button, a[role='button']"))
+        .filter(b => /add single item|add to bulk list/i.test((b.textContent || "").trim()));
+      [...foundById, ...foundByText].forEach(btn => { btn.disabled = !isValid; });
+    }
 
   function computeValidity() {
     // BASIC — always required (explicit control list)
@@ -510,6 +511,274 @@ function setMarketplaceVisibility() {
     // Wire and run initial validation
     wireValidation();
     computeValidity();
+
+    // --- [NEW] Submission wiring: both buttons call POST /api/inventory/intake ---
+    function valByIdOrLabel(id, label) {
+      const el = id ? document.getElementById(id) : null;
+      if (el) return el.value ?? "";
+      const byLbl = findControlByLabel(label || "");
+      return byLbl ? (byLbl.value ?? "") : "";
+    }
+    
+    function buildPayload() {
+      const inventory = {
+        product_short_title: valByIdOrLabel(null, "Item Name / Description"),
+        price: Number(valByIdOrLabel(null, "Price (USD)") || 0),
+        qty: Number(valByIdOrLabel(null, "Qty") || 0),
+        cost_of_goods: Number(valByIdOrLabel(null, "Cost of Goods (USD)") || 0),
+        category_nm: valByIdOrLabel("categorySelect", "Category"),
+        instore_loc: valByIdOrLabel("storeLocationSelect", "Store Location"),
+        case_bin_shelf: valByIdOrLabel(null, "Case#/Bin#/Shelf#"),
+        instore_online: valByIdOrLabel("salesChannelSelect", "Sales Channel"),
+      };
+    
+      const listing = {
+        listing_category: valByIdOrLabel("marketplaceCategorySelect", "Marketplace Category"),
+        item_condition: valByIdOrLabel("conditionSelect", "Condition"),
+        brand_name: valByIdOrLabel("brandSelect", "Brand"),
+        primary_color: valByIdOrLabel("colorSelect", "Primary Color"),
+        product_description: valByIdOrLabel(null, "Long Description"),
+        shipping_box: valByIdOrLabel("shippingBoxSelect", "Shipping Box"),
+        weight_lb: Number(valByIdOrLabel("shipWeightLb", "Weight (lb)") || 0),
+        weight_oz: Number(valByIdOrLabel("shipWeightOz", "Weight (oz)") || 0),
+        shipbx_length: Number(valByIdOrLabel("shipLength", "Length") || 0),
+        shipbx_width: Number(valByIdOrLabel("shipWidth", "Width") || 0),
+        shipbx_height: Number(valByIdOrLabel("shipHeight", "Height") || 0),
+      };
+    
+      return { inventory, listing };
+    }
+    
+    async function submitIntake(mode = "active") {
+      // Drafts are allowed to save without full validation; active must validate
+      if (mode !== "draft" && !computeValidity()) return;
+
+      const payload = buildPayload();
+      if (mode === "draft") {
+        payload.status = "draft";
+      }
+      // If we’re editing an existing item, send its id so the server updates it
+      if (__currentItemId) {
+        payload.item_id = __currentItemId;
+      }
+
+      const res = await api("/api/inventory/intake", {
+        method: "POST",
+        body: JSON.stringify(payload),
+        headers: { "content-type": "application/json" },
+      });
+      if (!res || res.ok === false) {
+          throw new Error(res?.error || "intake_failed");
+        }
+  
+        // Post-save UX: confirm, disable fields, and swap CTAs to Edit/Add New
+        postSaveSuccess(res, mode);
+      try {
+        const skuEl = document.querySelector("[data-sku-out]");
+        if (skuEl && res.sku) skuEl.textContent = res.sku;
+      } catch {}
+      // Success UX is up to you (toast, clear form, or route back to Inventory)
+    }
+    
+    function wireCtas() {
+      const activeIds = ["intake-submit", "intake-save", "intake-add-single", "intake-add-bulk"];
+      const draftIds  = ["intake-draft"];
+
+      // Buttons that create ACTIVE items
+      const actById = activeIds.map(id => document.getElementById(id)).filter(Boolean);
+      const actByText = Array.from(document.querySelectorAll("button, a[role='button']"))
+        .filter(b => /add single item|add to bulk list/i.test((b.textContent || "").trim()));
+      [...actById, ...actByText].forEach(btn => {
+        btn.addEventListener("click", async (e) => {
+          e.preventDefault();
+          try {
+            btn.disabled = true;
+            await submitIntake("active");
+          } catch (err) {
+            console.error("intake:submit:error", err);
+            alert("Failed to save. Please check required fields and try again.");
+          } finally {
+            btn.disabled = false;
+          }
+        });
+      });
+
+      // Buttons that save DRAFTS
+      const draftButtons = draftIds.map(id => document.getElementById(id)).filter(Boolean);
+      draftButtons.forEach(btn => {
+        btn.addEventListener("click", async (e) => {
+          e.preventDefault();
+          try {
+            btn.disabled = true;
+            await submitIntake("draft");
+            alert("Draft saved.");
+          } catch (err) {
+            console.error("intake:draft:error", err);
+            alert("Failed to save draft.");
+          } finally {
+            btn.disabled = false;
+          }
+        });
+      });
+    }
+
+    // Remember original actions-row HTML so we can restore the 3 CTAs after editing
+    let __originalCtasHTML = null;
+    
+    // Hold the current item id across edits so the next save updates, not creates
+    let __currentItemId = null;
+
+    
+    wireCtas();
+
+      // After successful save: confirm, disable form controls, and swap CTAs
+      function postSaveSuccess(res, mode) {
+        try {
+          // 1) Confirmation — show SKU when present, otherwise draft notice
+          const skuPart = res?.sku ? `SKU ${res.sku}` : `Draft saved`;
+          const msg = mode === "draft"
+            ? `Saved draft (#${res?.item_id || "?"}).`
+            : `Saved item ${skuPart} (#${res?.item_id || "?"}).`;
+          alert(msg);
+          // Remember the item id for subsequent edits/saves
+          __currentItemId = res?.item_id || __currentItemId;
+          // Also stash on the form for resilience (not strictly required)
+          try {
+            const form = document.getElementById("intakeForm");
+            if (form && __currentItemId) form.dataset.itemId = __currentItemId;
+          } catch (e) {}
+          
+        } catch {}
+  
+        // 2) Disable all form fields (inputs/selects/textareas)
+        try {
+          const form = document.getElementById("intakeForm");
+          if (form) {
+            const ctrls = Array.from(form.querySelectorAll("input, select, textarea"));
+            ctrls.forEach(el => { el.disabled = true; el.readOnly = true; el.setAttribute("aria-disabled", "true"); });
+          }
+        } catch {}
+  
+        // 3) Replace the three CTAs with: Edit Item + Add New Item
+        try {
+          // Find the first actions row that contains our intake buttons
+          const actionsRow = document.querySelector(".actions.flex.gap-2");
+          if (actionsRow) {
+            const itemId = res?.item_id || "";
+        
+            // Capture original CTAs the first time we swap them out
+            if (__originalCtasHTML == null) {
+              __originalCtasHTML = actionsRow.innerHTML;
+            }
+        
+            // Swap to Edit / Add New
+            actionsRow.innerHTML = `
+              <button id="btnEditItem" class="btn btn-primary btn-sm">Edit Item</button>
+              <button id="btnAddNew" class="btn btn-ghost btn-sm">Add New Item</button>
+              <button id="btnDeleteItem" class="btn btn-danger btn-sm">Delete</button>
+            `;
+        
+            const btnEdit = document.getElementById("btnEditItem");
+            const btnNew  = document.getElementById("btnAddNew");
+        
+            if (btnEdit) {
+              btnEdit.addEventListener("click", (e) => {
+                e.preventDefault();
+        
+               // (1) Re-enable form fields, and lock Category ONLY if a SKU already exists
+              try {
+                const form = document.getElementById("intakeForm");
+                if (form) {
+                  const ctrls = Array.from(form.querySelectorAll("input, select, textarea"));
+                  ctrls.forEach((el) => {
+                    el.disabled = false;
+                    el.readOnly = false;
+                    el.removeAttribute("aria-disabled");
+                  });
+              
+                  // If the last save returned a SKU, do not allow Category edits
+                  const hasSku = !!(res && res.sku);
+                  if (hasSku) {
+                    const cat = document.getElementById("categorySelect");
+                    if (cat) {
+                      cat.disabled = true;
+                      cat.setAttribute("aria-disabled", "true");
+                      const hint = document.getElementById("categoryCodeHint");
+                      if (hint) hint.textContent = "Category locked (SKU assigned)";
+                    }
+                  }
+                }
+              } catch (err) { /* no-op */ }
+        
+                // (2) Restore the original 3 CTAs and re-wire their handlers
+                try {
+                  if (__originalCtasHTML != null) {
+                    actionsRow.innerHTML = __originalCtasHTML;
+                  }
+                  // Reattach events to the restored buttons
+                  wireCtas();
+                } catch (err) { /* no-op */ }
+        
+                // (3) Remove success banner (if present) and re-validate to toggle button disabled states
+                try {
+                  const banner = document.getElementById("intake-save-banner");
+                  if (banner) banner.remove();
+                } catch (err) { /* no-op */ }
+                computeValidity();
+        
+                // (4) Optional: focus the first field for convenience
+                try {
+                  const first = document.querySelector("#intakeForm input, #intakeForm select, #intakeForm textarea");
+                  if (first) first.focus();
+                } catch (err) { /* no-op */ }
+              });
+            }
+        
+            if (btnNew) {
+              btnNew.addEventListener("click", (e) => {
+                e.preventDefault();
+                // Reload the intake screen to start a fresh item
+                window.location.reload();
+              });
+            }
+
+            const btnDel = document.getElementById("btnDeleteItem");
+            if (btnDel) {
+              btnDel.addEventListener("click", async (e) => {
+                e.preventDefault();
+                try {
+                  if (!__currentItemId) return alert("No item to delete.");
+                  const sure = confirm("Delete this item? This cannot be undone.");
+                  if (!sure) return;
+                  btnDel.disabled = true;
+                  const resDel = await api("/api/inventory/intake", {
+                    method: "POST",
+                    headers: { "content-type": "application/json" },
+                    body: JSON.stringify({ action: "delete", item_id: __currentItemId }),
+                  });
+                  if (!resDel || resDel.ok === false) {
+                    throw new Error(resDel?.error || "delete_failed");
+                  }
+                  alert("Item deleted.");
+                  window.location.reload();
+                } catch (err) {
+                  console.error("intake:delete:error", err);
+                  alert("Failed to delete item.");
+                } finally {
+                  btnDel.disabled = false;
+                }
+              });
+            }
+
+            
+          }
+        } catch (err) { /* no-op */ }
+      }
+  
+    
+  
+  
+    
   } catch (err) {
     console.error("Meta load failed:", err);
     const denied = document.getElementById("intake-access-denied");
@@ -518,3 +787,5 @@ function setMarketplaceVisibility() {
     try { document.body.classList.remove("loading"); } catch {}
   }
 }
+
+// end intake js file. 
