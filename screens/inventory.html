@@ -1,0 +1,59 @@
+<!-- screens/inventory.html -->
+<h2>Inventory</h2>
+<div id="invControls" style="margin: 8px 0; display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
+  <input id="invSearch" type="search" placeholder="Search sku, title, brand, category, status, Vendoo #" style="min-width: 260px;">
+  <button id="invBtnFilter">Filters…</button>
+  <button id="invBtnColumns">Columns</button>
+  <span id="invCount" title="Exact unless prefixed with ≈">—</span>
+  <span style="flex:1 1 auto;"></span>
+  <label>Page size:
+    <select id="invPageSize">
+      <option value="50" selected>50</option>
+      <option value="25">25</option>
+      <option value="100">100</option>
+    </select>
+  </label>
+</div>
+
+<div id="invTableWrap" style="overflow:auto; border:1px solid #ddd; border-radius:6px;">
+  <table id="invTable" style="width:100%; border-collapse:collapse; font-size:14px;">
+    <thead id="invHead"></thead>
+    <tbody id="invBody"><tr><td style="padding:12px;">Loading…</td></tr></tbody>
+  </table>
+</div>
+
+<div id="invPager" style="margin: 10px 0; display:flex; gap:8px; align-items:center;">
+  <button id="invPrev">&larr; Prev</button>
+  <button id="invNext">Next &rarr;</button>
+</div>
+
+<!-- lightweight column picker modal (no external libs) -->
+<dialog id="invColumnsDlg">
+  <form method="dialog" style="min-width: 320px;">
+    <h3 style="margin-top:0;">Choose Columns</h3>
+    <div id="invColumnsList" style="display:grid; grid-template-columns: 1fr 1fr; gap:6px; max-height:50vh; overflow:auto;"></div>
+    <div style="margin-top:12px; display:flex; gap:8px; justify-content:flex-end;">
+      <button value="cancel">Cancel</button>
+      <button id="invColumnsSave" value="default">Save</button>
+    </div>
+  </form>
+</dialog>
+
+<!-- simple filter placeholder — Phase 1: basic text + numeric operators via query.ts -->
+<dialog id="invFilterDlg">
+  <form method="dialog" style="min-width: 420px;">
+    <h3 style="margin-top:0;">Filters</h3>
+    <div id="invFilterArea">
+      <p style="margin:0 0 8px;">
+        Add filters (e.g., <code>price &gt;= 10</code>, <code>qty &lt; 5</code>, <code>status = LISTED</code>).
+        String filters use <code>contains</code> by default when you pick “Contains”.
+      </p>
+      <div id="invFilterRows"></div>
+      <button id="invAddFilter" type="button">+ Add Filter</button>
+    </div>
+    <div style="margin-top:12px; display:flex; gap:8px; justify-content:flex-end;">
+      <button value="cancel">Cancel</button>
+      <button id="invFilterApply" value="default">Apply</button>
+    </div>
+  </form>
+</dialog>
