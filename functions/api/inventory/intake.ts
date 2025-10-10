@@ -79,6 +79,17 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
     // Optional: if present, we update instead of insert
     const item_id_in: string | null = body?.item_id ? String(body.item_id) : null;
 
+    // If the client requested a delete, do it now (and exit)
+    if (body?.action === "delete") {
+      if (!item_id_in) return json({ ok: false, error: "missing_item_id" }, 400);
+      // inventory → item_listing_profile cascades ON DELETE
+      await sql/*sql*/`
+        DELETE FROM app.inventory
+        WHERE item_id = ${item_id_in}
+      `;
+      return json({ ok: true, deleted: true, item_id: item_id_in }, 200);
+    }
+    
     // Look up category_code from sku_categories
     const catRows = await sql<{ category_code: string }[]>`
       SELECT category_code FROM app.sku_categories WHERE category_name = ${inv.category_nm} LIMIT 1
