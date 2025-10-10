@@ -1,0 +1,165 @@
+Goal: Make every new screen a 10-minute, boring task—consistent wiring, consistent design, zero surprises.
+
+1) Screen Contract (UI)
+
+Router contract
+
+Each screen exports a named function: init.
+
+The router dynamically imports the module and calls await mod.init().
+
+Helper usage
+
+Screens import shared helpers (e.g., api()), or define local equivalents.
+
+Do not rely on accidental globals (e.g., $, fillSelect, ensure, etc.).
+
+Design skeleton
+
+Use the shared CSS in assets/css/ui.css; no inline styles.
+
+Layout primitives required on every screen:
+
+.page container
+
+.card with .card-header, .card-body, .card-footer
+
+.form-grid for responsive fields (mobile: 1-col; desktop: 2–3 cols)
+
+.field with .field-label, .field-control, optional .field-hint / .field-error
+
+CTA row using btn, btn-primary, btn-ghost classes
+
+Built-in UX hooks:
+
+body.loading toggled while async work runs
+
+#screen-banner for info/success/error messages
+
+#screen-access-denied for 401/403 states
+
+Definition of Done (UI)
+
+Screen exports init.
+
+On load, DevTools → Network shows the expected API call(s).
+
+Fields/tables/buttons render with the standard classes (no custom CSS).
+
+Mobile: no horizontal scroll except within table wrapper.
+
+2) Endpoint Contract (API)
+
+Auth stance (choose one and document which you use):
+
+Metadata endpoints (read-only, global lists like dropdowns):
+
+Require presence of session cookie.
+
+Tenant optional unless data is tenant-scoped.
+
+Headers: cache-control: no-store, vary: Cookie.
+
+Tenant-scoped endpoints (reads/writes tied to a tenant):
+
+Require valid session and x-tenant-id.
+
+Return clear 400/401/403 on failures (not 500).
+
+Schema certainty
+
+All tables live in the app schema. Never depend on default search_path.
+
+Either:
+
+Fully qualify tables (e.g., app.sku_categories, app.shipping_boxes), or
+
+Set search_path to app, public in your DB helper—pick one and use it everywhere.
+
+Definition of Done (API)
+
+Endpoint returns 200 with minimal, correctly shaped data.
+
+No “relation does not exist” errors—tables are schema-qualified or search_path is set.
+
+Consistent headers and error shape ({ ok:false, error, message? }).
+
+3) Design Definition of Done
+
+Uses .page, .card, .form-grid, .field* primitives.
+
+Buttons use btn classes; tables use .table.w-full with left-aligned headers, thin row separators, and consistent padding.
+
+Loading overlay via body.loading; banner messaging via #screen-banner.
+
+Accessibility: labels linked to controls; aria-invalid used for validation; touch targets ≥ 40px.
+
+4) Templates (source of truth)
+
+Screen Template: /screens/_template/screen-template.html and /screens/_template/screen-template.js
+
+Already wired for router/export contract and design skeleton.
+
+Contains banner slot, access-denied block, loading overlay, and sample table/form structure.
+
+Endpoint Templates (optional but recommended):
+
+functions/api/_template_readonly.ts (metadata pattern)
+
+functions/api/_template_tenant.ts (tenant-scoped pattern)
+
+Each new screen or endpoint should be created by duplicating the appropriate template, then renaming and wiring.
+
+5) Guardrails (to prevent drift)
+
+Pre-commit checks (lightweight)
+
+Verify new screen files include export function init.
+
+Verify screen imports api() or defines local helpers.
+
+Verify API files either:
+
+Fully qualify tables with app., or
+
+Call your shared setSearchPath() helper.
+
+CI smoke tests (tiny)
+
+Start functions in a local runner and hit each metadata endpoint—expect 200 and arrays.
+
+Headless check that visiting a screen triggers at least one API call (e.g., /api/inventory/meta).
+
+6) Triage Map (fast debugging)
+
+No API call in Network: router/export mismatch or top-of-file error (missing import/helper).
+
+401/403: session/tenant mismatch—align with endpoint’s auth stance.
+
+500 + “relation … does not exist”: missing app. prefix or missing search_path.
+
+200 + empty UI: IDs or fill logic mismatch; verify selectors and shape.
+
+7) Working Agreement (repeatable process)
+
+When creating a new screen
+
+Duplicate the Screen Template files and rename.
+
+Replace titles/IDs; wire real API calls.
+
+Confirm in Network that the screen’s primary API call fires and returns 200.
+
+Validate design primitives and mobile behavior.
+
+When creating a new endpoint
+
+Choose the contract (metadata vs tenant-scoped).
+
+Use the endpoint template matching that contract.
+
+Ensure app. qualification or search_path is set.
+
+Protocol addendum: Template link reminder
+
+Any time we start a new screen, I will proactively remind you to share the template RAW SHA link so I base all work on the exact template state you’re using.
