@@ -510,6 +510,88 @@ function setMarketplaceVisibility() {
     // Wire and run initial validation
     wireValidation();
     computeValidity();
+
+    // --- [NEW] Submission wiring: both buttons call POST /api/inventory/intake ---
+    function valByIdOrLabel(id, label) {
+      const el = id ? document.getElementById(id) : null;
+      if (el) return el.value ?? "";
+      const byLbl = findControlByLabel(label || "");
+      return byLbl ? (byLbl.value ?? "") : "";
+    }
+    
+    function buildPayload() {
+      const inventory = {
+        product_short_title: valByIdOrLabel(null, "Item Name / Description"),
+        price: Number(valByIdOrLabel(null, "Price (USD)") || 0),
+        qty: Number(valByIdOrLabel(null, "Qty") || 0),
+        cost_of_goods: Number(valByIdOrLabel(null, "Cost of Goods (USD)") || 0),
+        category_nm: valByIdOrLabel("categorySelect", "Category"),
+        instore_loc: valByIdOrLabel("storeLocationSelect", "Store Location"),
+        case_bin_shelf: valByIdOrLabel(null, "Case#/Bin#/Shelf#"),
+        instore_online: valByIdOrLabel("salesChannelSelect", "Sales Channel"),
+      };
+    
+      const listing = {
+        listing_category: valByIdOrLabel("marketplaceCategorySelect", "Marketplace Category"),
+        item_condition: valByIdOrLabel("conditionSelect", "Condition"),
+        brand_name: valByIdOrLabel("brandSelect", "Brand"),
+        primary_color: valByIdOrLabel("colorSelect", "Primary Color"),
+        product_description: valByIdOrLabel(null, "Long Description"),
+        shipping_box: valByIdOrLabel("shippingBoxSelect", "Shipping Box"),
+        weight_lb: Number(valByIdOrLabel("shipWeightLb", "Weight (lb)") || 0),
+        weight_oz: Number(valByIdOrLabel("shipWeightOz", "Weight (oz)") || 0),
+        shipbx_length: Number(valByIdOrLabel("shipLength", "Length") || 0),
+        shipbx_width: Number(valByIdOrLabel("shipWidth", "Width") || 0),
+        shipbx_height: Number(valByIdOrLabel("shipHeight", "Height") || 0),
+      };
+    
+      return { inventory, listing };
+    }
+    
+    async function submitIntake() {
+      if (!computeValidity()) return;
+      const payload = buildPayload();
+      const res = await api("/api/inventory/intake", {
+        method: "POST",
+        body: JSON.stringify(payload),
+        headers: { "content-type": "application/json" },
+      });
+      if (!res || res.ok === false) {
+        throw new Error(res?.error || "intake_failed");
+      }
+      // Optional: surface returned SKU to user
+      try {
+        const skuEl = document.querySelector("[data-sku-out]");
+        if (skuEl && res.sku) skuEl.textContent = res.sku;
+      } catch {}
+      // Success UX is up to you (toast, clear form, or route back to Inventory)
+    }
+    
+    function wireCtas() {
+      const ids = ["intake-submit", "intake-save", "intake-add-single", "intake-add-bulk"];
+      const byId = ids.map(id => document.getElementById(id)).filter(Boolean);
+      const byText = Array.from(document.querySelectorAll("button, a[role='button']"))
+        .filter(b => /add single item|add to bulk list/i.test((b.textContent || "").trim()));
+      [...byId, ...byText].forEach(btn => {
+        btn.addEventListener("click", async (e) => {
+          e.preventDefault();
+          try {
+            btn.disabled = true;
+            await submitIntake();
+            btn.disabled = false;
+          } catch (err) {
+            console.error("intake:submit:error", err);
+            btn.disabled = false;
+            alert("Failed to save. Please check required fields and try again.");
+          }
+        });
+      });
+    }
+    
+    wireCtas();
+
+
+    
   } catch (err) {
     console.error("Meta load failed:", err);
     const denied = document.getElementById("intake-access-denied");
