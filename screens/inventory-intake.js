@@ -564,9 +564,11 @@ function setMarketplaceVisibility() {
         headers: { "content-type": "application/json" },
       });
       if (!res || res.ok === false) {
-        throw new Error(res?.error || "intake_failed");
-      }
-      // Optional: surface returned SKU to user
+          throw new Error(res?.error || "intake_failed");
+        }
+  
+        // Post-save UX: confirm, disable fields, and swap CTAs to Edit/Add New
+        postSaveSuccess(res, mode);
       try {
         const skuEl = document.querySelector("[data-sku-out]");
         if (skuEl && res.sku) skuEl.textContent = res.sku;
@@ -618,7 +620,86 @@ function setMarketplaceVisibility() {
     
     wireCtas();
 
+      // After successful save: confirm, disable form controls, and swap CTAs
+      function postSaveSuccess(res, mode) {
+        // Optional banner in-page (non-blocking)
+        try {
+          const existing = document.getElementById("intake-save-banner");
+          if (!existing) {
+            const banner = document.createElement("div");
+            banner.id = "intake-save-banner";
+            banner.className = "border border-green-300 bg-green-50 text-green-800 rounded p-3 mb-3";
+            banner.textContent = (mode === "draft")
+              ? "Draft saved successfully."
+              : "Item saved successfully.";
+            const header = document.querySelector("#inventory-intake-screen .mb-3")
+              || document.getElementById("inventory-intake-screen");
+            if (header) header.insertAdjacentElement("afterend", banner);
+          }
+        } catch {}
 
+
+        
+        try {
+          // 1) Confirmation — show SKU when present, otherwise draft notice
+          const skuPart = res?.sku ? `SKU ${res.sku}` : `Draft saved`;
+          const msg = mode === "draft"
+            ? `Saved draft (#${res?.item_id || "?"}).`
+            : `Saved item ${skuPart} (#${res?.item_id || "?"}).`;
+          alert(msg);
+        } catch {}
+  
+        // 2) Disable all form fields (inputs/selects/textareas)
+        try {
+          const form = document.getElementById("intakeForm");
+          if (form) {
+            const ctrls = Array.from(form.querySelectorAll("input, select, textarea"));
+            ctrls.forEach(el => { el.disabled = true; el.readOnly = true; el.setAttribute("aria-disabled", "true"); });
+          }
+        } catch {}
+  
+        // 3) Replace the three CTAs with: Edit Item + Add New Item
+        try {
+          // Find the first actions row that contains our intake buttons
+          const actionsRow = document.querySelector(".actions.flex.gap-2");
+          if (actionsRow) {
+            const itemId = res?.item_id || "";
+            const isDraft = String(res?.status || "").toLowerCase() === "draft";
+  
+            actionsRow.innerHTML = `
+              <button id="btnEditItem" class="btn btn-primary btn-sm">Edit Item</button>
+              <button id="btnAddNew" class="btn btn-ghost btn-sm">Add New Item</button>
+            `;
+  
+            const btnEdit = document.getElementById("btnEditItem");
+            const btnNew  = document.getElementById("btnAddNew");
+  
+            if (btnEdit) {
+              btnEdit.addEventListener("click", (e) => {
+                e.preventDefault();
+                // Navigate to inventory item detail or edit; adjust route to your app’s pattern.
+                // Uses querystring with item_id for now.
+                const target = isDraft
+                  ? `/screens/inventory.html?draft=1&item_id=${encodeURIComponent(itemId)}`
+                  : `/screens/inventory.html?item_id=${encodeURIComponent(itemId)}`;
+                window.location.href = target;
+              });
+            }
+  
+            if (btnNew) {
+              btnNew.addEventListener("click", (e) => {
+                e.preventDefault();
+                // Easiest: reload the intake screen to start a fresh item
+                window.location.reload();
+              });
+            }
+          }
+        } catch {}
+      }
+  
+    
+  
+  
     
   } catch (err) {
     console.error("Meta load failed:", err);
