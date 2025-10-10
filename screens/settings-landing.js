@@ -1,17 +1,14 @@
 // Settings Landing (Chooser)
-// Based on screens/_template/screen-template.js contract: export async function init()
-// Uses existing auth/api/ui helpers if present; falls back gracefully.
-
-export async function init() {
+export async function init(ctx) {
   const $ = (sel) => document.querySelector(sel);
   const show = (el) => { el && (el.hidden = false); };
   const hide = (el) => { el && (el.hidden = true); };
-  const banner = $("#settings-landing-banner");
-  const denied = $("#settings-landing-denied");
+
+  const banner  = $("#settings-landing-banner");
+  const denied  = $("#settings-landing-denied");
   const loading = $("#settings-landing-loading");
   const content = $("#settings-landing-content");
 
-  // Helper to set page title if your UI helper exists
   try { window.ui?.setTitle?.("Settings"); } catch {}
 
   hide(banner);
@@ -20,34 +17,20 @@ export async function init() {
   hide(content);
 
   try {
-    // Ensure session (project protocol)
-    let session = null;
-    if (window.auth?.ensureSession) {
-      session = await window.auth.ensureSession();
-    } else if (window.api) {
-      // Fallback: hit session endpoint directly if needed
-      const res = await window.api("/api/auth/session");
-      session = res?.data || res;
-    }
-
+    // ✅ Use router-provided session (do NOT re-fetch)
+    const session = ctx?.session;
     const role = session?.user?.role || session?.role || "";
-    const isOwnerOrAdmin = ["owner", "Owner", "admin", "Admin"].includes(role);
-
-    const params = new URLSearchParams(window.location.search);
-    const tab = params.get("tab");
-
-    // No tab parsing in router.js; deep-links handled by explicit pages
+    const isOwnerOrAdmin = role?.toLowerCase?.() === "owner" || role?.toLowerCase?.() === "admin";
 
     // If not privileged, send them straight to Users
     if (!isOwnerOrAdmin) {
       return routeToUsers();
     }
 
-    // Privileged: render chooser
+    // Privileged: render chooser and wire actions
     hide(loading);
     show(content);
 
-    // Wire actions
     $("#goto-user-settings")?.addEventListener("click", routeToUsers);
     $("#goto-user-settings")?.addEventListener("keydown", (e) => {
       if (e.key === "Enter" || e.key === " ") routeToUsers();
@@ -77,8 +60,10 @@ export async function init() {
   }
 
   function routeToUsers() {
+    // Your router uses '?page=<key>' keys (see router.js)
     window.router?.go?.("?page=settings-users") || (window.location.href = "?page=settings-users");
   }
+
   function routeToMarketplaces() {
     window.router?.go?.("?page=settings-marketplaces") || (window.location.href = "?page=settings-marketplaces");
   }
