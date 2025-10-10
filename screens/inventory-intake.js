@@ -1,3 +1,5 @@
+
+// begin intake.js file
 import { api } from "/assets/js/api.js";
 
 // Exported so router can call it: router awaits `mod.init(...)` after importing this module.
@@ -709,3 +711,4 @@ function setMarketplaceVisibility() {
     try { document.body.classList.remove("loading"); } catch {}
   }
 }
+// end intake.js file
