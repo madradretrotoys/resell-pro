@@ -644,10 +644,14 @@ function setMarketplaceVisibility() {
           alert(msg);
           // Remember the item id for subsequent edits/saves
           __currentItemId = res?.item_id || __currentItemId;
-          // Also stash on the form for resilience (not strictly required)
+          __currentSku = res?.sku || __currentSku; // keep last known SKU (may be null for drafts)
+          
           try {
             const form = document.getElementById("intakeForm");
-            if (form && __currentItemId) form.dataset.itemId = __currentItemId;
+            if (form) {
+              if (__currentItemId) form.dataset.itemId = __currentItemId;
+              if (__currentSku != null) form.dataset.sku = String(__currentSku);
+            }
           } catch (e) {}
           
         } catch {}
@@ -687,16 +691,26 @@ function setMarketplaceVisibility() {
               btnEdit.addEventListener("click", (e) => {
                 e.preventDefault();
         
-                // (1) Re-enable form fields
+                // (1) Re-enable form fields (but lock Category if a SKU exists)
                 try {
                   const form = document.getElementById("intakeForm");
                   if (form) {
                     const ctrls = Array.from(form.querySelectorAll("input, select, textarea"));
-                    ctrls.forEach((el) => {
+                    ctrls.forEach(el => {
                       el.disabled = false;
                       el.readOnly = false;
                       el.removeAttribute("aria-disabled");
                     });
+                
+                    // Lock Category when SKU is present
+                    const cat = document.getElementById("categorySelect");
+                    if ((__currentSku && __currentSku !== "") && cat) {
+                      cat.disabled = true;
+                      cat.setAttribute("aria-disabled", "true");
+                      // Optional: visual hint next to the helper span if you have one
+                      const hint = document.getElementById("categoryCodeHint");
+                      if (hint) hint.textContent = "Category locked because SKU is assigned";
+                    }
                   }
                 } catch (err) { /* no-op */ }
         
