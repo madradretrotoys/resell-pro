@@ -461,44 +461,7 @@ function setMarketplaceVisibility() {
       }
     }
 
-    // Collect all controls inside a container (inputs, selects, textareas)
-    function controlsIn(el) {
-      if (!el) return [];
-      return Array.from(el.querySelectorAll("input, select, textarea"))
-        // exclude deliberately disabled controls
-        .filter(n => !n.disabled && n.type !== "hidden");
-    }
     
-    // Mark invalid/valid for a batch
-    function markBatchValidity(nodes, isValidFn) {
-      let allOk = true;
-      for (const n of nodes) {
-        const ok = isValidFn(n);
-        n.setAttribute("aria-invalid", ok ? "false" : "true");
-        if (!ok) allOk = false;
-      }
-      return allOk;
-    }
-    
-    // Generic value check for required controls
-    function hasValue(n) {
-      if (!n) return false;
-      if (n.tagName === "SELECT") return n.value !== "";
-      if (n.type === "checkbox" || n.type === "radio") return n.checked;
-      return String(n.value ?? "").trim() !== "";
-    }
-    
-    // Enable/disable CTAs
-    function setCtasEnabled(isValid) {
-      // Prefer explicit IDs if you have them
-      const ids = ["intake-submit", "intake-save", "intake-next", "intake-add-single", "intake-add-bulk"];
-      const foundById = ids.map(id => document.getElementById(id)).filter(Boolean);
-      const foundByText = Array.from(document.querySelectorAll("button, a[role='button']"))
-        .filter(b => /add single item|add to bulk list/i.test((b.textContent || "").trim()));
-    
-      [...foundById, ...foundByText].forEach(btn => { btn.disabled = !isValid; });
-    }
-
 
     // Apply placeholders if any list was empty
     ensurePlaceholder($("categorySelect"));
