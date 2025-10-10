@@ -36,13 +36,7 @@ export async function init() {
     const params = new URLSearchParams(window.location.search);
     const tab = params.get("tab");
 
-    // Backward-compatible deep-links:
-    if (tab === "users") {
-      return routeToUsers();
-    }
-    if (tab === "marketplaces") {
-      return routeToMarketplaces();
-    }
+    // No tab parsing in router.js; deep-links handled by explicit pages
 
     // If not privileged, send them straight to Users
     if (!isOwnerOrAdmin) {
@@ -83,10 +77,9 @@ export async function init() {
   }
 
   function routeToUsers() {
-    window.router?.go?.("?page=settings&tab=users") || (window.location.href = "?page=settings&tab=users");
+    window.router?.go?.("?page=settings-users") || (window.location.href = "?page=settings-users");
   }
-
   function routeToMarketplaces() {
-    window.router?.go?.("?page=settings&tab=marketplaces") || (window.location.href = "?page=settings&tab=marketplaces");
+    window.router?.go?.("?page=settings-marketplaces") || (window.location.href = "?page=settings-marketplaces");
   }
 }
