@@ -726,3 +726,5 @@ function setMarketplaceVisibility() {
     try { document.body.classList.remove("loading"); } catch {}
   }
 }
+
+// end intake js file. 
