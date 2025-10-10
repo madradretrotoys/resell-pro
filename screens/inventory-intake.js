@@ -1,5 +1,3 @@
-
-// begin intake.js file
 import { api } from "/assets/js/api.js";
 
 // Exported so router can call it: router awaits `mod.init(...)` after importing this module.
@@ -461,7 +459,44 @@ function setMarketplaceVisibility() {
       }
     }
 
+    // Collect all controls inside a container (inputs, selects, textareas)
+    function controlsIn(el) {
+      if (!el) return [];
+      return Array.from(el.querySelectorAll("input, select, textarea"))
+        // exclude deliberately disabled controls
+        .filter(n => !n.disabled && n.type !== "hidden");
+    }
     
+    // Mark invalid/valid for a batch
+    function markBatchValidity(nodes, isValidFn) {
+      let allOk = true;
+      for (const n of nodes) {
+        const ok = isValidFn(n);
+        n.setAttribute("aria-invalid", ok ? "false" : "true");
+        if (!ok) allOk = false;
+      }
+      return allOk;
+    }
+    
+    // Generic value check for required controls
+    function hasValue(n) {
+      if (!n) return false;
+      if (n.tagName === "SELECT") return n.value !== "";
+      if (n.type === "checkbox" || n.type === "radio") return n.checked;
+      return String(n.value ?? "").trim() !== "";
+    }
+    
+    // Enable/disable CTAs
+    function setCtasEnabled(isValid) {
+      // Prefer explicit IDs if you have them
+      const ids = ["intake-submit", "intake-save", "intake-next", "intake-add-single", "intake-add-bulk"];
+      const foundById = ids.map(id => document.getElementById(id)).filter(Boolean);
+      const foundByText = Array.from(document.querySelectorAll("button, a[role='button']"))
+        .filter(b => /add single item|add to bulk list/i.test((b.textContent || "").trim()));
+    
+      [...foundById, ...foundByText].forEach(btn => { btn.disabled = !isValid; });
+    }
+
 
     // Apply placeholders if any list was empty
     ensurePlaceholder($("categorySelect"));
@@ -540,9 +575,6 @@ function setMarketplaceVisibility() {
       } catch {}
       // Success UX is up to you (toast, clear form, or route back to Inventory)
     }
-
-    // Remember original actions-row HTML so we can restore the 3 CTAs after editing
-    let __originalCtasHTML = null;
     
     function wireCtas() {
       const activeIds = ["intake-submit", "intake-save", "intake-add-single", "intake-add-bulk"];
@@ -590,24 +622,6 @@ function setMarketplaceVisibility() {
 
       // After successful save: confirm, disable form controls, and swap CTAs
       function postSaveSuccess(res, mode) {
-        // Optional banner in-page (non-blocking)
-        try {
-          const existing = document.getElementById("intake-save-banner");
-          if (!existing) {
-            const banner = document.createElement("div");
-            banner.id = "intake-save-banner";
-            banner.className = "border border-green-300 bg-green-50 text-green-800 rounded p-3 mb-3";
-            banner.textContent = (mode === "draft")
-              ? "Draft saved successfully."
-              : "Item saved successfully.";
-            const header = document.querySelector("#inventory-intake-screen .mb-3")
-              || document.getElementById("inventory-intake-screen");
-            if (header) header.insertAdjacentElement("afterend", banner);
-          }
-        } catch {}
-
-
-        
         try {
           // 1) Confirmation — show SKU when present, otherwise draft notice
           const skuPart = res?.sku ? `SKU ${res.sku}` : `Draft saved`;
@@ -632,71 +646,38 @@ function setMarketplaceVisibility() {
           const actionsRow = document.querySelector(".actions.flex.gap-2");
           if (actionsRow) {
             const itemId = res?.item_id || "";
-
-            // Capture original CTAs the first time we swap them out
-            if (__originalCtasHTML == null) {
-              __originalCtasHTML = actionsRow.innerHTML;
-            }
-
-            // Swap to Edit / Add New
+            const isDraft = String(res?.status || "").toLowerCase() === "draft";
+  
             actionsRow.innerHTML = `
               <button id="btnEditItem" class="btn btn-primary btn-sm">Edit Item</button>
               <button id="btnAddNew" class="btn btn-ghost btn-sm">Add New Item</button>
             `;
-
+  
             const btnEdit = document.getElementById("btnEditItem");
             const btnNew  = document.getElementById("btnAddNew");
-
+  
             if (btnEdit) {
               btnEdit.addEventListener("click", (e) => {
                 e.preventDefault();
-
-                // (1) Re-enable form fields
-                try {
-                  const form = document.getElementById("intakeForm");
-                  if (form) {
-                    const ctrls = Array.from(form.querySelectorAll("input, select, textarea"));
-                    ctrls.forEach(el => {
-                      el.disabled = false;
-                      el.readOnly = false;
-                      el.removeAttribute("aria-disabled");
-                    });
-                  }
-                } catch {}
-
-                // (2) Restore the original 3 CTAs and re-wire their handlers
-                try {
-                  if (__originalCtasHTML != null) {
-                    actionsRow.innerHTML = __originalCtasHTML;
-                  }
-                  // Reattach events to the restored buttons
-                  wireCtas();
-                } catch {}
-
-                // (3) Remove success banner (if present) and re-validate to toggle button disabled states
-                try {
-                  const banner = document.getElementById("intake-save-banner");
-                  if (banner) banner.remove();
-                } catch {}
-                computeValidity();
-
-                // (4) Optional: focus the first field for convenience
-                try {
-                  const first = document.querySelector("#intakeForm input, #intakeForm select, #intakeForm textarea");
-                  if (first) first.focus();
-                } catch {}
+                // Navigate to inventory item detail or edit; adjust route to your app’s pattern.
+                // Uses querystring with item_id for now.
+                const target = isDraft
+                  ? `/screens/inventory.html?draft=1&item_id=${encodeURIComponent(itemId)}`
+                  : `/screens/inventory.html?item_id=${encodeURIComponent(itemId)}`;
+                window.location.href = target;
               });
             }
-
+  
             if (btnNew) {
               btnNew.addEventListener("click", (e) => {
                 e.preventDefault();
-                // Reload the intake screen to start a fresh item
+                // Easiest: reload the intake screen to start a fresh item
                 window.location.reload();
               });
             }
           }
         } catch {}
+      }
   
     
   
@@ -710,4 +691,3 @@ function setMarketplaceVisibility() {
     try { document.body.classList.remove("loading"); } catch {}
   }
 }
-// end intake.js file
