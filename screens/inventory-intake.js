@@ -274,7 +274,7 @@ function setMarketplaceVisibility() {
   function nonEmptySelect(el) { return !!el && el.value !== ""; }
   function markValidity(el, ok) { if (!el) return; el.setAttribute("aria-invalid", ok ? "false" : "true"); }
   function setCtasEnabled(isValid) {
-    ["intake-submit", "intake-save", "intake-next"].forEach((id) => {
+    ["intake-submit", "intake-save", "intake-next", "intake-draft"].forEach((id) => {
       const btn = getEl(id);
       if (btn) btn.disabled = !isValid;
     });
@@ -357,13 +357,14 @@ function setMarketplaceVisibility() {
     if (n.type === "checkbox" || n.type === "radio") return n.checked;
     return String(n.value ?? "").trim() !== "";
   }
+
   function setCtasEnabled(isValid) {
-    const ids = ["intake-submit", "intake-save", "intake-next", "intake-add-single", "intake-add-bulk"];
-    const foundById = ids.map(id => document.getElementById(id)).filter(Boolean);
-    const foundByText = Array.from(document.querySelectorAll("button, a[role='button']"))
-      .filter(b => /add single item|add to bulk list/i.test((b.textContent || "").trim()));
-    [...foundById, ...foundByText].forEach(btn => { btn.disabled = !isValid; });
-  }
+      const ids = ["intake-submit", "intake-save", "intake-next", "intake-add-single", "intake-add-bulk", "intake-draft"];
+      const foundById = ids.map(id => document.getElementById(id)).filter(Boolean);
+      const foundByText = Array.from(document.querySelectorAll("button, a[role='button']"))
+        .filter(b => /add single item|add to bulk list/i.test((b.textContent || "").trim()));
+      [...foundById, ...foundByText].forEach(btn => { btn.disabled = !isValid; });
+    }
 
   function computeValidity() {
     // BASIC — always required (explicit control list)
@@ -548,9 +549,15 @@ function setMarketplaceVisibility() {
       return { inventory, listing };
     }
     
-    async function submitIntake() {
-      if (!computeValidity()) return;
+    async function submitIntake(mode = "active") {
+      // Drafts are allowed to save without full validation; active must validate
+      if (mode !== "draft" && !computeValidity()) return;
+
       const payload = buildPayload();
+      if (mode === "draft") {
+        payload.status = "draft";
+      }
+
       const res = await api("/api/inventory/intake", {
         method: "POST",
         body: JSON.stringify(payload),
@@ -568,21 +575,42 @@ function setMarketplaceVisibility() {
     }
     
     function wireCtas() {
-      const ids = ["intake-submit", "intake-save", "intake-add-single", "intake-add-bulk"];
-      const byId = ids.map(id => document.getElementById(id)).filter(Boolean);
-      const byText = Array.from(document.querySelectorAll("button, a[role='button']"))
+      const activeIds = ["intake-submit", "intake-save", "intake-add-single", "intake-add-bulk"];
+      const draftIds  = ["intake-draft"];
+
+      // Buttons that create ACTIVE items
+      const actById = activeIds.map(id => document.getElementById(id)).filter(Boolean);
+      const actByText = Array.from(document.querySelectorAll("button, a[role='button']"))
         .filter(b => /add single item|add to bulk list/i.test((b.textContent || "").trim()));
-      [...byId, ...byText].forEach(btn => {
+      [...actById, ...actByText].forEach(btn => {
         btn.addEventListener("click", async (e) => {
           e.preventDefault();
           try {
             btn.disabled = true;
-            await submitIntake();
-            btn.disabled = false;
+            await submitIntake("active");
           } catch (err) {
             console.error("intake:submit:error", err);
-            btn.disabled = false;
             alert("Failed to save. Please check required fields and try again.");
+          } finally {
+            btn.disabled = false;
+          }
+        });
+      });
+
+      // Buttons that save DRAFTS
+      const draftButtons = draftIds.map(id => document.getElementById(id)).filter(Boolean);
+      draftButtons.forEach(btn => {
+        btn.addEventListener("click", async (e) => {
+          e.preventDefault();
+          try {
+            btn.disabled = true;
+            await submitIntake("draft");
+            alert("Draft saved.");
+          } catch (err) {
+            console.error("intake:draft:error", err);
+            alert("Failed to save draft.");
+          } finally {
+            btn.disabled = false;
           }
         });
       });
