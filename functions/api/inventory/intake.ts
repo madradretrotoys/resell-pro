@@ -110,8 +110,12 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
           if (existing.length === 0) {
             return json({ ok: false, error: "not_found" }, 404);
           }
-          // Once a SKU exists, the category is locked. To change category, delete & re-intake.
-          if (existing[0].sku && String(inv.category_nm || "") !== String(existing[0].category_nm || "")) {
+          // Once a SKU exists, the category is locked. Only enforce if client actually sent a category value.
+          if (
+            existing[0].sku &&
+            inv?.category_nm != null &&
+            String(inv.category_nm) !== String(existing[0].category_nm || "")
+          ) {
             return json({ ok: false, error: "category_locked", message: "Category cannot be changed after a SKU is assigned. Delete the item and re-intake if needed." }, 400);
           }
           
