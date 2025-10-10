@@ -617,6 +617,9 @@ function setMarketplaceVisibility() {
         });
       });
     }
+
+     // Remember original actions-row HTML so we can restore the 3 CTAs after editing
+    let __originalCtasHTML = null;
     
     wireCtas();
 
