@@ -149,4 +149,4 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
     return json({ ok: false, error: "server_error", message: msg }, 500);
   }
 };
-// end intake.js file
+// end intake.ts file
