@@ -92,7 +92,7 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
           const existing = await sql<{ item_id: string; sku: string | null; item_status: string | null }[]>`
             SELECT item_id, sku, item_status
             FROM app.inventory
-            WHERE tenant_id = ${tenant_id} AND item_id = ${item_id_in}
+            WHERE item_id = ${item_id_in}
             LIMIT 1
           `;
           if (existing.length === 0) {
@@ -146,9 +146,10 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
               case_bin_shelf = ${inv.case_bin_shelf},
               instore_online = ${inv.instore_online},
               item_status = ${status}
-            WHERE tenant_id = ${tenant_id} AND item_id = ${item_id_in}
+            WHERE item_id = ${item_id_in}
             RETURNING item_id, sku
           `;
+
           const item_id = updInv[0].item_id;
           const retSku  = updInv[0].sku;
         
