@@ -10,21 +10,35 @@ const SCREENS = {
   intake: { html: '/screens/inventory-intake.html', js: '/screens/inventory-intake.js', title: 'Inventory Intake' },
   research:  { html: '/screens/research.html',  js: '/screens/research.js',  title: 'Research' },
 
-  // Settings → Users
+  // Settings landing (chooser)
   settings: {
+    html: '/screens/settings-landing.html',
+    js:   '/screens/settings-landing.js',
+    title: 'Settings',
+  },
+
+  // Settings → Users (moved from 'settings')
+  'settings-users': {
     html: '/screens/settings-users.html',
-    js: '/screens/settings-users.js',
+    js:   '/screens/settings-users.js',
     title: 'Settings · Users',
   },
   'settings-user-new': {
     html: '/screens/settings-user-new.html',
-    js: '/screens/settings-user-new.js',
+    js:   '/screens/settings-user-new.js',
     title: 'Settings · Add User',
   },
   'settings-user-edit': {
     html: '/screens/settings-user-edit.html',
-    js: '/screens/settings-user-edit.js',
+    js:   '/screens/settings-user-edit.js',
     title: 'Settings · Edit User',
+  },
+
+  // Settings → Marketplaces (new)
+  'settings-marketplaces': {
+    html: '/screens/settings-marketplaces.html',
+    js:   '/screens/settings-marketplaces.js',
+    title: 'Settings · Marketplaces',
   },
 };
 
