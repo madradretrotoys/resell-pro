@@ -79,47 +79,25 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
     // Optional: if present, we update instead of insert
     const item_id_in: string | null = body?.item_id ? String(body.item_id) : null;
 
-    // If the client requested a delete, do it now (and exit)
-    if (body?.action === "delete") {
-      if (!item_id_in) return json({ ok: false, error: "missing_item_id" }, 400);
-      // inventory → item_listing_profile cascades ON DELETE
-      await sql/*sql*/`
-        DELETE FROM app.inventory
-        WHERE item_id = ${item_id_in}
-      `;
-      return json({ ok: true, deleted: true, item_id: item_id_in }, 200);
-    }
-
     // Look up category_code from sku_categories
     const catRows = await sql<{ category_code: string }[]>`
       SELECT category_code FROM app.sku_categories WHERE category_name = ${inv.category_nm} LIMIT 1
     `;
     if (catRows.length === 0) return json({ ok: false, error: "bad_category" }, 400);
       const category_code = catRows[0].category_code;
-        
+
         // If item_id was provided, UPDATE existing rows instead of INSERT
         if (item_id_in) {
           // Load existing inventory row to check current SKU & status and tenant ownership
           const existing = await sql<{ item_id: string; sku: string | null; item_status: string | null }[]>`
             SELECT item_id, sku, item_status
             FROM app.inventory
-            WHERE item_id = ${item_id_in}
+            WHERE tenant_id = ${tenant_id} AND item_id = ${item_id_in}
             LIMIT 1
           `;
-          
           if (existing.length === 0) {
             return json({ ok: false, error: "not_found" }, 404);
           }
-
-          // Once a SKU exists, the category is locked. Only enforce if client actually sent a category value.
-          if (
-            existing[0].sku &&
-            inv?.category_nm != null &&
-            String(inv.category_nm) !== String(existing[0].category_nm || "")
-          ) {
-            return json({ ok: false, error: "category_locked", message: "Category cannot be changed after a SKU is assigned. Delete the item and re-intake if needed." }, 400);
-          }
-          
         
           // Decide SKU: if promoting draft → active and no SKU yet, allocate one; otherwise keep existing SKU
           let sku: string | null = existing[0].sku;
@@ -168,10 +146,9 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
               case_bin_shelf = ${inv.case_bin_shelf},
               instore_online = ${inv.instore_online},
               item_status = ${status}
-            WHERE item_id = ${item_id_in}
+            WHERE tenant_id = ${tenant_id} AND item_id = ${item_id_in}
             RETURNING item_id, sku
           `;
-
           const item_id = updInv[0].item_id;
           const retSku  = updInv[0].sku;
         
