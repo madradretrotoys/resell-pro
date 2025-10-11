@@ -1,6 +1,6 @@
 import { ensureSession, waitForSession } from '/assets/js/auth.js';
 import { showToast } from '/assets/js/ui.js';
-
+import '/assets/js/api.js'; // ensure window.api is available to screens
 const SCREENS = {
   dashboard: { html: '/screens/dashboard.html', js: '/screens/dashboard.js', title: 'Dashboard' },
   pos:       { html: '/screens/pos.html',       js: '/screens/pos.js',       title: 'POS' },
