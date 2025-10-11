@@ -36,6 +36,10 @@ export async function init(ctx) {
 
     const rows = data?.marketplaces || [];
     const container = document.querySelector("#mp-list");
+    if (!container) {
+      hide(loading);
+      return showBanner("Marketplace list container not found in HTML.", "error");
+    }
     container.innerHTML = rows.map((r) => {
       const connected = String(r.status || "").toLowerCase() === "connected";
       const badge = connected ? `<span class="badge" style="margin-left:8px">Connected</span>` : "";
@@ -74,8 +78,12 @@ export async function init(ctx) {
       });
     });
 
-    hide(loading);
+     hide(loading);
     show(content);
+  } catch (err) {
+    console.error(err);
+    hide(loading);
+    showBanner("Could not load Marketplace Settings.", "error");
   }
 
   function showBanner(message, tone = "info") {
