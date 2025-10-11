@@ -56,7 +56,29 @@ export const onRequestGet: PagesFunction = async ({ request, env }) => {
       sql`SELECT instore_locations FROM app.instore_locations_1 ORDER BY instore_locations ASC`,
       sql`SELECT sales_channel FROM app.sales_channels ORDER BY sales_channel ASC`,
     ]);
-    
+
+    // NEW: (optional) tenant for marketplace enablement/connection flags
+    const tenantId = request.headers.get("x-tenant-id") || null;
+
+    // NEW: available marketplaces + tenant flags
+    const marketplaces = await sql/*sql*/`
+      SELECT
+        ma.id,
+        ma.slug,
+        ma.marketplace_name,
+        ma.is_active,
+        ma.ui_notes,
+        COALESCE(tm.enabled, false) AS enabled_for_tenant,
+        (mc.status = 'connected')   AS is_connected
+      FROM app.marketplaces_available ma
+      LEFT JOIN app.tenant_marketplaces tm
+        ON tm.marketplace_id = ma.id AND tm.tenant_id = ${tenantId}
+      LEFT JOIN app.marketplace_connections mc
+        ON mc.marketplace_id = ma.id AND mc.tenant_id = ${tenantId}
+      WHERE ma.is_active = true
+      ORDER BY ma.marketplace_name ASC
+    `;
+ 
     const payloadOut = {
       categories: categories, // [{category_name, category_code}]
       marketplace: {
@@ -66,11 +88,14 @@ export const onRequestGet: PagesFunction = async ({ request, env }) => {
         conditions: conditions.map((r: any) => r.condition_name),
         colors: colors.map((r: any) => r.color_name),
       },
+      // NEW
+      marketplaces,
       shipping_boxes: shippingBoxes, // [{box_name, weight_lb, weight_oz, length, width, height}]
       store_locations: storeLocations.map((r: any) => r.instore_locations),
       sales_channels: salesChannels.map((r: any) => r.sales_channel),
+      
     };
-
+    
     return json(payloadOut, 200);
   } catch (e: any) {
     return json({ ok: false, error: "server_error", message: e?.message || String(e) }, 500);
