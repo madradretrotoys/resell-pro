@@ -68,7 +68,7 @@ export async function init(ctx) {
           ${notes}
           <div class="actions">${btn}</div>
         </div>
-      ``;
+      `;
     }).join("");
     }
 
