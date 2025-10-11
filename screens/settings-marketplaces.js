@@ -2,7 +2,7 @@
 // Settings › Marketplaces (Placeholder)
 // Based on screens/_template/screen-template.js: export async function init()
 
-export async function init() {
+export async function init(ctx) {
   const $ = (sel) => document.querySelector(sel);
   const banner = $("#settings-marketplaces-banner");
   const denied = $("#settings-marketplaces-denied");
@@ -20,32 +20,19 @@ export async function init() {
   hide(content);
 
   try {
-    // Auth + role (project protocol)
-    let session = null;
-    if (window.auth?.ensureSession) {
-      session = await window.auth.ensureSession();
-    } else if (window.api) {
-      const res = await window.api("/api/auth/session");
-      session = res?.data || res;
-    }
+    // Use router-provided session; do NOT re-fetch here
+    const session = ctx?.session;
 
-    const role = session?.user?.role || session?.role || "";
-    const isOwnerOrAdmin = ["owner", "Owner", "admin", "Admin"].includes(role);
-
-    if (!isOwnerOrAdmin) {
+    // Defer authorization to the server (same pattern as Users screen)
+    // We call an API endpoint that applies the allowSettings policy.
+    try {
+      await window.api("/api/settings/marketplaces/list");
+    } catch (e) {
       hide(loading);
-      return show(denied);
-    }
-
-    // Placeholder render
-    hide(loading);
-    show(content);
-
-  } catch (err) {
-    console.error(err);
-    hide(loading);
-    if (err?.status === 403) {
-      return show(denied);
+      if (e && e.status === 403) {
+        return show(denied);
+      }
+      return showBanner("Could not load Marketplace Settings.", "error");
     }
     showBanner("Could not load Marketplace Settings.", "error");
   }
