@@ -335,22 +335,135 @@ function setMarketplaceVisibility() {
     const v = (sales?.value || "").toLowerCase();
     return v.includes("marketplace") || v.includes("both");
   }
-  
-  // Helpers needed by computeValidity (top-level so they are always in scope)
-  function controlsIn(el) {
-    if (!el) return [];
-    return Array.from(el.querySelectorAll("input, select, textarea"))
-      .filter(n => !n.disabled && n.type !== "hidden");
+
+  // === NEW: Marketplace tiles state + helpers ===
+  const MP_TILES_ID = "marketplaceTiles";
+  const MP_ERROR_ID = "marketplaceTilesError";
+  const MP_DEFAULTS_KEY = "rp:intake:lastCrosslist"; // prototype: local defaults
+
+  /** currently selected marketplace IDs (from app.marketplaces_available.id) */
+  const selectedMarketplaceIds = new Set();
+
+  function readDefaults() {
+    try {
+      const raw = localStorage.getItem(MP_DEFAULTS_KEY);
+      if (!raw) return [];
+      const arr = JSON.parse(raw);
+      return Array.isArray(arr) ? arr.map(Number).filter(n => !Number.isNaN(n)) : [];
+    } catch { return []; }
   }
-  function markBatchValidity(nodes, isValidFn) {
-    let allOk = true;
-    for (const n of nodes) {
-      const ok = isValidFn(n);
-      n.setAttribute("aria-invalid", ok ? "false" : "true");
-      if (!ok) allOk = false;
+  function writeDefaults(ids) {
+    try { localStorage.setItem(MP_DEFAULTS_KEY, JSON.stringify(ids)); } catch {}
+  }
+
+  function renderMarketplaceTiles(meta) {
+    const host = document.getElementById(MP_TILES_ID);
+    if (!host) return;
+    host.innerHTML = "";
+
+    const rows = (meta?.marketplaces || []).filter(m => m.is_active !== false);
+    const defaults = readDefaults();
+
+    const enableForSelection = (m) => !!(m.enabled_for_tenant && m.is_connected);
+
+    for (const m of rows) {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "btn btn-sm rounded-2xl";
+      btn.dataset.marketplaceId = String(m.id);
+      btn.title = m.marketplace_name || m.slug || "Marketplace";
+
+      const enabledSelectable = enableForSelection(m);
+
+      // baseline visual
+      btn.classList.add(enabledSelectable ? "btn-ghost" : "opacity-50", "cursor-not-allowed");
+      if (!enabledSelectable) {
+        btn.disabled = true;
+        btn.setAttribute("aria-disabled", "true");
+      }
+
+      // label
+      btn.textContent = m.marketplace_name || m.slug || `#${m.id}`;
+
+      // preselect from defaults (only if still selectable)
+      if (enabledSelectable && defaults.includes(m.id)) {
+        selectedMarketplaceIds.add(m.id);
+        btn.classList.remove("btn-ghost");
+        btn.classList.add("btn-primary");
+        btn.setAttribute("aria-pressed", "true");
+      } else {
+        btn.setAttribute("aria-pressed", "false");
+      }
+
+      // click toggles selection if selectable
+      if (enabledSelectable) {
+        btn.addEventListener("click", () => {
+          const id = Number(btn.dataset.marketplaceId);
+          const isSel = selectedMarketplaceIds.has(id);
+          if (isSel) {
+            selectedMarketplaceIds.delete(id);
+            btn.classList.remove("btn-primary");
+            btn.classList.add("btn-ghost");
+            btn.setAttribute("aria-pressed", "false");
+          } else {
+            selectedMarketplaceIds.add(id);
+            btn.classList.remove("btn-ghost");
+            btn.classList.add("btn-primary");
+            btn.setAttribute("aria-pressed", "true");
+          }
+          // live-validate after any toggle
+          computeValidity();
+        });
+      } else {
+        btn.addEventListener("click", () => {
+          alert("This marketplace isn’t connected for your tenant yet. Please ask your manager to connect it.");
+        });
+      }
+
+      host.appendChild(btn);
     }
+  }
+
+  function showMarketplaceTilesError(show) {
+    const el = document.getElementById(MP_ERROR_ID);
+    if (!el) return;
+    el.classList.toggle("hidden", !show);
+  }
+  // === END NEW ===
+
+  function computeValidity() {
+    // BASIC — always required (explicit control list)
+    const basicControls = getBasicRequiredControls();
+    const basicOk = markBatchValidity(basicControls, hasValue);
+  
+    // MARKETPLACE — required only when active
+    let marketOk = true;
+    if (marketplaceActive()) {
+      const marketControls = getMarketplaceRequiredControls();
+      marketOk = markBatchValidity(marketControls, hasValue);
+
+      // NEW: also require ≥1 marketplace tile selected
+      if (marketOk) {
+        const hasAny = selectedMarketplaceIds.size >= 1;
+        marketOk = marketOk && hasAny;
+        showMarketplaceTilesError(!hasAny);
+      } else {
+        showMarketplaceTilesError(false);
+      }
+    } else {
+      // clear invalid state for marketplace when not required
+      getMarketplaceRequiredControls().forEach(n => n.setAttribute("aria-invalid", "false"));
+      showMarketplaceTilesError(false);
+    }
+  
+    const allOk = basicOk && marketOk;
+    setCtasEnabled(allOk);
+    document.dispatchEvent(new CustomEvent("intake:validity-changed", { detail: { valid: allOk } }));
     return allOk;
   }
+
+
+  
   function hasValue(n) {
     if (!n) return false;
     if (n.tagName === "SELECT") return n.value !== "";
@@ -439,6 +552,9 @@ function setMarketplaceVisibility() {
     });
     wireShippingBoxAutofill(meta);
 
+    // NEW: Render marketplace tiles (below Shipping)
+    renderMarketplaceTiles(meta);
+    
     // Store + channel
     fillSelect($("storeLocationSelect"), meta.store_locations);
     fillSelect($("salesChannelSelect"), meta.sales_channels);
@@ -545,8 +661,10 @@ function setMarketplaceVisibility() {
         shipbx_width: Number(valByIdOrLabel("shipWidth", "Width") || 0),
         shipbx_height: Number(valByIdOrLabel("shipHeight", "Height") || 0),
       };
-    
-      return { inventory, listing };
+      // NEW: add selected marketplaces to payload
+      const marketplaces_selected = Array.from(selectedMarketplaceIds.values());
+      
+      return { inventory, listing, marketplaces_selected };
     }
     
     async function submitIntake(mode = "active") {
@@ -570,8 +688,13 @@ function setMarketplaceVisibility() {
       if (!res || res.ok === false) {
           throw new Error(res?.error || "intake_failed");
         }
-  
-        // Post-save UX: confirm, disable fields, and swap CTAs to Edit/Add New
+
+        // Save defaults (local) on success so user gets the same picks next time
+        try {
+          writeDefaults(Array.from(selectedMarketplaceIds.values()));
+        } catch {}
+
+        // Post-save UX: confirm, disable fields, and swap CTAs
         postSaveSuccess(res, mode);
       try {
         const skuEl = document.querySelector("[data-sku-out]");
