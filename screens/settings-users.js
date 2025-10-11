@@ -1,4 +1,4 @@
-//Begin settings-users.js
+
 import { api } from '/assets/js/api.js';
 import { ensureSession } from '/assets/js/auth.js';
 import { applyButtonGroupColors } from '/assets/js/ui.js';
@@ -105,4 +105,4 @@ function escapeHtml(s) {
     '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'
   }[c]));
 }
-//End settings-users.js
+
