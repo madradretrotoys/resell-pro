@@ -100,9 +100,9 @@ export async function init(ctx) {
     // Wire Subscribe toggle
     container.querySelectorAll('input[data-action="toggle-enabled"]').forEach((chk) => {
       chk.addEventListener("change", async (ev) => {
-        const el = ev.currentTarget as HTMLInputElement;
+        const el = ev.currentTarget; // HTMLInputElement
         const id = Number(el.getAttribute("data-id"));
-        const wrap = container.querySelector(`[data-connect-wrap="${id}"]`) as HTMLElement | null;
+        const wrap = container.querySelector(`[data-connect-wrap="${id}"]`);
 
         el.disabled = true;
         const wantEnable = el.checked;
@@ -129,9 +129,9 @@ export async function init(ctx) {
     });
 
     // Wire Connect / Disconnect buttons
-    container.querySelectorAll('button[data-action="connect"]').forEach((btn) => {
+      container.querySelectorAll('button[data-action="disconnect"]').forEach((btn) => {
       btn.addEventListener("click", async (ev) => {
-        const b = ev.currentTarget as HTMLButtonElement;
+        const b = ev.currentTarget; // HTMLButtonElement
         const id = Number(b.getAttribute("data-id"));
         b.disabled = true;
         try {
