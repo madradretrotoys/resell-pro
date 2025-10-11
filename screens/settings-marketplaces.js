@@ -1,3 +1,4 @@
+//begin marketplaces.js
 // Settings › Marketplaces (Placeholder)
 // Based on screens/_template/screen-template.js: export async function init()
 
@@ -57,3 +58,4 @@ export async function init() {
     setTimeout(() => (banner.hidden = true), 5000);
   }
 }
+//end marketplaces.js
