@@ -1,4 +1,4 @@
-// functions/api/settings/marketplaces/list.ts
+// begin functions/api/settings/marketplaces/list.ts
 // Mirrors the access policy used by settings/users/list.ts.
 // Returns a trivial payload for now (we’ll add real data in the next phase).
 
@@ -89,3 +89,4 @@ export const onRequestGet: PagesFunction = async ({ request, env }) => {
     return json({ ok: false, error: "server_error", message: e?.message || String(e) }, 500);
   }
 };
+// end functions/api/settings/marketplaces/list.ts
