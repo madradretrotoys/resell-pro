@@ -1,6 +1,7 @@
 //begin marketplaces.js
 // Settings › Marketplaces (Placeholder)
 // Based on screens/_template/screen-template.js: export async function init()
+import { api } from '/assets/js/api.js';
 
 export async function init(ctx) {
   const $ = (sel) => document.querySelector(sel);
@@ -30,8 +31,7 @@ export async function init(ctx) {
     // Fetch available marketplaces + current connection status for this tenant.
     let data;
     try {
-      console.log("[mp] window.api type:", typeof window.api);
-      data = await window.api("/api/settings/marketplaces/list");
+      data = await api("/api/settings/marketplaces/list");
       console.log("[mp] list OK");
     } catch (e) {
       hide(loading);
@@ -80,7 +80,7 @@ export async function init(ctx) {
 
         try {
           // Use POST; include id in query as a fallback (helper will attach tenant headers)
-          await window.api(`/api/settings/marketplaces/connect?marketplace_id=${id}`, { method: "POST" });
+          await api(`/api/settings/marketplaces/connect?marketplace_id=${id}`, { method: "POST" });
           ev.currentTarget.textContent = "Connected";
           ev.currentTarget.classList.remove("btn--primary");
           ev.currentTarget.classList.add("btn--neutral");
