@@ -83,8 +83,26 @@ export const onRequestGet: PagesFunction = async ({ request, env }) => {
       return json({ ok: false, error: "forbidden" }, 403);
     }
 
-    // For now, just confirm access (the UI only needs a 200 vs 403)
-    return json({ ok: true });
+        // Return all active marketplaces + tenant's connection status
+    const rows = await sql/*sql*/`
+      SELECT
+        m.id,
+        m.marketplace_name,
+        m.slug,
+        m.is_active,
+        m.auth_type,
+        m.api_base_url,
+        m.ui_notes,
+        COALESCE(c.status::text, 'never_connected') AS status
+      FROM app.marketplaces_available m
+      LEFT JOIN app.marketplace_connections c
+        ON c.marketplace_id = m.id AND c.tenant_id = ${tenant_id}
+      WHERE m.is_active = true
+      ORDER BY m.marketplace_name
+    `;
+
+    return json({ ok: true, marketplaces: rows });
+
   } catch (e: any) {
     return json({ ok: false, error: "server_error", message: e?.message || String(e) }, 500);
   }
