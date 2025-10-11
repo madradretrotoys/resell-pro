@@ -643,7 +643,10 @@ function setMarketplaceVisibility() {
           // NOTE: do NOT include listing or marketplaces_selected for drafts
         };
       }
-    
+
+      const salesChannel = valByIdOrLabel("salesChannelSelect", "Sales Channel");
+      const isStoreOnly = /store only/i.test(String(salesChannel || ""));
+      
       // Active/new items: full payload
       const inventory = {
         product_short_title: title,
@@ -655,7 +658,12 @@ function setMarketplaceVisibility() {
         case_bin_shelf: valByIdOrLabel(null, "Case#/Bin#/Shelf#"),
         instore_online: valByIdOrLabel("salesChannelSelect", "Sales Channel"),
       };
-    
+
+      if (isStoreOnly) {
+        // For Store Only: no marketplace listing data
+        return { inventory };
+      }
+      
       const listing = {
         listing_category: valByIdOrLabel("marketplaceCategorySelect", "Marketplace Category"),
         item_condition: valByIdOrLabel("conditionSelect", "Condition"),
@@ -740,7 +748,6 @@ function setMarketplaceVisibility() {
           try {
             btn.disabled = true;
             await submitIntake("draft");
-            alert("Draft saved.");
           } catch (err) {
             console.error("intake:draft:error", err);
             alert("Failed to save draft.");
