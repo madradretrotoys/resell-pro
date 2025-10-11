@@ -272,16 +272,48 @@ function setMarketplaceVisibility() {
   }
 
 
-  // --- Validation helpers (unchanged) ---
+ 
+    // --- Validation helpers (HOISTED so computeValidity can see them) ---
   function getEl(id) { try { return document.getElementById(id); } catch { return null; } }
-  function nonEmptySelect(el) { return !!el && el.value !== ""; }
   function markValidity(el, ok) { if (!el) return; el.setAttribute("aria-invalid", ok ? "false" : "true"); }
-  function setCtasEnabled(isValid) {
-    ["intake-submit", "intake-save", "intake-next", "intake-draft"].forEach((id) => {
-      const btn = getEl(id);
-      if (btn) btn.disabled = !isValid;
-    });
+
+  // Generic value check for required controls
+  function hasValue(n) {
+    if (!n) return false;
+    if (n.tagName === "SELECT") return n.value !== "";
+    if (n.type === "checkbox" || n.type === "radio") return n.checked;
+    return String(n.value ?? "").trim() !== "";
   }
+
+  // Mark invalid/valid for a batch
+  function markBatchValidity(nodes, isValidFn) {
+    let allOk = true;
+    for (const n of nodes) {
+      const ok = isValidFn(n);
+      n.setAttribute("aria-invalid", ok ? "false" : "true");
+      if (!ok) allOk = false;
+    }
+    return allOk;
+  }
+
+  // Enable/disable CTAs:
+  // - ACTIVE CTAs (Add Single / Add to Bulk) depend on full validity
+  // - DRAFT CTA depends only on the Title being non-empty
+  function setCtasEnabled(activeValid) {
+    // ACTIVE CTAs by id or by visible text:
+    const activeIds = ["intake-submit", "intake-save", "intake-next", "intake-add-single", "intake-add-bulk", "btnAddSingle_bottom", "btnAddBulk_bottom"];
+    const actById   = activeIds.map((id) => document.getElementById(id)).filter(Boolean);
+    const actByText = Array.from(document.querySelectorAll("button, a[role='button']"))
+      .filter((b) => /add single item|add to bulk list/i.test((b.textContent || "").trim()));
+    [...actById, ...actByText].forEach((btn) => { btn.disabled = !activeValid; });
+
+    // DRAFT CTA: enable if Title has any value
+    const title = resolveControl(null, "Item Name / Description");
+    const draftOk = !!title && String(title.value || "").trim() !== "";
+    const draftBtn = document.getElementById("intake-draft");
+    if (draftBtn) draftBtn.disabled = !draftOk;
+  }
+
 
   // === [ADD] resolvers + explicit required-field lists (by ID or label) ===
   function resolveControl(id, labelText) {
@@ -378,9 +410,17 @@ function setMarketplaceVisibility() {
 
       const enabledSelectable = enableForSelection(m);
 
-      // baseline visual
-      btn.classList.add(enabledSelectable ? "btn-ghost" : "opacity-50", "cursor-not-allowed");
-      if (!enabledSelectable) {
+      // Baseline styling
+      btn.className = "btn btn-sm rounded-2xl";
+
+      const enabledSelectable = enableForSelection(m);
+
+      if (enabledSelectable) {
+        // Enabled tiles start as ghost (pale) until selected
+        btn.classList.add("btn-ghost");
+      } else {
+        // Disabled tiles are dimmed and non-interactive
+        btn.classList.add("btn-ghost", "opacity-50", "cursor-not-allowed");
         btn.disabled = true;
         btn.setAttribute("aria-disabled", "true");
       }
