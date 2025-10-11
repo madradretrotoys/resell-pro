@@ -300,18 +300,28 @@ function setMarketplaceVisibility() {
   // - ACTIVE CTAs (Add Single / Add to Bulk) depend on full validity
   // - DRAFT CTA depends only on the Title being non-empty
   function setCtasEnabled(activeValid) {
-    // ACTIVE CTAs by id or by visible text:
+    // ACTIVE CTAs (Add Single / Add to Bulk) by id or visible text:
     const activeIds = ["intake-submit", "intake-save", "intake-next", "intake-add-single", "intake-add-bulk", "btnAddSingle_bottom", "btnAddBulk_bottom"];
     const actById   = activeIds.map((id) => document.getElementById(id)).filter(Boolean);
     const actByText = Array.from(document.querySelectorAll("button, a[role='button']"))
       .filter((b) => /add single item|add to bulk list/i.test((b.textContent || "").trim()));
-    [...actById, ...actByText].forEach((btn) => { btn.disabled = !activeValid; });
-
-    // DRAFT CTA: enable if Title has any value
+  
+    [...actById, ...actByText].forEach((btn) => {
+      const enable = !!activeValid;
+      btn.disabled = !enable;
+      btn.classList.toggle("opacity-60", !enable);
+      btn.classList.toggle("cursor-not-allowed", !enable);
+    });
+  
+    // DRAFT CTA: enable if Title has any value (independent of full validity)
     const title = resolveControl(null, "Item Name / Description");
     const draftOk = !!title && String(title.value || "").trim() !== "";
     const draftBtn = document.getElementById("intake-draft");
-    if (draftBtn) draftBtn.disabled = !draftOk;
+    if (draftBtn) {
+      draftBtn.disabled = !draftOk;
+      draftBtn.classList.toggle("opacity-60", !draftOk);
+      draftBtn.classList.toggle("cursor-not-allowed", !draftOk);
+    }
   }
 
 
@@ -399,8 +409,17 @@ function setMarketplaceVisibility() {
     const rows = (meta?.marketplaces || []).filter(m => m.is_active !== false);
     const defaults = readDefaults();
 
-    const enableForSelection = (m) => !!(m.enabled_for_tenant && m.is_connected);
-
+    // PROTOTYPE RULE:
+    // If ZERO marketplaces are connected for this tenant, allow selecting ALL active marketplaces.
+    const anyConnected = rows.some(r => r.enabled_for_tenant && r.is_connected);
+    const enableForSelection = (m) => {
+      if (anyConnected) {
+        return !!(m.enabled_for_tenant && m.is_connected);
+      }
+      // Prototype fallback: let the user pick active marketplaces even without connections
+      return m.is_active !== false;
+    };
+    
     for (const m of rows) {
       const btn = document.createElement("button");
       btn.type = "button";
@@ -602,36 +621,6 @@ function setMarketplaceVisibility() {
         .filter(n => !n.disabled && n.type !== "hidden");
     }
     
-    // Mark invalid/valid for a batch
-    function markBatchValidity(nodes, isValidFn) {
-      let allOk = true;
-      for (const n of nodes) {
-        const ok = isValidFn(n);
-        n.setAttribute("aria-invalid", ok ? "false" : "true");
-        if (!ok) allOk = false;
-      }
-      return allOk;
-    }
-    
-    // Generic value check for required controls
-    function hasValue(n) {
-      if (!n) return false;
-      if (n.tagName === "SELECT") return n.value !== "";
-      if (n.type === "checkbox" || n.type === "radio") return n.checked;
-      return String(n.value ?? "").trim() !== "";
-    }
-    
-    // Enable/disable CTAs
-    function setCtasEnabled(isValid) {
-      // Prefer explicit IDs if you have them
-      const ids = ["intake-submit", "intake-save", "intake-next", "intake-add-single", "intake-add-bulk"];
-      const foundById = ids.map(id => document.getElementById(id)).filter(Boolean);
-      const foundByText = Array.from(document.querySelectorAll("button, a[role='button']"))
-        .filter(b => /add single item|add to bulk list/i.test((b.textContent || "").trim()));
-    
-      [...foundById, ...foundByText].forEach(btn => { btn.disabled = !isValid; });
-    }
-
 
     // Apply placeholders if any list was empty
     ensurePlaceholder($("categorySelect"));
