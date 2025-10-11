@@ -21,13 +21,18 @@ export async function init(ctx) {
 
   try {
     // Use router-provided session; do NOT re-fetch here
+    console.log("[mp] init() starting");
+    // Use router-provided session; do NOT re-fetch here
     const session = ctx?.session;
+    console.log("[mp] session role:", session?.user?.role || session?.role);
 
     // Defer authorization to the server (same pattern as Users screen)
     // Fetch available marketplaces + current connection status for this tenant.
     let data;
     try {
+      console.log("[mp] window.api type:", typeof window.api);
       data = await window.api("/api/settings/marketplaces/list");
+      console.log("[mp] list OK");
     } catch (e) {
       hide(loading);
       if (e && e.status === 403) return show(denied);
