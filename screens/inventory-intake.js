@@ -413,7 +413,7 @@ function setMarketplaceVisibility() {
       // Baseline styling
       btn.className = "btn btn-sm rounded-2xl";
 
-      const enabledSelectable = enableForSelection(m);
+      
 
       if (enabledSelectable) {
         // Enabled tiles start as ghost (pale) until selected
