@@ -1,4 +1,4 @@
-// Settings Landing (Chooser)
+// Begin landing.js Settings Landing (Chooser)
 export async function init(ctx) {
   const $ = (sel) => document.querySelector(sel);
   const show = (el) => { el && (el.hidden = false); };
@@ -74,3 +74,4 @@ export async function init(ctx) {
     window.router?.go?.("?page=settings-marketplaces") || (window.location.href = "?page=settings-marketplaces");
   }
 }
+// end landing.js 
