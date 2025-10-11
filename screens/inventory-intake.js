@@ -620,7 +620,10 @@ function setMarketplaceVisibility() {
     // Wire and run initial validation
     wireValidation();
     computeValidity();
-
+    
+    // Auto-load drafts into the Drafts tab on screen load (does not auto-switch the tab)
+    await loadDrafts?.();
+    
     // --- [NEW] Submission wiring: both buttons call POST /api/inventory/intake ---
     function valByIdOrLabel(id, label) {
       const el = id ? document.getElementById(id) : null;
@@ -764,6 +767,252 @@ function setMarketplaceVisibility() {
     // Hold the current item id across edits so the next save updates, not creates
     let __currentItemId = null;
 
+    /** Format a timestamp into a short local string */
+    function fmtSaved(ts) {
+      try {
+        const d = new Date(ts);
+        return isNaN(d.getTime()) ? "—" : d.toLocaleString();
+      } catch { return "—"; }
+    }
+    
+    /** Render a single draft row */
+    function renderDraftRow(row) {
+      const tr = document.createElement("tr");
+      tr.className = "border-b";
+      tr.innerHTML = `
+        <td class="px-3 py-2 whitespace-nowrap">${fmtSaved(row.saved_at)}</td>
+        <td class="px-3 py-2">${row.product_short_title || "—"}</td>
+        <td class="px-3 py-2">${row.price != null ? `$${Number(row.price).toFixed(2)}` : "—"}</td>
+        <td class="px-3 py-2">${row.qty ?? "—"}</td>
+        <td class="px-3 py-2">${row.category_nm || "—"}</td>
+        <td class="px-3 py-2">
+          <div class="flex gap-2">
+            <button type="button" class="btn btn-primary btn-sm" data-action="load" data-item-id="${row.item_id}">Load</button>
+            <button type="button" class="btn btn-ghost btn-sm" data-action="delete" data-item-id="${row.item_id}">Delete</button>
+          </div>
+        </td>
+      `;
+      return tr;
+    }
+    
+    /** Populate intake form controls from saved inventory + listing profile */
+    function populateFromSaved(inv, listing) {
+      // Basic Item Details
+      const title = document.getElementById("titleInput") || findControlByLabel("Item Name / Description");
+      if (title) title.value = inv?.product_short_title ?? "";
+    
+      const price = document.getElementById("priceInput") || findControlByLabel("Price (USD)");
+      if (price) price.value = inv?.price ?? "";
+    
+      const qty = document.getElementById("qtyInput") || findControlByLabel("Qty");
+      if (qty) qty.value = inv?.qty ?? "";
+    
+      const cat = document.getElementById("categorySelect") || findControlByLabel("Category");
+      if (cat) cat.value = inv?.category_nm ?? "";
+    
+      const store = document.getElementById("storeLocationSelect") || findControlByLabel("Store Location");
+      if (store) store.value = inv?.instore_loc ?? "";
+    
+      const cogs = document.getElementById("costInput") || findControlByLabel("Cost of Goods (USD)");
+      if (cogs) cogs.value = inv?.cost_of_goods ?? "";
+    
+      const bin = document.getElementById("caseBinShelfInput") || findControlByLabel("Case#/Bin#/Shelf#");
+      if (bin) bin.value = inv?.case_bin_shelf ?? "";
+    
+      const sales = document.getElementById("salesChannelSelect") || findControlByLabel("Sales Channel");
+      if (sales) sales.value = inv?.instore_online ?? "";
+    
+      // Marketplace Listing Details (optional for drafts)
+      if (listing) {
+        const mpCat = document.getElementById("marketplaceCategorySelect") || findControlByLabel("Marketplace Category");
+        if (mpCat) mpCat.value = listing.listing_category ?? "";
+    
+        const cond = document.getElementById("conditionSelect") || findControlByLabel("Condition");
+        if (cond) cond.value = listing.item_condition ?? "";
+    
+        const brand = document.getElementById("brandSelect") || findControlByLabel("Brand");
+        if (brand) brand.value = listing.brand_name ?? "";
+    
+        const color = document.getElementById("colorSelect") || findControlByLabel("Primary Color");
+        if (color) color.value = listing.primary_color ?? "";
+    
+        const desc = document.getElementById("longDescriptionTextarea") || findControlByLabel("Long Description");
+        if (desc) desc.value = listing.product_description ?? "";
+    
+        const shipBox = document.getElementById("shippingBoxSelect") || findControlByLabel("Shipping Box");
+        if (shipBox) shipBox.value = listing.shipping_box ?? "";
+    
+        const lb  = document.getElementById("weightLbInput") || findControlByLabel("Weight (lb)");
+        const oz  = document.getElementById("weightOzInput") || findControlByLabel("Weight (oz)");
+        const len = document.getElementById("lengthInput")   || findControlByLabel("Length");
+        const wid = document.getElementById("widthInput")    || findControlByLabel("Width");
+        const hei = document.getElementById("heightInput")   || findControlByLabel("Height");
+        if (lb)  lb.value  = listing.weight_lb ?? "";
+        if (oz)  oz.value  = listing.weight_oz ?? "";
+        if (len) len.value = listing.shipbx_length ?? "";
+        if (wid) wid.value = listing.shipbx_width ?? "";
+        if (hei) hei.value = listing.shipbx_height ?? "";
+      }
+    
+      // Recompute validity / show or hide marketplace fields as needed
+      try { setMarketplaceVisibility(); } catch {}
+      try { computeValidity(); } catch {}
+    }
+    
+    /** Enter existing-view mode (disabled fields + Edit/Add New/Delete CTAs) */
+    function enterViewMode({ item_id, hasSku = false }) {
+      __currentItemId = item_id;
+    
+      // Disable all fields
+      try {
+        const form = document.getElementById("intakeForm");
+        if (form) {
+          const ctrls = Array.from(form.querySelectorAll("input, select, textarea"));
+          ctrls.forEach((el) => { el.disabled = true; el.readOnly = true; el.setAttribute("aria-disabled", "true"); });
+        }
+      } catch {}
+    
+      // Swap CTAs to Edit / Add New / Delete (mirror postSaveSuccess)
+      try {
+        const actionsRow = document.querySelector(".actions.flex.gap-2");
+        if (actionsRow) {
+          if (__originalCtasHTML == null) __originalCtasHTML = actionsRow.innerHTML;
+          actionsRow.innerHTML = `
+            <button id="btnEditItem" class="btn btn-primary btn-sm">Edit Item</button>
+            <button id="btnAddNew" class="btn btn-ghost btn-sm">Add New Item</button>
+            <button id="btnDeleteItem" class="btn btn-danger btn-sm">Delete</button>
+          `;
+          const btnEdit = document.getElementById("btnEditItem");
+          const btnNew  = document.getElementById("btnAddNew");
+          const btnDel  = document.getElementById("btnDeleteItem");
+    
+          if (btnEdit) btnEdit.addEventListener("click", (e) => {
+            e.preventDefault();
+            try {
+              const form = document.getElementById("intakeForm");
+              if (form) {
+                const ctrls = Array.from(form.querySelectorAll("input, select, textarea"));
+                ctrls.forEach((el) => { el.disabled = false; el.readOnly = false; el.removeAttribute("aria-disabled"); });
+                if (hasSku) {
+                  const cat = document.getElementById("categorySelect");
+                  if (cat) { cat.disabled = true; cat.setAttribute("aria-disabled", "true"); }
+                }
+              }
+            } catch {}
+            // Restore original CTAs and rewire
+            try {
+              if (__originalCtasHTML != null) {
+                actionsRow.innerHTML = __originalCtasHTML;
+                wireCtas();
+              }
+            } catch {}
+            computeValidity();
+          });
+    
+          if (btnNew) btnNew.addEventListener("click", (e) => {
+            e.preventDefault();
+            window.location.reload();
+          });
+    
+          if (btnDel) btnDel.addEventListener("click", async (e) => {
+            e.preventDefault();
+            try {
+              if (!__currentItemId) return alert("No item to delete.");
+              const sure = confirm("Delete this item? This cannot be undone.");
+              if (!sure) return;
+              btnDel.disabled = true;
+              const resDel = await api("/api/inventory/intake", {
+                method: "POST",
+                headers: { "content-type": "application/json" },
+                body: JSON.stringify({ action: "delete", item_id: __currentItemId }),
+              });
+              if (!resDel || resDel.ok === false) throw new Error(resDel?.error || "delete_failed");
+              alert("Item deleted.");
+              window.location.reload();
+            } catch (err) {
+              console.error("intake:delete:error", err);
+              alert("Failed to delete item.");
+            } finally {
+              btnDel.disabled = false;
+            }
+          });
+        }
+      } catch {}
+    }
+    
+    /** Click handler: Load a draft into the form and switch to edit path */
+    async function handleLoadDraft(item_id) {
+      try {
+        const res = await api(`/api/inventory/intake?item_id=${encodeURIComponent(item_id)}`, { method: "GET" });
+        if (!res || res.ok === false) throw new Error(res?.error || "fetch_failed");
+        populateFromSaved(res.inventory || {}, res.listing || null);
+    
+        // Enter view mode (treat as previously-saved edit path). Drafts have no SKU.
+        enterViewMode({ item_id, hasSku: !!res?.inventory?.sku });
+      } catch (err) {
+        console.error("drafts:load:error", err);
+        alert("Failed to load draft.");
+      }
+    }
+    
+    /** Click handler: Delete a draft from the list */
+    async function handleDeleteDraft(item_id, rowEl) {
+      try {
+        const sure = confirm("Delete this draft? This cannot be undone.");
+        if (!sure) return;
+        const res = await api("/api/inventory/intake", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ action: "delete", item_id }),
+        });
+        if (!res || res.ok === false) throw new Error(res?.error || "delete_failed");
+        // Remove row
+        if (rowEl && rowEl.parentElement) rowEl.parentElement.removeChild(rowEl);
+      } catch (err) {
+        console.error("drafts:delete:error", err);
+        alert("Failed to delete draft.");
+      }
+    }
+    
+    /** Load and render all pending drafts */
+    async function loadDrafts() {
+      try {
+        const tbody = document.getElementById("recentDraftsTbody");
+        if (!tbody) return;
+        // Fetch recent drafts
+        const res = await api("/api/inventory/drafts", { method: "GET" });
+        if (!res || res.ok === false) throw new Error(res?.error || "drafts_failed");
+        const rows = Array.isArray(res.rows) ? res.rows : [];
+    
+        // Clear tbody
+        tbody.innerHTML = "";
+        if (rows.length === 0) {
+          const tr = document.createElement("tr");
+          tr.innerHTML = `<td class="px-3 py-2 text-gray-500" colspan="6">No drafts yet.</td>`;
+          tbody.appendChild(tr);
+          return;
+        }
+    
+        // Render rows
+        for (const r of rows) {
+          const tr = renderDraftRow(r);
+          tbody.appendChild(tr);
+        }
+    
+        // Wire row buttons
+        tbody.querySelectorAll("button[data-action]").forEach((btn) => {
+          const action = btn.getAttribute("data-action");
+          const id = btn.getAttribute("data-item-id");
+          if (action === "load") {
+            btn.addEventListener("click", () => handleLoadDraft(id));
+          } else if (action === "delete") {
+            btn.addEventListener("click", (e) => handleDeleteDraft(id, btn.closest("tr")));
+          }
+        });
+      } catch (err) {
+        console.error("drafts:load:error", err);
+      }
+    }
     
     wireCtas();
 
