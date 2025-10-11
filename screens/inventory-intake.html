@@ -121,6 +121,27 @@
         </div>
       </div>
 
+      <!-- NEW: Crosslist to Marketplaces (below Shipping) -->
+        <div id="marketplaceCrosslistBlock" style="margin-top:12px">
+          <h3 class="sectionTitle" style="margin:0 0 8px">Crosslist to Marketplaces</h3>
+
+          <!-- Tiles container; filled by JS from meta.marketplaces -->
+          <div id="marketplaceTiles"
+               class="flex flex-wrap gap-2"
+               role="group"
+               aria-labelledby="marketplaceTilesHeader"
+               aria-describedby="marketplaceTilesHelp">
+          </div>
+
+          <div id="marketplaceTilesHelp" class="text-sm text-gray-600 mt-1">
+            Select one or more marketplaces. Disabled tiles mean not connected for your tenant — ask a manager to connect.
+          </div>
+          <div id="marketplaceTilesError" class="text-sm text-red-600 mt-1 hidden">
+            Select at least one marketplace.
+          </div>
+        </div>
+      </div>
+      
       <!-- C) Actions row -->
       <div class="actions flex gap-2">
         <button id="btnAddSingle_bottom" class="btn btn-primary btn-sm opacity-60 cursor-not-allowed" disabled>Add Single Item</button>
