@@ -55,40 +55,117 @@ export async function init(ctx) {
         </div>`;
     } else {
       container.innerHTML = rows.map((r) => {
-      const connected = String(r.status || "").toLowerCase() === "connected";
-      const badge = connected ? `<span class="badge" style="margin-left:8px">Connected</span>` : "";
-      const btn = connected
-        ? `<button class="btn btn--neutral" data-id="${r.id}" disabled>Connected</button>`
-        : `<button class="btn btn--primary" data-id="${r.id}">Connect</button>`;
-      const notes = r.ui_notes ? `<pre class="text-muted" style="white-space:pre-wrap">${JSON.stringify(r.ui_notes, null, 2)}</pre>` : "";
-      return `
-        <div class="card">
-          <h3 style="display:flex;align-items:center;gap:6px">${r.marketplace_name}${badge}</h3>
-          <p class="text-muted">Slug: <code>${r.slug || "-"}</code> · Auth: <code>${r.auth_type}</code></p>
-          ${notes}
-          <div class="actions">${btn}</div>
-        </div>
-      `;
-    }).join("");
-    }
+          const connected = String(r.status || "").toLowerCase() === "connected";
+          const enabled   = !!r.enabled;
+  
+          const notes = r.ui_notes ? `<pre class="text-muted" style="white-space:pre-wrap">${JSON.stringify(r.ui_notes, null, 2)}</pre>` : "";
+  
+          // Subscribe toggle
+          const toggle = `
+            <label class="switch" style="display:flex;align-items:center;gap:8px">
+              <input type="checkbox" data-action="toggle-enabled" data-id="${r.id}" ${enabled ? "checked" : ""} />
+              <span>Enable for tenant</span>
+            </label>
+          `;
+  
+          // Connect/Disconnect (only visible if enabled)
+          const connectBlock = enabled ? `
+            <div class="actions" data-connect-wrap="${r.id}">
+              ${
+                connected
+                ? `<button class="btn btn--neutral" data-action="disconnect" data-id="${r.id}">Disconnect</button>`
+                : `<button class="btn btn--primary" data-action="connect" data-id="${r.id}">Connect</button>`
+              }
+            </div>
+          ` : `<div class="actions" data-connect-wrap="${r.id}" hidden></div>`;
+  
+          // Badges
+          const statusBadge = connected ? `<span class="badge" style="margin-left:8px">Connected</span>` : `<span class="badge" style="margin-left:8px">Not connected</span>`;
+          const enabledBadge = enabled ? `<span class="badge" style="margin-left:8px">Enabled</span>` : `<span class="badge" style="margin-left:8px">Disabled</span>`;
+  
+          return `
+            <div class="card">
+              <h3 style="display:flex;align-items:center;gap:6px">
+                ${r.marketplace_name} ${statusBadge} ${enabledBadge}
+              </h3>
+              <p class="text-muted">Slug: <code>${r.slug || "-"}</code> · Auth: <code>${r.auth_type}</code></p>
+              ${notes}
+              <div class="row" style="display:flex;align-items:center;gap:12px">${toggle}${connectBlock}</div>
+            </div>
+          `;
+        }).join("");
+      }
 
     // Wire Connect buttons
-    container.querySelectorAll("button[data-id]").forEach((btn) => {
-      btn.addEventListener("click", async (ev) => {
-        const id = Number(ev.currentTarget.getAttribute("data-id"));
-        ev.currentTarget.disabled = true;
+    // Wire Subscribe toggle
+    container.querySelectorAll('input[data-action="toggle-enabled"]').forEach((chk) => {
+      chk.addEventListener("change", async (ev) => {
+        const el = ev.currentTarget as HTMLInputElement;
+        const id = Number(el.getAttribute("data-id"));
+        const wrap = container.querySelector(`[data-connect-wrap="${id}"]`) as HTMLElement | null;
+
+        el.disabled = true;
+        const wantEnable = el.checked;
 
         try {
-          // Use POST; include id in query as a fallback (helper will attach tenant headers)
-          await api(`/api/settings/marketplaces/connect?marketplace_id=${id}`, { method: "POST" });
-          ev.currentTarget.textContent = "Connected";
-          ev.currentTarget.classList.remove("btn--primary");
-          ev.currentTarget.classList.add("btn--neutral");
-          showBanner("Connection saved.", "info");
+          if (wantEnable) {
+            await api("/api/settings/marketplaces/subscribe", { method: "POST", body: { marketplace_id: id } });
+            showBanner("Marketplace enabled for tenant.", "info");
+            if (wrap) wrap.hidden = false;
+          } else {
+            await api("/api/settings/marketplaces/unsubscribe", { method: "POST", body: { marketplace_id: id } });
+            showBanner("Marketplace disabled for tenant.", "info");
+            if (wrap) wrap.hidden = true;
+          }
         } catch (e) {
-          ev.currentTarget.disabled = false;
+          // revert UI on error
+          el.checked = !wantEnable;
+          if (e && e.status === 403) return showBanner("Access denied.", "error");
+          showBanner("Failed to update subscription.", "error");
+        } finally {
+          el.disabled = false;
+        }
+      });
+    });
+
+    // Wire Connect / Disconnect buttons
+    container.querySelectorAll('button[data-action="connect"]').forEach((btn) => {
+      btn.addEventListener("click", async (ev) => {
+        const b = ev.currentTarget as HTMLButtonElement;
+        const id = Number(b.getAttribute("data-id"));
+        b.disabled = true;
+        try {
+          await api(`/api/settings/marketplaces/connect?marketplace_id=${id}`, { method: "POST" });
+          b.textContent = "Disconnect";
+          b.dataset.action = "disconnect";
+          b.classList.remove("btn--primary");
+          b.classList.add("btn--neutral");
+          showBanner("Connection saved.", "info");
+          b.disabled = false;
+        } catch (e) {
+          b.disabled = false;
           if (e && e.status === 403) return showBanner("Access denied.", "error");
           showBanner("Failed to connect. Please try again.", "error");
+        }
+      });
+    });
+    container.querySelectorAll('button[data-action="disconnect"]').forEach((btn) => {
+      btn.addEventListener("click", async (ev) => {
+        const b = ev.currentTarget as HTMLButtonElement;
+        const id = Number(b.getAttribute("data-id"));
+        b.disabled = true;
+        try {
+          await api(`/api/settings/marketplaces/disconnect?marketplace_id=${id}`, { method: "POST" });
+          b.textContent = "Connect";
+          b.dataset.action = "connect";
+          b.classList.remove("btn--neutral");
+          b.classList.add("btn--primary");
+          showBanner("Disconnected.", "info");
+          b.disabled = false;
+        } catch (e) {
+          b.disabled = false;
+          if (e && e.status === 403) return showBanner("Access denied.", "error");
+          showBanner("Failed to disconnect.", "error");
         }
       });
     });
