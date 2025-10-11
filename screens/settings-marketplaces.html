@@ -1,0 +1,40 @@
+<!-- Begin settings-marketplaces.html -->
+
+<!-- Settings › Marketplaces (Placeholder) -->
+<section class="screen" data-screen="settings-marketplaces">
+  <header class="screen-header">
+    <h1>Marketplace Settings</h1>
+    <p class="subtitle">Connect marketplaces and configure listing defaults (coming soon)</p>
+  </header>
+
+  <!-- Global banner -->
+  <div id="settings-marketplaces-banner" class="banner" hidden></div>
+
+  <!-- Access denied -->
+  <div id="settings-marketplaces-denied" class="card error" hidden>
+    <h2>Access denied</h2>
+    <p>You must be an Owner or Admin to view Marketplace Settings.</p>
+  </div>
+
+  <!-- Loading -->
+  <div id="settings-marketplaces-loading" class="loading" hidden>Loading…</div>
+
+    <!-- Content -->
+    <div id="settings-marketplaces-content" class="content" hidden>
+      <div id="mp-list" class="grid grid-3" style="gap:14px"></div>
+  
+      <div class="card">
+        <h3>Notes</h3>
+        <p>
+          Connections here are a prototype. We record your selection in
+          <code>app.marketplace_connections</code> but full OAuth/API flows will be added later.
+        </p>
+        <div class="actions">
+          <a class="btn" href="?page=settings">Back to Settings</a>
+        </div>
+      </div>
+    </div>
+
+
+</section>
+<!-- end settings-marketplaces.html -->

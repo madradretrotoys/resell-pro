@@ -1,37 +1,33 @@
-// functions/api/settings/users/list.ts
+// begin functions/api/settings/marketplaces/list.ts
+// Mirrors the access policy used by settings/users/list.ts.
+// Returns a trivial payload for now (we’ll add real data in the next phase).
+
+import type { PagesFunction } from "@cloudflare/workers-types";
 import { neon } from "@neondatabase/serverless";
 
-// Minimal JSON responder (pattern: admin/schema.ts)
-const json = (data: any, status = 200) =>
-  new Response(JSON.stringify(data), {
+// Minimal helpers copied from your patterns
+function json(body: any, status = 200): Response {
+  return new Response(JSON.stringify(body), {
     status,
-    headers: { "content-type": "application/json", "cache-control": "no-store" },
+    headers: { "content-type": "application/json; charset=utf-8" },
   });
-
-// Read a cookie value from "cookie" header (pattern: auth/session.ts)
-function readCookie(header: string, name: string): string | null {
-  if (!header) return null;
-  for (const part of header.split(/; */)) {
-    const [k, ...rest] = part.split("=");
-    if (k === name) return decodeURIComponent(rest.join("="));
-  }
-  return null;
 }
 
-// Minimal HS256 JWT verify (pattern adapted from auth/session.ts)
-async function verifyJwt(token: string, secret: string): Promise<Record<string, any>> {
-  const enc = new TextEncoder();
+function readCookie(cookieHeader: string, name: string) {
+  const m = cookieHeader.match(new RegExp(`(?:^|; )${name}=([^;]*)`));
+  return m ? decodeURIComponent(m[1]) : "";
+}
+
+function base64urlToBytes(s: string) {
+  s = s.replace(/-/g, "+").replace(/_/g, "/");
+  const pad = s.length % 4 ? 4 - (s.length % 4) : 0;
+  return Uint8Array.from(atob(s + "=".repeat(pad)), (c) => c.charCodeAt(0));
+}
+
+async function verifyJwt(token: string, secret: string) {
   const [h, p, s] = token.split(".");
   if (!h || !p || !s) throw new Error("bad_token");
-
-  const base64urlToBytes = (str: string) => {
-    const pad = "=".repeat((4 - (str.length % 4)) % 4);
-    const b64 = (str + pad).replace(/-/g, "+").replace(/_/g, "/");
-    const bin = atob(b64);
-    return Uint8Array.from(bin, (c) => c.charCodeAt(0));
-  };
-
-  const data = `${h}.${p}`;
+  const enc = new TextEncoder();
   const key = await crypto.subtle.importKey(
     "raw",
     enc.encode(secret),
@@ -39,9 +35,8 @@ async function verifyJwt(token: string, secret: string): Promise<Record<string, 
     false,
     ["verify"]
   );
-  const ok = await crypto.subtle.verify("HMAC", key, base64urlToBytes(s), enc.encode(data));
+  const ok = await crypto.subtle.verify("HMAC", key, base64urlToBytes(s), enc.encode(`${h}.${p}`));
   if (!ok) throw new Error("bad_sig");
-
   const payload = JSON.parse(new TextDecoder().decode(base64urlToBytes(p)));
   if ((payload as any)?.exp && Date.now() / 1000 > (payload as any).exp) throw new Error("expired");
   return payload as Record<string, any>;
@@ -80,8 +75,7 @@ export const onRequestGet: PagesFunction = async ({ request, env }) => {
       return json({ ok: false, error: "forbidden" }, 403);
     }
 
-    // Server-side access policy:
-    // Owner/Admin/Manager may access Settings (list users). Clerk: denied.
+    // --- Access policy: same as Users ---
     const role = actor[0].role;
     const allowSettings =
       role === "owner" || role === "admin" || role === "manager" || !!actor[0].can_settings;
@@ -89,25 +83,28 @@ export const onRequestGet: PagesFunction = async ({ request, env }) => {
       return json({ ok: false, error: "forbidden" }, 403);
     }
 
-    // --- List users in tenant with memberships + permissions ---
+        // Return all active marketplaces + tenant's connection status
     const rows = await sql/*sql*/`
       SELECT
-        u.user_id, u.email, u.name, u.login_id,
-        m.role, m.active,
-        p.can_pos, p.can_cash_drawer, p.can_cash_payouts, p.can_item_research,
-        p.can_inventory, p.can_inventory_intake, p.can_drop_off_form,
-        p.can_estimates_buy_tickets, p.can_timekeeping, p.can_settings,
-        p.notify_cash_drawer, p.notify_daily_sales_summary, p.discount_max
-      FROM app.memberships m
-      JOIN app.users u ON u.user_id = m.user_id
-      LEFT JOIN app.permissions p ON p.user_id = u.user_id
-      WHERE m.tenant_id = ${tenant_id}
-      ORDER BY lower(u.name)
+        m.id,
+        m.marketplace_name,
+        m.slug,
+        m.is_active,
+        m.auth_type,
+        m.api_base_url,
+        m.ui_notes,
+        COALESCE(c.status::text, 'never_connected') AS status
+      FROM app.marketplaces_available m
+      LEFT JOIN app.marketplace_connections c
+        ON c.marketplace_id = m.id AND c.tenant_id = ${tenant_id}
+      WHERE m.is_active = true
+      ORDER BY m.marketplace_name
     `;
 
-    return json({ ok: true, users: rows });
+    return json({ ok: true, marketplaces: rows });
+
   } catch (e: any) {
     return json({ ok: false, error: "server_error", message: e?.message || String(e) }, 500);
   }
 };
-// end functions/api/settings/users/list.ts
+// end functions/api/settings/marketplaces/list.ts

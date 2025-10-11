@@ -1,0 +1,34 @@
+# New Screen Checklist
+
+## Router
+- Register screen in `SCREENS` (html/js/title).
+- The router will call `init({ container, session })`. Don’t re-fetch session.
+
+## HTML ↔ JS IDs
+- Provide: `#screen-banner`, `#screen-access-denied`, `#screen-loading`, `#screen-content`.
+- Provide any list/table targets you’ll query (e.g., `#template-list`, `#template-table-body`, `#template-empty`).
+
+## JS Pattern
+- `import { api } from "/assets/js/api.js"`.
+- Export `async function init(ctx) { try { … } catch (e) { … } }`.
+- Tri-state: show loading; on 200 render content; on 403 show denied; else banner error.
+
+## Server-first Auth
+- Create `/functions/api/<feature>/<screen>/list.ts` (GET) and write endpoints (POST/PUT/PATCH).
+- Reuse allowSettings: resolve membership + permissions; allow `owner|admin|manager` or `can_settings = true`; tenant match; active.
+
+## Empty State
+- Render a clear empty card when arrays are length 0.
+
+## Data/Env
+- If blank: check Network response, DB filters (e.g., `is_active = true`), and Pages `DATABASE_URL`.
+
+## Sample Endpoints
+- GET: `const data = await api("/api/<feature>/<screen>/list");`
+- POST: `await api("/api/<feature>/<screen>/connect", { method: "POST", body: { id } });`
+
+## DoD
+- Link opens screen; JS calls real endpoints.
+- Server enforces; UI shows content or denied.
+- Empty state present; POST updates DB and UI.
+- Console clean; Network shows expected calls.
