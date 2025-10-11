@@ -629,9 +629,24 @@ function setMarketplaceVisibility() {
       return byLbl ? (byLbl.value ?? "") : "";
     }
     
-    function buildPayload() {
+    function buildPayload(isDraft = false) {
+      // Always collect the title
+      const title = valByIdOrLabel(null, "Item Name / Description");
+    
+      if (isDraft) {
+        // Drafts: minimal payload so the API won't try to process incomplete listing data
+        return {
+          status: "draft",
+          inventory: {
+            product_short_title: title
+          }
+          // NOTE: do NOT include listing or marketplaces_selected for drafts
+        };
+      }
+    
+      // Active/new items: full payload
       const inventory = {
-        product_short_title: valByIdOrLabel(null, "Item Name / Description"),
+        product_short_title: title,
         price: Number(valByIdOrLabel(null, "Price (USD)") || 0),
         qty: Number(valByIdOrLabel(null, "Qty") || 0),
         cost_of_goods: Number(valByIdOrLabel(null, "Cost of Goods (USD)") || 0),
@@ -654,19 +669,17 @@ function setMarketplaceVisibility() {
         shipbx_width: Number(valByIdOrLabel("shipWidth", "Width") || 0),
         shipbx_height: Number(valByIdOrLabel("shipHeight", "Height") || 0),
       };
-      // NEW: add selected marketplaces to payload
-      const marketplaces_selected = Array.from(selectedMarketplaceIds.values());
-      
-      return { inventory, listing, marketplaces_selected };
-    }
     
-    async function submitIntake(mode = "active") {
-      // Drafts are allowed to save without full validation; active must validate
+      const marketplaces_selected = Array.from(selectedMarketplaceIds.values());
+      return { inventory, listing, marketplaces_selected };
+    }    
+      async function submitIntake(mode = "active") {
       if (mode !== "draft" && !computeValidity()) return;
-
-      const payload = buildPayload();
-      if (mode === "draft") {
-        payload.status = "draft";
+    
+      const payload = buildPayload(mode === "draft");
+      // If we’re editing an existing item, send its id so the server updates it
+      if (__currentItemId) {
+        payload.item_id = __currentItemId;
       }
       // If we’re editing an existing item, send its id so the server updates it
       if (__currentItemId) {
