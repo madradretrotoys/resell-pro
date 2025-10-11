@@ -526,22 +526,7 @@ function setMarketplaceVisibility() {
 
 
   
-  function hasValue(n) {
-    if (!n) return false;
-    if (n.tagName === "SELECT") return n.value !== "";
-    if (n.type === "checkbox" || n.type === "radio") return n.checked;
-    return String(n.value ?? "").trim() !== "";
-  }
-
-  function setCtasEnabled(isValid) {
-      const ids = ["intake-submit", "intake-save", "intake-next", "intake-add-single", "intake-add-bulk", "intake-draft"];
-      const foundById = ids.map(id => document.getElementById(id)).filter(Boolean);
-      const foundByText = Array.from(document.querySelectorAll("button, a[role='button']"))
-        .filter(b => /add single item|add to bulk list/i.test((b.textContent || "").trim()));
-      [...foundById, ...foundByText].forEach(btn => { btn.disabled = !isValid; });
-    }
-
-   
+  
   function wireValidation() {
     // Always (re)validate when any required control changes/inputs
     const controls = [
