@@ -83,7 +83,7 @@ export const onRequestGet: PagesFunction = async ({ request, env }) => {
       return json({ ok: false, error: "forbidden" }, 403);
     }
 
-    // Return all active marketplaces + tenant's connection status + subscription (enabled)
+    // Return all active marketplaces + tenant's connection status + enabled flag
     const rows = await sql/*sql*/`
       SELECT
         m.id,
