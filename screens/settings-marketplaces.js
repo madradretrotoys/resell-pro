@@ -40,12 +40,21 @@ export async function init(ctx) {
     }
 
     const rows = data?.marketplaces || [];
-    const container = document.querySelector("#mp-list");
+    console.log("[mp] rows length:", Array.isArray(rows) ? rows.length : "(not array)");
+
+    const container = document.querySelector("#mp-list");    
     if (!container) {
       hide(loading);
       return showBanner("Marketplace list container not found in HTML.", "error");
     }
-    container.innerHTML = rows.map((r) => {
+    if (!rows.length) {
+      container.innerHTML = `
+        <div class="card">
+          <h3>No marketplaces available</h3>
+          <p class="text-muted">We didn’t receive any active rows from <code>app.marketplaces_available</code>. If you expect items, verify <code>is_active = TRUE</code> in the database your Pages env hits.</p>
+        </div>`;
+    } else {
+      container.innerHTML = rows.map((r) => {
       const connected = String(r.status || "").toLowerCase() === "connected";
       const badge = connected ? `<span class="badge" style="margin-left:8px">Connected</span>` : "";
       const btn = connected
@@ -59,8 +68,9 @@ export async function init(ctx) {
           ${notes}
           <div class="actions">${btn}</div>
         </div>
-      `;
+      ``;
     }).join("");
+    }
 
     // Wire Connect buttons
     container.querySelectorAll("button[data-id]").forEach((btn) => {
@@ -86,7 +96,7 @@ export async function init(ctx) {
      hide(loading);
     show(content);
   } catch (err) {
-    console.error(err);
+    console.error("[mp] fatal:", err);
     hide(loading);
     showBanner("Could not load Marketplace Settings.", "error");
   }
