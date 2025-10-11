@@ -1,3 +1,5 @@
+
+// Begin functions/api/settings/marketplaces/connect.ts
 import type { PagesFunction } from "@cloudflare/workers-types";
 import { neon } from "@neondatabase/serverless";
 
@@ -84,3 +86,4 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
     return json({ ok: false, error: "server_error", message: e?.message || String(e) }, 500);
   }
 };
+//end functions/api/settings/marketplaces/connect.ts
