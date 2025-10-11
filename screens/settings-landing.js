@@ -27,13 +27,8 @@ export async function init(ctx) {
     if (knowsRole && !isOwnerOrAdmin) {
       return routeToUsers();
     }
-    
-    // If not privileged, send them straight to Users
-    if (!isOwnerOrAdmin) {
-      return routeToUsers();
-    }
 
-    // Privileged: render chooser and wire actions
+    // Privileged (or role unknown): render chooser and wire actions
     hide(loading);
     show(content);
 
