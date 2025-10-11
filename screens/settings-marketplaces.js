@@ -149,10 +149,11 @@ export async function init(ctx) {
         }
       });
     });
-    container.querySelectorAll('button[data-action="disconnect"]').forEach((btn) => {
+    container.querySelectorAll('button[data-action="connect"]').forEach((btn) => {
       btn.addEventListener("click", async (ev) => {
-        const b = ev.currentTarget as HTMLButtonElement;
+        const b = ev.currentTarget; // HTMLButtonElement
         const id = Number(b.getAttribute("data-id"));
+
         b.disabled = true;
         try {
           await api(`/api/settings/marketplaces/disconnect?marketplace_id=${id}`, { method: "POST" });
