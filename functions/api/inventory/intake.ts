@@ -185,7 +185,22 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
               shipbx_width     = EXCLUDED.shipbx_width,
               shipbx_height    = EXCLUDED.shipbx_height
           `;
-        
+
+          // NEW: Upsert selected marketplaces into app.item_marketplace_listing (prototype: status 'draft')
+          {
+            const mpIds: number[] = Array.isArray(body?.marketplaces_selected)
+              ? body.marketplaces_selected.map((n: any) => Number(n)).filter((n) => !Number.isNaN(n))
+              : [];
+            for (const mpId of mpIds) {
+              await sql/*sql*/`
+                INSERT INTO app.item_marketplace_listing (item_id, tenant_id, marketplace_id, status)
+                VALUES (${item_id}, ${tenant_id}, ${mpId}, 'draft')
+                ON CONFLICT (item_id, marketplace_id)
+                DO UPDATE SET status = 'draft', updated_at = now()
+              `;
+            }
+          }
+          
           return json({ ok: true, item_id, sku: retSku, status, ms: Date.now() - t0 }, 200);
         }
 
