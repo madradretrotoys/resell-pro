@@ -90,76 +90,91 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
       return json({ ok: true, deleted: true, item_id: item_id_in }, 200);
     }
     
-    // Look up category_code from sku_categories
-    const catRows = await sql<{ category_code: string }[]>`
-      SELECT category_code FROM app.sku_categories WHERE category_name = ${inv.category_nm} LIMIT 1
-    `;
-    if (catRows.length === 0) return json({ ok: false, error: "bad_category" }, 400);
-      const category_code = catRows[0].category_code;
-
-        // If item_id was provided, UPDATE existing rows instead of INSERT
+       // If item_id was provided, UPDATE existing rows instead of INSERT
         if (item_id_in) {
-          // Load existing inventory row to check current SKU & status and tenant ownership
-          const existing = await sql<{ item_id: string; sku: string | null; item_status: string | null }[]>`
-            SELECT item_id, sku, item_status
-            FROM app.inventory
-            WHERE item_id = ${item_id_in}
-            LIMIT 1
-          `;
-          if (existing.length === 0) {
-            return json({ ok: false, error: "not_found" }, 404);
-          }
-        
-          // Decide SKU: if promoting draft → active and no SKU yet, allocate one; otherwise keep existing SKU
-          let sku: string | null = existing[0].sku;
-          if (!isDraft && !sku) {
-            // Allocate a SKU (same logic as create)
-            const seqRows = await sql<{ last_number: number }[]>`
-              SELECT last_number FROM app.sku_sequence
-              WHERE tenant_id = ${tenant_id} AND category_code = ${category_code}
-              FOR UPDATE
-            `;
-            let next = 0;
-            if (seqRows.length === 0) {
-              await sql/*sql*/`
-                INSERT INTO app.sku_sequence (tenant_id, category_code, last_number)
-                VALUES (${tenant_id}, ${category_code}, 0)
-                ON CONFLICT (tenant_id, category_code) DO NOTHING
-              `;
-              next = 1;
-              await sql/*sql*/`
-                UPDATE app.sku_sequence
-                SET last_number = ${next}
-                WHERE tenant_id = ${tenant_id} AND category_code = ${category_code}
-              `;
-            } else {
-              next = Number(seqRows[0].last_number || 0) + 1;
-              await sql/*sql*/`
-                UPDATE app.sku_sequence
-                SET last_number = ${next}
-                WHERE tenant_id = ${tenant_id} AND category_code = ${category_code}
-              `;
-            }
-            sku = `${category_code}${String(next).padStart(4, "0")}`;
-          }
-        
-          // Update inventory
+        // Load existing inventory row
+        const existing = await sql<{ item_id: string; sku: string | null; item_status: string | null }[]>`
+          SELECT item_id, sku, item_status
+          FROM app.inventory
+          WHERE item_id = ${item_id_in}
+          LIMIT 1
+        `;
+        if (existing.length === 0) {
+          return json({ ok: false, error: "not_found" }, 404);
+        }
+
+        // === DRAFT UPDATE: minimal fields only; no SKU allocation, no listing/profile upserts ===
+        if (isDraft) {
           const updInv = await sql<{ item_id: string; sku: string | null }[]>`
             UPDATE app.inventory
             SET
-              sku = ${sku},
               product_short_title = ${inv.product_short_title},
-              price = ${inv.price},
-              qty = ${inv.qty},
-              cost_of_goods = ${inv.cost_of_goods},
-              category_nm = ${inv.category_nm},
-              instore_loc = ${inv.instore_loc},
-              case_bin_shelf = ${inv.case_bin_shelf},
-              instore_online = ${inv.instore_online},
-              item_status = ${status}
+              item_status = 'draft'
             WHERE item_id = ${item_id_in}
             RETURNING item_id, sku
           `;
+          const item_id = updInv[0].item_id;
+          const retSku  = updInv[0].sku;
+          return json({ ok: true, item_id, sku: retSku, status, ms: Date.now() - t0 }, 200);
+        }
+
+        // === ACTIVE UPDATE: if promoting to active and no SKU yet, allocate ===
+        // Look up category_code only when needed for SKU allocation
+        const catRows = await sql<{ category_code: string }[]>`
+          SELECT category_code FROM app.sku_categories WHERE category_name = ${inv.category_nm} LIMIT 1
+        `;
+        if (catRows.length === 0) return json({ ok: false, error: "bad_category" }, 400);
+        const category_code = catRows[0].category_code;
+
+        let sku: string | null = existing[0].sku;
+        if (!sku) {
+          const seqRows = await sql<{ last_number: number }[]>`
+            SELECT last_number FROM app.sku_sequence
+            WHERE tenant_id = ${tenant_id} AND category_code = ${category_code}
+            FOR UPDATE
+          `;
+          let next = 0;
+          if (seqRows.length === 0) {
+            await sql/*sql*/`
+              INSERT INTO app.sku_sequence (tenant_id, category_code, last_number)
+              VALUES (${tenant_id}, ${category_code}, 0)
+              ON CONFLICT (tenant_id, category_code) DO NOTHING
+            `;
+            next = 1;
+            await sql/*sql*/`
+              UPDATE app.sku_sequence
+              SET last_number = ${next}
+              WHERE tenant_id = ${tenant_id} AND category_code = ${category_code}
+            `;
+          } else {
+            next = Number(seqRows[0].last_number || 0) + 1;
+            await sql/*sql*/`
+              UPDATE app.sku_sequence
+              SET last_number = ${next}
+              WHERE tenant_id = ${tenant_id} AND category_code = ${category_code}
+            `;
+          }
+          sku = `${category_code}${String(next).padStart(4, "0")}`;
+        }
+
+        // Full inventory update for ACTIVE
+        const updInv = await sql<{ item_id: string; sku: string | null }[]>`
+          UPDATE app.inventory
+          SET
+            sku = ${sku},
+            product_short_title = ${inv.product_short_title},
+            price = ${inv.price},
+            qty = ${inv.qty},
+            cost_of_goods = ${inv.cost_of_goods},
+            category_nm = ${inv.category_nm},
+            instore_loc = ${inv.instore_loc},
+            case_bin_shelf = ${inv.case_bin_shelf},
+            instore_online = ${inv.instore_online},
+            item_status = 'active'
+          WHERE item_id = ${item_id_in}
+          RETURNING item_id, sku
+        `;
+
           const item_id = updInv[0].item_id;
           const retSku  = updInv[0].sku;
         
@@ -241,17 +256,40 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
 
 
     // 2) Insert into inventory (drafts carry NULL sku; active allocates)
+        // === CREATE DRAFT: minimal insert, no listing/profile, no marketplaces ===
+    if (isDraft) {
+      const invRows = await sql<{ item_id: string }[]>`
+        INSERT INTO app.inventory
+          (sku, product_short_title, item_status)
+        VALUES
+          (NULL, ${inv.product_short_title}, 'draft')
+        RETURNING item_id
+      `;
+      const item_id = invRows[0].item_id;
+      return json({ ok: true, item_id, sku: null, status: 'draft', ms: Date.now() - t0 }, 200);
+    }
+
+    // === CREATE ACTIVE: full flow (requires category for SKU allocation) ===
+    // Look up category_code for active creates (now that we know it's needed)
+    const catRows = await sql<{ category_code: string }[]>`
+      SELECT category_code FROM app.sku_categories WHERE category_name = ${inv.category_nm} LIMIT 1
+    `;
+    if (catRows.length === 0) return json({ ok: false, error: "bad_category" }, 400);
+    const category_code = catRows[0].category_code;
+
+    // 1) Allocate next SKU (already guarded earlier; keep as-is)
+    // 2) Insert full inventory
     const invRows = await sql<{ item_id: string }[]>`
       INSERT INTO app.inventory
         (sku, product_short_title, price, qty, cost_of_goods, category_nm, instore_loc, case_bin_shelf, instore_online, item_status)
       VALUES
         (${sku}, ${inv.product_short_title}, ${inv.price}, ${inv.qty}, ${inv.cost_of_goods},
-         ${inv.category_nm}, ${inv.instore_loc}, ${inv.case_bin_shelf}, ${inv.instore_online}, ${status})
+         ${inv.category_nm}, ${inv.instore_loc}, ${inv.case_bin_shelf}, ${inv.instore_online}, 'active')
       RETURNING item_id
     `;
     const item_id = invRows[0].item_id;
 
-    // 3) Insert into item_listing_profile (item_id is now UUID and FK to inventory)
+    // 3) Insert listing profile (ACTIVE only)
     await sql/*sql*/`
       INSERT INTO app.item_listing_profile
         (item_id, tenant_id, listing_category, item_condition, brand_name, primary_color,
@@ -262,8 +300,11 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
          ${lst.shipbx_length}, ${lst.shipbx_width}, ${lst.shipbx_height})
     `;
 
+    // (Marketplace upserts for ACTIVE creates can be added here later if desired)
+
     // 4) Return success
-    return json({ ok: true, item_id, sku, status, ms: Date.now() - t0 }, 200);
+    return json({ ok: true, item_id, sku, status: 'active', ms: Date.now() - t0 }, 200);
+
 
   } catch (e: any) {
     // Try a friendlier error
