@@ -177,45 +177,49 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
 
           const item_id = updInv[0].item_id;
           const retSku  = updInv[0].sku;
-        
-          // Upsert listing profile for this item_id
-          await sql/*sql*/`
-            INSERT INTO app.item_listing_profile
-              (item_id, tenant_id, listing_category, item_condition, brand_name, primary_color,
-               product_description, shipping_box, weight_lb, weight_oz, shipbx_length, shipbx_width, shipbx_height)
-            VALUES
-              (${item_id}, ${tenant_id}, ${lst.listing_category}, ${lst.item_condition}, ${lst.brand_name}, ${lst.primary_color},
-               ${lst.product_description}, ${lst.shipping_box}, ${lst.weight_lb}, ${lst.weight_oz},
-               ${lst.shipbx_length}, ${lst.shipbx_width}, ${lst.shipbx_height})
-            ON CONFLICT (item_id) DO UPDATE SET
-              listing_category = EXCLUDED.listing_category,
-              item_condition   = EXCLUDED.item_condition,
-              brand_name       = EXCLUDED.brand_name,
-              primary_color    = EXCLUDED.primary_color,
-              product_description = EXCLUDED.product_description,
-              shipping_box     = EXCLUDED.shipping_box,
-              weight_lb        = EXCLUDED.weight_lb,
-              weight_oz        = EXCLUDED.weight_oz,
-              shipbx_length    = EXCLUDED.shipbx_length,
-              shipbx_width     = EXCLUDED.shipbx_width,
-              shipbx_height    = EXCLUDED.shipbx_height
-          `;
 
-          // NEW: Upsert selected marketplaces into app.item_marketplace_listing (prototype: status 'draft')
-          {
-            const mpIds: number[] = Array.isArray(body?.marketplaces_selected)
-              ? body.marketplaces_selected.map((n: any) => Number(n)).filter((n) => !Number.isNaN(n))
-              : [];
-            for (const mpId of mpIds) {
-              await sql/*sql*/`
-                INSERT INTO app.item_marketplace_listing (item_id, tenant_id, marketplace_id, status)
-                VALUES (${item_id}, ${tenant_id}, ${mpId}, 'draft')
-                ON CONFLICT (item_id, marketplace_id)
-                DO UPDATE SET status = 'draft', updated_at = now()
-              `;
+          // Store Only: skip marketplace-related tables entirely
+          const isStoreOnly = String(inv?.instore_online || "").toLowerCase().includes("store only");
+
+          if (!isStoreOnly) {
+            // Upsert listing profile for this item_id
+            await sql/*sql*/`
+              INSERT INTO app.item_listing_profile
+                (item_id, tenant_id, listing_category, item_condition, brand_name, primary_color,
+                 product_description, shipping_box, weight_lb, weight_oz, shipbx_length, shipbx_width, shipbx_height)
+              VALUES
+                (${item_id}, ${tenant_id}, ${lst.listing_category}, ${lst.item_condition}, ${lst.brand_name}, ${lst.primary_color},
+                 ${lst.product_description}, ${lst.shipping_box}, ${lst.weight_lb}, ${lst.weight_oz},
+                 ${lst.shipbx_length}, ${lst.shipbx_width}, ${lst.shipbx_height})
+              ON CONFLICT (item_id) DO UPDATE SET
+                listing_category = EXCLUDED.listing_category,
+                item_condition   = EXCLUDED.item_condition,
+                brand_name       = EXCLUDED.brand_name,
+                primary_color    = EXCLUDED.primary_color,
+                product_description = EXCLUDED.product_description,
+                shipping_box     = EXCLUDED.shipping_box,
+                weight_lb        = EXCLUDED.weight_lb,
+                weight_oz        = EXCLUDED.weight_oz,
+                shipbx_length    = EXCLUDED.shipbx_length,
+                shipbx_width     = EXCLUDED.shipbx_width,
+                shipbx_height    = EXCLUDED.shipbx_height
+            `;
+  
+            // NEW: Upsert selected marketplaces into app.item_marketplace_listing (prototype: status 'draft')
+            {
+              const mpIds: number[] = Array.isArray(body?.marketplaces_selected)
+                ? body.marketplaces_selected.map((n: any) => Number(n)).filter((n) => !Number.isNaN(n))
+                : [];
+              for (const mpId of mpIds) {
+                await sql/*sql*/`
+                  INSERT INTO app.item_marketplace_listing (item_id, tenant_id, marketplace_id, status)
+                  VALUES (${item_id}, ${tenant_id}, ${mpId}, 'draft')
+                  ON CONFLICT (item_id, marketplace_id)
+                  DO UPDATE SET status = 'draft', updated_at = now()
+                `;
+              }
             }
-          }
-          
+          }  
           return json({ ok: true, item_id, sku: retSku, status, ms: Date.now() - t0 }, 200);
         }
 
@@ -288,20 +292,24 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
       RETURNING item_id
     `;
     const item_id = invRows[0].item_id;
+    // Store Only: skip marketplace-related tables
+    const isStoreOnly = String(inv?.instore_online || "").toLowerCase().includes("store only");
 
-    // 3) Insert listing profile (ACTIVE only)
-    await sql/*sql*/`
-      INSERT INTO app.item_listing_profile
-        (item_id, tenant_id, listing_category, item_condition, brand_name, primary_color,
-         product_description, shipping_box, weight_lb, weight_oz, shipbx_length, shipbx_width, shipbx_height)
-      VALUES
-        (${item_id}, ${tenant_id}, ${lst.listing_category}, ${lst.item_condition}, ${lst.brand_name}, ${lst.primary_color},
-         ${lst.product_description}, ${lst.shipping_box}, ${lst.weight_lb}, ${lst.weight_oz},
-         ${lst.shipbx_length}, ${lst.shipbx_width}, ${lst.shipbx_height})
-    `;
-
-    // (Marketplace upserts for ACTIVE creates can be added here later if desired)
-
+    if (!isStoreOnly) {
+      // 3) Insert listing profile (ACTIVE only)
+      await sql/*sql*/`
+        INSERT INTO app.item_listing_profile
+          (item_id, tenant_id, listing_category, item_condition, brand_name, primary_color,
+           product_description, shipping_box, weight_lb, weight_oz, shipbx_length, shipbx_width, shipbx_height)
+        VALUES
+          (${item_id}, ${tenant_id}, ${lst.listing_category}, ${lst.item_condition}, ${lst.brand_name}, ${lst.primary_color},
+           ${lst.product_description}, ${lst.shipping_box}, ${lst.weight_lb}, ${lst.weight_oz},
+           ${lst.shipbx_length}, ${lst.shipbx_width}, ${lst.shipbx_height})
+      `;
+    
+        // (Marketplace upserts for ACTIVE creates can be added here later if desired)
+    }
+    
     // 4) Return success
     return json({ ok: true, item_id, sku, status: 'active', ms: Date.now() - t0 }, 200);
 
