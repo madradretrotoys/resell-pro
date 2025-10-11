@@ -321,4 +321,84 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
     return json({ ok: false, error: "server_error", message: msg }, 500);
   }
 };
+
+// Read a single item (inventory + optional listing profile) by item_id
+export const onRequestGet: PagesFunction = async ({ request, env }) => {
+  try {
+    // AuthN
+    const cookieHeader = request.headers.get("cookie") || "";
+    const token = (function readCookie(header: string, name: string): string | null {
+      if (!header) return null;
+      for (const part of header.split(/; */)) {
+        const [k, ...rest] = part.split("=");
+        if (k === name) return decodeURIComponent(rest.join("="));
+      }
+      return null;
+    })(cookieHeader, "__Host-rp_session");
+    if (!token) return new Response(JSON.stringify({ ok: false, error: "no_cookie" }), { status: 401, headers: { "content-type": "application/json" } });
+
+    // Verify JWT (reuse the inline HS256 verifier pattern)
+    async function verifyJwt(token: string, secret: string): Promise<any> {
+      const enc = new TextEncoder();
+      const [h, p, s] = token.split(".");
+      if (!h || !p || !s) throw new Error("bad_token");
+      const base64urlToBytes = (str: string) => {
+        const pad = "=".repeat((4 - (str.length % 4)) % 4);
+        const b64 = (str + pad).replace(/-/g, "+").replace(/_/g, "/");
+        const bin = atob(b64);
+        return Uint8Array.from(bin, (c) => c.charCodeAt(0));
+      };
+      const data = `${h}.${p}`;
+      const key = await crypto.subtle.importKey("raw", enc.encode(String(env.JWT_SECRET)), { name: "HMAC", hash: "SHA-256" }, false, ["verify"]);
+      const ok = await crypto.subtle.verify("HMAC", key, base64urlToBytes(s), enc.encode(data));
+      if (!ok) throw new Error("bad_sig");
+      const payload = JSON.parse(new TextDecoder().decode(base64urlToBytes(p)));
+      if ((payload as any)?.exp && Date.now() / 1000 > (payload as any).exp) throw new Error("expired");
+      return payload;
+    }
+    await verifyJwt(token, String(env.JWT_SECRET));
+
+    // Tenant (required for listing profile lookups)
+    const tenant_id = request.headers.get("x-tenant-id");
+    if (!tenant_id) {
+      return new Response(JSON.stringify({ ok: false, error: "missing_tenant" }), { status: 400, headers: { "content-type": "application/json" } });
+    }
+
+    const url = new URL(request.url);
+    const item_id = url.searchParams.get("item_id");
+    if (!item_id) {
+      return new Response(JSON.stringify({ ok: false, error: "missing_item_id" }), { status: 400, headers: { "content-type": "application/json" } });
+    }
+
+    const sql = neon(String(env.DATABASE_URL));
+
+    // Load inventory row
+    const invRows = await sql<any[]>`
+      SELECT *
+      FROM app.inventory
+      WHERE item_id = ${item_id}
+      LIMIT 1
+    `;
+    if (invRows.length === 0) {
+      return new Response(JSON.stringify({ ok: false, error: "not_found" }), { status: 404, headers: { "content-type": "application/json" } });
+    }
+
+    // Load listing profile (only for this tenant, if present)
+    const lstRows = await sql<any[]>`
+      SELECT *
+      FROM app.item_listing_profile
+      WHERE item_id = ${item_id} AND tenant_id = ${tenant_id}
+      LIMIT 1
+    `;
+
+    return new Response(JSON.stringify({
+      ok: true,
+      inventory: invRows[0],
+      listing: lstRows[0] || null,
+    }), { status: 200, headers: { "content-type": "application/json", "cache-control": "no-store" } });
+  } catch (e: any) {
+    return new Response(JSON.stringify({ ok: false, error: "server_error", message: String(e?.message || e) }), { status: 500, headers: { "content-type": "application/json" } });
+  }
+};
+
 // end intake.ts file
