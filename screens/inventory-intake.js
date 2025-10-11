@@ -129,6 +129,9 @@ function setMarketplaceVisibility() {
   ];
   MARKETPLACE_FIELD_IDS.forEach((id) => hideShowFieldById(id, hide));
 
+  // Include the new Crosslist to Marketplaces block
+  hideShowFieldById("marketplaceCrosslistBlock", hide);
+
   // Fields that don’t have stable IDs — target by label text:
   hideShowFieldByLabel("Long Description", hide);
 
@@ -479,31 +482,7 @@ function setMarketplaceVisibility() {
       [...foundById, ...foundByText].forEach(btn => { btn.disabled = !isValid; });
     }
 
-  function computeValidity() {
-    // BASIC — always required (explicit control list)
-    const basicControls = getBasicRequiredControls();
-    const basicOk = markBatchValidity(basicControls, hasValue);
-  
-    // MARKETPLACE — required only when active
-    let marketOk = true;
-    if (marketplaceActive()) {
-      const marketControls = getMarketplaceRequiredControls();
-      marketOk = markBatchValidity(marketControls, hasValue);
-    } else {
-      // clear invalid state for marketplace when not required
-      getMarketplaceRequiredControls().forEach(n => n.setAttribute("aria-invalid", "false"));
-    }
-  
-    const allOk = basicOk && marketOk;
-    setCtasEnabled(allOk);
-    document.dispatchEvent(new CustomEvent("intake:validity-changed", { detail: { valid: allOk } }));
-    return allOk;
-  }
-
-
-
-
-  
+   
   function wireValidation() {
     // Always (re)validate when any required control changes/inputs
     const controls = [
