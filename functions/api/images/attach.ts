@@ -1,4 +1,4 @@
-// functions/api/images/attach.ts
+// Begin functions/api/images/attach.ts
 import { neon } from "@neondatabase/serverless";
 
 const json = (data: any, status = 200) =>
@@ -67,3 +67,6 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
     return json({ ok: false, error: String(err?.message || err || "attach_failed") }, 500);
   }
 };
+
+// end functions/api/images/attach.ts
+// Begin functions/api/images/attach.ts// Begin functions/api/images/attach.ts
