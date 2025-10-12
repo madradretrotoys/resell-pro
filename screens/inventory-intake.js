@@ -35,7 +35,13 @@ export async function init() {
     const host = $("photosGrid");
     if (!host) return;
     // safety: fixed-size columns
-    try { host.style.gridTemplateColumns = "repeat(auto-fill,140px)"; } catch {}
+    // safety: fixed-size columns + consistent row height
+    try {
+      host.style.gridTemplateColumns = "repeat(auto-fill, 140px)";
+      host.style.gridAutoRows = "140px";
+      host.style.alignItems = "start";
+      host.style.justifyItems = "start";
+    } catch {}
     host.innerHTML = "";
   
     // Existing images (from DB)
@@ -55,17 +61,22 @@ export async function init() {
   function renderThumb(model, flags) {
   const { persisted = false, pending = false } = flags || {};
   const wrap = document.createElement("div");
-  // fixed 140x140 thumb box
+  // fixed 140x140 thumb box (pure CSS styles; no Tailwind utilities)
   wrap.className = "relative group border rounded-xl overflow-hidden";
   wrap.style.width = "140px";
   wrap.style.height = "140px";
+  wrap.style.display = "inline-block"; // ensure the grid cell stays compact
   wrap.tabIndex = 0;
 
   const img = new Image();
   img.src = model.cdn_url || "";
   img.alt = "Item photo";
   img.loading = "lazy";
-  img.className = "block w-[140px] h-[140px] object-cover";
+  img.className = "block";
+  img.style.width = "140px";
+  img.style.height = "140px";
+  img.style.objectFit = "cover";
+  img.style.display = "block";
   wrap.appendChild(img);
 
   const bar = document.createElement("div");
