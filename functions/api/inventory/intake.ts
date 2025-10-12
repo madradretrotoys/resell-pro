@@ -229,6 +229,20 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
 
     
         // Begin "transaction" (serverless best-effort: use explicit locks/constraints)
+        // Resolve category_code early for ACTIVE creates (needed for SKU allocation)
+        let category_code: string | null = null;
+        if (!isDraft) {
+          const catRows = await sql<{ category_code: string }[]>`
+            SELECT category_code
+            FROM app.sku_categories
+            WHERE category_name = ${inv.category_nm}
+            LIMIT 1
+          `;
+          if (catRows.length === 0) {
+            return json({ ok: false, error: "bad_category" }, 400);
+          }
+          category_code = catRows[0].category_code;
+        }
         // 1) Allocate next SKU via sku_sequence (ACTIVE only). Drafts skip SKU.
         let sku: string | null = null;
         if (!isDraft) {
@@ -275,14 +289,6 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
       const item_id = invRows[0].item_id;
       return json({ ok: true, item_id, sku: null, status: 'draft', ms: Date.now() - t0 }, 200);
     }
-
-    // === CREATE ACTIVE: full flow (requires category for SKU allocation) ===
-    // Look up category_code for active creates (now that we know it's needed)
-    const catRows = await sql<{ category_code: string }[]>`
-      SELECT category_code FROM app.sku_categories WHERE category_name = ${inv.category_nm} LIMIT 1
-    `;
-    if (catRows.length === 0) return json({ ok: false, error: "bad_category" }, 400);
-    const category_code = catRows[0].category_code;
 
     // 1) Allocate next SKU (already guarded earlier; keep as-is)
     // 2) Insert full inventory
