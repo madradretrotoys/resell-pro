@@ -34,6 +34,8 @@ export async function init() {
   function renderPhotosGrid() {
     const host = $("photosGrid");
     if (!host) return;
+    // safety: fixed-size columns
+    try { host.style.gridTemplateColumns = "repeat(auto-fill,140px)"; } catch {}
     host.innerHTML = "";
   
     // Existing images (from DB)
@@ -51,40 +53,34 @@ export async function init() {
   
   // Thumb element
   function renderThumb(model, flags) {
-    const { persisted = false, pending = false } = flags || {};
-    const wrap = document.createElement("div");
-    wrap.className = "relative group border rounded-xl overflow-hidden";
-    wrap.tabIndex = 0;
-  
-    const img = new Image();
-    img.src = model.cdn_url || "";
-    img.alt = "Item photo";
-    img.loading = "lazy";
-    img.className = "block w-full h-[110px] object-cover";
-    wrap.appendChild(img);
-  
-    // Primary badge
-    if (model.is_primary) {
-      const b = document.createElement("div");
-      b.className = "absolute top-1 left-1 text-[11px] px-2 py-0.5 rounded-full bg-black/70 text-white";
-      b.textContent = "Primary";
-      wrap.appendChild(b);
-    }
-  
-    // Controls
-    const bar = document.createElement("div");
-    bar.className = "absolute inset-x-0 bottom-0 p-1 bg-black/50 opacity-0 group-hover:opacity-100 transition";
-    bar.innerHTML = `
-      <div class="flex gap-1 justify-center">
-        <button class="btn btn-ghost btn-sm" data-act="crop" ${pending ? "disabled" : ""} title="Crop">Crop</button>
-        <label class="btn btn-ghost btn-sm cursor-pointer" title="Replace">
-          Replace
-          <input type="file" accept="image/*" class="hidden" data-act="replace">
-        </label>
-        <button class="btn btn-ghost btn-sm" data-act="primary" ${pending ? "disabled" : ""} title="Set Primary">Primary</button>
-        <button class="btn btn-ghost btn-sm" data-act="delete" ${pending ? "" : ""} title="Delete">Delete</button>
-      </div>
-    `;
+  const { persisted = false, pending = false } = flags || {};
+  const wrap = document.createElement("div");
+  // fixed 140x140 thumb box
+  wrap.className = "relative group border rounded-xl overflow-hidden";
+  wrap.style.width = "140px";
+  wrap.style.height = "140px";
+  wrap.tabIndex = 0;
+
+  const img = new Image();
+  img.src = model.cdn_url || "";
+  img.alt = "Item photo";
+  img.loading = "lazy";
+  img.className = "block w-[140px] h-[140px] object-cover";
+  wrap.appendChild(img);
+
+  const bar = document.createElement("div");
+  bar.className = "absolute inset-x-0 bottom-0 p-1 bg-black/50 opacity-0 group-hover:opacity-100 transition";
+  bar.innerHTML = `
+    <div class="flex gap-1 justify-center">
+      <button class="btn btn-ghost btn-sm" data-act="crop" title="Crop">Crop</button>
+      <label class="btn btn-ghost btn-sm cursor-pointer" title="Replace">
+        Replace
+        <input type="file" accept="image/*" class="hidden" data-act="replace">
+      </label>
+      <button class="btn btn-ghost btn-sm" data-act="primary" ${pending ? "disabled" : ""} title="Set Primary">Primary</button>
+      <button class="btn btn-ghost btn-sm" data-act="delete" title="Delete">Delete</button>
+    </div>
+  `;
     wrap.appendChild(bar);
   
     // Drag handle in reorder mode
@@ -103,15 +99,16 @@ export async function init() {
       const btn = e.target.closest("button");
       if (!btn) return;
       const act = btn.dataset.act;
-      if (act === "crop" && persisted) {
-        await openCropper(model);
+    
+      if (act === "crop") {
+        await openCropper(model, { pending });
       } else if (act === "primary" && persisted) {
         await setPrimary(model.image_id);
       } else if (act === "delete") {
         if (pending) {
-          // remove from pending
-          const idx = __pendingFiles.findIndex(f => ("name" in f) && (model.cdn_url.endsWith(f.name) || true));
-          if (idx >= 0) __pendingFiles.splice(idx, 1);
+          // remove from pending preview
+          const i = __pendingFiles.findIndex(f => model.cdn_url && model.cdn_url.startsWith("blob:"));
+          if (i >= 0) __pendingFiles.splice(i, 1);
           renderPhotosGrid();
         } else if (persisted) {
           await deleteImage(model.image_id);
@@ -317,6 +314,37 @@ export async function init() {
   
   // Wire inputs
   function wirePhotoPickers() {
+    // Camera modal open
+    $("openCameraBtn")?.addEventListener("click", async ()=>{
+      const dlg = $("cameraDialog");
+      const video = $("cameraVideo");
+      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" }, audio: false }).catch(()=>null);
+      if (!stream) { alert("Camera not available. Use Upload Photo."); return; }
+      video.srcObject = stream;
+      dlg.showModal();
+  
+      const stop = ()=>{ try { stream.getTracks().forEach(t=>t.stop()); } catch {} };
+  
+      $("cameraCancelBtn").onclick = ()=>{ stop(); dlg.close(); };
+      $("cameraSnapBtn").onclick   = async ()=>{
+        const canvas = $("cameraCanvas");
+        const ctx = canvas.getContext("2d");
+        // draw current frame
+        const vw = video.videoWidth || 1280, vh = video.videoHeight || 720;
+        canvas.width = vw; canvas.height = vh;
+        ctx.drawImage(video, 0, 0, vw, vh);
+        canvas.toBlob(async (blob)=>{
+          if (!blob) return;
+          stop();
+          dlg.close();
+          const file = new File([blob], `camera_${Date.now()}.jpg`, { type: "image/jpeg" });
+          const ds = await downscaleToBlob(file);
+          await uploadAndAttach(ds);
+        }, "image/jpeg", 0.92);
+      };
+    });
+  
+    // Fallback “camera” input (kept hidden)
     $("photoCameraInput")?.addEventListener("change", async (e) => {
       const files = Array.from(e.target.files || []);
       for (const f of files) {
@@ -326,6 +354,8 @@ export async function init() {
       }
       e.target.value = "";
     });
+  
+    // Upload from gallery/files
     $("photoFileInput")?.addEventListener("change", async (e) => {
       const files = Array.from(e.target.files || []);
       for (const f of files) {
@@ -342,15 +372,7 @@ export async function init() {
       alert(__reorderMode ? "Reorder ON: drag photos to rearrange." : "Reorder OFF");
     });
   
-    // When item gets its ID (after first save), flush pending files
-    document.addEventListener("intake:item-saved", async (ev) => {
-      const id = ev?.detail?.item_id;
-      if (!id) return;
-      __currentItemId = id;
-      if (__pendingFiles.length === 0) return;
-      const pending = __pendingFiles.splice(0, __pendingFiles.length);
-      for (const f of pending) await uploadAndAttach(f);
-    });
+    document.addEventListener("intake:item-saved", async (ev) => { ... });
   }
 
 
