@@ -9,6 +9,354 @@ export async function init() {
   // ——— Local helpers (screen-scoped) ———
   const $ = (id) => document.getElementById(id);
 
+  // ====== Photos state & helpers (NEW) ======
+  const MAX_PHOTOS = 15;
+  let __photos = [];              // [{image_id, cdn_url, is_primary, sort_order, r2_key, width, height, bytes, content_type}]
+  let __pendingFiles = [];        // Files awaiting upload (before item_id exists)
+  let __currentItemId = null;     // sync with existing flow
+  let __reorderMode = false;
+  
+  // Utility: update counter + disable add when maxed
+  function updatePhotosUIBasic() {
+    const count = __photos.length + __pendingFiles.length;
+    const cap = `${count} / ${MAX_PHOTOS}`;
+    const el = $("photosCount");
+    if (el) el.textContent = cap;
+  
+    const canAdd = count < MAX_PHOTOS;
+    const cam = $("photoCameraInput");
+    const fil = $("photoFileInput");
+    if (cam) cam.disabled = !canAdd;
+    if (fil) fil.disabled = !canAdd;
+  }
+  
+  // Render thumbnails
+  function renderPhotosGrid() {
+    const host = $("photosGrid");
+    if (!host) return;
+    host.innerHTML = "";
+  
+    // Existing images (from DB)
+    for (const img of __photos.sort((a,b)=>a.sort_order-b.sort_order)) {
+      host.appendChild(renderThumb(img, { persisted: true }));
+    }
+  
+    // Pending files (preview only)
+    for (const f of __pendingFiles) {
+      host.appendChild(renderThumb({ cdn_url: URL.createObjectURL(f), is_primary: false }, { pending: true }));
+    }
+  
+    updatePhotosUIBasic();
+  }
+  
+  // Thumb element
+  function renderThumb(model, flags) {
+    const { persisted = false, pending = false } = flags || {};
+    const wrap = document.createElement("div");
+    wrap.className = "relative group border rounded-xl overflow-hidden";
+    wrap.tabIndex = 0;
+  
+    const img = new Image();
+    img.src = model.cdn_url || "";
+    img.alt = "Item photo";
+    img.loading = "lazy";
+    img.className = "block w-full h-[110px] object-cover";
+    wrap.appendChild(img);
+  
+    // Primary badge
+    if (model.is_primary) {
+      const b = document.createElement("div");
+      b.className = "absolute top-1 left-1 text-[11px] px-2 py-0.5 rounded-full bg-black/70 text-white";
+      b.textContent = "Primary";
+      wrap.appendChild(b);
+    }
+  
+    // Controls
+    const bar = document.createElement("div");
+    bar.className = "absolute inset-x-0 bottom-0 p-1 bg-black/50 opacity-0 group-hover:opacity-100 transition";
+    bar.innerHTML = `
+      <div class="flex gap-1 justify-center">
+        <button class="btn btn-ghost btn-sm" data-act="crop" ${pending ? "disabled" : ""} title="Crop">Crop</button>
+        <label class="btn btn-ghost btn-sm cursor-pointer" title="Replace">
+          Replace
+          <input type="file" accept="image/*" class="hidden" data-act="replace">
+        </label>
+        <button class="btn btn-ghost btn-sm" data-act="primary" ${pending ? "disabled" : ""} title="Set Primary">Primary</button>
+        <button class="btn btn-ghost btn-sm" data-act="delete" ${pending ? "" : ""} title="Delete">Delete</button>
+      </div>
+    `;
+    wrap.appendChild(bar);
+  
+    // Drag handle in reorder mode
+    if (__reorderMode && persisted) {
+      wrap.draggable = true;
+      wrap.dataset.imageId = model.image_id;
+      wrap.classList.add("cursor-move");
+      wrap.addEventListener("dragstart", (e) => {
+        e.dataTransfer.setData("text/plain", model.image_id);
+      });
+      hostDragEnable();
+    }
+  
+    // Wire actions
+    bar.addEventListener("click", async (e) => {
+      const btn = e.target.closest("button");
+      if (!btn) return;
+      const act = btn.dataset.act;
+      if (act === "crop" && persisted) {
+        await openCropper(model);
+      } else if (act === "primary" && persisted) {
+        await setPrimary(model.image_id);
+      } else if (act === "delete") {
+        if (pending) {
+          // remove from pending
+          const idx = __pendingFiles.findIndex(f => ("name" in f) && (model.cdn_url.endsWith(f.name) || true));
+          if (idx >= 0) __pendingFiles.splice(idx, 1);
+          renderPhotosGrid();
+        } else if (persisted) {
+          await deleteImage(model.image_id);
+        }
+      }
+    });
+    // Replace (separate input)
+    bar.querySelector('input[type="file"][data-act="replace"]')?.addEventListener("change", async (ev) => {
+      const f = ev.target.files?.[0];
+      if (!f) return;
+      await replaceImage(model, f);
+    });
+  
+    return wrap;
+  }
+  
+  // Enable drop targets to reorder cards
+  function hostDragEnable() {
+    const host = $("photosGrid");
+    if (!host) return;
+    host.addEventListener("dragover", (e) => { if (__reorderMode) e.preventDefault(); });
+    host.addEventListener("drop", async (e) => {
+      if (!__reorderMode) return;
+      e.preventDefault();
+      const draggingId = e.dataTransfer.getData("text/plain");
+      const target = e.target.closest("[data-image-id]");
+      const targetId = target?.dataset.imageId;
+      if (!draggingId || !targetId || draggingId === targetId) return;
+  
+      // compute new order: move dragging before target
+      const order = __photos.slice().sort((a,b)=>a.sort_order-b.sort_order);
+      const fromIdx = order.findIndex(r => r.image_id === draggingId);
+      const toIdx   = order.findIndex(r => r.image_id === targetId);
+      if (fromIdx < 0 || toIdx < 0) return;
+  
+      const [moved] = order.splice(fromIdx, 1);
+      order.splice(toIdx, 0, moved);
+      order.forEach((r, i) => r.sort_order = i);
+  
+      // persist
+      try {
+        await api("/api/images/reorder", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            item_id: __currentItemId,
+            orders: order.map(r => ({ image_id: r.image_id, sort_order: r.sort_order }))
+          })
+        });
+        __photos = order;
+        renderPhotosGrid();
+      } catch { alert("Failed to reorder."); }
+    }, { once: true });
+  }
+  
+  // Simple browser-side resize/compress to keep uploads fast
+  async function downscaleToBlob(file, maxEdge = 2048, quality = 0.9) {
+    const img = await createImageBitmap(file);
+    const scale = Math.min(1, maxEdge / Math.max(img.width, img.height));
+    const w = Math.round(img.width * scale);
+    const h = Math.round(img.height * scale);
+  
+    const cnv = document.createElement("canvas");
+    cnv.width = w; cnv.height = h;
+    const ctx = cnv.getContext("2d");
+    ctx.drawImage(img, 0, 0, w, h);
+    const type = /image\/(png|webp)/i.test(file.type) ? file.type : "image/jpeg";
+    const blob = await new Promise(res => cnv.toBlob(res, type, quality));
+    return new File([blob], file.name.replace(/\.(heic|heif)$/i, ".jpg"), { type });
+  }
+  
+  // Upload + attach (requires item_id)
+  async function uploadAndAttach(file, { cropOfImageId = null } = {}) {
+    if (!__currentItemId) {
+      __pendingFiles.push(file);
+      renderPhotosGrid();
+      return;
+    }
+    const body = new FormData();
+    body.append("file", file);
+    const up = await api(`/api/images/upload?item_id=${encodeURIComponent(__currentItemId)}&filename=${encodeURIComponent(file.name)}`, {
+      method: "POST",
+      body
+    });
+    if (!up || up.ok === false) throw new Error(up?.error || "upload_failed");
+  
+    const at = await api("/api/images/attach", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        item_id: __currentItemId,
+        ...up
+      })
+    });
+    if (!at || at.ok === false) throw new Error(at?.error || "attach_failed");
+  
+    // If this was a crop-replace, consider deleting the original
+    if (cropOfImageId) {
+      try { await deleteImage(cropOfImageId, { silent: true }); } catch {}
+    }
+  
+    // Refresh in-memory list
+    __photos.push({
+      image_id: at.image_id,
+      cdn_url: up.cdn_url,
+      is_primary: at.is_primary,
+      sort_order: (__photos.length),
+      r2_key: up.r2_key,
+      width: up.width, height: up.height, bytes: up.bytes, content_type: up.content_type,
+    });
+    renderPhotosGrid();
+  }
+  
+  // Set primary
+  async function setPrimary(image_id) {
+    if (!__currentItemId) return alert("Save the item first.");
+    const res = await api("/api/images/set-primary", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ item_id: __currentItemId, image_id })
+    });
+    if (!res || res.ok === false) return alert(res?.error || "Failed to set primary.");
+    __photos.forEach(p => p.is_primary = (p.image_id === image_id));
+    renderPhotosGrid();
+  }
+  
+  // Delete
+  async function deleteImage(image_id, { silent = false } = {}) {
+    if (!__currentItemId) return;
+    const res = await api("/api/images/delete", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ item_id: __currentItemId, image_id })
+    });
+    if (!res || res.ok === false) { if (!silent) alert(res?.error || "Failed to delete."); return; }
+    __photos = __photos.filter(p => p.image_id !== image_id);
+    renderPhotosGrid();
+  }
+  
+  // Replace
+  async function replaceImage(oldModel, newFile) {
+    const ds = await downscaleToBlob(newFile);
+    await uploadAndAttach(ds, { cropOfImageId: oldModel.image_id });
+  }
+  
+  // Minimal cropper: square crop with zoom+drag
+  let __cropState = { img: null, zoom: 1, dx: 0, dy: 0, baseW: 0, baseH: 0, targetId: null };
+  async function openCropper(model) {
+    // load source
+    const src = model.cdn_url;
+    const img = await (async () => {
+      const i = new Image();
+      i.crossOrigin = "anonymous";
+      i.src = src;
+      await new Promise((r, j) => { i.onload = r; i.onerror = j; });
+      return i;
+    })();
+    __cropState.img = img;
+    __cropState.zoom = 1;
+    __cropState.dx = 0;
+    __cropState.dy = 0;
+    __cropState.targetId = model.image_id;
+  
+    const dlg = $("cropDialog");
+    const cnv = $("cropCanvas");
+    const zoom = $("cropZoom");
+    const ctx = cnv.getContext("2d");
+  
+    function redraw() {
+      const Z = Number(zoom.value || 1);
+      __cropState.zoom = Z;
+      ctx.clearRect(0,0,cnv.width, cnv.height);
+      // cover fit
+      const baseScale = Math.max(cnv.width / img.width, cnv.height / img.height);
+      const s = baseScale * Z;
+      const drawW = img.width * s;
+      const drawH = img.height * s;
+      const x = (cnv.width - drawW) / 2 + __cropState.dx;
+      const y = (cnv.height - drawH) / 2 + __cropState.dy;
+      ctx.drawImage(img, x, y, drawW, drawH);
+    }
+  
+    let dragging = false, lastX = 0, lastY = 0;
+    cnv.onmousedown = (e)=>{ dragging=true; lastX=e.clientX; lastY=e.clientY; };
+    cnv.onmouseup   = ()=> dragging=false;
+    cnv.onmouseleave= ()=> dragging=false;
+    cnv.onmousemove = (e)=>{ if(!dragging) return; __cropState.dx += (e.clientX-lastX); __cropState.dy += (e.clientY-lastY); lastX=e.clientX; lastY=e.clientY; redraw(); };
+    zoom.oninput = redraw;
+  
+    dlg.showModal();
+    redraw();
+  
+    $("cropCancelBtn").onclick = ()=> dlg.close();
+    $("cropSaveBtn").onclick = async ()=>{
+      cnv.toBlob(async (blob)=>{
+        if (!blob) return;
+        const f = new File([blob], "crop.jpg", { type: "image/jpeg" });
+        await uploadAndAttach(f, { cropOfImageId: __cropState.targetId });
+        dlg.close();
+      }, "image/jpeg", 0.92);
+    };
+  }
+  
+  // Wire inputs
+  function wirePhotoPickers() {
+    $("photoCameraInput")?.addEventListener("change", async (e) => {
+      const files = Array.from(e.target.files || []);
+      for (const f of files) {
+        if (__photos.length + __pendingFiles.length >= MAX_PHOTOS) break;
+        const ds = await downscaleToBlob(f);
+        await uploadAndAttach(ds);
+      }
+      e.target.value = "";
+    });
+    $("photoFileInput")?.addEventListener("change", async (e) => {
+      const files = Array.from(e.target.files || []);
+      for (const f of files) {
+        if (__photos.length + __pendingFiles.length >= MAX_PHOTOS) break;
+        const ds = await downscaleToBlob(f);
+        await uploadAndAttach(ds);
+      }
+      e.target.value = "";
+    });
+  
+    $("photoReorderToggle")?.addEventListener("click", ()=>{
+      __reorderMode = !__reorderMode;
+      renderPhotosGrid();
+      alert(__reorderMode ? "Reorder ON: drag photos to rearrange." : "Reorder OFF");
+    });
+  
+    // When item gets its ID (after first save), flush pending files
+    document.addEventListener("intake:item-saved", async (ev) => {
+      const id = ev?.detail?.item_id;
+      if (!id) return;
+      __currentItemId = id;
+      if (__pendingFiles.length === 0) return;
+      const pending = __pendingFiles.splice(0, __pendingFiles.length);
+      for (const f of pending) await uploadAndAttach(f);
+    });
+  }
+
+
+
+
+  
   async function loadMeta() {
     const res = await api("/api/inventory/meta", { method: "GET" });
     if (!res || res.ok === false) throw new Error(res?.error || "meta_failed");
@@ -1035,6 +1383,10 @@ document.addEventListener("intake:item-changed", () => refreshDrafts({ force: tr
     
     wireCtas();
 
+    // NEW: Photos bootstrap
+    wirePhotoPickers();
+    renderPhotosGrid();
+
       // After successful save: confirm, disable form controls, and swap CTAs
       function postSaveSuccess(res, mode) {
         try {
@@ -1051,6 +1403,11 @@ document.addEventListener("intake:item-changed", () => refreshDrafts({ force: tr
             const form = document.getElementById("intakeForm");
             if (form && __currentItemId) form.dataset.itemId = __currentItemId;
           } catch (e) {}
+
+          // NEW: notify photos module so it can flush any pending uploads
+          try {
+            document.dispatchEvent(new CustomEvent("intake:item-saved", { detail: { item_id: __currentItemId } }));
+          } catch {}
           
         } catch {}
   
