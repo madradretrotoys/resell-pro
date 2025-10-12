@@ -148,37 +148,6 @@ function setMarketplaceVisibility() {
   
 
   
-  // Generic select filler; supports arrays of strings OR objects.
-  // Adds a placeholder at the top and leaves the select unselected.
-  function fillSelect(selectEl, rows = [], opts = {}) {
-    if (!selectEl) return;
-    const { textKey = null, valueKey = null, extras = null } = opts;
-    selectEl.innerHTML = "";
-  
-    // 1) placeholder first
-    const ph = document.createElement("option");
-    ph.value = "";
-    ph.textContent = "<select>";
-    selectEl.appendChild(ph);
-  
-    // 2) then options
-    for (const row of rows || []) {
-      const opt = document.createElement("option");
-      const text = textKey ? row?.[textKey] : String(row ?? "");
-      const value = valueKey ? row?.[valueKey] : String(row ?? "");
-      opt.textContent = text ?? "";
-      opt.value = value ?? "";
-      if (extras && typeof extras === "function") {
-        const ex = extras(row) || {};
-        for (const k in ex) opt.dataset[k] = ex[k];
-      }
-      selectEl.appendChild(opt);
-    }
-  
-    // 3) keep placeholder selected
-    selectEl.value = "";
-  }
-
   function ensurePlaceholder(selectEl, placeholderText = "— Select —") {
     if (!selectEl) return;
     const hasOptions = selectEl.options && selectEl.options.length > 0;
@@ -731,45 +700,7 @@ document.addEventListener("intake:item-changed", () => refreshDrafts({ force: tr
       return { inventory, listing, marketplaces_selected };
     }
 
-
-      const salesChannel = valByIdOrLabel("salesChannelSelect", "Sales Channel");
-      const isStoreOnly = /store only/i.test(String(salesChannel || ""));
-      
-      // Active/new items: full payload
-      const inventory = {
-        product_short_title: title,
-        price: Number(valByIdOrLabel(null, "Price (USD)") || 0),
-        qty: Number(valByIdOrLabel(null, "Qty") || 0),
-        cost_of_goods: Number(valByIdOrLabel(null, "Cost of Goods (USD)") || 0),
-        category_nm: valByIdOrLabel("categorySelect", "Category"),
-        instore_loc: valByIdOrLabel("storeLocationSelect", "Store Location"),
-        case_bin_shelf: valByIdOrLabel(null, "Case#/Bin#/Shelf#"),
-        instore_online: valByIdOrLabel("salesChannelSelect", "Sales Channel"),
-      };
-
-      if (isStoreOnly) {
-        // For Store Only: no marketplace listing data
-        return { inventory };
-      }
-      
-      const listing = {
-        listing_category: valByIdOrLabel("marketplaceCategorySelect", "Marketplace Category"),
-        item_condition: valByIdOrLabel("conditionSelect", "Condition"),
-        brand_name: valByIdOrLabel("brandSelect", "Brand"),
-        primary_color: valByIdOrLabel("colorSelect", "Primary Color"),
-        product_description: valByIdOrLabel(null, "Long Description"),
-        shipping_box: valByIdOrLabel("shippingBoxSelect", "Shipping Box"),
-        weight_lb: Number(valByIdOrLabel("shipWeightLb", "Weight (lb)") || 0),
-        weight_oz: Number(valByIdOrLabel("shipWeightOz", "Weight (oz)") || 0),
-        shipbx_length: Number(valByIdOrLabel("shipLength", "Length") || 0),
-        shipbx_width: Number(valByIdOrLabel("shipWidth", "Width") || 0),
-        shipbx_height: Number(valByIdOrLabel("shipHeight", "Height") || 0),
-      };
-    
-      const marketplaces_selected = Array.from(selectedMarketplaceIds.values());
-      return { inventory, listing, marketplaces_selected };
-    }    
-      async function submitIntake(mode = "active") {
+     async function submitIntake(mode = "active") {
       if (mode !== "draft" && !computeValidity()) return;
     
       const payload = buildPayload(mode === "draft");
