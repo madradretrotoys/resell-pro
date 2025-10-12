@@ -1,3 +1,4 @@
+// Begin functions/api/images/read.ts
 // functions/api/images/read.ts
 // GET /api/images/read?tenant_id=...&key=...  OR mount behind a friendly route.
 // Sets long-lived cache headers and streams from R2.
@@ -22,3 +23,4 @@ export const onRequestGet: PagesFunction = async ({ request, env }) => {
 
   return new Response(obj.body, { status: 200, headers });
 };
+// end functions/api/images/read.ts
