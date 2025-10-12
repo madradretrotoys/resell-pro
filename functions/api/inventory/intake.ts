@@ -86,7 +86,9 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
       if (!item_id_in) return json({ ok: false, error: "missing_item_id" }, 400);
       // inventory → item_listing_profile cascades ON DELETE
       await sql/*sql*/`
-        SELECT set_config('app.actor_user_id', ${actor_user_id}, true);
+        WITH s AS (
+          SELECT set_config('app.actor_user_id', ${actor_user_id}, true)
+        )
         DELETE FROM app.inventory
         WHERE item_id = ${item_id_in};
       `;
@@ -109,7 +111,9 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
         // === DRAFT UPDATE: minimal fields only; no SKU allocation, no listing/profile upserts ===
         if (isDraft) {
           const updInv = await sql<{ item_id: string; sku: string | null }[]>`
-            SELECT set_config('app.actor_user_id', ${actor_user_id}, true);
+            WITH s AS (
+              SELECT set_config('app.actor_user_id', ${actor_user_id}, true)
+            )
             UPDATE app.inventory
             SET
               product_short_title = ${inv.product_short_title},
@@ -170,7 +174,9 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
 
         // Full inventory update for ACTIVE
         const updInv = await sql<{ item_id: string; sku: string | null }[]>`
-          SELECT set_config('app.actor_user_id', ${actor_user_id}, true);
+          WITH s AS (
+            SELECT set_config('app.actor_user_id', ${actor_user_id}, true);
+          )
           UPDATE app.inventory
           SET
             sku = ${sku},
