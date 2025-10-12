@@ -286,15 +286,17 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
 
 
     // 2) Insert into inventory (drafts carry NULL sku; active allocates)
-        // === CREATE DRAFT: minimal insert, no listing/profile, no marketplaces ===
+    // === CREATE DRAFT: minimal insert, no listing/profile, no marketplaces ===
     if (isDraft) {
       const invRows = await sql<{ item_id: string }[]>`
-        SELECT set_config('app.actor_user_id', ${actor_user_id}, true);
+        WITH s AS (
+          SELECT set_config('app.actor_user_id', ${actor_user_id}, true)
+        )
         INSERT INTO app.inventory
           (sku, product_short_title, item_status)
         VALUES
           (NULL, ${inv.product_short_title}, 'draft')
-        RETURNING item_id;
+        RETURNING item_id
       `;
       const item_id = invRows[0].item_id;
       return json({ ok: true, item_id, sku: null, status: 'draft', ms: Date.now() - t0 }, 200);
@@ -303,7 +305,9 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
    // 1) Allocate next SKU (already guarded earlier; keep as-is)
     // 2) Insert full inventory
     const invRows = await sql<{ item_id: string }[]>`
-      SELECT set_config('app.actor_user_id', ${actor_user_id}, true);
+      WITH s AS (
+        SELECT set_config('app.actor_user_id', ${actor_user_id}, true)
+      )
       INSERT INTO app.inventory
         (sku, product_short_title, price, qty, cost_of_goods, category_nm, instore_loc, case_bin_shelf, instore_online, item_status)
       VALUES
