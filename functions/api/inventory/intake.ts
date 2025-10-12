@@ -175,7 +175,7 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
         // Full inventory update for ACTIVE
         const updInv = await sql<{ item_id: string; sku: string | null }[]>`
           WITH s AS (
-            SELECT set_config('app.actor_user_id', ${actor_user_id}, true);
+            SELECT set_config('app.actor_user_id', ${actor_user_id}, true)
           )
           UPDATE app.inventory
           SET
