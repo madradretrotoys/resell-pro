@@ -543,7 +543,9 @@ async function refreshDrafts({ force = false } = {}) {
     try {
       const header = document.querySelector('#recentDraftsHeader, [data-recent-drafts-header]');
       if (header) header.classList.add("loading");
-      await loadDrafts?.();
+      // Support scope where loadDrafts is defined later/inside try{}
+      const __callLoadDrafts = (window && window.__loadDrafts) || (typeof loadDrafts === "function" ? loadDrafts : null);
+      if (__callLoadDrafts) { await __callLoadDrafts(); }
     } finally {
       const header = document.querySelector('#recentDraftsHeader, [data-recent-drafts-header]');
       if (header) header.classList.remove("loading");
@@ -1050,6 +1052,9 @@ document.addEventListener("intake:item-changed", () => refreshDrafts({ force: tr
         console.error("drafts:load:error", err);
       }
     }
+
+     // Make loadDrafts available to the refresh bus declared earlier
+    try { window.__loadDrafts = loadDrafts; } catch {}
     
     wireCtas();
 
