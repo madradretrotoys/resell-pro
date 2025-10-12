@@ -86,8 +86,9 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
       if (!item_id_in) return json({ ok: false, error: "missing_item_id" }, 400);
       // inventory → item_listing_profile cascades ON DELETE
       await sql/*sql*/`
+        SELECT set_config('app.actor_user_id', ${actor_user_id}, true);
         DELETE FROM app.inventory
-        WHERE item_id = ${item_id_in}
+        WHERE item_id = ${item_id_in};
       `;
       return json({ ok: true, deleted: true, item_id: item_id_in }, 200);
     }
@@ -108,12 +109,20 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
         // === DRAFT UPDATE: minimal fields only; no SKU allocation, no listing/profile upserts ===
         if (isDraft) {
           const updInv = await sql<{ item_id: string; sku: string | null }[]>`
+            SELECT set_config('app.actor_user_id', ${actor_user_id}, true);
             UPDATE app.inventory
             SET
               product_short_title = ${inv.product_short_title},
+              price = ${inv.price},
+              qty = ${inv.qty},
+              cost_of_goods = ${inv.cost_of_goods},
+              category_nm = ${inv.category_nm},
+              instore_loc = ${inv.instore_loc},
+              case_bin_shelf = ${inv.case_bin_shelf},
+              instore_online = ${inv.instore_online},
               item_status = 'draft'
             WHERE item_id = ${item_id_in}
-            RETURNING item_id, sku
+            RETURNING item_id, sku;
           `;
           const item_id = updInv[0].item_id;
           const retSku  = updInv[0].sku;
@@ -161,6 +170,7 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
 
         // Full inventory update for ACTIVE
         const updInv = await sql<{ item_id: string; sku: string | null }[]>`
+          SELECT set_config('app.actor_user_id', ${actor_user_id}, true);
           UPDATE app.inventory
           SET
             sku = ${sku},
@@ -174,7 +184,7 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
             instore_online = ${inv.instore_online},
             item_status = 'active'
           WHERE item_id = ${item_id_in}
-          RETURNING item_id, sku
+          RETURNING item_id, sku;
         `;
 
           const item_id = updInv[0].item_id;
@@ -279,19 +289,21 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
         // === CREATE DRAFT: minimal insert, no listing/profile, no marketplaces ===
     if (isDraft) {
       const invRows = await sql<{ item_id: string }[]>`
+        SELECT set_config('app.actor_user_id', ${actor_user_id}, true);
         INSERT INTO app.inventory
           (sku, product_short_title, item_status)
         VALUES
           (NULL, ${inv.product_short_title}, 'draft')
-        RETURNING item_id
+        RETURNING item_id;
       `;
       const item_id = invRows[0].item_id;
       return json({ ok: true, item_id, sku: null, status: 'draft', ms: Date.now() - t0 }, 200);
     }
 
-    // 1) Allocate next SKU (already guarded earlier; keep as-is)
+   // 1) Allocate next SKU (already guarded earlier; keep as-is)
     // 2) Insert full inventory
     const invRows = await sql<{ item_id: string }[]>`
+      SELECT set_config('app.actor_user_id', ${actor_user_id}, true);
       INSERT INTO app.inventory
         (sku, product_short_title, price, qty, cost_of_goods, category_nm, instore_loc, case_bin_shelf, instore_online, item_status)
       VALUES
