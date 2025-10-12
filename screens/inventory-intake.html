@@ -22,22 +22,25 @@
   
         <!-- Actions -->
         <div class="flex flex-wrap gap-2 mb-3">
-          <label class="btn btn-primary btn-sm cursor-pointer">
+          <button id="openCameraBtn" type="button" class="btn btn-primary btn-sm">
             Take Photo
-            <input id="photoCameraInput" type="file" accept="image/*" capture="environment" class="hidden" />
-          </label>
+          </button>
           <label class="btn btn-ghost btn-sm cursor-pointer">
             Upload Photo
             <input id="photoFileInput" type="file" accept="image/*" multiple class="hidden" />
           </label>
+          
+          <!-- keep a hidden camera input as a fallback, not visible in UI -->
+          <input id="photoCameraInput" type="file" accept="image/*" capture="environment" class="hidden" />
+
           <button id="photoReorderToggle" type="button" class="btn btn-ghost btn-sm" title="Toggle drag-to-reorder">
             Reorder
           </button>
         </div>
   
         <!-- Grid -->
-        <div id="photosGrid" class="grid gap-2"
-             style="grid-template-columns:repeat(auto-fill,minmax(110px,1fr));">
+        <div id="photosGrid" class="grid gap-2 place-items-start"
+             style="grid-template-columns:repeat(auto-fill,140px);">
           <!-- thumbnails injected here -->
         </div>
   
@@ -258,5 +261,25 @@
   </form>
 </dialog>
 
+
+<!-- Camera Modal -->
+<dialog id="cameraDialog" class="rounded-2xl p-0">
+  <form method="dialog" class="p-3 w-[90vw] max-w-xl">
+    <h3 class="sectionTitle mb-2">Take Photo</h3>
+
+    <div class="border rounded-2xl overflow-hidden mb-2">
+      <video id="cameraVideo" autoplay playsinline style="display:block;max-width:100%;width:100%;height:auto"></video>
+      <canvas id="cameraCanvas" width="1920" height="1080" style="display:none"></canvas>
+    </div>
+
+    <div class="flex gap-2 justify-between">
+      <div class="text-sm text-gray-600">If your browser blocks the camera, use “Upload Photo”.</div>
+      <div class="flex gap-2">
+        <button id="cameraCancelBtn" type="button" class="btn btn-ghost btn-sm">Cancel</button>
+        <button id="cameraSnapBtn"   type="button" class="btn btn-primary btn-sm">Take Photo</button>
+      </div>
+    </div>
+  </form>
+</dialog>
 <!-- end intake.html -->
 
