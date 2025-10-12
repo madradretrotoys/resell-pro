@@ -108,7 +108,7 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
           return json({ ok: false, error: "not_found" }, 404);
         }
 
-        // === DRAFT UPDATE: minimal fields only; no SKU allocation, no listing/profile upserts ===
+        // === DRAFT UPDATE: update any inventory fields; also upsert listing if sent ===
         if (isDraft) {
           const updInv = await sql<{ item_id: string; sku: string | null }[]>`
             WITH s AS (
@@ -129,9 +129,34 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
             RETURNING item_id, sku;
           `;
           const item_id = updInv[0].item_id;
-          const retSku  = updInv[0].sku;
-          return json({ ok: true, item_id, sku: retSku, status, ms: Date.now() - t0 }, 200);
+        
+          if (lst && Object.values(lst).some(v => v !== null && v !== undefined && String(v) !== "")) {
+            await sql/*sql*/`
+              INSERT INTO app.item_listing_profile
+                (item_id, tenant_id, listing_category, item_condition, brand_name, primary_color,
+                 product_description, shipping_box, weight_lb, weight_oz, shipbx_length, shipbx_width, shipbx_height)
+              VALUES
+                (${item_id}, ${tenant_id}, ${lst.listing_category}, ${lst.item_condition}, ${lst.brand_name}, ${lst.primary_color},
+                 ${lst.product_description}, ${lst.shipping_box}, ${lst.weight_lb}, ${lst.weight_oz},
+                 ${lst.shipbx_length}, ${lst.shipbx_width}, ${lst.shipbx_height})
+              ON CONFLICT (item_id) DO UPDATE SET
+                listing_category = EXCLUDED.listing_category,
+                item_condition   = EXCLUDED.item_condition,
+                brand_name       = EXCLUDED.brand_name,
+                primary_color    = EXCLUDED.primary_color,
+                product_description = EXCLUDED.product_description,
+                shipping_box     = EXCLUDED.shipping_box,
+                weight_lb        = EXCLUDED.weight_lb,
+                weight_oz        = EXCLUDED.weight_oz,
+                shipbx_length    = EXCLUDED.shipbx_length,
+                shipbx_width     = EXCLUDED.shipbx_width,
+                shipbx_height    = EXCLUDED.shipbx_height
+            `;
+          }
+        
+          return json({ ok: true, item_id, sku: updInv[0].sku, status, ms: Date.now() - t0 }, 200);
         }
+
 
         // === ACTIVE UPDATE: if promoting to active and no SKU yet, allocate ===
         // Look up category_code only when needed for SKU allocation
@@ -292,19 +317,46 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
 
 
     // 2) Insert into inventory (drafts carry NULL sku; active allocates)
-    // === CREATE DRAFT: minimal insert, no listing/profile, no marketplaces ===
+    // === CREATE DRAFT: store any provided inventory fields; also upsert listing if sent ===
     if (isDraft) {
       const invRows = await sql<{ item_id: string }[]>`
         WITH s AS (
           SELECT set_config('app.actor_user_id', ${actor_user_id}, true)
         )
         INSERT INTO app.inventory
-          (sku, product_short_title, item_status)
+          (sku, product_short_title, price, qty, cost_of_goods, category_nm, instore_loc, case_bin_shelf, instore_online, item_status)
         VALUES
-          (NULL, ${inv.product_short_title}, 'draft')
+          (NULL, ${inv.product_short_title}, ${inv.price}, ${inv.qty}, ${inv.cost_of_goods},
+           ${inv.category_nm}, ${inv.instore_loc}, ${inv.case_bin_shelf}, ${inv.instore_online}, 'draft')
         RETURNING item_id
       `;
       const item_id = invRows[0].item_id;
+    
+      // If the client provided any listing fields for the draft, persist them too
+      if (lst && Object.values(lst).some(v => v !== null && v !== undefined && String(v) !== "")) {
+        await sql/*sql*/`
+          INSERT INTO app.item_listing_profile
+            (item_id, tenant_id, listing_category, item_condition, brand_name, primary_color,
+             product_description, shipping_box, weight_lb, weight_oz, shipbx_length, shipbx_width, shipbx_height)
+          VALUES
+            (${item_id}, ${tenant_id}, ${lst.listing_category}, ${lst.item_condition}, ${lst.brand_name}, ${lst.primary_color},
+             ${lst.product_description}, ${lst.shipping_box}, ${lst.weight_lb}, ${lst.weight_oz},
+             ${lst.shipbx_length}, ${lst.shipbx_width}, ${lst.shipbx_height})
+          ON CONFLICT (item_id) DO UPDATE SET
+            listing_category = EXCLUDED.listing_category,
+            item_condition   = EXCLUDED.item_condition,
+            brand_name       = EXCLUDED.brand_name,
+            primary_color    = EXCLUDED.primary_color,
+            product_description = EXCLUDED.product_description,
+            shipping_box     = EXCLUDED.shipping_box,
+            weight_lb        = EXCLUDED.weight_lb,
+            weight_oz        = EXCLUDED.weight_oz,
+            shipbx_length    = EXCLUDED.shipbx_length,
+            shipbx_width     = EXCLUDED.shipbx_width,
+            shipbx_height    = EXCLUDED.shipbx_height
+        `;
+      }
+    
       return json({ ok: true, item_id, sku: null, status: 'draft', ms: Date.now() - t0 }, 200);
     }
 
