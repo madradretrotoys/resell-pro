@@ -727,11 +727,7 @@ document.addEventListener("intake:item-changed", () => refreshDrafts({ force: tr
       if (__currentItemId) {
         payload.item_id = __currentItemId;
       }
-      // If we’re editing an existing item, send its id so the server updates it
-      if (__currentItemId) {
-        payload.item_id = __currentItemId;
-      }
-
+      
       const res = await api("/api/inventory/intake", {
         method: "POST",
         body: JSON.stringify(payload),
