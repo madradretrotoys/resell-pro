@@ -1,3 +1,4 @@
+// begin functions/api/images/upload.ts
 // functions/api/images/upload.ts
 import { neon } from "@neondatabase/serverless";
 
@@ -125,3 +126,7 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
     return json({ ok: false, error: String(err?.message || err || "upload_failed") }, 500);
   }
 };
+
+// end functions/api/images/upload.ts
+
+// functions/api/images/upload.ts
