@@ -524,7 +524,40 @@ function setMarketplaceVisibility() {
     return allOk;
   }
 
+// --- Drafts refresh bus + helpers (anchored insert) ---
+let __draftsRefreshTimer = null;
 
+function isDraftsTabVisible() {
+  const tab = document.querySelector('[data-tab="drafts"], #tabDrafts, #draftsTab');
+  const host = tab || document.getElementById("recentDraftsTbody")?.closest("section,div,table");
+  if (!host) return true; // if we can't detect, allow refresh
+  const hiddenByAttr = host.getAttribute("hidden") != null;
+  const hiddenByClass = host.classList.contains("hidden");
+  return !(hiddenByAttr || hiddenByClass);
+}
+
+async function refreshDrafts({ force = false } = {}) {
+  if (!force && !isDraftsTabVisible()) return;
+  if (__draftsRefreshTimer) window.clearTimeout(__draftsRefreshTimer);
+  __draftsRefreshTimer = window.setTimeout(async () => {
+    try {
+      const header = document.querySelector('#recentDraftsHeader, [data-recent-drafts-header]');
+      if (header) header.classList.add("loading");
+      await loadDrafts?.();
+    } finally {
+      const header = document.querySelector('#recentDraftsHeader, [data-recent-drafts-header]');
+      if (header) header.classList.remove("loading");
+      __draftsRefreshTimer = null;
+    }
+  }, 300);
+}
+
+// Central event to refresh Drafts after successful add/save/delete
+document.addEventListener("intake:item-changed", () => refreshDrafts({ force: true }));
+// --- end Drafts refresh bus ---
+
+
+  
   
   
   function wireValidation() {
@@ -713,6 +746,8 @@ function setMarketplaceVisibility() {
 
         // Post-save UX: confirm, disable fields, and swap CTAs
         postSaveSuccess(res, mode);
+        // Notify Drafts to reload now that an item changed (added/promoted/saved)
+        document.dispatchEvent(new CustomEvent("intake:item-changed"));
       try {
         const skuEl = document.querySelector("[data-sku-out]");
         if (skuEl && res.sku) skuEl.textContent = res.sku;
@@ -928,6 +963,8 @@ function setMarketplaceVisibility() {
               });
               if (!resDel || resDel.ok === false) throw new Error(resDel?.error || "delete_failed");
               alert("Item deleted.");
+              // Also refresh Drafts immediately (useful when the page is not fully reloaded yet)
+              document.dispatchEvent(new CustomEvent("intake:item-changed"));
               window.location.reload();
             } catch (err) {
               console.error("intake:delete:error", err);
