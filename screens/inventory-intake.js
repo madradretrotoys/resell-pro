@@ -668,19 +668,69 @@ document.addEventListener("intake:item-changed", () => refreshDrafts({ force: tr
     }
     
     function buildPayload(isDraft = false) {
-      // Always collect the title
+      // helper: drop empty strings/null/undefined
+      const prune = (obj) => {
+        const out = {};
+        for (const [k, v] of Object.entries(obj || {})) {
+          if (v === null || v === undefined) continue;
+          if (typeof v === "string" && v.trim() === "") continue;
+          out[k] = v;
+        }
+        return out;
+      };
+    
       const title = valByIdOrLabel(null, "Item Name / Description");
     
+      // Collect all possible fields (strings left as entered; numbers coerced when present)
+      const invAll = {
+        product_short_title: title,
+        price: (() => { const v = valByIdOrLabel(null, "Price (USD)"); return v !== "" ? Number(v) : undefined; })(),
+        qty: (() => { const v = valByIdOrLabel(null, "Qty"); return v !== "" ? Number(v) : undefined; })(),
+        cost_of_goods: (() => { const v = valByIdOrLabel(null, "Cost of Goods (USD)"); return v !== "" ? Number(v) : undefined; })(),
+        category_nm: valByIdOrLabel("categorySelect", "Category"),
+        instore_loc: valByIdOrLabel("storeLocationSelect", "Store Location"),
+        case_bin_shelf: valByIdOrLabel(null, "Case#/Bin#/Shelf#"),
+        instore_online: valByIdOrLabel("salesChannelSelect", "Sales Channel"),
+      };
+    
+      const listingAll = {
+        listing_category: valByIdOrLabel("marketplaceCategorySelect", "Marketplace Category"),
+        item_condition:   valByIdOrLabel("conditionSelect", "Condition"),
+        brand_name:       valByIdOrLabel("brandSelect", "Brand"),
+        primary_color:    valByIdOrLabel("colorSelect", "Primary Color"),
+        product_description: valByIdOrLabel(null, "Long Description"),
+        shipping_box:     valByIdOrLabel("shippingBoxSelect", "Shipping Box"),
+        weight_lb:  (() => { const v = valByIdOrLabel("shipWeightLb", "Weight (lb)"); return v !== "" ? Number(v) : undefined; })(),
+        weight_oz:  (() => { const v = valByIdOrLabel("shipWeightOz", "Weight (oz)"); return v !== "" ? Number(v) : undefined; })(),
+        shipbx_length: (() => { const v = valByIdOrLabel("shipLength", "Length"); return v !== "" ? Number(v) : undefined; })(),
+        shipbx_width:  (() => { const v = valByIdOrLabel("shipWidth", "Width"); return v !== "" ? Number(v) : undefined; })(),
+        shipbx_height: (() => { const v = valByIdOrLabel("shipHeight", "Height"); return v !== "" ? Number(v) : undefined; })(),
+      };
+    
       if (isDraft) {
-        // Drafts: minimal payload so the API won't try to process incomplete listing data
-        return {
-          status: "draft",
-          inventory: {
-            product_short_title: title
-          }
-          // NOTE: do NOT include listing or marketplaces_selected for drafts
-        };
+        // Send any non-empty fields for drafts (Basic + Marketplace)
+        const inventory = prune(invAll);
+        const listing   = prune(listingAll);
+        const payload = { status: "draft", inventory };
+        if (Object.keys(listing).length > 0) payload.listing = listing;
+        // NOTE: we still omit marketplaces_selected for drafts for now
+        return payload;
       }
+    
+      // Active/new items (unchanged behavior)
+      const salesChannel = valByIdOrLabel("salesChannelSelect", "Sales Channel");
+      const isStoreOnly = /store only/i.test(String(salesChannel || ""));
+      const inventory = prune(invAll);
+    
+      if (isStoreOnly) {
+        return { inventory };
+      }
+    
+      const listing = prune(listingAll);
+      const marketplaces_selected = Array.from(selectedMarketplaceIds.values());
+      return { inventory, listing, marketplaces_selected };
+    }
+
 
       const salesChannel = valByIdOrLabel("salesChannelSelect", "Sales Channel");
       const isStoreOnly = /store only/i.test(String(salesChannel || ""));
