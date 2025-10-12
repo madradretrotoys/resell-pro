@@ -256,7 +256,7 @@ export async function init() {
   
   // Minimal cropper: square crop with zoom+drag
   let __cropState = { img: null, zoom: 1, dx: 0, dy: 0, baseW: 0, baseH: 0, targetId: null };
-  async function openCropper(model) {
+  async function openCropper(model, { pending = false } = {}) {
     // load source
     const src = model.cdn_url;
     const img = await (async () => {
@@ -266,22 +266,23 @@ export async function init() {
       await new Promise((r, j) => { i.onload = r; i.onerror = j; });
       return i;
     })();
+  
     __cropState.img = img;
     __cropState.zoom = 1;
     __cropState.dx = 0;
     __cropState.dy = 0;
-    __cropState.targetId = model.image_id;
+    __cropState.targetId = model.image_id || null;
   
-    const dlg = $("cropDialog");
-    const cnv = $("cropCanvas");
+    const dlg  = $("cropDialog");
+    const cnv  = $("cropCanvas");
     const zoom = $("cropZoom");
-    const ctx = cnv.getContext("2d");
+    const ctx  = cnv.getContext("2d");
   
     function redraw() {
       const Z = Number(zoom.value || 1);
       __cropState.zoom = Z;
-      ctx.clearRect(0,0,cnv.width, cnv.height);
-      // cover fit
+      ctx.clearRect(0, 0, cnv.width, cnv.height);
+      // cover-fit draw
       const baseScale = Math.max(cnv.width / img.width, cnv.height / img.height);
       const s = baseScale * Z;
       const drawW = img.width * s;
@@ -292,25 +293,62 @@ export async function init() {
     }
   
     let dragging = false, lastX = 0, lastY = 0;
-    cnv.onmousedown = (e)=>{ dragging=true; lastX=e.clientX; lastY=e.clientY; };
-    cnv.onmouseup   = ()=> dragging=false;
-    cnv.onmouseleave= ()=> dragging=false;
-    cnv.onmousemove = (e)=>{ if(!dragging) return; __cropState.dx += (e.clientX-lastX); __cropState.dy += (e.clientY-lastY); lastX=e.clientX; lastY=e.clientY; redraw(); };
+    cnv.onmousedown  = (e) => { dragging = true; lastX = e.clientX; lastY = e.clientY; };
+    cnv.onmouseup    = ()  => { dragging = false; };
+    cnv.onmouseleave = ()  => { dragging = false; };
+    cnv.onmousemove  = (e) => {
+      if (!dragging) return;
+      __cropState.dx += (e.clientX - lastX);
+      __cropState.dy += (e.clientY - lastY);
+      lastX = e.clientX; lastY = e.clientY;
+      redraw();
+    };
     zoom.oninput = redraw;
   
     dlg.showModal();
     redraw();
   
-    $("cropCancelBtn").onclick = ()=> dlg.close();
-    $("cropSaveBtn").onclick = async ()=>{
-      cnv.toBlob(async (blob)=>{
+    $("cropCancelBtn").onclick = () => dlg.close();
+  
+    $("cropSaveBtn").onclick = async () => {
+      cnv.toBlob(async (blob) => {
         if (!blob) return;
         const f = new File([blob], "crop.jpg", { type: "image/jpeg" });
-        await uploadAndAttach(f, { cropOfImageId: __cropState.targetId });
+  
+        if (pending) {
+          // Pending image (no image_id yet):
+          // 1) If we already have an item_id, upload now and remove one pending preview.
+          // 2) If we don't yet have an item_id, replace one pending slot with the cropped file.
+          if (__currentItemId) {
+            try {
+              await uploadAndAttach(f);
+              // best-effort: remove one pending placeholder to avoid duplicates
+              if (Array.isArray(__pendingFiles) && __pendingFiles.length) {
+                __pendingFiles.splice(0, 1);
+              }
+              renderPhotosGrid();
+            } catch (e) {
+              alert("Failed to upload cropped image.");
+            }
+          } else {
+            // Replace one pending entry locally
+            if (Array.isArray(__pendingFiles) && __pendingFiles.length) {
+              __pendingFiles.splice(0, 1, f);
+            } else {
+              __pendingFiles.push(f);
+            }
+            renderPhotosGrid();
+          }
+        } else {
+          // Persisted image: upload the cropped version and delete the original server-side
+          await uploadAndAttach(f, { cropOfImageId: __cropState.targetId });
+        }
+  
         dlg.close();
       }, "image/jpeg", 0.92);
     };
   }
+
   
   // Wire inputs
   function wirePhotoPickers() {
@@ -372,7 +410,21 @@ export async function init() {
       alert(__reorderMode ? "Reorder ON: drag photos to rearrange." : "Reorder OFF");
     });
   
-    document.addEventListener("intake:item-saved", async (ev) => { ... });
+      document.addEventListener("intake:item-saved", async (ev) => {
+      try {
+        const id = ev?.detail?.item_id;
+        if (!id) return;
+        __currentItemId = id;
+    
+        if (__pendingFiles.length === 0) return;
+        const pending = __pendingFiles.splice(0, __pendingFiles.length);
+        for (const f of pending) {
+          await uploadAndAttach(f);
+        }
+      } catch (e) {
+        console.error("photos:flush:error", e);
+      }
+    });
   }
 
 
