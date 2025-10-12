@@ -66,6 +66,9 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
     const allow = ["owner", "admin", "manager"].includes(actor[0].role) || !!actor[0].can_inventory_intake;
     if (!allow) return json({ ok: false, error: "forbidden" }, 403);
 
+    // Expose the current actor to DB triggers for this request
+    await sql/*sql*/`SELECT set_config('app.actor_user_id', ${actor_user_id}, true)`;
+    
     // Payload
     const body = await request.json();
     const inv = body?.inventory || {};
