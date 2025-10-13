@@ -109,8 +109,9 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
     });
 
     // Build CDN URL (served by our read function below)
-    const base = env.IMG_BASE_URL || ""; // e.g. https://img.resell.pro
-    const cdn_url = base ? `${base}/i/${encodeURIComponent(String(tenant_id))}/${encodeURIComponent(r2_key.split("/").slice(2).join("/"))}` : "";
+    const base = env.IMG_BASE_URL || ""; // e.g. https://img.resellpros.com
+    // Direct R2 custom-domain path; must match the exact object key we just wrote
+    const cdn_url = base ? `${base}/${encodeURIComponent(r2_key)}` : "";
 
     return json({
       ok: true,
