@@ -84,6 +84,33 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
     // If the client requested a delete, do it now (and exit)
     if (body?.action === "delete") {
       if (!item_id_in) return json({ ok: false, error: "missing_item_id" }, 400);
+
+      // 1) Gather all images for this item (need r2_key for deletion)
+      const imgRows = await sql<{ image_id: string; r2_key: string | null }[]>`
+        SELECT image_id, r2_key
+        FROM app.item_images
+        WHERE item_id = ${item_id_in}
+      `;
+    
+      // 2) Best-effort delete each object from R2
+      for (const r of imgRows) {
+        if (!r?.r2_key) continue;
+        try {
+          // R2 binding name matches your upload handler (R2_IMAGES)
+          // @ts-ignore
+          await env.R2_IMAGES.delete(r.r2_key);
+        } catch (e) {
+          // log but don't fail whole operation
+          console.warn("r2.delete failed", r.r2_key, e);
+        }
+      }
+    
+      // 3) Remove image rows for this item
+      await sql/*sql*/`
+        DELETE FROM app.item_images
+        WHERE item_id = ${item_id_in}
+      `;
+      
       // inventory → item_listing_profile cascades ON DELETE
       await sql/*sql*/`
         WITH s AS (
@@ -473,11 +500,24 @@ export const onRequestGet: PagesFunction = async ({ request, env }) => {
       LIMIT 1
     `;
 
+    // Load images for this item (scoped by tenant)
+    const imgRows = await sql<any[]>`
+      SELECT image_id, r2_key, cdn_url, is_primary, sort_order,
+             content_type, bytes, width_px, height_px
+      FROM app.item_images
+      WHERE item_id = ${item_id} AND tenant_id = ${tenant_id}
+      ORDER BY sort_order ASC, created_at ASC
+    `;
+    
     return new Response(JSON.stringify({
       ok: true,
       inventory: invRows[0],
       listing: lstRows[0] || null,
+      images: imgRows
     }), { status: 200, headers: { "content-type": "application/json", "cache-control": "no-store" } });
+
+
+    
   } catch (e: any) {
     return new Response(JSON.stringify({ ok: false, error: "server_error", message: String(e?.message || e) }), { status: 500, headers: { "content-type": "application/json" } });
   }
