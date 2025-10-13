@@ -15,6 +15,8 @@ export async function init() {
   let __pendingFiles = [];        // Files awaiting upload (before item_id exists)
   let __currentItemId = null;     // sync with existing flow
   let __reorderMode = false;
+  // Stash the tenant id once we learn it (from /api/inventory/meta or DOM)
+  let __tenantId = "";
   
   // Utility: update counter + disable add when maxed
   function updatePhotosUIBasic() {
@@ -204,9 +206,11 @@ export async function init() {
     // IMPORTANT: bypass api() for multipart so the browser sets the boundary.
     // Do NOT set content-type here.
     // Resolve tenant id the same way other calls do (fallbacks are safe if api() isn’t available here)
-    const metaTenant = document.querySelector('meta[name="x-tenant-id"]');
+    // Resolve tenant id (prefer what we got from the meta API)
+    const metaTag = document.querySelector('meta[name="x-tenant-id"]');
     const TENANT_ID =
-      (metaTenant && metaTenant.getAttribute("content")) ||
+      __tenantId ||
+      (metaTag && metaTag.getAttribute("content")) ||
       document.documentElement.getAttribute("data-tenant-id") ||
       localStorage.getItem("rp:tenant_id") ||
       "";
@@ -218,9 +222,10 @@ export async function init() {
         method: "POST",
         body,
         credentials: "include",
-        headers: TENANT_ID ? { "x-tenant-id": TENANT_ID } : undefined
+        headers: TENANT_ID ? { "x-tenant-id": TENANT_ID } : {}
       }
     );
+
 
     const up = await upRes.json();
     if (!upRes.ok || !up || up.ok === false) throw new Error(up?.error || "upload_failed");
@@ -1007,6 +1012,16 @@ document.addEventListener("intake:item-changed", () => refreshDrafts({ force: tr
 
   try {
     const meta = await loadMeta();
+    // Prefer server-provided tenant id; fall back to DOM/local
+    try {
+      __tenantId =
+        String(
+          (meta && (meta.tenant_id || meta?.tenant?.tenant_id || meta?.tenant?.id)) ||
+          document.documentElement.getAttribute("data-tenant-id") ||
+          localStorage.getItem("rp:tenant_id") ||
+          ""
+        );
+    } catch { __tenantId = ""; }
 
     // Populate Category (+ show its code hint)
     fillSelect($("categorySelect"), meta.categories, {
