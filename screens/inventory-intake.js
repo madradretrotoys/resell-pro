@@ -715,9 +715,12 @@ function setMarketplaceVisibility() {
       btn.classList.toggle("cursor-not-allowed", !enable);
     });
   
-    // DRAFT CTA: enable if Title has any value (independent of full validity)
+    // DRAFT CTA: enable if Title has any value OR at least one photo (pending or persisted)
     const title = resolveControl(null, "Item Name / Description");
-    const draftOk = !!title && String(title.value || "").trim() !== "";
+    const hasTitle = !!title && String(title.value || "").trim() !== "";
+    const photoCount = (__photos?.length || 0) + (__pendingFiles?.length || 0);
+    const hasAnyPhoto = photoCount >= 1;
+    const draftOk = hasTitle || hasAnyPhoto;
     const draftBtn = document.getElementById("intake-draft");
     if (draftBtn) {
       draftBtn.disabled = !draftOk;
@@ -1395,7 +1398,8 @@ document.addEventListener("intake:item-changed", () => refreshDrafts({ force: tr
         const res = await api(`/api/inventory/intake?item_id=${encodeURIComponent(item_id)}`, { method: "GET" });
         if (!res || res.ok === false) throw new Error(res?.error || "fetch_failed");
         populateFromSaved(res.inventory || {}, res.listing || null);
-    
+        // Photos: hydrate thumbnails from GET response
+        bootstrapPhotos(Array.isArray(res.images) ? res.images : [], item_id);
         // Enter view mode (treat as previously-saved edit path). Drafts have no SKU.
         enterViewMode({ item_id, hasSku: !!res?.inventory?.sku });
       } catch (err) {
@@ -1471,6 +1475,30 @@ document.addEventListener("intake:item-changed", () => refreshDrafts({ force: tr
     // NEW: Photos bootstrap
     wirePhotoPickers();
     renderPhotosGrid();
+    // Hydrate Photos state from API results and refresh the grid
+    function bootstrapPhotos(images = [], itemId = null) {
+      __currentItemId = itemId || __currentItemId;
+    
+      __photos = (images || [])
+        .map(r => ({
+          image_id: r.image_id,
+          cdn_url: r.cdn_url,
+          is_primary: !!r.is_primary,
+          sort_order: Number(r.sort_order) || 0,
+          r2_key: r.r2_key,
+          width: r.width_px,
+          height: r.height_px,
+          bytes: r.bytes,
+          content_type: r.content_type,
+        }))
+        .sort((a, b) => a.sort_order - b.sort_order);
+    
+      __pendingFiles = [];
+      renderPhotosGrid();
+    
+      // Re-evaluate gating to ensure "Save as Draft" may enable based on photos
+      try { computeValidity(); } catch {}
+    }
 
       // After successful save: confirm, disable form controls, and swap CTAs
       function postSaveSuccess(res, mode) {
