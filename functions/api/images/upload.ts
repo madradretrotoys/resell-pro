@@ -78,6 +78,15 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
       bytes = await request.arrayBuffer();
     }
 
+    // Reject clearly wrong payloads (prevents "{}" objects from being stored)
+    if (!/^image\//i.test(contentType)) {
+      return json({ ok: false, error: "not_image", content_type: contentType }, 400);
+    }
+    if (!bytes || bytes.byteLength < 128) { // tiny bodies are almost certainly not an image
+      return json({ ok: false, error: "empty_or_too_small" }, 400);
+    }
+
+
     // Generate object key: tenant/YYYY/MM/sku_or_item/itemid/random-filename
     const item_id = new URL(request.url).searchParams.get("item_id") || "unassigned";
     const today = new Date();
