@@ -200,11 +200,16 @@ export async function init() {
     }
     const body = new FormData();
     body.append("file", file);
-    const up = await api(`/api/images/upload?item_id=${encodeURIComponent(__currentItemId)}&filename=${encodeURIComponent(file.name)}`, {
-      method: "POST",
-      body
-    });
-    if (!up || up.ok === false) throw new Error(up?.error || "upload_failed");
+    
+    // IMPORTANT: bypass api() for multipart so the browser sets the boundary.
+    // Do NOT set content-type here.
+    const upRes = await fetch(
+      `/api/images/upload?item_id=${encodeURIComponent(__currentItemId)}&filename=${encodeURIComponent(file.name)}`,
+      { method: "POST", body }
+    );
+    const up = await upRes.json();
+    if (!upRes.ok || !up || up.ok === false) throw new Error(up?.error || "upload_failed");
+
   
     const at = await api("/api/images/attach", {
       method: "POST",
