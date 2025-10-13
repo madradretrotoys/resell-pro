@@ -204,10 +204,12 @@ export async function init() {
     // IMPORTANT: bypass api() for multipart so the browser sets the boundary.
     // Do NOT set content-type here.
     // Resolve tenant id the same way other calls do (fallbacks are safe if api() isn’t available here)
+    const metaTenant = document.querySelector('meta[name="x-tenant-id"]');
     const TENANT_ID =
-      (document.querySelector('meta[name="x-tenant-id"]') as HTMLMetaElement)?.content ||
+      (metaTenant && metaTenant.getAttribute("content")) ||
       document.documentElement.getAttribute("data-tenant-id") ||
-      localStorage.getItem("rp:tenant_id") || "";
+      localStorage.getItem("rp:tenant_id") ||
+      "";
     
     // IMPORTANT: send cookies + tenant header; do NOT set content-type here.
     const upRes = await fetch(
