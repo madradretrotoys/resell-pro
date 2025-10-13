@@ -203,10 +203,23 @@ export async function init() {
     
     // IMPORTANT: bypass api() for multipart so the browser sets the boundary.
     // Do NOT set content-type here.
+    // Resolve tenant id the same way other calls do (fallbacks are safe if api() isn’t available here)
+    const TENANT_ID =
+      (document.querySelector('meta[name="x-tenant-id"]') as HTMLMetaElement)?.content ||
+      document.documentElement.getAttribute("data-tenant-id") ||
+      localStorage.getItem("rp:tenant_id") || "";
+    
+    // IMPORTANT: send cookies + tenant header; do NOT set content-type here.
     const upRes = await fetch(
       `/api/images/upload?item_id=${encodeURIComponent(__currentItemId)}&filename=${encodeURIComponent(file.name)}`,
-      { method: "POST", body }
+      {
+        method: "POST",
+        body,
+        credentials: "include",
+        headers: TENANT_ID ? { "x-tenant-id": TENANT_ID } : undefined
+      }
     );
+
     const up = await upRes.json();
     if (!upRes.ok || !up || up.ok === false) throw new Error(up?.error || "upload_failed");
 
