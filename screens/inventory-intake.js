@@ -1011,8 +1011,32 @@ document.addEventListener("intake:item-changed", () => refreshDrafts({ force: tr
   // --- end validation helpers ---
 
   try {
+    // …inside init() for the intake screen…
     const meta = await loadMeta();
-    // Prefer server-provided tenant id; fall back to DOM/local
+    
+    // Derive tenant_id once from the meta response; fall back to DOM or localStorage.
+    // Store it in both our local stash and the global ACTIVE_TENANT_ID used by api().
+    (function () {
+      const fromMeta =
+        (meta && (meta.tenant_id || (meta.tenant && (meta.tenant.tenant_id || meta.tenant.id)))) || "";
+      const fromDom =
+        document.documentElement.getAttribute("data-tenant-id") ||
+        (function () {
+          const m = document.querySelector('meta[name="x-tenant-id"]');
+          return m ? m.getAttribute("content") : "";
+        })() ||
+        "";
+      const fromStore = localStorage.getItem("rp:tenant_id") || "";
+    
+      const resolved = String((fromMeta || fromDom || fromStore || "")).trim();
+    
+      // write once for the page lifetime
+      window.__tenantId = resolved;            // used by the multipart upload fetch
+      window.ACTIVE_TENANT_ID = resolved;      // used by the centralized api() helper
+    })();
+    
+    // (your existing code continues here…)
+
     try {
       __tenantId =
         String(
