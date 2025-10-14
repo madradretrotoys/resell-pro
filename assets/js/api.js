@@ -15,19 +15,26 @@ function getCookie(name) {
 
 export async function api(path, opts = {}) {
   const headers = new Headers(opts.headers || {});
-  if (!headers.has("content-type") && opts.body && typeof opts.body === "object")
+  const isForm = typeof FormData !== "undefined" && opts.body instanceof FormData;
+
+  // Only set JSON content-type for plain objects (NOT for FormData)
+  if (!headers.has("content-type") && opts.body && typeof opts.body === "object" && !isForm)
     headers.set("content-type", "application/json");
   headers.set("accept", "application/json");
 
   // Attach tenant explicitly from session
   if (ACTIVE_TENANT_ID) headers.set("x-tenant-id", ACTIVE_TENANT_ID);
 
+  // Pass FormData through; JSON-stringify plain objects; otherwise use as-is
+  const requestBody = isForm
+    ? opts.body
+    : (opts.body && typeof opts.body === "object" ? JSON.stringify(opts.body) : opts.body);
+
   const resp = await fetch(path, {
     method: opts.method || "GET",
     credentials: "include",
     headers,
-    body:
-      opts.body && typeof opts.body === "object" ? JSON.stringify(opts.body) : opts.body,
+    body: requestBody,
     cache: "no-store",
   });
 
@@ -42,3 +49,4 @@ export async function api(path, opts = {}) {
     throw Object.assign(new Error("API error"), { status: resp.status, data });
   return data;
 }
+
