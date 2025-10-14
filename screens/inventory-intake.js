@@ -222,10 +222,8 @@ export async function init() {
         method: "POST",
         body,
         credentials: "include",
-        // Use the same source as api(): window.ACTIVE_TENANT_ID
-        headers: (window.ACTIVE_TENANT_ID && String(window.ACTIVE_TENANT_ID).trim())
-          ? { "x-tenant-id": String(window.ACTIVE_TENANT_ID).trim() }
-          : {}
+        // Use the TENANT_ID we just resolved above
+        headers: TENANT_ID ? { "x-tenant-id": String(TENANT_ID).trim() } : {}
       }
     );
 
@@ -236,7 +234,10 @@ export async function init() {
   
     const at = await api("/api/images/attach", {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers: {
+        "content-type": "application/json",
+        ...(TENANT_ID ? { "x-tenant-id": String(TENANT_ID).trim() } : {})
+      },
       body: JSON.stringify({
         item_id: __currentItemId,
         ...up
