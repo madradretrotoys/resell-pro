@@ -222,7 +222,10 @@ export async function init() {
         method: "POST",
         body,
         credentials: "include",
-        headers: TENANT_ID ? { "x-tenant-id": TENANT_ID } : {}
+        // Use the same source as api(): window.ACTIVE_TENANT_ID
+        headers: (window.ACTIVE_TENANT_ID && String(window.ACTIVE_TENANT_ID).trim())
+          ? { "x-tenant-id": String(window.ACTIVE_TENANT_ID).trim() }
+          : {}
       }
     );
 
