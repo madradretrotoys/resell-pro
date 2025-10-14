@@ -215,34 +215,24 @@ export async function init() {
       localStorage.getItem("rp:tenant_id") ||
       "";
     
-    // IMPORTANT: send cookies + tenant header; do NOT set content-type here.
-    const upRes = await fetch(
+    // Upload via centralized api(); it will keep FormData boundaries and add x-tenant-id automatically.
+    const up = await api(
       `/api/images/upload?item_id=${encodeURIComponent(__currentItemId)}&filename=${encodeURIComponent(file.name)}`,
-      {
-        method: "POST",
-        body,
-        credentials: "include",
-        // Use the TENANT_ID we just resolved above
-        headers: TENANT_ID ? { "x-tenant-id": String(TENANT_ID).trim() } : {}
-      }
+      { method: "POST", body }
     );
+    if (!up || up.ok === false) throw new Error(up?.error || "upload_failed");
 
-
-    const up = await upRes.json();
-    if (!upRes.ok || !up || up.ok === false) throw new Error(up?.error || "upload_failed");
-
-  
     const at = await api("/api/images/attach", {
       method: "POST",
-      headers: {
-        "content-type": "application/json",
-        ...(TENANT_ID ? { "x-tenant-id": String(TENANT_ID).trim() } : {})
-      },
-      body: JSON.stringify({
+      body: {
         item_id: __currentItemId,
         ...up
-      })
+      }
     });
+   
+
+  
+    
     if (!at || at.ok === false) throw new Error(at?.error || "attach_failed");
   
     // If this was a crop-replace, consider deleting the original
