@@ -284,7 +284,7 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
                   ${lst.product_description}, ${lst.weight_lb}, ${lst.weight_oz},
                   ${lst.shipbx_length}, ${lst.shipbx_width}, ${lst.shipbx_height}
                 )
-            `;
+            
               ON CONFLICT (item_id) DO UPDATE SET
                 listing_category = EXCLUDED.listing_category,
                 item_condition   = EXCLUDED.item_condition,
