@@ -1050,16 +1050,26 @@ document.addEventListener("intake:item-changed", () => refreshDrafts({ force: tr
     wireCategoryCodeHint(meta);
 
     // Marketplace lists
+    // Use UUIDs as <option value>, keep human labels for display
     fillSelect($("marketplaceCategorySelect"), meta.marketplace.categories, {
       textKey: "display_name",
-      valueKey: "display_name",
+      valueKey: "category_key",
       extras: (row) => ({ path: row.path || "" }),
     });
     wireMarketplaceCategoryPath();
-
-    fillSelect($("brandSelect"), meta.marketplace.brands);
-    fillSelect($("conditionSelect"), meta.marketplace.conditions);
-    fillSelect($("colorSelect"), meta.marketplace.colors);
+    
+    fillSelect($("brandSelect"), meta.marketplace.brands, {
+      textKey: "brand_name",
+      valueKey: "brand_key",
+    });
+    fillSelect($("conditionSelect"), meta.marketplace.conditions, {
+      textKey: "condition_name",
+      valueKey: "condition_key",
+    });
+    fillSelect($("colorSelect"), meta.marketplace.colors, {
+      textKey: "color_name",
+      valueKey: "color_key",
+    });
 
     // Shipping
     fillSelect($("shippingBoxSelect"), meta.shipping_boxes, {
@@ -1152,10 +1162,10 @@ document.addEventListener("intake:item-changed", () => refreshDrafts({ force: tr
       };
     
       const listingAll = {
-        listing_category: valByIdOrLabel("marketplaceCategorySelect", "Marketplace Category"),
-        item_condition:   valByIdOrLabel("conditionSelect", "Condition"),
-        brand_name:       valByIdOrLabel("brandSelect", "Brand"),
-        primary_color:    valByIdOrLabel("colorSelect", "Primary Color"),
+        listing_category_key: valByIdOrLabel("marketplaceCategorySelect", "Marketplace Category"),
+        condition_key:        valByIdOrLabel("conditionSelect", "Condition"),
+        brand_key:            valByIdOrLabel("brandSelect", "Brand"),
+        color_key:            valByIdOrLabel("colorSelect", "Primary Color"),
         product_description: valByIdOrLabel(null, "Long Description"),
         shipping_box:     valByIdOrLabel("shippingBoxSelect", "Shipping Box"),
         weight_lb:  (() => { const v = valByIdOrLabel("shipWeightLb", "Weight (lb)"); return v !== "" ? Number(v) : undefined; })(),
