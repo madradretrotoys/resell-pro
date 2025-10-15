@@ -286,6 +286,12 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
                 )
             
               ON CONFLICT (item_id) DO UPDATE SET
+                -- keys
+                listing_category_key = EXCLUDED.listing_category_key,
+                condition_key        = EXCLUDED.condition_key,
+                brand_key            = EXCLUDED.brand_key,
+                color_key            = EXCLUDED.color_key,
+                shipping_box_key     = EXCLUDED.shipping_box_key,
                 listing_category = EXCLUDED.listing_category,
                 item_condition   = EXCLUDED.item_condition,
                 brand_name       = EXCLUDED.brand_name,
@@ -402,7 +408,13 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
               ${lst.product_description}, ${lst.weight_lb}, ${lst.weight_oz},
               ${lst.shipbx_length}, ${lst.shipbx_width}, ${lst.shipbx_height}
             )
-          ON CONFLICT (item_id) DO UPDATE SET
+        ON CONFLICT (item_id) DO UPDATE SET
+            -- keys
+            listing_category_key = EXCLUDED.listing_category_key,
+            condition_key        = EXCLUDED.condition_key,
+            brand_key            = EXCLUDED.brand_key,
+            color_key            = EXCLUDED.color_key,
+            shipping_box_key     = EXCLUDED.shipping_box_key,
             listing_category = EXCLUDED.listing_category,
             item_condition   = EXCLUDED.item_condition,
             brand_name       = EXCLUDED.brand_name,
@@ -456,6 +468,25 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
           ${lst.product_description}, ${lst.weight_lb}, ${lst.weight_oz},
           ${lst.shipbx_length}, ${lst.shipbx_width}, ${lst.shipbx_height}
         )
+        ON CONFLICT (item_id) DO UPDATE SET
+          -- keys
+          listing_category_key = EXCLUDED.listing_category_key,
+          condition_key        = EXCLUDED.condition_key,
+          brand_key            = EXCLUDED.brand_key,
+          color_key            = EXCLUDED.color_key,
+          shipping_box_key     = EXCLUDED.shipping_box_key,
+          -- labels / other
+          listing_category     = EXCLUDED.listing_category,
+          item_condition       = EXCLUDED.item_condition,
+          brand_name           = EXCLUDED.brand_name,
+          primary_color        = EXCLUDED.primary_color,
+          product_description  = EXCLUDED.product_description,
+          shipping_box         = EXCLUDED.shipping_box,
+          weight_lb            = EXCLUDED.weight_lb,
+          weight_oz            = EXCLUDED.weight_oz,
+          shipbx_length        = EXCLUDED.shipbx_length,
+          shipbx_width         = EXCLUDED.shipbx_width,
+          shipbx_height        = EXCLUDED.shipbx_height
       `;
     
         // (Marketplace upserts for ACTIVE creates can be added here later if desired)
