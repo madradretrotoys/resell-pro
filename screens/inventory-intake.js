@@ -659,7 +659,8 @@ function setMarketplaceVisibility() {
   
     const map = Object.create(null);
     for (const r of (meta.shipping_boxes || [])) {
-      map[r.box_name] = {
+      // Key by UUID so it matches <option value="box_key">
+      map[r.box_key] = {
         lb: r.weight_lb, oz: r.weight_oz, len: r.length, wid: r.width, hei: r.height,
       };
     }
@@ -668,10 +669,10 @@ function setMarketplaceVisibility() {
     const clearAll  = () => { inputs.forEach((el) => { el.value = ""; }); };
   
     const hasMetaValues = (m) => !!m && ![m.lb, m.oz, m.len, m.wid, m.hei].every(v => v == null || v === "");
-  
+
     const update = () => {
       enableAll(); // always allow typing
-      const key = sel.value;
+      const key = sel.value; // this is box_key
       const m = map[key];
   
       // No selection or unknown row => manual
@@ -1277,8 +1278,8 @@ document.addEventListener("intake:item-changed", () => refreshDrafts({ force: tr
     // Remember original actions-row HTML so we can restore the 3 CTAs after editing
     let __originalCtasHTML = null;
     
-    // Hold the current item id across edits so the next save updates, not creates
-    let __currentItemId = null;
+    // Hold the current item id across edits so the next save updates, not creates let __currentItemId = null;
+    
 
     /** Format a timestamp into a short local string */
     function fmtSaved(ts) {
