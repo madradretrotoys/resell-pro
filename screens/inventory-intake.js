@@ -1074,7 +1074,7 @@ document.addEventListener("intake:item-changed", () => refreshDrafts({ force: tr
     // Shipping
     fillSelect($("shippingBoxSelect"), meta.shipping_boxes, {
       textKey: "box_name",
-      valueKey: "box_name",
+      valueKey: "box_key",
     });
     wireShippingBoxAutofill(meta);
 
@@ -1167,7 +1167,7 @@ document.addEventListener("intake:item-changed", () => refreshDrafts({ force: tr
         brand_key:            valByIdOrLabel("brandSelect", "Brand"),
         color_key:            valByIdOrLabel("colorSelect", "Primary Color"),
         product_description: valByIdOrLabel(null, "Long Description"),
-        shipping_box:     valByIdOrLabel("shippingBoxSelect", "Shipping Box"),
+        shipping_box_key:     valByIdOrLabel("shippingBoxSelect", "Shipping Box"),
         weight_lb:  (() => { const v = valByIdOrLabel("shipWeightLb", "Weight (lb)"); return v !== "" ? Number(v) : undefined; })(),
         weight_oz:  (() => { const v = valByIdOrLabel("shipWeightOz", "Weight (oz)"); return v !== "" ? Number(v) : undefined; })(),
         shipbx_length: (() => { const v = valByIdOrLabel("shipLength", "Length"); return v !== "" ? Number(v) : undefined; })(),
@@ -1337,23 +1337,23 @@ document.addEventListener("intake:item-changed", () => refreshDrafts({ force: tr
     
       // Marketplace Listing Details (optional for drafts)
       if (listing) {
-        const mpCat = document.getElementById("marketplaceCategorySelect") || findControlByLabel("Marketplace Category");
-        if (mpCat) mpCat.value = listing.listing_category ?? "";
-    
-        const cond = document.getElementById("conditionSelect") || findControlByLabel("Condition");
-        if (cond) cond.value = listing.item_condition ?? "";
-    
-        const brand = document.getElementById("brandSelect") || findControlByLabel("Brand");
-        if (brand) brand.value = listing.brand_name ?? "";
-    
-        const color = document.getElementById("colorSelect") || findControlByLabel("Primary Color");
-        if (color) color.value = listing.primary_color ?? "";
-    
-        const desc = document.getElementById("longDescriptionTextarea") || findControlByLabel("Long Description");
-        if (desc) desc.value = listing.product_description ?? "";
-    
-        const shipBox = document.getElementById("shippingBoxSelect") || findControlByLabel("Shipping Box");
-        if (shipBox) shipBox.value = listing.shipping_box ?? "";
+        
+          const mpCat = document.getElementById("marketplaceCategorySelect") || findControlByLabel("Marketplace Category");
+          if (mpCat) mpCat.value = listing.listing_category_key ?? "";
+        
+          const cond = document.getElementById("conditionSelect") || findControlByLabel("Condition");
+          if (cond) cond.value = listing.condition_key ?? "";
+        
+          const brand = document.getElementById("brandSelect") || findControlByLabel("Brand");
+          if (brand) brand.value = listing.brand_key ?? "";
+        
+          const color = document.getElementById("colorSelect") || findControlByLabel("Primary Color");
+          if (color) color.value = listing.color_key ?? "";
+        
+          const shipBox = document.getElementById("shippingBoxSelect") || findControlByLabel("Shipping Box");
+          if (shipBox) shipBox.value = listing.shipping_box_key ?? "";
+          // ...
+        }
     
         const lb  = document.getElementById("weightLbInput") || findControlByLabel("Weight (lb)");
         const oz  = document.getElementById("weightOzInput") || findControlByLabel("Weight (oz)");
