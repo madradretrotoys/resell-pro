@@ -230,7 +230,23 @@ function html(status: number, text: string) {
 function b64(u8: Uint8Array) { return btoa(String.fromCharCode(...u8)); }
 function b64d(s: string) { return Uint8Array.from(atob(s), c => c.charCodeAt(0)); }
 
-// Reuse your existing DB client; these stubs keep the patch self-contained.
-async function execSql(env: Env, sql: string, params: unknown[]) { /* see note in start.ts */ }
-async function querySql(env: Env, sql: string, params: unknown[]) { /* see note in start.ts */ return []; }
+// Reuse your existing DB client; these helpers use Neon serverless in Workers/Pages.
+async function execSql(env: Env, sql: string, params: unknown[]) {
+  const rows = await _neon(env, sql, params);
+  return rows;
+}
+async function querySql(env: Env, sql: string, params: unknown[]) {
+  const rows = await _neon(env, sql, params);
+  return rows;
+}
+// Minimal Neon helper (no pooling; safe for Workers). Requires DATABASE_URL.
+async function _neon(env: Env, text: string, params: unknown[]) {
+  if (!env.DATABASE_URL) throw new Error("DATABASE_URL missing");
+  // Dynamic import keeps file self-contained; CF Pages bundles this.
+  const { neon } = await import("@neondatabase/serverless");
+  const sql = neon(env.DATABASE_URL);
+  // Use unsafe so we can pass parametrized text + params array.
+  const res = await sql.unsafe(text, params);
+  return res as any[];
+}
 
