@@ -13,7 +13,7 @@ export async function init() {
   const MAX_PHOTOS = 15;
   let __photos = [];              // [{image_id, cdn_url, is_primary, sort_order, r2_key, width, height, bytes, content_type}]
   let __pendingFiles = [];        // Files awaiting upload (before item_id exists)
-  
+  let __currentItemId = null;     // sync with existing flow
   let __reorderMode = false;
   // Stash the tenant id once we learn it (from /api/inventory/meta or DOM)
   let __tenantId = "";
