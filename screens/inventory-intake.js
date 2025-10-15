@@ -1352,7 +1352,7 @@ document.addEventListener("intake:item-changed", () => refreshDrafts({ force: tr
         
           const shipBox = document.getElementById("shippingBoxSelect") || findControlByLabel("Shipping Box");
           if (shipBox) shipBox.value = listing.shipping_box_key ?? "";
-          // ...
+          
         }
     
         const lb  = document.getElementById("weightLbInput") || findControlByLabel("Weight (lb)");
