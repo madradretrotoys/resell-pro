@@ -1051,7 +1051,7 @@ document.addEventListener("intake:item-changed", () => refreshDrafts({ force: tr
     wireCategoryCodeHint(meta);
 
     // Marketplace lists
-    // Use UUIDs as <option value>, keep human labels for display
+    // Use UUIDs as <option value> when available; fall back to legacy name-only payloads
     fillSelect($("marketplaceCategorySelect"), meta.marketplace.categories, {
       textKey: "display_name",
       valueKey: "category_key",
@@ -1059,18 +1059,35 @@ document.addEventListener("intake:item-changed", () => refreshDrafts({ force: tr
     });
     wireMarketplaceCategoryPath();
     
-    fillSelect($("brandSelect"), meta.marketplace.brands, {
-      textKey: "brand_name",
-      valueKey: "brand_key",
-    });
-    fillSelect($("conditionSelect"), meta.marketplace.conditions, {
-      textKey: "condition_name",
-      valueKey: "condition_key",
-    });
-    fillSelect($("colorSelect"), meta.marketplace.colors, {
-      textKey: "color_name",
-      valueKey: "color_key",
-    });
+    // Brands
+    {
+      const brands = (meta?.marketplace?.brands) || [];
+      const useKey = Array.isArray(brands) && brands.length > 0 && ("brand_key" in brands[0]);
+      fillSelect($("brandSelect"), brands, {
+        textKey: "brand_name",
+        valueKey: useKey ? "brand_key" : "brand_name",
+      });
+    }
+    
+    // Conditions
+    {
+      const conds = (meta?.marketplace?.conditions) || [];
+      const useKey = Array.isArray(conds) && conds.length > 0 && ("condition_key" in conds[0]);
+      fillSelect($("conditionSelect"), conds, {
+        textKey: "condition_name",
+        valueKey: useKey ? "condition_key" : "condition_name",
+      });
+    }
+    
+    // Colors
+    {
+      const colors = (meta?.marketplace?.colors) || [];
+      const useKey = Array.isArray(colors) && colors.length > 0 && ("color_key" in colors[0]);
+      fillSelect($("colorSelect"), colors, {
+        textKey: "color_name",
+        valueKey: useKey ? "color_key" : "color_name",
+      });
+    }
 
     // Shipping
     fillSelect($("shippingBoxSelect"), meta.shipping_boxes, {
