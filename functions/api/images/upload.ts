@@ -78,6 +78,15 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
       bytes = await request.arrayBuffer();
     }
 
+    // Reject clearly wrong payloads (prevents "{}" objects from being stored)
+    if (!/^image\//i.test(contentType)) {
+      return json({ ok: false, error: "not_image", content_type: contentType }, 400);
+    }
+    if (!bytes || bytes.byteLength < 128) { // tiny bodies are almost certainly not an image
+      return json({ ok: false, error: "empty_or_too_small" }, 400);
+    }
+
+
     // Generate object key: tenant/YYYY/MM/sku_or_item/itemid/random-filename
     const item_id = new URL(request.url).searchParams.get("item_id") || "unassigned";
     const today = new Date();
@@ -109,9 +118,10 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
     });
 
     // Build CDN URL (served by our read function below)
-    const base = env.IMG_BASE_URL || ""; // e.g. https://img.resell.pro
-    const cdn_url = base ? `${base}/i/${encodeURIComponent(String(tenant_id))}/${encodeURIComponent(r2_key.split("/").slice(2).join("/"))}` : "";
-
+    const base = env.IMG_BASE_URL || ""; // e.g. https://img.resellpros.com
+    // Direct R2 custom-domain path; must match the exact object key we just wrote
+    const cdn_url = base ? `${base}/${r2_key}` : "";
+    
     return json({
       ok: true,
       r2_key,

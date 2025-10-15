@@ -15,6 +15,8 @@ export async function init() {
   let __pendingFiles = [];        // Files awaiting upload (before item_id exists)
   let __currentItemId = null;     // sync with existing flow
   let __reorderMode = false;
+  // Stash the tenant id once we learn it (from /api/inventory/meta or DOM)
+  let __tenantId = "";
   
   // Utility: update counter + disable add when maxed
   function updatePhotosUIBasic() {
@@ -200,20 +202,37 @@ export async function init() {
     }
     const body = new FormData();
     body.append("file", file);
-    const up = await api(`/api/images/upload?item_id=${encodeURIComponent(__currentItemId)}&filename=${encodeURIComponent(file.name)}`, {
-      method: "POST",
-      body
-    });
+    
+    // IMPORTANT: bypass api() for multipart so the browser sets the boundary.
+    // Do NOT set content-type here.
+    // Resolve tenant id the same way other calls do (fallbacks are safe if api() isn’t available here)
+    // Resolve tenant id (prefer what we got from the meta API)
+    const metaTag = document.querySelector('meta[name="x-tenant-id"]');
+    const TENANT_ID =
+      __tenantId ||
+      (metaTag && metaTag.getAttribute("content")) ||
+      document.documentElement.getAttribute("data-tenant-id") ||
+      localStorage.getItem("rp:tenant_id") ||
+      "";
+    
+    // Upload via centralized api(); it will keep FormData boundaries and add x-tenant-id automatically.
+    const up = await api(
+      `/api/images/upload?item_id=${encodeURIComponent(__currentItemId)}&filename=${encodeURIComponent(file.name)}`,
+      { method: "POST", body }
+    );
     if (!up || up.ok === false) throw new Error(up?.error || "upload_failed");
-  
+
     const at = await api("/api/images/attach", {
       method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
+      body: {
         item_id: __currentItemId,
         ...up
-      })
+      }
     });
+   
+
+  
+    
     if (!at || at.ok === false) throw new Error(at?.error || "attach_failed");
   
     // If this was a crop-replace, consider deleting the original
@@ -640,7 +659,8 @@ function setMarketplaceVisibility() {
   
     const map = Object.create(null);
     for (const r of (meta.shipping_boxes || [])) {
-      map[r.box_name] = {
+      // Key by UUID so it matches <option value="box_key">
+      map[r.box_key] = {
         lb: r.weight_lb, oz: r.weight_oz, len: r.length, wid: r.width, hei: r.height,
       };
     }
@@ -649,33 +669,38 @@ function setMarketplaceVisibility() {
     const clearAll  = () => { inputs.forEach((el) => { el.value = ""; }); };
   
     const hasMetaValues = (m) => !!m && ![m.lb, m.oz, m.len, m.wid, m.hei].every(v => v == null || v === "");
-  
+
     const update = () => {
       enableAll(); // always allow typing
-      const key = sel.value;
+      const key = sel.value; // this is box_key
       const m = map[key];
-  
+    
       // No selection or unknown row => manual
-      if (!key || !m) { clearAll(); return; }
-  
+      if (!key || !m) { clearAll(); try { computeValidity(); } catch {} return; }
+    
       // Row exists but empty (e.g., "Custom Box") => manual
-      if (!hasMetaValues(m)) { clearAll(); return; }
-  
+      if (!hasMetaValues(m)) { clearAll(); try { computeValidity(); } catch {} return; }
+    
       // Prefill numbers (still editable)
       if (lb)  lb.value  = `${m.lb ?? ""}`;
       if (oz)  oz.value  = `${m.oz ?? ""}`;
       if (len) len.value = `${m.len ?? ""}`;
       if (wid) wid.value = `${m.wid ?? ""}`;
       if (hei) hei.value = `${m.hei ?? ""}`;
+    
+      // Re-validate so CTAs can enable immediately after selection
+      try { computeValidity(); } catch {}
     };
-  
+
+    // run on change + once on load
     sel.addEventListener("change", update);
-    update();
-  }
+    try { update(); } catch {}
+    
+    // CLOSE wireShippingBoxAutofill(meta)
+    }
+    
 
-
- 
-    // --- Validation helpers (HOISTED so computeValidity can see them) ---
+   // --- Validation helpers (HOISTED so computeValidity can see them) ---
   function getEl(id) { try { return document.getElementById(id); } catch { return null; } }
   function markValidity(el, ok) { if (!el) return; el.setAttribute("aria-invalid", ok ? "false" : "true"); }
 
@@ -715,9 +740,12 @@ function setMarketplaceVisibility() {
       btn.classList.toggle("cursor-not-allowed", !enable);
     });
   
-    // DRAFT CTA: enable if Title has any value (independent of full validity)
+    // DRAFT CTA: enable if Title has any value OR at least one photo (pending or persisted)
     const title = resolveControl(null, "Item Name / Description");
-    const draftOk = !!title && String(title.value || "").trim() !== "";
+    const hasTitle = !!title && String(title.value || "").trim() !== "";
+    const photoCount = (__photos?.length || 0) + (__pendingFiles?.length || 0);
+    const hasAnyPhoto = photoCount >= 1;
+    const draftOk = hasTitle || hasAnyPhoto;
     const draftBtn = document.getElementById("intake-draft");
     if (draftBtn) {
       draftBtn.disabled = !draftOk;
@@ -983,7 +1011,41 @@ document.addEventListener("intake:item-changed", () => refreshDrafts({ force: tr
   // --- end validation helpers ---
 
   try {
+    // …inside init() for the intake screen…
     const meta = await loadMeta();
+    
+    // Derive tenant_id once from the meta response; fall back to DOM or localStorage.
+    // Store it in both our local stash and the global ACTIVE_TENANT_ID used by api().
+    (function () {
+      const fromMeta =
+        (meta && (meta.tenant_id || (meta.tenant && (meta.tenant.tenant_id || meta.tenant.id)))) || "";
+      const fromDom =
+        document.documentElement.getAttribute("data-tenant-id") ||
+        (function () {
+          const m = document.querySelector('meta[name="x-tenant-id"]');
+          return m ? m.getAttribute("content") : "";
+        })() ||
+        "";
+      const fromStore = localStorage.getItem("rp:tenant_id") || "";
+    
+      const resolved = String((fromMeta || fromDom || fromStore || "")).trim();
+    
+      // write once for the page lifetime
+      window.__tenantId = resolved;            // used by the multipart upload fetch
+      window.ACTIVE_TENANT_ID = resolved;      // used by the centralized api() helper
+    })();
+    
+    // (your existing code continues here…)
+
+    try {
+      __tenantId =
+        String(
+          (meta && (meta.tenant_id || meta?.tenant?.tenant_id || meta?.tenant?.id)) ||
+          document.documentElement.getAttribute("data-tenant-id") ||
+          localStorage.getItem("rp:tenant_id") ||
+          ""
+        );
+    } catch { __tenantId = ""; }
 
     // Populate Category (+ show its code hint)
     fillSelect($("categorySelect"), meta.categories, {
@@ -994,21 +1056,63 @@ document.addEventListener("intake:item-changed", () => refreshDrafts({ force: tr
     wireCategoryCodeHint(meta);
 
     // Marketplace lists
-    fillSelect($("marketplaceCategorySelect"), meta.marketplace.categories, {
+    // Categories: already objects with keys
+    fillSelect($("marketplaceCategorySelect"), meta?.marketplace?.categories || [], {
       textKey: "display_name",
-      valueKey: "display_name",
+      valueKey: "category_key",
       extras: (row) => ({ path: row.path || "" }),
     });
     wireMarketplaceCategoryPath();
-
-    fillSelect($("brandSelect"), meta.marketplace.brands);
-    fillSelect($("conditionSelect"), meta.marketplace.conditions);
-    fillSelect($("colorSelect"), meta.marketplace.colors);
+    
+    // Brands: accept array of strings OR array of objects
+    {
+      const raw = meta?.marketplace?.brands || [];
+      const asObjects = raw.map(r =>
+        (r && typeof r === "object")
+          ? r
+          : { brand_name: String(r ?? ""), brand_key: String(r ?? "") }
+      );
+      const haveKey = asObjects.length > 0 && !!asObjects[0]?.brand_key;
+      fillSelect($("brandSelect"), asObjects, {
+        textKey: "brand_name",
+        valueKey: haveKey ? "brand_key" : "brand_name",
+      });
+    }
+    
+    // Conditions: accept array of strings OR array of objects
+    {
+      const raw = meta?.marketplace?.conditions || [];
+      const asObjects = raw.map(r =>
+        (r && typeof r === "object")
+          ? r
+          : { condition_name: String(r ?? ""), condition_key: String(r ?? "") }
+      );
+      const haveKey = asObjects.length > 0 && !!asObjects[0]?.condition_key;
+      fillSelect($("conditionSelect"), asObjects, {
+        textKey: "condition_name",
+        valueKey: haveKey ? "condition_key" : "condition_name",
+      });
+    }
+    
+    // Colors: accept array of strings OR array of objects
+    {
+      const raw = meta?.marketplace?.colors || [];
+      const asObjects = raw.map(r =>
+        (r && typeof r === "object")
+          ? r
+          : { color_name: String(r ?? ""), color_key: String(r ?? "") }
+      );
+      const haveKey = asObjects.length > 0 && !!asObjects[0]?.color_key;
+      fillSelect($("colorSelect"), asObjects, {
+        textKey: "color_name",
+        valueKey: haveKey ? "color_key" : "color_name",
+      });
+    }
 
     // Shipping
     fillSelect($("shippingBoxSelect"), meta.shipping_boxes, {
       textKey: "box_name",
-      valueKey: "box_name",
+      valueKey: "box_key",
     });
     wireShippingBoxAutofill(meta);
 
@@ -1096,12 +1200,12 @@ document.addEventListener("intake:item-changed", () => refreshDrafts({ force: tr
       };
     
       const listingAll = {
-        listing_category: valByIdOrLabel("marketplaceCategorySelect", "Marketplace Category"),
-        item_condition:   valByIdOrLabel("conditionSelect", "Condition"),
-        brand_name:       valByIdOrLabel("brandSelect", "Brand"),
-        primary_color:    valByIdOrLabel("colorSelect", "Primary Color"),
+        listing_category_key: valByIdOrLabel("marketplaceCategorySelect", "Marketplace Category"),
+        condition_key:        valByIdOrLabel("conditionSelect", "Condition"),
+        brand_key:            valByIdOrLabel("brandSelect", "Brand"),
+        color_key:            valByIdOrLabel("colorSelect", "Primary Color"),
         product_description: valByIdOrLabel(null, "Long Description"),
-        shipping_box:     valByIdOrLabel("shippingBoxSelect", "Shipping Box"),
+        shipping_box_key:     valByIdOrLabel("shippingBoxSelect", "Shipping Box"),
         weight_lb:  (() => { const v = valByIdOrLabel("shipWeightLb", "Weight (lb)"); return v !== "" ? Number(v) : undefined; })(),
         weight_oz:  (() => { const v = valByIdOrLabel("shipWeightOz", "Weight (oz)"); return v !== "" ? Number(v) : undefined; })(),
         shipbx_length: (() => { const v = valByIdOrLabel("shipLength", "Length"); return v !== "" ? Number(v) : undefined; })(),
@@ -1211,8 +1315,9 @@ document.addEventListener("intake:item-changed", () => refreshDrafts({ force: tr
     // Remember original actions-row HTML so we can restore the 3 CTAs after editing
     let __originalCtasHTML = null;
     
-    // Hold the current item id across edits so the next save updates, not creates
+    // Hold the current item id across edits so the next save updates, not creates 
     let __currentItemId = null;
+    
 
     /** Format a timestamp into a short local string */
     function fmtSaved(ts) {
@@ -1271,23 +1376,23 @@ document.addEventListener("intake:item-changed", () => refreshDrafts({ force: tr
     
       // Marketplace Listing Details (optional for drafts)
       if (listing) {
-        const mpCat = document.getElementById("marketplaceCategorySelect") || findControlByLabel("Marketplace Category");
-        if (mpCat) mpCat.value = listing.listing_category ?? "";
-    
-        const cond = document.getElementById("conditionSelect") || findControlByLabel("Condition");
-        if (cond) cond.value = listing.item_condition ?? "";
-    
-        const brand = document.getElementById("brandSelect") || findControlByLabel("Brand");
-        if (brand) brand.value = listing.brand_name ?? "";
-    
-        const color = document.getElementById("colorSelect") || findControlByLabel("Primary Color");
-        if (color) color.value = listing.primary_color ?? "";
-    
-        const desc = document.getElementById("longDescriptionTextarea") || findControlByLabel("Long Description");
-        if (desc) desc.value = listing.product_description ?? "";
-    
-        const shipBox = document.getElementById("shippingBoxSelect") || findControlByLabel("Shipping Box");
-        if (shipBox) shipBox.value = listing.shipping_box ?? "";
+        
+          const mpCat = document.getElementById("marketplaceCategorySelect") || findControlByLabel("Marketplace Category");
+          if (mpCat) mpCat.value = listing.listing_category_key ?? "";
+        
+          const cond = document.getElementById("conditionSelect") || findControlByLabel("Condition");
+          if (cond) cond.value = listing.condition_key ?? "";
+        
+          const brand = document.getElementById("brandSelect") || findControlByLabel("Brand");
+          if (brand) brand.value = listing.brand_key ?? "";
+        
+          const color = document.getElementById("colorSelect") || findControlByLabel("Primary Color");
+          if (color) color.value = listing.color_key ?? "";
+        
+          const shipBox = document.getElementById("shippingBoxSelect") || findControlByLabel("Shipping Box");
+          if (shipBox) shipBox.value = listing.shipping_box_key ?? "";
+          
+        
     
         const lb  = document.getElementById("weightLbInput") || findControlByLabel("Weight (lb)");
         const oz  = document.getElementById("weightOzInput") || findControlByLabel("Weight (oz)");
@@ -1395,7 +1500,8 @@ document.addEventListener("intake:item-changed", () => refreshDrafts({ force: tr
         const res = await api(`/api/inventory/intake?item_id=${encodeURIComponent(item_id)}`, { method: "GET" });
         if (!res || res.ok === false) throw new Error(res?.error || "fetch_failed");
         populateFromSaved(res.inventory || {}, res.listing || null);
-    
+        // Photos: hydrate thumbnails from GET response
+        bootstrapPhotos(Array.isArray(res.images) ? res.images : [], item_id);
         // Enter view mode (treat as previously-saved edit path). Drafts have no SKU.
         enterViewMode({ item_id, hasSku: !!res?.inventory?.sku });
       } catch (err) {
@@ -1471,6 +1577,30 @@ document.addEventListener("intake:item-changed", () => refreshDrafts({ force: tr
     // NEW: Photos bootstrap
     wirePhotoPickers();
     renderPhotosGrid();
+    // Hydrate Photos state from API results and refresh the grid
+    function bootstrapPhotos(images = [], itemId = null) {
+      __currentItemId = itemId || __currentItemId;
+    
+      __photos = (images || [])
+        .map(r => ({
+          image_id: r.image_id,
+          cdn_url: r.cdn_url,
+          is_primary: !!r.is_primary,
+          sort_order: Number(r.sort_order) || 0,
+          r2_key: r.r2_key,
+          width: r.width_px,
+          height: r.height_px,
+          bytes: r.bytes,
+          content_type: r.content_type,
+        }))
+        .sort((a, b) => a.sort_order - b.sort_order);
+    
+      __pendingFiles = [];
+      renderPhotosGrid();
+    
+      // Re-evaluate gating to ensure "Save as Draft" may enable based on photos
+      try { computeValidity(); } catch {}
+    }
 
       // After successful save: confirm, disable form controls, and swap CTAs
       function postSaveSuccess(res, mode) {
