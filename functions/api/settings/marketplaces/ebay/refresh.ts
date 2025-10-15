@@ -1,4 +1,4 @@
-// functions/api/marketplaces/ebay/refresh.ts
+// functions/api/settings/marketplaces/ebay/refresh.ts
 // Refreshes the eBay access token using the stored refresh token and same scope family.
 
 export const onRequestPost: PagesFunction<Env> = async (context) => {
