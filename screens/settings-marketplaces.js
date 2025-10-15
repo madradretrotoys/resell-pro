@@ -81,18 +81,25 @@ export async function init(ctx) {
           `;
   
           // Badges
-          const statusBadge = connected ? `<span class="badge" style="margin-left:8px">Connected</span>` : `<span class="badge" style="margin-left:8px">Not connected</span>`;
-          const enabledBadge = enabled ? `<span class="badge" style="margin-left:8px">Enabled</span>` : `<span class="badge" style="margin-left:8px">Disabled</span>`;
-  
+          const statusBadge = connected ? `Connected` : `Not connected`;
+          const enabledBadge = enabled ? `Enabled` : `Disabled`;
+          
+          // If server reports an error status, surface a small Retry control
+          const needsAttention = String(r.status || "").toLowerCase() === "error";
+          const retryBlock = needsAttention
+            ? `
+          <button class="btn btn--warning btn--sm" data-action="retry" data-id="${r.marketplace_id}">Retry</button>
+          `
+            : "";
+          
           return `
-            <div class="card">
-              <h3 style="display:flex;align-items:center;gap:6px">
-                ${r.marketplace_name} ${statusBadge} ${enabledBadge}
-              </h3>
-              <p class="text-muted">Slug: <code>${r.slug || "-"}</code> · Auth: <code>${r.auth_type}</code></p>
-              ${notes}
-              <div class="row" style="display:flex;align-items:center;gap:12px">${toggle}${connectBlock}</div>
-            </div>
+          ###  ${r.marketplace_name} ${statusBadge} ${enabledBadge}
+          
+          Slug: \`${r.slug || "-"}\` · Auth: \`${r.auth_type}\`
+          
+          ${notes}
+          
+          ${toggle}${connectBlock}${retryBlock}
           `;
         }).join("");
       }
@@ -141,15 +148,17 @@ export async function init(ctx) {
         const id = Number(b.getAttribute("data-id"));
         b.disabled = true;
         try {
-          await api(`/api/settings/marketplaces/connect?marketplace_id=${id}`, { method: "POST" });
-          b.textContent = "Disconnect";
-          b.dataset.action = "disconnect";
-          b.classList.remove("btn--primary");
-          b.classList.add("btn--neutral");
-          showBanner("Connection saved.", "info");
+          // Start OAuth and follow the returned eBay consent URL
+          const environment = window.localStorage.getItem('mp_env') || 'sandbox';
+          const { redirect_url } = await api('/api/settings/marketplaces/ebay/start', {
+            method: 'POST',
+            body: { marketplace_id: id, environment }
+          });
+          window.location.href = redirect_url;
+          return; // leave the page for eBay; on return the list will refresh & show status
         } catch (e) {
           if (e && e.status === 403) showBanner("Access denied.", "error");
-          else showBanner("Failed to connect. Please try again.", "error");
+          else showBanner("Failed to start eBay connect. Please try again.", "error");
         } finally {
           b.disabled = false;
         }
@@ -177,9 +186,31 @@ export async function init(ctx) {
         }
       });
     });
-  
+
+      // RETRY
+      container.querySelectorAll('button[data-action="retry"]').forEach((btn) => {
+        btn.addEventListener("click", async (ev) => {
+          const b = ev.currentTarget;
+          const id = Number(b.getAttribute("data-id"));
+          b.disabled = true;
+          try {
+            await api('/api/settings/marketplaces/ebay/refresh', { method: 'POST', body: { marketplace_id: id } });
+            showBanner("Retry successful. Updating status…", "info");
+            // Keep it simple for v1: reload to re-run init() and pull fresh statuses
+            window.location.reload();
+          } catch (e) {
+            if (e && e.status === 403) showBanner("Access denied.", "error");
+            else showBanner("Retry failed. Please reconnect.", "error");
+          } finally {
+            b.disabled = false;
+          }
+        });
+      });
+    
      hide(loading);
     show(content);
+
+    
   } catch (err) {
     console.error("[mp] fatal:", err);
     hide(loading);
