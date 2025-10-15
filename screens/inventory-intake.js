@@ -690,8 +690,8 @@ function setMarketplaceVisibility() {
     
       // Re-validate so CTAs can enable immediately after selection
       try { computeValidity(); } catch {}
-    };
-
+    }
+    
 
  
     // --- Validation helpers (HOISTED so computeValidity can see them) ---
