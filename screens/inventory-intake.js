@@ -690,11 +690,17 @@ function setMarketplaceVisibility() {
     
       // Re-validate so CTAs can enable immediately after selection
       try { computeValidity(); } catch {}
+    };
+
+    // run on change + once on load
+    sel.addEventListener("change", update);
+    try { update(); } catch {}
+    
+    // CLOSE wireShippingBoxAutofill(meta)
     }
     
 
- 
-    // --- Validation helpers (HOISTED so computeValidity can see them) ---
+   // --- Validation helpers (HOISTED so computeValidity can see them) ---
   function getEl(id) { try { return document.getElementById(id); } catch { return null; } }
   function markValidity(el, ok) { if (!el) return; el.setAttribute("aria-invalid", ok ? "false" : "true"); }
 
