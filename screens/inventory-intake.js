@@ -671,27 +671,25 @@ function setMarketplaceVisibility() {
     const hasMetaValues = (m) => !!m && ![m.lb, m.oz, m.len, m.wid, m.hei].every(v => v == null || v === "");
 
     const update = () => {
-      enableAll(); // always allow typing
-      const key = sel.value; // this is box_key
+      enableAll();
+      const key = sel.value; // box_key
       const m = map[key];
-  
-      // No selection or unknown row => manual
-      if (!key || !m) { clearAll(); return; }
-  
-      // Row exists but empty (e.g., "Custom Box") => manual
-      if (!hasMetaValues(m)) { clearAll(); return; }
-  
-      // Prefill numbers (still editable)
+    
+      if (!key || !m || !hasMetaValues(m)) {
+        clearAll();
+        try { computeValidity(); } catch {}
+        return;
+      }
+    
       if (lb)  lb.value  = `${m.lb ?? ""}`;
       if (oz)  oz.value  = `${m.oz ?? ""}`;
       if (len) len.value = `${m.len ?? ""}`;
       if (wid) wid.value = `${m.wid ?? ""}`;
       if (hei) hei.value = `${m.hei ?? ""}`;
+    
+      // re-check requireds so CTAs enable right away
+      try { computeValidity(); } catch {}
     };
-  
-    sel.addEventListener("change", update);
-    update();
-  }
 
 
  
