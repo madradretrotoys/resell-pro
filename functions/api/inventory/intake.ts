@@ -159,26 +159,40 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
         
           if (lst && Object.values(lst).some(v => v !== null && v !== undefined && String(v) !== "")) {
             await sql/*sql*/`
-              INSERT INTO app.item_listing_profile
-                (item_id, tenant_id, listing_category, item_condition, brand_name, primary_color,
-                 product_description, shipping_box, weight_lb, weight_oz, shipbx_length, shipbx_width, shipbx_height)
-              VALUES
-                (${item_id}, ${tenant_id}, ${lst.listing_category}, ${lst.item_condition}, ${lst.brand_name}, ${lst.primary_color},
-                 ${lst.product_description}, ${lst.shipping_box}, ${lst.weight_lb}, ${lst.weight_oz},
-                 ${lst.shipbx_length}, ${lst.shipbx_width}, ${lst.shipbx_height})
-              ON CONFLICT (item_id) DO UPDATE SET
-                listing_category = EXCLUDED.listing_category,
-                item_condition   = EXCLUDED.item_condition,
-                brand_name       = EXCLUDED.brand_name,
-                primary_color    = EXCLUDED.primary_color,
-                product_description = EXCLUDED.product_description,
-                shipping_box     = EXCLUDED.shipping_box,
-                weight_lb        = EXCLUDED.weight_lb,
-                weight_oz        = EXCLUDED.weight_oz,
-                shipbx_length    = EXCLUDED.shipbx_length,
-                shipbx_width     = EXCLUDED.shipbx_width,
-                shipbx_height    = EXCLUDED.shipbx_height
-            `;
+            INSERT INTO app.item_listing_profile
+              ( item_id, tenant_id,
+                listing_category_key, condition_key, brand_key, color_key, shipping_box_key,
+                listing_category,       item_condition,  brand_name,  primary_color,  shipping_box,
+                product_description, weight_lb, weight_oz, shipbx_length, shipbx_width, shipbx_height )
+            VALUES
+              ( ${item_id}, ${tenant_id},
+                ${lst.listing_category_key}, ${lst.condition_key}, ${lst.brand_key}, ${lst.color_key}, ${lst.shipping_box_key},
+                (SELECT display_name    FROM app.marketplace_categories  WHERE category_key  = ${lst.listing_category_key}),
+                (SELECT condition_name  FROM app.marketplace_conditions  WHERE condition_key = ${lst.condition_key}),
+                (SELECT brand_name      FROM app.marketplace_brands      WHERE brand_key     = ${lst.brand_key}),
+                (SELECT color_name      FROM app.marketplace_colors      WHERE color_key     = ${lst.color_key}),
+                (SELECT box_name        FROM app.shipping_boxes          WHERE box_key       = ${lst.shipping_box_key}),
+                ${lst.product_description}, ${lst.weight_lb}, ${lst.weight_oz},
+                ${lst.shipbx_length}, ${lst.shipbx_width}, ${lst.shipbx_height}
+              )
+            ON CONFLICT (item_id) DO UPDATE SET
+              listing_category_key = EXCLUDED.listing_category_key,
+              condition_key        = EXCLUDED.condition_key,
+              brand_key            = EXCLUDED.brand_key,
+              color_key            = EXCLUDED.color_key,
+              shipping_box_key     = EXCLUDED.shipping_box_key,
+              listing_category     = EXCLUDED.listing_category,
+              item_condition       = EXCLUDED.item_condition,
+              brand_name           = EXCLUDED.brand_name,
+              primary_color        = EXCLUDED.primary_color,
+              shipping_box         = EXCLUDED.shipping_box,
+              product_description  = EXCLUDED.product_description,
+              weight_lb            = EXCLUDED.weight_lb,
+              weight_oz            = EXCLUDED.weight_oz,
+              shipbx_length        = EXCLUDED.shipbx_length,
+              shipbx_width         = EXCLUDED.shipbx_width,
+              shipbx_height        = EXCLUDED.shipbx_height
+          `;
           }
         
           return json({ ok: true, item_id, sku: updInv[0].sku, status, ms: Date.now() - t0 }, 200);
@@ -255,12 +269,22 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
             // Upsert listing profile for this item_id
             await sql/*sql*/`
               INSERT INTO app.item_listing_profile
-                (item_id, tenant_id, listing_category, item_condition, brand_name, primary_color,
-                 product_description, shipping_box, weight_lb, weight_oz, shipbx_length, shipbx_width, shipbx_height)
+                ( item_id, tenant_id,
+                  listing_category_key, condition_key, brand_key, color_key, shipping_box_key,
+                  listing_category,       item_condition,  brand_name,  primary_color,  shipping_box,
+                  product_description, weight_lb, weight_oz, shipbx_length, shipbx_width, shipbx_height )
               VALUES
-                (${item_id}, ${tenant_id}, ${lst.listing_category}, ${lst.item_condition}, ${lst.brand_name}, ${lst.primary_color},
-                 ${lst.product_description}, ${lst.shipping_box}, ${lst.weight_lb}, ${lst.weight_oz},
-                 ${lst.shipbx_length}, ${lst.shipbx_width}, ${lst.shipbx_height})
+                ( ${item_id}, ${tenant_id},
+                  ${lst.listing_category_key}, ${lst.condition_key}, ${lst.brand_key}, ${lst.color_key}, ${lst.shipping_box_key},
+                  (SELECT display_name    FROM app.marketplace_categories  WHERE category_key  = ${lst.listing_category_key}),
+                  (SELECT condition_name  FROM app.marketplace_conditions  WHERE condition_key = ${lst.condition_key}),
+                  (SELECT brand_name      FROM app.marketplace_brands      WHERE brand_key     = ${lst.brand_key}),
+                  (SELECT color_name      FROM app.marketplace_colors      WHERE color_key     = ${lst.color_key}),
+                  (SELECT box_name        FROM app.shipping_boxes          WHERE box_key       = ${lst.shipping_box_key}),
+                  ${lst.product_description}, ${lst.weight_lb}, ${lst.weight_oz},
+                  ${lst.shipbx_length}, ${lst.shipbx_width}, ${lst.shipbx_height}
+                )
+            `;
               ON CONFLICT (item_id) DO UPDATE SET
                 listing_category = EXCLUDED.listing_category,
                 item_condition   = EXCLUDED.item_condition,
