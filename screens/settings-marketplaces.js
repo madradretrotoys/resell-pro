@@ -194,7 +194,7 @@ export async function init(ctx) {
           const id = Number(b.getAttribute("data-id"));
           b.disabled = true;
           try {
-            await api('/api/marketplaces/ebay/refresh', { method: 'POST', body: { marketplace_id: id } });
+            await api('/api/settings/marketplaces/ebay/refresh', { method: 'POST', body: { marketplace_id: id } });
             showBanner("Retry successful. Updating status…", "info");
             // Keep it simple for v1: reload to re-run init() and pull fresh statuses
             window.location.reload();
