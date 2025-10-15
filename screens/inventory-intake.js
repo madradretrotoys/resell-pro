@@ -1051,41 +1051,56 @@ document.addEventListener("intake:item-changed", () => refreshDrafts({ force: tr
     wireCategoryCodeHint(meta);
 
     // Marketplace lists
-    // Use UUIDs as <option value> when available; fall back to legacy name-only payloads
-    fillSelect($("marketplaceCategorySelect"), meta.marketplace.categories, {
+    // Categories: already objects with keys
+    fillSelect($("marketplaceCategorySelect"), meta?.marketplace?.categories || [], {
       textKey: "display_name",
       valueKey: "category_key",
       extras: (row) => ({ path: row.path || "" }),
     });
     wireMarketplaceCategoryPath();
     
-    // Brands
+    // Brands: accept array of strings OR array of objects
     {
-      const brands = (meta?.marketplace?.brands) || [];
-      const useKey = Array.isArray(brands) && brands.length > 0 && ("brand_key" in brands[0]);
-      fillSelect($("brandSelect"), brands, {
+      const raw = meta?.marketplace?.brands || [];
+      const asObjects = raw.map(r =>
+        (r && typeof r === "object")
+          ? r
+          : { brand_name: String(r ?? ""), brand_key: String(r ?? "") }
+      );
+      const haveKey = asObjects.length > 0 && !!asObjects[0]?.brand_key;
+      fillSelect($("brandSelect"), asObjects, {
         textKey: "brand_name",
-        valueKey: useKey ? "brand_key" : "brand_name",
+        valueKey: haveKey ? "brand_key" : "brand_name",
       });
     }
     
-    // Conditions
+    // Conditions: accept array of strings OR array of objects
     {
-      const conds = (meta?.marketplace?.conditions) || [];
-      const useKey = Array.isArray(conds) && conds.length > 0 && ("condition_key" in conds[0]);
-      fillSelect($("conditionSelect"), conds, {
+      const raw = meta?.marketplace?.conditions || [];
+      const asObjects = raw.map(r =>
+        (r && typeof r === "object")
+          ? r
+          : { condition_name: String(r ?? ""), condition_key: String(r ?? "") }
+      );
+      const haveKey = asObjects.length > 0 && !!asObjects[0]?.condition_key;
+      fillSelect($("conditionSelect"), asObjects, {
         textKey: "condition_name",
-        valueKey: useKey ? "condition_key" : "condition_name",
+        valueKey: haveKey ? "condition_key" : "condition_name",
       });
     }
     
-    // Colors
+    // Colors: accept array of strings OR array of objects
     {
-      const colors = (meta?.marketplace?.colors) || [];
-      const useKey = Array.isArray(colors) && colors.length > 0 && ("color_key" in colors[0]);
-      fillSelect($("colorSelect"), colors, {
+      const raw = meta?.marketplace?.colors || [];
+      const asObjects = raw.map(r =>
+        (r && typeof r === "object")
+          ? r
+          : { color_name: String(r ?? ""), color_key: String(r ?? "") }
+      );
+      const haveKey = asObjects.length > 0 && !!asObjects[0]?.color_key;
+      fillSelect($("colorSelect"), asObjects, {
         textKey: "color_name",
-        valueKey: useKey ? "color_key" : "color_name",
+        valueKey: haveKey ? "color_key" : "color_name",
       });
     }
 
