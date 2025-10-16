@@ -99,7 +99,15 @@ export async function loadScreen(name){
   }
   document.title = `Resell Pro — ${meta.title}`;
   setActiveLink(name);
+  
+  // Extra safety: ensure menus are closed AFTER the new screen is painted
+  requestAnimationFrame(() => closeMenus());
+  
+  // Release nav lock (see below)
+  window.__navLock = false;
+  
   log('loadScreen:end', { name });
+  }
 }
 
 function goto(name){
