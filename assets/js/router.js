@@ -98,16 +98,21 @@ export async function loadScreen(name){
     showToast('Screen script error');
   }
   document.title = `Resell Pro — ${meta.title}`;
-  setActiveLink(name);
-  
-  // Extra safety: ensure menus are closed AFTER the new screen is painted
-  requestAnimationFrame(() => closeMenus());
-  
-  // Release nav lock (see below)
-  window.__navLock = false;
-  
-  log('loadScreen:end', { name });
-  }
+setActiveLink(name);
+
+// Ensure menus are closed AFTER the new screen is painted and any CSS transitions settle
+requestAnimationFrame(() => {
+  closeMenus();
+  // additional passes for slow mobile paints / transitions
+  setTimeout(closeMenus, 120);
+  setTimeout(closeMenus, 360);
+});
+
+// Release nav lock (see below)
+window.__navLock = false;
+
+log('loadScreen:end', { name });
+}
 
 
 function goto(name){
@@ -120,8 +125,11 @@ function goto(name){
   history.pushState({}, '', u);
 
   // Close immediately before loading
+    
   closeMenus();
-
+  // small delay to catch CSS-driven drawers
+  setTimeout(closeMenus, 60);
+  
   loadScreen(name);
 }
 
@@ -134,6 +142,13 @@ document.addEventListener('touchend', (e) => {
   closeMenus();
   goto(a.getAttribute('data-page'));
 }, { passive: false });
+
+// If the tab becomes visible again or the viewport changes, ensure menus are shut
+document.addEventListener('visibilitychange', () => { if (!document.hidden) closeMenus(); });
+window.addEventListener('resize', () => closeMenus());
+
+// Defensive: if a page is restored from bfcache/pageshow, close menus
+window.addEventListener('pageshow', () => setTimeout(closeMenus, 0));
 
 function closeMenus(){
   // 1) Checkbox toggles (multiple, if any)
