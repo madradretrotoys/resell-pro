@@ -106,6 +106,7 @@ function goto(name){
   const u = new URL(location.href);
   u.searchParams.set('page', name);
   history.pushState({}, '', u);
+  closeMenus();
   loadScreen(name);
 }
 
@@ -114,8 +115,25 @@ document.addEventListener('click', (e) => {
   const a = e.target.closest('[data-page]');
   if(!a) return;
   e.preventDefault();
+  closeMenus();
   goto(a.getAttribute('data-page'));
 });
+
+function closeMenus(){
+  // Close a checkbox-based nav (if present)
+  const chk = document.getElementById('navcheck');
+  if (chk) chk.checked = false;
+
+  // Close any <details open> menus (if used)
+  document.querySelectorAll('details[open]').forEach(d => d.removeAttribute('open'));
+
+  // Remove a generic "open" class on a menu container (if present)
+  const menu = document.getElementById('app-menu') || document.querySelector('[data-menu]');
+  if (menu && menu.classList.contains('open')) menu.classList.remove('open');
+
+  // Clear a global body state (harmless if unused)
+  document.body.classList.remove('menu-open');
+}
 
 log('boot');
 loadScreen(qs('page') || 'dashboard');
