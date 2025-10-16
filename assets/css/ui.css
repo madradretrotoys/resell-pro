@@ -148,7 +148,29 @@ label{
   font-size: 14px;
   color: var(--muted);
 }
-
+/* ===== Intake-scoped: keep switches compact and colored ===== */
+#inventory-intake-screen .switch{
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  width: auto;           /* prevent grid/field from stretching the control */
+}
+#inventory-intake-screen .switch input[type="checkbox"]{
+  flex: 0 0 var(--sw-width);      /* lock track width */
+  width: var(--sw-width);
+  height: var(--sw-height);
+}
+#inventory-intake-screen .switch .slider{
+  width: var(--sw-width);         /* ensure visible track matches the input */
+  height: var(--sw-height);
+}
+#inventory-intake-screen .switch input[type="checkbox"]{
+  background: var(--sw-track-off);
+}
+#inventory-intake-screen .switch input[type="checkbox"]:checked{
+  background: var(--brand);       /* strong ON color on the visible track */
+  border-color: color-mix(in srgb, var(--brand) 70%, #000 30%);
+}
 
 /* Buttons */
 .btn{
