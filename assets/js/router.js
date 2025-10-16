@@ -111,11 +111,25 @@ requestAnimationFrame(() => {
 // Release nav lock (see below)
 window.__navLock = false;
 
-log('loadScreen:end', { name });
+  log('loadScreen:end', { name });
+  
+  // Mobile-only fallback: if flagged, do a one-time hard reload after paint
+  if (window.__forceMobileReloadOnce) {
+    // clear the flag to avoid loops
+    window.__forceMobileReloadOnce = false;
+    // Allow the DOM to present the new screen, then replace to refresh
+    requestAnimationFrame(() => {
+      setTimeout(() => {
+        try { closeMenus(); } catch {}
+        location.replace(location.href);
+      }, 0);
+    });
+  }
+  
 }
 
 
-function goto(name){
+async function goto(name){
   // Prevent double navigation on touchend+click
   if (window.__navLock) return;
   window.__navLock = true;
@@ -125,12 +139,21 @@ function goto(name){
   history.pushState({}, '', u);
 
   // Close immediately before loading
-    
   closeMenus();
   // small delay to catch CSS-driven drawers
   setTimeout(closeMenus, 60);
-  
-  loadScreen(name);
+
+  // Hint: on mobile, do a one-time hard refresh after the new screen paints
+  // to defeat stubborn menu/focus states in certain browsers.
+  window.__forceMobileReloadOnce = /Mobi|Android/i.test(navigator.userAgent);
+
+  await loadScreen(name);
+
+  // Extra pass after the screen init settles
+  requestAnimationFrame(() => {
+    closeMenus();
+    setTimeout(closeMenus, 120);
+  });
 }
 
 window.addEventListener('popstate', () => loadScreen(qs('page') || 'dashboard'));
@@ -151,18 +174,36 @@ window.addEventListener('resize', () => closeMenus());
 window.addEventListener('pageshow', () => setTimeout(closeMenus, 0));
 
 function closeMenus(){
-  // 1) Checkbox toggles (multiple, if any)
+  // 0) Clear :target-based menus and active focus that can keep overlays shown
+  try {
+    if (location.hash) {
+      const noHash = location.pathname + location.search;
+      history.replaceState({}, '', noHash);
+    }
+    if (document.activeElement && typeof document.activeElement.blur === 'function') {
+      document.activeElement.blur();
+    }
+  } catch {}
+
+  // 1) Checkbox toggles (multiple, if any) — also dispatch 'change' so CSS/listeners react
   const toggles = [
     document.getElementById('navcheck'),
     ...document.querySelectorAll('input[type="checkbox"][data-menu-toggle], input[type="checkbox"][id*="nav"]')
   ].filter(Boolean);
-  toggles.forEach(cb => { try{ cb.checked = false; cb.blur?.(); }catch{} });
+
+  toggles.forEach(cb => {
+    try {
+      if (cb.checked) cb.checked = false;
+      cb.blur?.();
+      cb.dispatchEvent?.(new Event('change', { bubbles: true }));
+    } catch {}
+  });
 
   // 2) <details> patterns
   document.querySelectorAll('details[open]').forEach(d => d.removeAttribute('open'));
 
   // 3) aria-expanded patterns
-  document.querySelectorAll('[aria-expanded="true"]').forEach(el => el.setAttribute('aria-expanded','false'));
+  document.querySelectorAll('[aria-expanded="true"]').forEach(el => el.setAttribute('aria-expanded', 'false'));
 
   // 4) Common containers/classes
   const containers = [
@@ -171,6 +212,12 @@ function closeMenus(){
   ];
   containers.forEach(el => {
     ['open','active','show','visible','is-open'].forEach(cls => el?.classList?.remove(cls));
+    // If inline styles were used to keep it open, clear them
+    if (el && el.style) {
+      el.style.pointerEvents = '';
+      el.style.display = '';
+      el.style.visibility = '';
+    }
   });
 
   // 5) Body state
