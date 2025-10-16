@@ -1013,7 +1013,6 @@ function setMarketplaceVisibility() {
               <label>Duration <span class="text-red-600" aria-hidden="true">*</span></label>
               <select id="ebay_duration" required>
                 <option value="">&lt;select&gt;</option>
-                <option value="GTC">Good 'Til Cancelled</option>
                 <option value="3">3 Days</option>
                 <option value="5">5 Days</option>
                 <option value="7">7 Days</option>
