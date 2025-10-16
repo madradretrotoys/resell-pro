@@ -177,72 +177,56 @@ window.addEventListener('resize', () => closeMenus());
 window.addEventListener('pageshow', () => setTimeout(closeMenus, 0));
 
 function closeMenus(){
-  // 0) Clear :target/focus artifacts
+  // 0) Clear :target-based menus and active focus that can keep overlays shown
   try {
     if (location.hash) {
       const noHash = location.pathname + location.search;
       history.replaceState({}, '', noHash);
     }
-    document.activeElement?.blur?.();
+    if (document.activeElement && typeof document.activeElement.blur === 'function') {
+      document.activeElement.blur();
+    }
   } catch {}
 
-  // 1) Checkbox-style menus
+  // 1) Checkbox toggles (multiple, if any) — also dispatch 'change' so CSS/listeners react
   const toggles = [
     document.getElementById('navcheck'),
     ...document.querySelectorAll('input[type="checkbox"][data-menu-toggle], input[type="checkbox"][id*="nav"]')
   ].filter(Boolean);
-  for (const cb of toggles) {
+
+  toggles.forEach(cb => {
     try {
       if (cb.checked) cb.checked = false;
       cb.blur?.();
       cb.dispatchEvent?.(new Event('change', { bubbles: true }));
     } catch {}
-  }
+  });
 
   // 2) <details> patterns
   document.querySelectorAll('details[open]').forEach(d => d.removeAttribute('open'));
 
   // 3) aria-expanded patterns
-  document.querySelectorAll('[aria-expanded="true"]').forEach(el => el.setAttribute('aria-expanded','false'));
+  document.querySelectorAll('[aria-expanded="true"]').forEach(el => el.setAttribute('aria-expanded', 'false'));
 
-  // 4) Explicitly close the actual drawer used in your app
-  const navEl = document.getElementById('nav');
-  if (navEl) {
-    navEl.classList.remove('open', 'active', 'show', 'visible', 'is-open', 'drawer-open');
-    // Belt-and-suspenders for stubborn mobile layers: force-close, then restore styles.
-    try {
-      const prevTransition = navEl.style.transition;
-      navEl.style.transition = 'none';
-      navEl.style.transform = 'translateX(-101%)';
-      // force reflow to apply the state immediately
-      // eslint-disable-next-line no-unused-expressions
-      navEl.offsetHeight;
-      navEl.style.transform = '';
-      navEl.style.transition = prevTransition;
-      navEl.style.pointerEvents = '';
-      navEl.style.visibility = '';
-      navEl.style.display = '';
-    } catch {}
-  }
-
-  // 5) Common containers/classes (kept for compatibility with other menus)
+  // 4) Common containers/classes
   const containers = [
-    document.getElementById('nav'),
     document.getElementById('app-menu'),
     ...document.querySelectorAll('[data-menu], .menu, .mobile-nav, .nav-drawer, .drawer')
   ];
   containers.forEach(el => {
-    ['open','active','show','visible','is-open','drawer-open'].forEach(c => el?.classList?.remove?.(c));
-    if (el?.style) {
+    ['open','active','show','visible','is-open'].forEach(cls => el?.classList?.remove(cls));
+    // If inline styles were used to keep it open, clear them
+    if (el && el.style) {
       el.style.pointerEvents = '';
       el.style.display = '';
       el.style.visibility = '';
     }
   });
 
-  // 6) Body state
+  // 5) Body state
   document.body.classList.remove('menu-open');
 }
+
 
 log('boot');
 loadScreen(qs('page') || 'dashboard');
