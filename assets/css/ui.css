@@ -90,6 +90,73 @@ label{
   color: var(--text);           /* labels readable on white */
 }
 
+/* ===== Marketplace Settings list ===== */
+.mp-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;              /* consistent vertical rhythm between rows */
+}
+
+/* Each marketplace row */
+.mp-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 14px 16px;
+}
+
+/* Left group: name + toggle inline */
+.mp-left {
+  display: inline-flex;
+  align-items: center;
+  gap: 16px;              /* space between name and toggle */
+  min-width: 0;           /* allow safe shrink */
+}
+
+.mp-name {
+  font-weight: 700;
+  font-size: 16px;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Right group: actions flush-right */
+.mp-right {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;              /* Connect / Retry spacing */
+  margin-left: auto;      /* push to far right */
+}
+
+/* Tidy up the switch when used in-row */
+.mp-row .switch .switch-label {
+  color: var(--muted);
+  font-size: 14px;
+}
+.mp-row .switch {
+  gap: 8px;               /* slightly tighter than default */
+}
+
+/* Responsive: stack actions under the left group on small screens */
+@media (max-width: 600px) {
+  .mp-row {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 10px;
+  }
+  .mp-right {
+    justify-content: flex-end;
+    margin-left: 0;
+  }
+}
+
+
 /* ===== Switch (Toggle) ===== */
 .switch{
   --sw-width: 46px;
