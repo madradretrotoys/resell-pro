@@ -74,6 +74,7 @@ export async function loadScreen(name){
   if (!session?.user) {
     log('auth:fail->redirect', { reason: session?.reason, status: session?.status, debug: session?.debug });
     location.href = '/index.html';
+    window.__navLock = false;
     return;
   }
   log('auth:ok', { user: session.user });
@@ -86,6 +87,7 @@ export async function loadScreen(name){
   } catch (e) {
     log('screen:html:error', e);
     view.innerHTML = `\nFailed to load screen.\n`;
+    window.__navLock = false;
     return;
   }
   try {
