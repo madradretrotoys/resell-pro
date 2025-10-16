@@ -1037,10 +1037,10 @@ function setMarketplaceVisibility() {
   
             <!-- Fixed-only -->
             <div class="field ebay-fixed-only">
-              <label class="inline-flex items-center gap-2">
-                <input id="ebay_bestOffer" type="checkbox" />
-                <span>Allow Best Offer</span>
-              </label>
+              <div class="flex items-center gap-2">
+                <input id="ebay_bestOffer" type="checkbox" style="vertical-align: middle;" />
+                <label for="ebay_bestOffer" class="cursor-pointer">Allow Best Offer</label>
+              </div>
             </div>
             <div class="field ebay-fixed-only ebay-bestoffer-only hidden">
               <label>Auto-accept (USD) <span class="text-red-600" aria-hidden="true">*</span></label>
@@ -1053,10 +1053,10 @@ function setMarketplaceVisibility() {
   
             <!-- Promote -->
             <div class="field">
-              <label class="inline-flex items-center gap-2">
-                <input id="ebay_promote" type="checkbox" />
-                <span>Promote</span>
-              </label>
+              <div class="flex items-center gap-2">
+                <input id="ebay_promote" type="checkbox" style="vertical-align: middle;" />
+                <label for="ebay_promote" class="cursor-pointer">Promote</label>
+              </div>
             </div>
             <div class="field ebay-promote-only hidden">
               <label>Promotion Percent (%) <span class="text-red-600" aria-hidden="true">*</span></label>
