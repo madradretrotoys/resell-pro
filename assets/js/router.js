@@ -111,35 +111,54 @@ export async function loadScreen(name){
 
 
 function goto(name){
+  // Prevent double navigation on touchend+click
+  if (window.__navLock) return;
+  window.__navLock = true;
+
   const u = new URL(location.href);
   u.searchParams.set('page', name);
   history.pushState({}, '', u);
+
+  // Close immediately before loading
   closeMenus();
+
   loadScreen(name);
 }
 
 window.addEventListener('popstate', () => loadScreen(qs('page') || 'dashboard'));
-document.addEventListener('click', (e) => {
+// Mobile: some browsers fire touchend without a subsequent click
+document.addEventListener('touchend', (e) => {
   const a = e.target.closest('[data-page]');
-  if(!a) return;
-  e.preventDefault();
+  if (!a) return;
+  if (e.cancelable) e.preventDefault();
   closeMenus();
   goto(a.getAttribute('data-page'));
-});
+}, { passive: false });
 
 function closeMenus(){
-  // Close a checkbox-based nav (if present)
-  const chk = document.getElementById('navcheck');
-  if (chk) chk.checked = false;
+  // 1) Checkbox toggles (multiple, if any)
+  const toggles = [
+    document.getElementById('navcheck'),
+    ...document.querySelectorAll('input[type="checkbox"][data-menu-toggle], input[type="checkbox"][id*="nav"]')
+  ].filter(Boolean);
+  toggles.forEach(cb => { try{ cb.checked = false; cb.blur?.(); }catch{} });
 
-  // Close any <details open> menus (if used)
+  // 2) <details> patterns
   document.querySelectorAll('details[open]').forEach(d => d.removeAttribute('open'));
 
-  // Remove a generic "open" class on a menu container (if present)
-  const menu = document.getElementById('app-menu') || document.querySelector('[data-menu]');
-  if (menu && menu.classList.contains('open')) menu.classList.remove('open');
+  // 3) aria-expanded patterns
+  document.querySelectorAll('[aria-expanded="true"]').forEach(el => el.setAttribute('aria-expanded','false'));
 
-  // Clear a global body state (harmless if unused)
+  // 4) Common containers/classes
+  const containers = [
+    document.getElementById('app-menu'),
+    ...document.querySelectorAll('[data-menu], .menu, .mobile-nav, .nav-drawer, .drawer')
+  ];
+  containers.forEach(el => {
+    ['open','active','show','visible','is-open'].forEach(cls => el?.classList?.remove(cls));
+  });
+
+  // 5) Body state
   document.body.classList.remove('menu-open');
 }
 
