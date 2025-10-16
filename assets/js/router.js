@@ -161,22 +161,13 @@ async function goto(name){
 window.addEventListener('popstate', () => loadScreen(qs('page') || 'dashboard'));
 // Mobile: some browsers fire touchend without a subsequent click
 // Mobile: some browsers fire touchend without a subsequent click
-document.addEventListener('touchend', (e) => {
-  const a = e.target.closest('[data-page]');
-  if (!a) return;
-  if (e.cancelable) e.preventDefault();
-  closeMenus();
-  goto(a.getAttribute('data-page'));
-}, { passive: false });
-
-// Also intercept normal clicks (covers devices/browsers that don't emit touch events)
-document.addEventListener('click', (e) => {
-  const a = e.target.closest('[data-page]');
-  if (!a) return;
-  e.preventDefault();
-  closeMenus();
-  goto(a.getAttribute('data-page'));
-}, true); // capture to beat default navigation
+/* SPA interceptors disabled for stability:
+   Let anchors perform normal navigation (full reload),
+   which guarantees the menu overlay goes away on mobile
+   and prevents double-trigger flicker on desktop.
+*/
+// document.addEventListener('touchend', ...);
+// document.addEventListener('click', ...);
 
 // If the tab becomes visible again or the viewport changes, ensure menus are shut
 document.addEventListener('visibilitychange', () => { if (!document.hidden) closeMenus(); });
