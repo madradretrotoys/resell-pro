@@ -95,10 +95,6 @@ export async function init(ctx) {
           return `
           ${r.marketplace_name} 
           
-          
-          
-          ${notes}
-          
           ${toggle}${connectBlock}${retryBlock}
           `;
         }).join("");
