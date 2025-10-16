@@ -93,9 +93,9 @@ export async function init(ctx) {
             : "";
           
           return `
-          ###  ${r.marketplace_name} ${statusBadge} ${enabledBadge}
+          ${r.marketplace_name} ${statusBadge} ${enabledBadge}
           
-          Slug: \`${r.slug || "-"}\` · Auth: \`${r.auth_type}\`
+          
           
           ${notes}
           
