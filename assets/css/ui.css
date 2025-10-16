@@ -198,7 +198,13 @@ label{
 #inventory-intake-screen .legacy-grid-3{ display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--gap); }
 #inventory-intake-screen .field{ display: flex; flex-direction: column; padding: 2px 2px; min-width: 0; }
 #inventory-intake-screen .field.wide{ grid-column: 1 / -1; }
-#inventory-intake-screen label{ font-size: 12px; margin: 0 0 8px; }
+/* Label-as-row (for checkbox + caption inside a label) */
+#inventory-intake-screen label.chkrow{
+  margin: 0;                  /* neutralize stacked label bottom margin */
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
 /* Exclude checkboxes from the generic input styling */
 #inventory-intake-screen input:not([type="checkbox"]), #inventory-intake-screen select, #inventory-intake-screen textarea{
   background: #fff; border: 1px solid #ddd; border-radius: 8px; padding: 10px 12px; width: 100%; box-sizing: border-box;
