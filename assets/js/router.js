@@ -158,6 +158,7 @@ async function goto(name){
 
 window.addEventListener('popstate', () => loadScreen(qs('page') || 'dashboard'));
 // Mobile: some browsers fire touchend without a subsequent click
+// Mobile: some browsers fire touchend without a subsequent click
 document.addEventListener('touchend', (e) => {
   const a = e.target.closest('[data-page]');
   if (!a) return;
@@ -165,6 +166,15 @@ document.addEventListener('touchend', (e) => {
   closeMenus();
   goto(a.getAttribute('data-page'));
 }, { passive: false });
+
+// Also intercept normal clicks (covers devices/browsers that don't emit touch events)
+document.addEventListener('click', (e) => {
+  const a = e.target.closest('[data-page]');
+  if (!a) return;
+  e.preventDefault();
+  closeMenus();
+  goto(a.getAttribute('data-page'));
+}, true); // capture to beat default navigation
 
 // If the tab becomes visible again or the viewport changes, ensure menus are shut
 document.addEventListener('visibilitychange', () => { if (!document.hidden) closeMenus(); });
@@ -174,53 +184,70 @@ window.addEventListener('resize', () => closeMenus());
 window.addEventListener('pageshow', () => setTimeout(closeMenus, 0));
 
 function closeMenus(){
-  // 0) Clear :target-based menus and active focus that can keep overlays shown
+  // 0) Clear :target/focus artifacts
   try {
     if (location.hash) {
       const noHash = location.pathname + location.search;
       history.replaceState({}, '', noHash);
     }
-    if (document.activeElement && typeof document.activeElement.blur === 'function') {
-      document.activeElement.blur();
-    }
+    document.activeElement?.blur?.();
   } catch {}
 
-  // 1) Checkbox toggles (multiple, if any) — also dispatch 'change' so CSS/listeners react
+  // 1) Checkbox-style menus
   const toggles = [
     document.getElementById('navcheck'),
     ...document.querySelectorAll('input[type="checkbox"][data-menu-toggle], input[type="checkbox"][id*="nav"]')
   ].filter(Boolean);
-
-  toggles.forEach(cb => {
+  for (const cb of toggles) {
     try {
       if (cb.checked) cb.checked = false;
       cb.blur?.();
       cb.dispatchEvent?.(new Event('change', { bubbles: true }));
     } catch {}
-  });
+  }
 
   // 2) <details> patterns
   document.querySelectorAll('details[open]').forEach(d => d.removeAttribute('open'));
 
   // 3) aria-expanded patterns
-  document.querySelectorAll('[aria-expanded="true"]').forEach(el => el.setAttribute('aria-expanded', 'false'));
+  document.querySelectorAll('[aria-expanded="true"]').forEach(el => el.setAttribute('aria-expanded','false'));
 
-  // 4) Common containers/classes (include the actual drawer: #nav)
-const containers = [
-  document.getElementById('nav'),
-  document.getElementById('app-menu'),
-  ...document.querySelectorAll('[data-menu], .menu, .mobile-nav, .nav-drawer, .drawer')
-];
-containers.forEach(el => {
-  ['open','active','show','visible','is-open','drawer-open'].forEach(cls => el?.classList?.remove(cls));
-  if (el && el.style) {
-    el.style.pointerEvents = '';
-    el.style.display = '';
-    el.style.visibility = '';
+  // 4) Explicitly close the actual drawer used in your app
+  const navEl = document.getElementById('nav');
+  if (navEl) {
+    navEl.classList.remove('open', 'active', 'show', 'visible', 'is-open', 'drawer-open');
+    // Belt-and-suspenders for stubborn mobile layers: force-close, then restore styles.
+    try {
+      const prevTransition = navEl.style.transition;
+      navEl.style.transition = 'none';
+      navEl.style.transform = 'translateX(-101%)';
+      // force reflow to apply the state immediately
+      // eslint-disable-next-line no-unused-expressions
+      navEl.offsetHeight;
+      navEl.style.transform = '';
+      navEl.style.transition = prevTransition;
+      navEl.style.pointerEvents = '';
+      navEl.style.visibility = '';
+      navEl.style.display = '';
+    } catch {}
   }
-});
 
-  // 5) Body state
+  // 5) Common containers/classes (kept for compatibility with other menus)
+  const containers = [
+    document.getElementById('nav'),
+    document.getElementById('app-menu'),
+    ...document.querySelectorAll('[data-menu], .menu, .mobile-nav, .nav-drawer, .drawer')
+  ];
+  containers.forEach(el => {
+    ['open','active','show','visible','is-open','drawer-open'].forEach(c => el?.classList?.remove?.(c));
+    if (el?.style) {
+      el.style.pointerEvents = '';
+      el.style.display = '';
+      el.style.visibility = '';
+    }
+  });
+
+  // 6) Body state
   document.body.classList.remove('menu-open');
 }
 
