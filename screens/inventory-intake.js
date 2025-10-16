@@ -1036,17 +1036,26 @@ function setMarketplaceVisibility() {
             </div>
   
             
-            <div class="field wide ebay-fixed-only ebay-bestoffer-only hidden">
-              <div class="subgrid-2">
-                <div class="field">
-                  <label>Auto-accept (USD) <span class="text-red-600" aria-hidden="true">*</span></label>
-                  <input id="ebay_autoAccept" type="number" step="0.01" min="0" placeholder="0.00" required />
-                </div>
-                <div class="field">
-                  <label>Minimum offer (USD) <span class="text-red-600" aria-hidden="true">*</span></label>
-                  <input id="ebay_minOffer" type="number" step="0.01" min="0" placeholder="0.00" required />
-                </div>
-              </div>
+            <!-- Fixed-only -->
+            <div class="field ebay-fixed-only">
+              <label class="switch" for="ebay_bestOffer">
+                <input id="ebay_bestOffer" type="checkbox" />
+                <span class="slider"></span>
+                <span class="switch-label">Allow Best Offer</span>
+              </label>
+            </div>
+
+            <!-- Promote -->
+            <div class="field">
+              <label class="switch" for="ebay_promote">
+                <input id="ebay_promote" type="checkbox" />
+                <span class="slider"></span>
+                <span class="switch-label">Promote</span>
+              </label>
+            </div>
+            <div class="field wide ebay-promote-only hidden">
+              <label>Promotion Percent (%) <span class="text-red-600" aria-hidden="true">*</span></label>
+              <input id="ebay_promotePct" type="number" step="0.1" min="0" max="100" placeholder="0" required />
             </div>
             
             <!-- Promote -->
