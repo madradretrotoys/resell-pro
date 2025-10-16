@@ -1280,7 +1280,7 @@ document.addEventListener("intake:item-changed", () => refreshDrafts({ force: tr
     });
     wireShippingBoxAutofill(meta);
 
-    Render marketplace tiles (below Shipping)
+    //Render marketplace tiles (below Shipping)
     __metaCache = meta;
     renderMarketplaceTiles(meta);
     // Render placeholder cards for any preselected tiles (from defaults)
