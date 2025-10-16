@@ -977,100 +977,132 @@ function setMarketplaceVisibility() {
         body.innerHTML = `
           <div class="legacy-grid-2 gap-3">
             <div class="field">
-              <label>Shipping Policy</label>
-              <select id="ebay_shippingPolicy" required disabled title="Data wiring in later phase"></select>
-              <div class="muted text-xs">Required</div>
+              <label>Shipping Policy <span class="text-red-600" aria-hidden="true">*</span></label>
+              <select id="ebay_shippingPolicy" required disabled title="Data wiring in later phase">
+                <option value="">&lt;select&gt;</option>
+              </select>
             </div>
             <div class="field">
-              <label>Payment Policy</label>
-              <select id="ebay_paymentPolicy" required disabled title="Data wiring in later phase"></select>
-              <div class="muted text-xs">Required</div>
+              <label>Payment Policy <span class="text-red-600" aria-hidden="true">*</span></label>
+              <select id="ebay_paymentPolicy" required disabled title="Data wiring in later phase">
+                <option value="">&lt;select&gt;</option>
+              </select>
             </div>
             <div class="field">
-              <label>Return Policy</label>
-              <select id="ebay_returnPolicy" required disabled title="Data wiring in later phase"></select>
-              <div class="muted text-xs">Required</div>
+              <label>Return Policy <span class="text-red-600" aria-hidden="true">*</span></label>
+              <select id="ebay_returnPolicy" required disabled title="Data wiring in later phase">
+                <option value="">&lt;select&gt;</option>
+              </select>
             </div>
             <div class="field">
-              <label>Shipping Location (Zip)</label>
+              <label>Shipping Location (Zip) <span class="text-red-600" aria-hidden="true">*</span></label>
               <input id="ebay_shipZip" type="text" inputmode="numeric" pattern="[0-9]{5}" placeholder="e.g. 80903" required />
               <div class="muted text-xs">5 digits</div>
             </div>
+  
             <div class="field">
-              <label>Pricing Format</label>
-              <div class="flex items-center gap-3">
-                <label><input type="radio" name="ebay_format" value="fixed" checked /> Fixed Price</label>
-                <label><input type="radio" name="ebay_format" value="auction" /> Auction</label>
-              </div>
-              <div class="muted text-xs">Required</div>
-            </div>
-            <div class="field">
-              <label>Duration</label>
-              <select id="ebay_duration" required>
-                <option value="">—</option>
-                <option>Good 'Til Cancelled</option>
-                <option>3 Days</option>
-                <option>5 Days</option>
-                <option>7 Days</option>
-                <option>10 Days</option>
+              <label>Pricing Format <span class="text-red-600" aria-hidden="true">*</span></label>
+              <select id="ebay_formatSelect" required>
+                <option value="">&lt;select&gt;</option>
+                <option value="fixed">Fixed Price</option>
+                <option value="auction">Auction</option>
               </select>
-              <div class="muted text-xs">Required</div>
             </div>
-            <div class="field">
-              <label>Buy It Now Price (USD)</label>
-              <input id="ebay_bin" type="number" step="0.01" min="0" placeholder="0.00" required />
-            </div>
+  
             <!-- Auction-only -->
             <div class="field ebay-auction-only hidden">
-              <label>Starting Bid (USD)</label>
-              <input id="ebay_start" type="number" step="0.01" min="0" placeholder="0.00" />
+              <label>Duration <span class="text-red-600" aria-hidden="true">*</span></label>
+              <select id="ebay_duration" required>
+                <option value="">&lt;select&gt;</option>
+                <option value="GTC">Good 'Til Cancelled</option>
+                <option value="3">3 Days</option>
+                <option value="5">5 Days</option>
+                <option value="7">7 Days</option>
+                <option value="10">10 Days</option>
+              </select>
+            </div>
+  
+            <div class="field">
+              <label>Buy It Now Price (USD) <span class="text-red-600" aria-hidden="true">*</span></label>
+              <input id="ebay_bin" type="number" step="0.01" min="0" placeholder="0.00" required />
+            </div>
+  
+            <!-- Auction-only -->
+            <div class="field ebay-auction-only hidden">
+              <label>Starting Bid (USD) <span class="text-red-600" aria-hidden="true">*</span></label>
+              <input id="ebay_start" type="number" step="0.01" min="0" placeholder="0.00" required />
             </div>
             <div class="field ebay-auction-only hidden">
               <label>Reserve Price (USD)</label>
               <input id="ebay_reserve" type="number" step="0.01" min="0" placeholder="0.00" />
             </div>
+  
             <!-- Fixed-only -->
             <div class="field ebay-fixed-only">
-              <label><input id="ebay_bestOffer" type="checkbox" /> Allow Best Offer</label>
+              <label class="inline-flex items-center gap-2">
+                <input id="ebay_bestOffer" type="checkbox" />
+                <span>Allow Best Offer</span>
+              </label>
             </div>
-            <div class="field ebay-fixed-only">
-              <label>Auto-accept (USD)</label>
-              <input id="ebay_autoAccept" type="number" step="0.01" min="0" placeholder="0.00" />
+            <div class="field ebay-fixed-only ebay-bestoffer-only hidden">
+              <label>Auto-accept (USD) <span class="text-red-600" aria-hidden="true">*</span></label>
+              <input id="ebay_autoAccept" type="number" step="0.01" min="0" placeholder="0.00" required />
             </div>
-            <div class="field ebay-fixed-only">
-              <label>Minimum offer (USD)</label>
-              <input id="ebay_minOffer" type="number" step="0.01" min="0" placeholder="0.00" />
+            <div class="field ebay-fixed-only ebay-bestoffer-only hidden">
+              <label>Minimum offer (USD) <span class="text-red-600" aria-hidden="true">*</span></label>
+              <input id="ebay_minOffer" type="number" step="0.01" min="0" placeholder="0.00" required />
             </div>
+  
             <!-- Promote -->
             <div class="field">
-              <label><input id="ebay_promote" type="checkbox" /> Promote</label>
+              <label class="inline-flex items-center gap-2">
+                <input id="ebay_promote" type="checkbox" />
+                <span>Promote</span>
+              </label>
             </div>
             <div class="field ebay-promote-only hidden">
-              <label>Promotion Percent (%)</label>
-              <input id="ebay_promotePct" type="number" step="0.1" min="0" max="100" placeholder="0" />
+              <label>Promotion Percent (%) <span class="text-red-600" aria-hidden="true">*</span></label>
+              <input id="ebay_promotePct" type="number" step="0.1" min="0" max="100" placeholder="0" required />
             </div>
           </div>
-          <div class="text-xs text-gray-600 mt-2" data-completeness>All visible fields are required.</div>
         `;
+
         card.appendChild(body);
   
         // Wire local show/hide inside the eBay card (client-only)
-        const formatRadios = body.querySelectorAll('input[name="ebay_format"]');
-        const promoteChk = body.querySelector('#ebay_promote');
-        const fixedOnly = () => body.querySelectorAll(".ebay-fixed-only");
-        const auctionOnly = () => body.querySelectorAll(".ebay-auction-only");
-        const promoOnly = () => body.querySelectorAll(".ebay-promote-only");
+        const formatSel   = body.querySelector('#ebay_formatSelect');
+        const bestOffer   = body.querySelector('#ebay_bestOffer');
+        const promoteChk  = body.querySelector('#ebay_promote');
+  
+        const fixedOnly    = () => body.querySelectorAll(".ebay-fixed-only");
+        const auctionOnly  = () => body.querySelectorAll(".ebay-auction-only");
+        const bestOfferOnly= () => body.querySelectorAll(".ebay-bestoffer-only");
+        const promoOnly    = () => body.querySelectorAll(".ebay-promote-only");
   
         function applyEbayVisibility() {
-          const fmt = Array.from(formatRadios).find(r => r.checked)?.value || "fixed";
-          fixedOnly().forEach(n => n.classList.toggle("hidden", fmt !== "fixed"));
-          auctionOnly().forEach(n => n.classList.toggle("hidden", fmt !== "auction"));
-          const promo = !!promoteChk?.checked;
+          const fmt = (formatSel?.value || "").toLowerCase(); // "" | "fixed" | "auction"
+          const isFixed   = fmt === "fixed";
+          const isAuction = fmt === "auction";
+          const hasBO     = !!bestOffer?.checked;
+          const promo     = !!promoteChk?.checked;
+  
+          fixedOnly().forEach(n => n.classList.toggle("hidden", !isFixed));
+          auctionOnly().forEach(n => n.classList.toggle("hidden", !isAuction));
+          bestOfferOnly().forEach(n => n.classList.toggle("hidden", !(isFixed && hasBO)));
           promoOnly().forEach(n => n.classList.toggle("hidden", !promo));
+  
+          // When Best Offer is unchecked, clear and mark not required
+          const autoAcc = body.querySelector('#ebay_autoAccept');
+          const minOff  = body.querySelector('#ebay_minOffer');
+          if (autoAcc) autoAcc.required = isFixed && hasBO;
+          if (minOff)  minOff.required  = isFixed && hasBO;
         }
-        formatRadios.forEach(r => r.addEventListener("change", applyEbayVisibility));
+  
+        formatSel?.addEventListener("change", applyEbayVisibility);
+        bestOffer?.addEventListener("change", applyEbayVisibility);
         promoteChk?.addEventListener("change", applyEbayVisibility);
         applyEbayVisibility();
+        
       } else {
         // Generic placeholder card for other marketplaces (no filler lists)
         body.innerHTML = `
