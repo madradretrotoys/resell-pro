@@ -231,22 +231,35 @@ function b64(u8: Uint8Array) { return btoa(String.fromCharCode(...u8)); }
 function b64d(s: string) { return Uint8Array.from(atob(s), c => c.charCodeAt(0)); }
 
 // Reuse your existing DB client; these helpers use Neon serverless in Workers/Pages.
-async function execSql(env: Env, sql: string, params: unknown[]) {
-  const rows = await _neon(env, sql, params);
-  return rows;
+async function execSql(env: Env, text: string, params: unknown[]) {
+  return _neon(env, text, params);
 }
-async function querySql(env: Env, sql: string, params: unknown[]) {
-  const rows = await _neon(env, sql, params);
-  return rows;
+async function querySql(env: Env, text: string, params: unknown[]) {
+  return _neon(env, text, params);
 }
-// Minimal Neon helper (no pooling; safe for Workers). Requires DATABASE_URL.
+
+// Minimal Neon helper that supports both shapes of the Neon client (with or without `.unsafe`).
+// Requires DATABASE_URL. Keeps $1/$2 placeholders in your existing SQL.
 async function _neon(env: Env, text: string, params: unknown[]) {
   if (!env.DATABASE_URL) throw new Error("DATABASE_URL missing");
-  // Dynamic import keeps file self-contained; CF Pages bundles this.
   const { neon } = await import("@neondatabase/serverless");
-  const sql = neon(env.DATABASE_URL);
-  // Use unsafe so we can pass parametrized text + params array.
-  const res = await sql.unsafe(text, params);
-  return res as any[];
+  const sql = neon(env.DATABASE_URL) as any;
+
+  // If the client exposes `.unsafe`, use it directly.
+  if (typeof sql.unsafe === "function") {
+    return (await sql.unsafe(text, params)) as any[];
+  }
+
+  // Fallback: build a TemplateStringsArray from "$1 ... $2 ..." and call the tag.
+  // This preserves parameterization and avoids string concatenation.
+  // Example: "select * from t where a=$1 and b=$2" + [x, y]
+  //   -> strings = ["select * from t where a=", " and b=", ""], call sql(strings, x, y)
+  const parts = text.split(/\$\d+/g);
+  // Ensure trailing empty string for correct arity (tag expects strings.length = params.length + 1)
+  if (parts[parts.length - 1] !== "") parts.push("");
+  // Create a TemplateStringsArray-like object
+  const strings = Object.assign([...parts], { raw: [...parts] }) as TemplateStringsArray;
+  return (await sql(strings, ...(params as any[]))) as any[];
 }
+
 

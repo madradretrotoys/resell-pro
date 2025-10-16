@@ -74,6 +74,7 @@ export async function loadScreen(name){
   if (!session?.user) {
     log('auth:fail->redirect', { reason: session?.reason, status: session?.status, debug: session?.debug });
     location.href = '/index.html';
+    window.__navLock = false;
     return;
   }
   log('auth:ok', { user: session.user });
@@ -86,6 +87,7 @@ export async function loadScreen(name){
   } catch (e) {
     log('screen:html:error', e);
     view.innerHTML = `\nFailed to load screen.\n`;
+    window.__navLock = false;
     return;
   }
   try {
@@ -98,24 +100,133 @@ export async function loadScreen(name){
     showToast('Screen script error');
   }
   document.title = `Resell Pro — ${meta.title}`;
-  setActiveLink(name);
+setActiveLink(name);
+
+// Ensure menus are closed AFTER the new screen is painted and any CSS transitions settle
+requestAnimationFrame(() => {
+  closeMenus();
+  // additional passes for slow mobile paints / transitions
+  setTimeout(closeMenus, 120);
+  setTimeout(closeMenus, 360);
+});
+
+// Release nav lock (see below)
+window.__navLock = false;
+
   log('loadScreen:end', { name });
+  
+  // Mobile-only fallback: if flagged, do a one-time hard reload after paint
+  if (window.__forceMobileReloadOnce) {
+    // clear the flag to avoid loops
+    window.__forceMobileReloadOnce = false;
+    // Allow the DOM to present the new screen, then replace to refresh
+    requestAnimationFrame(() => {
+      setTimeout(() => {
+        try { closeMenus(); } catch {}
+        location.replace(location.href);
+      }, 0);
+    });
+  }
+  
 }
 
-function goto(name){
+
+async function goto(name){
+  // Prevent double navigation on touchend+click
+  if (window.__navLock) return;
+  window.__navLock = true;
+
   const u = new URL(location.href);
   u.searchParams.set('page', name);
   history.pushState({}, '', u);
-  loadScreen(name);
+
+  // Close immediately before loading
+  closeMenus();
+  // small delay to catch CSS-driven drawers
+  setTimeout(closeMenus, 60);
+
+  // Hint: on mobile, do a one-time hard refresh after the new screen paints
+  // to defeat stubborn menu/focus states in certain browsers.
+  window.__forceMobileReloadOnce = /Mobi|Android/i.test(navigator.userAgent);
+
+  await loadScreen(name);
+
+  // Extra pass after the screen init settles
+  requestAnimationFrame(() => {
+    closeMenus();
+    setTimeout(closeMenus, 120);
+  });
 }
 
 window.addEventListener('popstate', () => loadScreen(qs('page') || 'dashboard'));
-document.addEventListener('click', (e) => {
-  const a = e.target.closest('[data-page]');
-  if(!a) return;
-  e.preventDefault();
-  goto(a.getAttribute('data-page'));
-});
+// Mobile: some browsers fire touchend without a subsequent click
+// Mobile: some browsers fire touchend without a subsequent click
+/* SPA interceptors disabled for stability:
+   Let anchors perform normal navigation (full reload),
+   which guarantees the menu overlay goes away on mobile
+   and prevents double-trigger flicker on desktop.
+*/
+// document.addEventListener('touchend', ...);
+// document.addEventListener('click', ...);
+
+// If the tab becomes visible again or the viewport changes, ensure menus are shut
+document.addEventListener('visibilitychange', () => { if (!document.hidden) closeMenus(); });
+window.addEventListener('resize', () => closeMenus());
+
+// Defensive: if a page is restored from bfcache/pageshow, close menus
+window.addEventListener('pageshow', () => setTimeout(closeMenus, 0));
+
+function closeMenus(){
+  // 0) Clear :target-based menus and active focus that can keep overlays shown
+  try {
+    if (location.hash) {
+      const noHash = location.pathname + location.search;
+      history.replaceState({}, '', noHash);
+    }
+    if (document.activeElement && typeof document.activeElement.blur === 'function') {
+      document.activeElement.blur();
+    }
+  } catch {}
+
+  // 1) Checkbox toggles (multiple, if any) — also dispatch 'change' so CSS/listeners react
+  const toggles = [
+    document.getElementById('navcheck'),
+    ...document.querySelectorAll('input[type="checkbox"][data-menu-toggle], input[type="checkbox"][id*="nav"]')
+  ].filter(Boolean);
+
+  toggles.forEach(cb => {
+    try {
+      if (cb.checked) cb.checked = false;
+      cb.blur?.();
+      cb.dispatchEvent?.(new Event('change', { bubbles: true }));
+    } catch {}
+  });
+
+  // 2) <details> patterns
+  document.querySelectorAll('details[open]').forEach(d => d.removeAttribute('open'));
+
+  // 3) aria-expanded patterns
+  document.querySelectorAll('[aria-expanded="true"]').forEach(el => el.setAttribute('aria-expanded', 'false'));
+
+  // 4) Common containers/classes
+  const containers = [
+    document.getElementById('app-menu'),
+    ...document.querySelectorAll('[data-menu], .menu, .mobile-nav, .nav-drawer, .drawer')
+  ];
+  containers.forEach(el => {
+    ['open','active','show','visible','is-open'].forEach(cls => el?.classList?.remove(cls));
+    // If inline styles were used to keep it open, clear them
+    if (el && el.style) {
+      el.style.pointerEvents = '';
+      el.style.display = '';
+      el.style.visibility = '';
+    }
+  });
+
+  // 5) Body state
+  document.body.classList.remove('menu-open');
+}
+
 
 log('boot');
 loadScreen(qs('page') || 'dashboard');

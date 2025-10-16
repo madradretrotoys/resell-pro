@@ -815,7 +815,11 @@ function setMarketplaceVisibility() {
   const MP_TILES_ID = "marketplaceTiles";
   const MP_ERROR_ID = "marketplaceTilesError";
   const MP_DEFAULTS_KEY = "rp:intake:lastCrosslist"; // prototype: local defaults
-
+  // Host for marketplace cards (placeholder UIs per selected marketplace)
+  const MP_CARDS_ID = "marketplaceCards";
+  
+  // Cache latest meta so we can re-render cards on tile toggles
+  let __metaCache = null;
   /** currently selected marketplace IDs (from app.marketplaces_available.id) */
   const selectedMarketplaceIds = new Set();
 
@@ -905,6 +909,8 @@ function setMarketplaceVisibility() {
           }
           // live-validate after any toggle
           computeValidity();
+          // update marketplace cards to match current selection
+          try { renderMarketplaceCards(__metaCache); } catch {}
         });
       } else {
         btn.addEventListener("click", () => {
@@ -921,6 +927,202 @@ function setMarketplaceVisibility() {
     if (!el) return;
     el.classList.toggle("hidden", !show);
   }
+
+  // Render placeholder cards for each selected marketplace (UI-only; no API calls)
+  function renderMarketplaceCards(meta) {
+    const host = document.getElementById(MP_CARDS_ID);
+    if (!host) return;
+    host.innerHTML = "";
+  
+    // Build a lookup of marketplaces by id (id, slug, marketplace_name, is_connected etc.)
+    const rows = (meta?.marketplaces || []).filter(m => m.is_active !== false);
+    const byId = new Map(rows.map(r => [Number(r.id), r]));
+  
+    // For each selected marketplace, render a card
+    for (const id of selectedMarketplaceIds) {
+      const m = byId.get(Number(id));
+      if (!m) continue;
+  
+      const slug = String(m.slug || "").toLowerCase();
+      const name = m.marketplace_name || m.slug || `#${m.id}`;
+      const connected = !!m.is_connected;
+  
+      // Card wrapper
+      const card = document.createElement("div");
+      card.className = "card p-3";
+  
+      // --- Header ---
+      const header = document.createElement("div");
+      header.className = "flex items-center justify-between mb-2";
+      header.innerHTML = `
+        <div class="flex items-center gap-2">
+          <span class="font-semibold">${name}</span>
+          <span class="text-xs px-2 py-1 rounded ${connected ? "bg-green-100 text-green-700" : "bg-gray-100 text-gray-600"}">
+            ${connected ? "Connected" : "Not connected"}
+          </span>
+        </div>
+        <div class="text-sm" data-card-status>
+          <strong>Status:</strong> <span class="mono" data-status-text>Not Listed</span>
+          <button type="button" class="btn btn-ghost btn-xs ml-2 hidden" data-delist>Delist</button>
+        </div>
+      `;
+      card.appendChild(header);
+  
+      // --- Body (placeholder fields) ---
+      const body = document.createElement("div");
+      body.className = "mt-2";
+  
+      if (slug === "ebay") {
+        // eBay placeholder UI — all fields required unless hidden by rules
+        body.innerHTML = `
+          <div class="legacy-grid-2 gap-3">
+            <div class="field">
+              <label>Shipping Policy <span class="text-red-600" aria-hidden="true">*</span></label>
+              <select id="ebay_shippingPolicy" required disabled title="Data wiring in later phase">
+                <option value="">&lt;select&gt;</option>
+              </select>
+            </div>
+            <div class="field">
+              <label>Payment Policy <span class="text-red-600" aria-hidden="true">*</span></label>
+              <select id="ebay_paymentPolicy" required disabled title="Data wiring in later phase">
+                <option value="">&lt;select&gt;</option>
+              </select>
+            </div>
+            <div class="field">
+              <label>Return Policy <span class="text-red-600" aria-hidden="true">*</span></label>
+              <select id="ebay_returnPolicy" required disabled title="Data wiring in later phase">
+                <option value="">&lt;select&gt;</option>
+              </select>
+            </div>
+            <div class="field">
+              <label>Shipping Location (Zip) <span class="text-red-600" aria-hidden="true">*</span></label>
+              <input id="ebay_shipZip" type="text" inputmode="numeric" pattern="[0-9]{5}" placeholder="e.g. 80903" required />
+            </div>
+  
+            <div class="field">
+              <label>Pricing Format <span class="text-red-600" aria-hidden="true">*</span></label>
+              <select id="ebay_formatSelect" required>
+                <option value="">&lt;select&gt;</option>
+                <option value="fixed">Fixed Price</option>
+                <option value="auction">Auction</option>
+              </select>
+            </div>
+  
+            <!-- Auction-only -->
+            <div class="field ebay-auction-only hidden">
+              <label>Duration <span class="text-red-600" aria-hidden="true">*</span></label>
+              <select id="ebay_duration" required>
+                <option value="">&lt;select&gt;</option>
+                <option value="3">3 Days</option>
+                <option value="5">5 Days</option>
+                <option value="7">7 Days</option>
+                <option value="10">10 Days</option>
+              </select>
+            </div>
+  
+            <div class="field">
+              <label>Buy It Now Price (USD) <span class="text-red-600" aria-hidden="true">*</span></label>
+              <input id="ebay_bin" type="number" step="0.01" min="0" placeholder="0.00" required />
+            </div>
+  
+            <!-- Auction-only -->
+            <div class="field ebay-auction-only hidden">
+              <label>Starting Bid (USD) <span class="text-red-600" aria-hidden="true">*</span></label>
+              <input id="ebay_start" type="number" step="0.01" min="0" placeholder="0.00" required />
+            </div>
+            <div class="field ebay-auction-only hidden">
+              <label>Reserve Price (USD)</label>
+              <input id="ebay_reserve" type="number" step="0.01" min="0" placeholder="0.00" />
+            </div>
+  
+            
+            <!-- Fixed-only -->
+            <div class="field ebay-fixed-only">
+              <label class="switch" for="ebay_bestOffer">
+                <input id="ebay_bestOffer" type="checkbox" />
+                <span class="slider"></span>
+                <span class="switch-label">Allow Best Offer</span>
+              </label>
+            </div>
+            <div class="field wide ebay-fixed-only ebay-bestoffer-only hidden">
+              <div class="subgrid-2">
+                <div class="field">
+                  <label>Auto-accept (USD) <span class="text-red-600" aria-hidden="true">*</span></label>
+                  <input id="ebay_autoAccept" type="number" step="0.01" min="0" placeholder="0.00" required />
+                </div>
+                <div class="field">
+                  <label>Minimum offer (USD) <span class="text-red-600" aria-hidden="true">*</span></label>
+                  <input id="ebay_minOffer" type="number" step="0.01" min="0" placeholder="0.00" required />
+                </div>
+              </div>
+            </div>
+
+            <!-- Promote -->
+            <div class="field">
+              <label class="switch" for="ebay_promote">
+                <input id="ebay_promote" type="checkbox" />
+                <span class="slider"></span>
+                <span class="switch-label">Promote</span>
+              </label>
+            </div>
+            <div class="field wide ebay-promote-only hidden">
+              <label>Promotion Percent (%) <span class="text-red-600" aria-hidden="true">*</span></label>
+              <input id="ebay_promotePct" type="number" step="0.1" min="0" max="100" placeholder="0" required />
+            </div>
+            
+            
+        `;
+
+        card.appendChild(body);
+  
+        // Wire local show/hide inside the eBay card (client-only)
+        const formatSel   = body.querySelector('#ebay_formatSelect');
+        const bestOffer   = body.querySelector('#ebay_bestOffer');
+        const promoteChk  = body.querySelector('#ebay_promote');
+  
+        const fixedOnly    = () => body.querySelectorAll(".ebay-fixed-only");
+        const auctionOnly  = () => body.querySelectorAll(".ebay-auction-only");
+        const bestOfferOnly= () => body.querySelectorAll(".ebay-bestoffer-only");
+        const promoOnly    = () => body.querySelectorAll(".ebay-promote-only");
+  
+        function applyEbayVisibility() {
+          const fmt = (formatSel?.value || "").toLowerCase(); // "" | "fixed" | "auction"
+          const isFixed   = fmt === "fixed";
+          const isAuction = fmt === "auction";
+          const hasBO     = !!bestOffer?.checked;
+          const promo     = !!promoteChk?.checked;
+  
+          fixedOnly().forEach(n => n.classList.toggle("hidden", !isFixed));
+          auctionOnly().forEach(n => n.classList.toggle("hidden", !isAuction));
+          bestOfferOnly().forEach(n => n.classList.toggle("hidden", !(isFixed && hasBO)));
+          promoOnly().forEach(n => n.classList.toggle("hidden", !promo));
+  
+          // When Best Offer is unchecked, clear and mark not required
+          const autoAcc = body.querySelector('#ebay_autoAccept');
+          const minOff  = body.querySelector('#ebay_minOffer');
+          if (autoAcc) autoAcc.required = isFixed && hasBO;
+          if (minOff)  minOff.required  = isFixed && hasBO;
+        }
+  
+        formatSel?.addEventListener("change", applyEbayVisibility);
+        bestOffer?.addEventListener("change", applyEbayVisibility);
+        promoteChk?.addEventListener("change", applyEbayVisibility);
+        applyEbayVisibility();
+        
+      } else {
+        // Generic placeholder card for other marketplaces (no filler lists)
+        body.innerHTML = `
+          <div class="muted text-sm">Marketplace-specific fields coming soon.</div>
+        `;
+        card.appendChild(body);
+      }
+  
+      host.appendChild(card);
+    }
+  
+    // If no marketplaces selected, nothing renders here by design.
+  }
+
   // === END NEW ===
 
   function computeValidity() {
@@ -1116,8 +1318,11 @@ document.addEventListener("intake:item-changed", () => refreshDrafts({ force: tr
     });
     wireShippingBoxAutofill(meta);
 
-    // NEW: Render marketplace tiles (below Shipping)
+    //Render marketplace tiles (below Shipping)
+    __metaCache = meta;
     renderMarketplaceTiles(meta);
+    // Render placeholder cards for any preselected tiles (from defaults)
+    try { renderMarketplaceCards(__metaCache); } catch {}
     
     // Store + channel
     fillSelect($("storeLocationSelect"), meta.store_locations);
