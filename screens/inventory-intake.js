@@ -997,7 +997,6 @@ function setMarketplaceVisibility() {
             <div class="field">
               <label>Shipping Location (Zip) <span class="text-red-600" aria-hidden="true">*</span></label>
               <input id="ebay_shipZip" type="text" inputmode="numeric" pattern="[0-9]{5}" placeholder="e.g. 80903" required />
-              <div class="muted text-xs">5 digits</div>
             </div>
   
             <div class="field">
