@@ -93,9 +93,17 @@ export async function init(ctx) {
             : "";
           
           return `
-          ${r.marketplace_name} 
+            <div class="mp-row">
+              <div class="mp-left">
+                <div class="mp-name">${r.marketplace_name}</div>
+                ${toggle}
+              </div>
           
-          ${toggle}${connectBlock}${retryBlock}
+              <div class="mp-right" data-connect-wrap="${r.id}" ${enabled ? "" : "hidden"}>
+                ${connectBtn}
+                ${retryBlock}
+              </div>
+            </div>
           `;
         }).join("");
       }
