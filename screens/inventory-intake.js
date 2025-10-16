@@ -1058,18 +1058,7 @@ function setMarketplaceVisibility() {
               <input id="ebay_promotePct" type="number" step="0.1" min="0" max="100" placeholder="0" required />
             </div>
             
-            <!-- Promote -->
-            <div class="field">
-              <label class="switch" for="ebay_promote">
-                <input id="ebay_promote" type="checkbox" />
-                <span class="slider"></span>
-                <span class="switch-label">Promote</span>
-              </label>
-            </div>
-            <div class="field wide ebay-promote-only hidden">
-              <label>Promotion Percent (%) <span class="text-red-600" aria-hidden="true">*</span></label>
-              <input id="ebay_promotePct" type="number" step="0.1" min="0" max="100" placeholder="0" required />
-            </div>
+            
         `;
 
         card.appendChild(body);
