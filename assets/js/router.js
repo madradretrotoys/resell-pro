@@ -205,20 +205,20 @@ function closeMenus(){
   // 3) aria-expanded patterns
   document.querySelectorAll('[aria-expanded="true"]').forEach(el => el.setAttribute('aria-expanded', 'false'));
 
-  // 4) Common containers/classes
-  const containers = [
-    document.getElementById('app-menu'),
-    ...document.querySelectorAll('[data-menu], .menu, .mobile-nav, .nav-drawer, .drawer')
-  ];
-  containers.forEach(el => {
-    ['open','active','show','visible','is-open'].forEach(cls => el?.classList?.remove(cls));
-    // If inline styles were used to keep it open, clear them
-    if (el && el.style) {
-      el.style.pointerEvents = '';
-      el.style.display = '';
-      el.style.visibility = '';
-    }
-  });
+  // 4) Common containers/classes (include the actual drawer: #nav)
+const containers = [
+  document.getElementById('nav'),
+  document.getElementById('app-menu'),
+  ...document.querySelectorAll('[data-menu], .menu, .mobile-nav, .nav-drawer, .drawer')
+];
+containers.forEach(el => {
+  ['open','active','show','visible','is-open','drawer-open'].forEach(cls => el?.classList?.remove(cls));
+  if (el && el.style) {
+    el.style.pointerEvents = '';
+    el.style.display = '';
+    el.style.visibility = '';
+  }
+});
 
   // 5) Body state
   document.body.classList.remove('menu-open');
