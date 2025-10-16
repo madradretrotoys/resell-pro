@@ -194,56 +194,6 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
               shipbx_height        = EXCLUDED.shipbx_height
           `;
           }
-
-          // NEW (DRAFT): upsert marketplace rows with mapped mp_category_id
-          {
-            const mpIds: number[] = Array.isArray(body?.marketplaces_selected)
-              ? body.marketplaces_selected.map((n: any) => Number(n)).filter((n) => !Number.isNaN(n))
-              : [];
-        
-            if (mpIds.length > 0 && lst?.listing_category_key) {
-              // Resolve the staff-facing category display_name once
-              const catNm = await sql<{ display_name: string }[]>`
-                SELECT display_name
-                FROM app.marketplace_categories
-                WHERE category_key = ${lst.listing_category_key}
-                LIMIT 1
-              `;
-              const category_name: string | null = catNm[0]?.display_name || null;
-        
-              for (const mpId of mpIds) {
-                // Prefer tenant override → fallback to default map
-                const map = await sql<{ mp_category_id: number | null }[]>`
-                  SELECT COALESCE(
-                    (SELECT m.mp_category_id
-                       FROM app.category_map_tenant_override m
-                      WHERE m.tenant_id = ${tenant_id}
-                        AND m.category_name = ${category_name}
-                        AND m.marketplace_id = ${mpId}
-                      LIMIT 1),
-                    (SELECT d.mp_category_id
-                       FROM app.category_map_default d
-                      WHERE d.category_name = ${category_name}
-                        AND d.marketplace_id = ${mpId}
-                      LIMIT 1)
-                  ) AS mp_category_id
-                `;
-        
-                const mpCategoryId = map[0]?.mp_category_id ?? null;
-        
-                await sql/*sql*/`
-                  INSERT INTO app.item_marketplace_listing
-                    (item_id, tenant_id, marketplace_id, status, mp_category_id)
-                  VALUES
-                    (${item_id}, ${tenant_id}, ${mpId}, 'draft', ${mpCategoryId})
-                  ON CONFLICT (item_id, marketplace_id) DO UPDATE SET
-                    status = 'draft',
-                    mp_category_id = EXCLUDED.mp_category_id,
-                    updated_at = now()
-                `;
-              }
-            }
-          }
         
           return json({ ok: true, item_id, sku: updInv[0].sku, status, ms: Date.now() - t0 }, 200);
         }
@@ -355,53 +305,21 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
                 shipbx_height    = EXCLUDED.shipbx_height
             `;
   
-              // NEW: Upsert selected marketplaces with mapped mp_category_id (status 'draft' until publish)
-              {
-                const mpIds: number[] = Array.isArray(body?.marketplaces_selected)
-                  ? body.marketplaces_selected.map((n: any) => Number(n)).filter((n) => !Number.isNaN(n))
-                  : [];
-              
-                if (mpIds.length > 0 && lst?.listing_category_key) {
-                  // Resolve staff-facing category display_name once from the key
-                  const catNm = await sql<{ display_name: string }[]>`
-                    SELECT display_name
-                    FROM app.marketplace_categories
-                    WHERE category_key = ${lst.listing_category_key}
-                    LIMIT 1
-                  `;
-                  const category_name: string | null = catNm[0]?.display_name || null;
-              
-                  for (const mpId of mpIds) {
-                    const map = await sql<{ mp_category_id: number | null }[]>`
-                      SELECT COALESCE(
-                        (SELECT m.mp_category_id
-                           FROM app.category_map_tenant_override m
-                          WHERE m.tenant_id = ${tenant_id}
-                            AND m.category_name = ${category_name}
-                            AND m.marketplace_id = ${mpId}
-                          LIMIT 1),
-                        (SELECT d.mp_category_id
-                           FROM app.category_map_default d
-                          WHERE d.category_name = ${category_name}
-                            AND d.marketplace_id = ${mpId}
-                          LIMIT 1)
-                      ) AS mp_category_id
-                    `;
-                    const mpCategoryId = map[0]?.mp_category_id ?? null;
-              
-                    await sql/*sql*/`
-                      INSERT INTO app.item_marketplace_listing
-                        (item_id, tenant_id, marketplace_id, status, mp_category_id)
-                      VALUES
-                        (${item_id}, ${tenant_id}, ${mpId}, 'draft', ${mpCategoryId})
-                      ON CONFLICT (item_id, marketplace_id) DO UPDATE SET
-                        status = 'draft',
-                        mp_category_id = EXCLUDED.mp_category_id,
-                        updated_at = now()
-                    `;
-                  }
-                }
-              } 
+            // NEW: Upsert selected marketplaces into app.item_marketplace_listing (prototype: status 'draft')
+            {
+              const mpIds: number[] = Array.isArray(body?.marketplaces_selected)
+                ? body.marketplaces_selected.map((n: any) => Number(n)).filter((n) => !Number.isNaN(n))
+                : [];
+              for (const mpId of mpIds) {
+                await sql/*sql*/`
+                  INSERT INTO app.item_marketplace_listing (item_id, tenant_id, marketplace_id, status)
+                  VALUES (${item_id}, ${tenant_id}, ${mpId}, 'draft')
+                  ON CONFLICT (item_id, marketplace_id)
+                  DO UPDATE SET status = 'draft', updated_at = now()
+                `;
+              }
+            }
+          }  
           return json({ ok: true, item_id, sku: retSku, status, ms: Date.now() - t0 }, 200);
         }
 
