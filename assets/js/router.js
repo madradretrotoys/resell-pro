@@ -108,7 +108,7 @@ export async function loadScreen(name){
   
   log('loadScreen:end', { name });
   }
-}
+
 
 function goto(name){
   const u = new URL(location.href);
