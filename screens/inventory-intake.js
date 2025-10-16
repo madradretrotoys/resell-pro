@@ -1035,18 +1035,7 @@ function setMarketplaceVisibility() {
               <input id="ebay_reserve" type="number" step="0.01" min="0" placeholder="0.00" />
             </div>
   
-            <div class="field wide ebay-fixed-only ebay-bestoffer-only hidden">
-            <div class="subgrid-2">
-              <div class="field">
-                <label>Auto-accept (USD) <span class="text-red-600" aria-hidden="true">*</span></label>
-                <input id="ebay_autoAccept" type="number" step="0.01" min="0" placeholder="0.00" required />
-              </div>
-              <div class="field">
-                <label>Minimum offer (USD) <span class="text-red-600" aria-hidden="true">*</span></label>
-                <input id="ebay_minOffer" type="number" step="0.01" min="0" placeholder="0.00" required />
-              </div>
-            </div>
-          </div>
+            
             <div class="field wide ebay-fixed-only ebay-bestoffer-only hidden">
               <div class="subgrid-2">
                 <div class="field">
