@@ -1037,9 +1037,10 @@ function setMarketplaceVisibility() {
   
             <!-- Fixed-only -->
             <div class="field ebay-fixed-only">
-              <label class="chkrow" for="ebay_bestOffer">
+              <label class="switch" for="ebay_bestOffer">
                 <input id="ebay_bestOffer" type="checkbox" />
-                <span>Allow Best Offer</span>
+                <span class="slider"></span>
+                <span class="switch-label">Allow Best Offer</span>
               </label>
             </div>
             <div class="field wide ebay-fixed-only ebay-bestoffer-only hidden">
@@ -1057,9 +1058,10 @@ function setMarketplaceVisibility() {
             
             <!-- Promote -->
             <div class="field">
-              <label class="chkrow" for="ebay_promote">
+              <label class="switch" for="ebay_promote">
                 <input id="ebay_promote" type="checkbox" />
-                <span>Promote</span>
+                <span class="slider"></span>
+                <span class="switch-label">Promote</span>
               </label>
             </div>
             <div class="field ebay-promote-only hidden">
