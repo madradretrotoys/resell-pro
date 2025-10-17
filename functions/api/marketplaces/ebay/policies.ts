@@ -78,22 +78,17 @@ export const onRequestGet: PagesFunction<Env> = async ({ request, env }) => {
     `;
 
     if (rows.length === 0) return json({ ok: false, error: "not_connected" }, 400);
-            const { access_token, environment } = rows[0] || {};
+      const { access_token, environment } = rows[0] || {};
     if (!access_token) return json({ ok: false, error: "no_access_token" }, 400);
 
-    // Normalize environment → host
-    function envToBase(envStr?: string) {
-      const v = String(envStr || "").trim().toLowerCase();
-      if (["prod", "production", "live"].includes(v)) return "https://api.ebay.com";
-      if (["sbx", "sandbox", "test"].includes(v))   return "https://api.sandbox.ebay.com";
-      // Default to production if unknown
-      return "https://api.ebay.com";
-    }
+    const base = String(environment || "").toLowerCase() === "production"
+      ? "https://api.ebay.com"
+      : "https://api.sandbox.ebay.com";
 
-    async function getListFrom(baseUrl: string, path: string, key: string): Promise<Array<{ id: string; name: string }>> {
-      const res = await fetch(baseUrl + path, {
+    async function getList(path: string, key: string): Promise<Array<{ id: string; name: string }>> {
+      const res = await fetch(base + path, {
         method: "GET",
-        headers: {
+       headers: {
           "Authorization": `Bearer ${access_token}`,
           "Content-Type": "application/json",
           "Accept": "application/json",
@@ -107,56 +102,26 @@ export const onRequestGet: PagesFunction<Env> = async ({ request, env }) => {
       const arr = Array.isArray(data?.[key]) ? data[key] : [];
       return arr
         .map((p: any) => {
+          // e.g. fulfillmentPolicies[].fulfillmentPolicyId / paymentPolicies[].paymentPolicyId / returnPolicies[].returnPolicyId
           const idKey = Object.keys(p).find(k => /PolicyId$/i.test(k));
           return { id: String(idKey ? p[idKey] : ""), name: String(p?.name ?? "") };
         })
         .filter(r => r.id && r.name);
     }
 
-    async function fetchPoliciesWithFallback() {
-      const primaryBase = envToBase(environment);
-      const altBase = primaryBase.includes("sandbox")
-        ? "https://api.ebay.com"
-        : "https://api.sandbox.ebay.com";
-
-      try {
-        const [shipping, payment, returns] = await Promise.all([
-          getListFrom(primaryBase, "/sell/account/v1/fulfillment_policy?marketplace_id=EBAY_US", "fulfillmentPolicies"),
-          getListFrom(primaryBase, "/sell/account/v1/payment_policy?marketplace_id=EBAY_US", "paymentPolicies"),
-          getListFrom(primaryBase, "/sell/account/v1/return_policy?marketplace_id=EBAY_US", "returnPolicies"),
-        ]);
-        return { shipping, payment, returns, base: primaryBase };
-      } catch (e: any) {
-        const msg = String(e?.message || "");
-        if (msg.includes(" 401")) {
-          const [shipping, payment, returns] = await Promise.all([
-            getListFrom(altBase, "/sell/account/v1/fulfillment_policy?marketplace_id=EBAY_US", "fulfillmentPolicies"),
-            getListFrom(altBase, "/sell/account/v1/payment_policy?marketplace_id=EBAY_US", "paymentPolicies"),
-            getListFrom(altBase, "/sell/account/v1/return_policy?marketplace_id=EBAY_US", "returnPolicies"),
-          ]);
-          return { shipping, payment, returns, base: altBase };
-        }
-        throw e;
-      }
-    } // <-- important: close the function here
-
-    // Call the helper and handle top-level errors
-    try {
-      const { shipping, payment, returns } = await fetchPoliciesWithFallback();
+        try {
+      const [shipping, payment, returns] = await Promise.all([
+        getList("/sell/account/v1/fulfillment_policy?marketplace_id=EBAY_US", "fulfillmentPolicies"),
+        getList("/sell/account/v1/payment_policy?marketplace_id=EBAY_US", "paymentPolicies"),
+        getList("/sell/account/v1/return_policy?marketplace_id=EBAY_US", "returnPolicies"),
+      ]);
       return json({ ok: true, shipping, payment, returns }, 200);
-    } catch (err: any) {
-      const msg = String(err?.message || err || "");
-      if (msg.includes(" 401")) return json({ ok: false, error: "reauth_required", message: msg }, 401);
-      return json({ ok: false, error: "server_error", message: msg }, 500);
-    }
-
-
     } catch (err: any) {
       const msg = String(err?.message || err || "");
       // Map eBay 401s to a clear client result so the UI can show “re-auth required”
       if (msg.includes(" 401")) return json({ ok: false, error: "reauth_required", message: msg }, 401);
       return json({ ok: false, error: "server_error", message: msg }, 500);
-    }
+    }        
   } catch (e: any) {
     return json({ ok: false, error: "server_error", message: String(e?.message || e) }, 500);
   }
