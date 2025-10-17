@@ -1,4 +1,4 @@
-yimport { neon } from "@neondatabase/serverless";
+import { neon } from "@neondatabase/serverless";
 
 type Role = "owner" | "admin" | "manager" | "clerk";
 type Env = { DATABASE_URL?: string; NEON_DATABASE_URL?: string; JWT_SECRET?: string };
@@ -35,7 +35,7 @@ async function verifyJwt(token: string, secret: string): Promise<any> {
 
 export const onRequestGet: PagesFunction<Env> = async ({ request, env }) => {
   try {
-    // AuthN: same style as your Intake APIs
+    // AuthN
     const cookieHeader = request.headers.get("cookie") || "";
     const token = readCookie(cookieHeader, "__Host-rp_session");
     if (!token) return json({ ok: false, error: "no_cookie" }, 401);
@@ -52,7 +52,7 @@ export const onRequestGet: PagesFunction<Env> = async ({ request, env }) => {
     if (!url) return json({ ok: false, error: "missing_db_url" }, 500);
     const sql = neon(url);
 
-    // AuthZ: mirror Intake auth (owner/admin/manager or can_inventory_intake)
+    // AuthZ
     const actor = await sql<{ role: Role; active: boolean; can_inventory_intake: boolean | null }[]>`
       SELECT m.role, m.active, COALESCE(p.can_inventory_intake, false) AS can_inventory_intake
       FROM app.memberships m
@@ -64,8 +64,7 @@ export const onRequestGet: PagesFunction<Env> = async ({ request, env }) => {
     const allow = ["owner","admin","manager"].includes(actor[0].role) || !!actor[0].can_inventory_intake;
     if (!allow) return json({ ok: false, error: "forbidden" }, 403);
 
-    // Tenant’s eBay connection
-        // Tenant’s eBay connection (pick the newest connected row deterministically)
+    // Tenant’s eBay connection (newest connected row)
     const rows = await sql<{ access_token: string | null; environment: string | null }[]>`
       SELECT mc.access_token, mc.environment
       FROM app.marketplace_connections mc
@@ -76,12 +75,12 @@ export const onRequestGet: PagesFunction<Env> = async ({ request, env }) => {
       ORDER BY mc.updated_at DESC
       LIMIT 1
     `;
-
     if (rows.length === 0) return json({ ok: false, error: "not_connected" }, 400);
-      const { access_token, environment } = rows[0] || {};
+
+    const { access_token, environment } = rows[0] || {};
     if (!access_token) return json({ ok: false, error: "no_access_token" }, 400);
 
-    // Choose primary base from stored environment and define an alternate for fallback
+    // Primary/alt hosts based on stored environment
     const envStr = String(environment || "").trim().toLowerCase();
     const primaryBase = (envStr === "production" || envStr === "prod" || envStr === "live")
       ? "https://api.ebay.com"
@@ -93,7 +92,7 @@ export const onRequestGet: PagesFunction<Env> = async ({ request, env }) => {
     async function getList(baseUrl: string, path: string, key: string): Promise<Array<{ id: string; name: string }>> {
       const res = await fetch(baseUrl + path, {
         method: "GET",
-       headers: {
+        headers: {
           "Authorization": `Bearer ${access_token}`,
           "Content-Type": "application/json",
           "Accept": "application/json",
@@ -104,47 +103,40 @@ export const onRequestGet: PagesFunction<Env> = async ({ request, env }) => {
         throw new Error(`ebay_${key}_failed ${res.status} ${txt}`.slice(0, 512));
       }
       const data = await res.json();
-      const arr = Array.isArray(data?.[key]) ? data[key] : [];
+      const arr = Array.isArray((data as any)?.[key]) ? (data as any)[key] : [];
       return arr
         .map((p: any) => {
-          // e.g. fulfillmentPolicies[].fulfillmentPolicyId / paymentPolicies[].paymentPolicyId / returnPolicies[].returnPolicyId
-          const idKey = Object.keys(p).find(k => /PolicyId$/i.test(k));
-          return { id: String(idKey ? p[idKey] : ""), name: String(p?.name ?? "") };
+          const idKey = Object.keys(p).find((k) => /PolicyId$/i.test(k));
+          return { id: String(idKey ? (p as any)[idKey] : ""), name: String(p?.name ?? "") };
         })
-        .filter(r => r.id && r.name);
+        .filter((r) => r.id && r.name);
     }
 
-       try {
-      // First try the base that matches the stored environment
-      try {
-        const [shipping, payment, returns] = await Promise.all([
-          getList(primaryBase, "/sell/account/v1/fulfillment_policy?marketplace_id=EBAY_US", "fulfillmentPolicies"),
-          getList(primaryBase, "/sell/account/v1/payment_policy?marketplace_id=EBAY_US", "paymentPolicies"),
-          getList(primaryBase, "/sell/account/v1/return_policy?marketplace_id=EBAY_US", "returnPolicies"),
-        ]);
-        return json({ ok: true, shipping, payment, returns }, 200);
-      } catch (e: any) {
-        const msg1 = String(e?.message || e || "");
-        // If Invalid access token (401), retry once against the other host
-        if (msg1.includes(" 401")) {
-          const [shipping, payment, returns] = await Promise.all([
-            getList(altBase, "/sell/account/v1/fulfillment_policy?marketplace_id=EBAY_US", "fulfillmentPolicies"),
-            getList(altBase, "/sell/account/v1/payment_policy?marketplace_id=EBAY_US", "paymentPolicies"),
-            getList(altBase, "/sell/account/v1/return_policy?marketplace_id=EBAY_US", "returnPolicies"),
-          ]);
-          return json({ ok: true, shipping, payment, returns }, 200);
-        }
-        throw e; // non-401 error → bubble up
-      }
-    } catch (err: any) {
-      const msg = String(err?.message || err || "");
-      if (msg.includes(" 401")) return json({ ok: false, error: "reauth_required", message: msg }, 401);
-      return json({ ok: false, error: "server_error", message: msg }, 500);
+    // Try primary; if 401, retry once on alt
+    let shipping: Array<{ id: string; name: string }>;
+    let payment: Array<{ id: string; name: string }>;
+    let returns: Array<{ id: string; name: string }>;
+
+    try {
+      [shipping, payment, returns] = await Promise.all([
+        getList(primaryBase, "/sell/account/v1/fulfillment_policy?marketplace_id=EBAY_US", "fulfillmentPolicies"),
+        getList(primaryBase, "/sell/account/v1/payment_policy?marketplace_id=EBAY_US", "paymentPolicies"),
+        getList(primaryBase, "/sell/account/v1/return_policy?marketplace_id=EBAY_US", "returnPolicies"),
+      ]);
+    } catch (e: any) {
+      const msg1 = String(e?.message || e || "");
+      if (!msg1.includes(" 401")) throw e;
+      [shipping, payment, returns] = await Promise.all([
+        getList(altBase, "/sell/account/v1/fulfillment_policy?marketplace_id=EBAY_US", "fulfillmentPolicies"),
+        getList(altBase, "/sell/account/v1/payment_policy?marketplace_id=EBAY_US", "paymentPolicies"),
+        getList(altBase, "/sell/account/v1/return_policy?marketplace_id=EBAY_US", "returnPolicies"),
+      ]);
     }
-        
-    }       
-  } catch (e: any) {
-    return json({ ok: false, error: "server_error", message: String(e?.message || e) }, 500);
+
+    return json({ ok: true, shipping, payment, returns }, 200);
+  } catch (err: any) {
+    const msg = String(err?.message || err || "");
+    if (msg.includes(" 401")) return json({ ok: false, error: "reauth_required", message: msg }, 401);
+    return json({ ok: false, error: "server_error", message: msg }, 500);
   }
-
 };
