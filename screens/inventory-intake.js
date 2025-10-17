@@ -978,19 +978,19 @@ function setMarketplaceVisibility() {
           <div class="legacy-grid-2 gap-3">
             <div class="field">
               <label>Shipping Policy <span class="text-red-600" aria-hidden="true">*</span></label>
-              <select id="ebay_shippingPolicy" required disabled title="Data wiring in later phase">
+              <select id="ebay_shippingPolicy" required enabled title="Data wiring in later phase">
                 <option value="">&lt;select&gt;</option>
               </select>
             </div>
             <div class="field">
               <label>Payment Policy <span class="text-red-600" aria-hidden="true">*</span></label>
-              <select id="ebay_paymentPolicy" required disabled title="Data wiring in later phase">
+              <select id="ebay_paymentPolicy" required enabled title="Data wiring in later phase">
                 <option value="">&lt;select&gt;</option>
               </select>
             </div>
             <div class="field">
               <label>Return Policy <span class="text-red-600" aria-hidden="true">*</span></label>
-              <select id="ebay_returnPolicy" required disabled title="Data wiring in later phase">
+              <select id="ebay_returnPolicy" required enabled title="Data wiring in later phase">
                 <option value="">&lt;select&gt;</option>
               </select>
             </div>
