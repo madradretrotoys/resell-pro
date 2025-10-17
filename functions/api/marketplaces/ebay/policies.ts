@@ -33,6 +33,19 @@ async function verifyJwt(token: string, secret: string): Promise<any> {
   return payload;
 }
 
+function b64(u8: Uint8Array) { return btoa(String.fromCharCode(...u8)); }
+function b64d(s: string) { return Uint8Array.from(atob(s), c => c.charCodeAt(0)); }
+async function decryptJson(base64Key: string, blob: string): Promise<any> {
+  if (!blob) return null;
+  const [ivB64, ctB64] = blob.split(".");
+  const iv = b64d(ivB64);
+  const ct = b64d(ctB64);
+  if (!base64Key) return JSON.parse(new TextDecoder().decode(ct));
+  const key = await crypto.subtle.importKey("raw", b64d(base64Key), { name: "AES-GCM" }, false, ["decrypt"]);
+  const pt = new Uint8Array(await crypto.subtle.decrypt({ name: "AES-GCM", iv }, key, ct));
+  return JSON.parse(new TextDecoder().decode(pt));
+}
+
 export const onRequestGet: PagesFunction<Env> = async ({ request, env }) => {
   try {
     // AuthN
@@ -77,9 +90,15 @@ export const onRequestGet: PagesFunction<Env> = async ({ request, env }) => {
     `;
     if (rows.length === 0) return json({ ok: false, error: "not_connected" }, 400);
 
-    const { access_token, environment } = rows[0] || {};
-    if (!access_token) return json({ ok: false, error: "no_access_token" }, 400);
+    const { access_token: encAccess, environment } = rows[0] || {};
+    if (!encAccess) return json({ ok: false, error: "no_access_token" }, 400);
+    const encKey = env.RP_ENCRYPTION_KEY || "";
+    const accessObj = await decryptJson(encKey, encAccess);
+    const access_token = String(accessObj?.v || "");
+    if (!access_token) return json({ ok: false, error: "bad_access_token" }, 400);
 
+ 
+    
     // Primary/alt hosts based on stored environment
     const envStr = String(environment || "").trim().toLowerCase();
     const primaryBase = (envStr === "production" || envStr === "prod" || envStr === "live")
