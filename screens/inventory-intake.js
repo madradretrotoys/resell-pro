@@ -1101,7 +1101,7 @@ function setMarketplaceVisibility() {
         // Wire local show/hide inside the eBay card (client-only)
         const formatSel   = body.querySelector('#ebay_formatSelect');
 
-        const formatSel   = body.querySelector('#ebay_formatSelect');
+        
         const bestOffer   = body.querySelector('#ebay_bestOffer');
         const promoteChk  = body.querySelector('#ebay_promote');
   
