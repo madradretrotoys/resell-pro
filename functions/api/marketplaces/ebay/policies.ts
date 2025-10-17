@@ -113,6 +113,97 @@ export const onRequestGet: PagesFunction<Env> = async ({ request, env }) => {
     const altBase = primaryBase.includes("sandbox")
       ? "https://api.ebay.com"
       : "https://api.sandbox.ebay.com";
+    
+    // ---- NEW: auto-refresh if token is expired/near-expiry ----
+    async function maybeRefreshToken() {
+      if (!secrets_blob) return null;
+      const sec = await decryptJson(encKey, secrets_blob);
+      const rt   = String(sec?.refresh_token || "");
+      const cid  = String(sec?.client_id || "");
+      const csec = String(sec?.client_secret || "");
+      const texp = String(sec?.token_expires_at || "");
+    
+      // If we have no refresh token, nothing to do.
+      if (!rt || !cid || !csec) return null;
+    
+      // Refresh when within 120s of expiry
+      const soon = Date.now() + 120_000;
+      const expMs = texp ? Date.parse(texp) : 0;
+      if (expMs && expMs > soon) return null; // still fresh
+    
+      const tokenHost = (envStr === "production")
+        ? "https://api.ebay.com/identity/v1/oauth2/token"
+        : "https://api.sandbox.ebay.com/identity/v1/oauth2/token";
+    
+      const basic = btoa(`${cid}:${csec}`);
+      const form = new URLSearchParams({
+        grant_type: "refresh_token",
+        refresh_token: rt,
+      });
+    
+      const r = await fetch(tokenHost, {
+        method: "POST",
+        headers: {
+          "content-type": "application/x-www-form-urlencoded",
+          "authorization": `Basic ${basic}`,
+        },
+        body: form.toString(),
+      });
+    
+      if (!r.ok) {
+        // If refresh fails, surface reauth_required so UI can prompt reconnect
+        const txt = await r.text().catch(() => "");
+        throw new Error(`reauth_required: refresh_failed ${r.status} ${txt}`.slice(0,512));
+      }
+    
+      const j = await r.json();
+      const newAccess    = String(j.access_token || "");
+      const expiresInSec = Number(j.expires_in || 0);
+      const newExpiresAt = new Date(Date.now() + Math.max(0, (expiresInSec - 60)) * 1000).toISOString();
+    
+      // Persist new token (reuse your encrypt/protect scheme)
+      const newEncAccess = await (async () => {
+        // protect(): encryptJson(encKey, { v: value })
+        const pt = JSON.stringify({ v: newAccess });
+        const u8 = new TextEncoder().encode(pt);
+        if (!encKey) return btoa(String.fromCharCode(...u8));
+        const key = await crypto.subtle.importKey("raw", b64d(encKey), { name: "AES-GCM" }, false, ["encrypt"]);
+        const iv  = crypto.getRandomValues(new Uint8Array(12));
+        const ct  = new Uint8Array(await crypto.subtle.encrypt({ name: "AES-GCM", iv }, key, u8));
+        return btoa(String.fromCharCode(...iv)) + "." + btoa(String.fromCharCode(...ct));
+      })();
+    
+      // Also update token_expires_at + last_success_at
+      const upd = `
+        UPDATE app.marketplace_connections
+           SET access_token = $1,
+               token_expires_at = $2,
+               last_success_at = now(),
+               updated_at = now()
+         WHERE tenant_id = $3
+           AND marketplace_id = (SELECT id FROM app.marketplaces_available WHERE slug = 'ebay')
+           AND status = 'connected'
+      `;
+      await sql(upd as any, [newEncAccess, newExpiresAt, tenant_id]);
+    
+      return newAccess;
+    }
+    
+    // If refresh happened, replace access_token in memory
+    try {
+      const refreshed = await maybeRefreshToken();
+      if (refreshed) {
+        // eslint-disable-next-line @typescript-eslint/no-unused-vars
+        (accessObj as any).v = refreshed;
+      }
+    } catch (e:any) {
+      const m = String(e?.message || "");
+      if (m.startsWith("reauth_required")) {
+        return json({ ok:false, error:"reauth_required", message:m }, 401);
+      }
+    }
+    // Re-read token in case it changed
+    const access_token2 = String((accessObj as any)?.v || "");
 
     
     async function getList(baseUrl: string, path: string, key: string): Promise<Array<{ id: string; name: string }>> {
