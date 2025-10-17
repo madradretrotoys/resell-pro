@@ -227,15 +227,7 @@ export const onRequestGet: PagesFunction<Env> = async ({ request, env }) => {
         getList(altBase, "/sell/account/v1/payment_policy?marketplace_id=EBAY_US", "paymentPolicies"),
         getList(altBase, "/sell/account/v1/return_policy?marketplace_id=EBAY_US", "returnPolicies"),
       ]);
-    } catch (e: any) {
-      const msg1 = String(e?.message || e || "");
-      if (!msg1.includes(" 401")) throw e;
-      [shipping, payment, returns] = await Promise.all([
-        getList(altBase, "/sell/account/v1/fulfillment_policy?marketplace_id=EBAY_US", "fulfillmentPolicies"),
-        getList(altBase, "/sell/account/v1/payment_policy?marketplace_id=EBAY_US", "paymentPolicies"),
-        getList(altBase, "/sell/account/v1/return_policy?marketplace_id=EBAY_US", "returnPolicies"),
-      ]);
-    }
+    } 
 
     return json({ ok: true, shipping, payment, returns }, 200);
   } catch (err: any) {
