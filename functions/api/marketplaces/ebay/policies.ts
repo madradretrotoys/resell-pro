@@ -78,7 +78,7 @@ export const onRequestGet: PagesFunction<Env> = async ({ request, env }) => {
     `;
 
     if (rows.length === 0) return json({ ok: false, error: "not_connected" }, 400);
-        const { access_token, environment } = rows[0] || {};
+            const { access_token, environment } = rows[0] || {};
     if (!access_token) return json({ ok: false, error: "no_access_token" }, 400);
 
     // Normalize environment → host
@@ -101,7 +101,6 @@ export const onRequestGet: PagesFunction<Env> = async ({ request, env }) => {
       });
       if (!res.ok) {
         const txt = await res.text().catch(() => "");
-        // include status code to help upstream mapping
         throw new Error(`ebay_${key}_failed ${res.status} ${txt}`.slice(0, 512));
       }
       const data = await res.json();
@@ -120,7 +119,6 @@ export const onRequestGet: PagesFunction<Env> = async ({ request, env }) => {
         ? "https://api.ebay.com"
         : "https://api.sandbox.ebay.com";
 
-      // try primary host first
       try {
         const [shipping, payment, returns] = await Promise.all([
           getListFrom(primaryBase, "/sell/account/v1/fulfillment_policy?marketplace_id=EBAY_US", "fulfillmentPolicies"),
@@ -130,7 +128,6 @@ export const onRequestGet: PagesFunction<Env> = async ({ request, env }) => {
         return { shipping, payment, returns, base: primaryBase };
       } catch (e: any) {
         const msg = String(e?.message || "");
-        // If Invalid access token (401), try the other host once
         if (msg.includes(" 401")) {
           const [shipping, payment, returns] = await Promise.all([
             getListFrom(altBase, "/sell/account/v1/fulfillment_policy?marketplace_id=EBAY_US", "fulfillmentPolicies"),
@@ -141,8 +138,9 @@ export const onRequestGet: PagesFunction<Env> = async ({ request, env }) => {
         }
         throw e;
       }
-    }
+    } // <-- important: close the function here
 
+    // Call the helper and handle top-level errors
     try {
       const { shipping, payment, returns } = await fetchPoliciesWithFallback();
       return json({ ok: true, shipping, payment, returns }, 200);
@@ -151,6 +149,7 @@ export const onRequestGet: PagesFunction<Env> = async ({ request, env }) => {
       if (msg.includes(" 401")) return json({ ok: false, error: "reauth_required", message: msg }, 401);
       return json({ ok: false, error: "server_error", message: msg }, 500);
     }
+
 
     } catch (err: any) {
       const msg = String(err?.message || err || "");
