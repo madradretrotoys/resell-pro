@@ -1,4 +1,4 @@
-import { neon } from "@neondatabase/serverless";
+yimport { neon } from "@neondatabase/serverless";
 
 type Role = "owner" | "admin" | "manager" | "clerk";
 type Env = { DATABASE_URL?: string; NEON_DATABASE_URL?: string; JWT_SECRET?: string };
@@ -115,18 +115,32 @@ export const onRequestGet: PagesFunction<Env> = async ({ request, env }) => {
     }
 
         try {
-      const [shipping, payment, returns] = await Promise.all([
-        getList("/sell/account/v1/fulfillment_policy?marketplace_id=EBAY_US", "fulfillmentPolicies"),
-        getList("/sell/account/v1/payment_policy?marketplace_id=EBAY_US", "paymentPolicies"),
-        getList("/sell/account/v1/return_policy?marketplace_id=EBAY_US", "returnPolicies"),
-      ]);
-      return json({ ok: true, shipping, payment, returns }, 200);
+      // First try the base that matches the stored environment
+      try {
+        const [shipping, payment, returns] = await Promise.all([
+          getList(primaryBase, "/sell/account/v1/fulfillment_policy?marketplace_id=EBAY_US", "fulfillmentPolicies"),
+          getList(primaryBase, "/sell/account/v1/payment_policy?marketplace_id=EBAY_US", "paymentPolicies"),
+          getList(primaryBase, "/sell/account/v1/return_policy?marketplace_id=EBAY_US", "returnPolicies"),
+        ]);
+        return json({ ok: true, shipping, payment, returns }, 200);
+      } catch (e: any) {
+        const msg1 = String(e?.message || e || "");
+        // If Invalid access token (401), retry once against the other host
+        if (msg1.includes(" 401")) {
+          const [shipping, payment, returns] = await Promise.all([
+            getList(altBase, "/sell/account/v1/fulfillment_policy?marketplace_id=EBAY_US", "fulfillmentPolicies"),
+            getList(altBase, "/sell/account/v1/payment_policy?marketplace_id=EBAY_US", "paymentPolicies"),
+            getList(altBase, "/sell/account/v1/return_policy?marketplace_id=EBAY_US", "returnPolicies"),
+          ]);
+          return json({ ok: true, shipping, payment, returns }, 200);
+        }
+        throw e; // non-401 error → bubble up
+      }
     } catch (err: any) {
       const msg = String(err?.message || err || "");
-      // Map eBay 401s to a clear client result so the UI can show “re-auth required”
       if (msg.includes(" 401")) return json({ ok: false, error: "reauth_required", message: msg }, 401);
       return json({ ok: false, error: "server_error", message: msg }, 500);
-    }        
+    }       
   } catch (e: any) {
     return json({ ok: false, error: "server_error", message: String(e?.message || e) }, 500);
   }
