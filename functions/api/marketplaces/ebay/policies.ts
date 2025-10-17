@@ -186,25 +186,47 @@ export const onRequestGet: PagesFunction<Env> = async ({ request, env }) => {
     const bearer = `Bearer ${refreshed ? refreshed : access_token}`;
     
     // Common fetcher that uses the (possibly refreshed) access token
+    // Common fetcher that uses the (possibly refreshed) access token
     async function getList(
-    baseUrl: string,
-    path: string,
-    key: string,
-    marketplaceId = "EBAY_US"
-  ): Promise<Array<{ id: string; name: string }>> {
-    const res = await fetch(baseUrl + path, {
-      method: "GET",
-      headers: {
-        "authorization": bearer,
-        "accept": "application/json",
-        // Account API prefers marketplace via header (not query string)
-        "X-EBAY-C-MARKETPLACE-ID": marketplaceId,
-      },
-    });
+      baseUrl: string,
+      path: string,
+      key: string,
+      marketplaceId = "EBAY_US"
+    ): Promise<Array<{ id: string; name: string }>> {
+      // include BOTH header and query param for maximum compatibility
+      const url = baseUrl + `${path}?marketplace_id=${encodeURIComponent(marketplaceId)}`;
+    
+      // ----- temporary debug (visible in Pages → Functions logs) -----
+      try {
+        console.log("[ebay/policies] request", JSON.stringify({
+          envStr,
+          url,
+          headerMarketplace: marketplaceId,
+          key,
+        }));
+      } catch {}
+    
+      const res = await fetch(url, {
+        method: "GET",
+        headers: {
+          "authorization": bearer,
+          "accept": "application/json",
+          "X-EBAY-C-MARKETPLACE-ID": marketplaceId,
+        },
+      });
+    
       if (!res.ok) {
         const txt = await res.text().catch(() => "");
+        try {
+          console.log("[ebay/policies] response", JSON.stringify({
+            status: res.status,
+            key,
+            body: txt.slice(0, 300),
+          }));
+        } catch {}
         throw new Error(`ebay_${key}_failed ${res.status} ${txt}`.slice(0, 512));
       }
+    
       const data = await res.json();
       const arr = Array.isArray((data as any)?.[key]) ? (data as any)[key] : [];
       return arr
@@ -214,6 +236,7 @@ export const onRequestGet: PagesFunction<Env> = async ({ request, env }) => {
         })
         .filter((r) => r.id && r.name);
     }
+
     
     // Try primary; if 401, retry once on alt
     let shipping: Array<{ id: string; name: string }>;
