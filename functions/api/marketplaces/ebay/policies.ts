@@ -114,7 +114,7 @@ export const onRequestGet: PagesFunction<Env> = async ({ request, env }) => {
         .filter(r => r.id && r.name);
     }
 
-        try {
+       try {
       // First try the base that matches the stored environment
       try {
         const [shipping, payment, returns] = await Promise.all([
@@ -140,6 +140,8 @@ export const onRequestGet: PagesFunction<Env> = async ({ request, env }) => {
       const msg = String(err?.message || err || "");
       if (msg.includes(" 401")) return json({ ok: false, error: "reauth_required", message: msg }, 401);
       return json({ ok: false, error: "server_error", message: msg }, 500);
+    }
+        
     }       
   } catch (e: any) {
     return json({ ok: false, error: "server_error", message: String(e?.message || e) }, 500);
