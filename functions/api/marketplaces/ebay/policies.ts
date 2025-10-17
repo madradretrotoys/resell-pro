@@ -81,12 +81,17 @@ export const onRequestGet: PagesFunction<Env> = async ({ request, env }) => {
       const { access_token, environment } = rows[0] || {};
     if (!access_token) return json({ ok: false, error: "no_access_token" }, 400);
 
-    const base = String(environment || "").toLowerCase() === "production"
+    // Choose primary base from stored environment and define an alternate for fallback
+    const envStr = String(environment || "").trim().toLowerCase();
+    const primaryBase = (envStr === "production" || envStr === "prod" || envStr === "live")
+      ? "https://api.ebay.com"
+      : "https://api.sandbox.ebay.com";
+    const altBase = primaryBase.includes("sandbox")
       ? "https://api.ebay.com"
       : "https://api.sandbox.ebay.com";
 
-    async function getList(path: string, key: string): Promise<Array<{ id: string; name: string }>> {
-      const res = await fetch(base + path, {
+    async function getList(baseUrl: string, path: string, key: string): Promise<Array<{ id: string; name: string }>> {
+      const res = await fetch(baseUrl + path, {
         method: "GET",
        headers: {
           "Authorization": `Bearer ${access_token}`,
