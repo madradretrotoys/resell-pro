@@ -107,6 +107,15 @@ export const onRequestGet: PagesFunction<Env> = async ({ request, env }) => {
         envStr = String(secrets?.environment || "").trim().toLowerCase();
       } catch {}
     }
+
+    // Optional override via query param for testing: ?env=production or ?env=sandbox
+    try {
+      const u = new URL(request.url);
+      const ov = (u.searchParams.get("env") || "").toLowerCase();
+      if (ov === "production" || ov === "prod" || ov === "live") envStr = "production";
+      if (ov === "sandbox" || ov === "sbx"  || ov === "test")  envStr = "sandbox";
+    } catch {}
+
     const primaryBase = (envStr === "production" || envStr === "prod" || envStr === "live")
       ? "https://api.ebay.com"
       : "https://api.sandbox.ebay.com";
