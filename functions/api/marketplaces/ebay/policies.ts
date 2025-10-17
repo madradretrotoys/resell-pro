@@ -114,10 +114,7 @@ export const onRequestGet: PagesFunction<Env> = async ({ request, env }) => {
       ? "https://api.ebay.com"
       : "https://api.sandbox.ebay.com";
 
-    const altBase = primaryBase.includes("sandbox")
-      ? "https://api.ebay.com"
-      : "https://api.sandbox.ebay.com";
-
+    
     async function getList(baseUrl: string, path: string, key: string): Promise<Array<{ id: string; name: string }>> {
       const res = await fetch(baseUrl + path, {
         method: "GET",
