@@ -152,18 +152,17 @@ async function persistTokens(env: Env, args: {
     last_success_at = now(),
     updated_at = now()
 `;
-await execSql(env, sql, [
-  args.tenantId,
-  args.marketplaceId,
-  args.access_token,
-  args.refresh_token,
-  args.token_expires_at,
-  args.status,
-  args.status_reason || null,
-  args.secrets_blob,
-  // NEW: persist the environment we used for this auth
-  (JSON.parse(atob(args.secrets_blob.split(".")[1] || ""))?.environment) ?? environment
-]);
+  await execSql(env, sql, [
+    args.tenantId,
+    args.marketplaceId,
+    args.access_token,
+    args.refresh_token,
+    args.token_expires_at,
+    args.status,
+    args.status_reason || null,
+    args.secrets_blob,
+    args.environment,   // <— use the explicit arg; no JSON.parse(atob(...))
+  ]);
 }
 
 async function updateStatus(env: Env, tenantId: string, marketplaceId: string, status: string, reason?: string) {
