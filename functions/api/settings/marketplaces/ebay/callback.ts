@@ -150,18 +150,60 @@ async function persistTokens(env: Env, args: {
     last_success_at = now(),
     updated_at = now()
 `;
-await execSql(env, sql, [
-  args.tenantId,
-  args.marketplaceId,
-  args.access_token,
-  args.refresh_token,
-  args.token_expires_at,
-  args.status,
-  args.status_reason || null,
-  args.secrets_blob,
-  // NEW: persist the environment we used for this auth
-  (JSON.parse(atob(args.secrets_blob.split(".")[1] || ""))?.environment) ?? environment
-]);
+
+  // 1) Add `environment` to the args you pass into persistTokens(...)
+await persistTokens(env, {
+  tenantId,
+  marketplaceId,
+  access_token: await protect(encKey, json.access_token),
+  refresh_token: json.refresh_token ? await protect(encKey, json.refresh_token) : null,
+  token_expires_at: tokenExpiresAt,
+  status: "connected",
+  status_reason: "eBay OAuth connected",
+  secrets_blob: secretsBlob,
+  environment, // <— pass it explicitly
+});
+
+// 2) Update persistTokens signature to accept it:
+async function persistTokens(env: Env, args: {
+  tenantId: string;
+  marketplaceId: string;
+  access_token: string;
+  refresh_token: string | null;
+  token_expires_at: string;
+  status: string;
+  status_reason?: string;
+  secrets_blob: string;
+  environment: "sandbox" | "production";   // <— added
+}) {
+  const sql = `
+  INSERT INTO app.marketplace_connections
+    (tenant_id, marketplace_id, access_token, refresh_token, token_expires_at, status, status_reason, secrets_blob, environment, last_success_at)
+  VALUES
+    ($1, $2, $3, $4, $5, $6, $7, $8, $9, now())
+  ON CONFLICT (tenant_id, marketplace_id)
+  DO UPDATE SET
+    access_token = EXCLUDED.access_token,
+    refresh_token = EXCLUDED.refresh_token,
+    token_expires_at = EXCLUDED.token_expires_at,
+    status = EXCLUDED.status,
+    status_reason = EXCLUDED.status_reason,
+    secrets_blob = EXCLUDED.secrets_blob,
+    environment = EXCLUDED.environment,
+    last_success_at = now(),
+    updated_at = now()
+`;
+  await execSql(env, sql, [
+    args.tenantId,
+    args.marketplaceId,
+    args.access_token,
+    args.refresh_token,
+    args.token_expires_at,
+    args.status,
+    args.status_reason || null,
+    args.secrets_blob,
+    args.environment,   // <— use the explicit arg; no JSON.parse(atob(...))
+  ]);
 }
 
 async function updateStatus(env: Env, tenantId: string, marketplaceId: string, status: string, reason?: string) {
