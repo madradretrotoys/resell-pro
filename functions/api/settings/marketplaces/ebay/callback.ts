@@ -88,6 +88,7 @@ export const onRequestGet: PagesFunction<Env> = async (context) => {
     status: "connected",
     status_reason: "eBay OAuth connected",
     secrets_blob: secretsBlob,
+    environment, 
   });
 
   // Redirect back to Settings → Marketplaces
