@@ -78,8 +78,8 @@ export const onRequestGet: PagesFunction<Env> = async ({ request, env }) => {
     if (!allow) return json({ ok: false, error: "forbidden" }, 403);
 
     // Tenant’s eBay connection (newest connected row)
-    const rows = await sql<{ access_token: string | null; environment: string | null }[]>`
-      SELECT mc.access_token, mc.environment
+    const rows = await sql<{ access_token: string | null; environment: string | null; secrets_blob: string | null }[]>`
+      SELECT mc.access_token, mc.environment, mc.secrets_blob
       FROM app.marketplace_connections mc
       JOIN app.marketplaces_available ma ON ma.id = mc.marketplace_id
       WHERE mc.tenant_id = ${tenant_id}
@@ -89,21 +89,31 @@ export const onRequestGet: PagesFunction<Env> = async ({ request, env }) => {
       LIMIT 1
     `;
     if (rows.length === 0) return json({ ok: false, error: "not_connected" }, 400);
-
-    const { access_token: encAccess, environment } = rows[0] || {};
+    
+    const { access_token: encAccess, environment, secrets_blob } = rows[0] || {};
     if (!encAccess) return json({ ok: false, error: "no_access_token" }, 400);
+    
     const encKey = env.RP_ENCRYPTION_KEY || "";
     const accessObj = await decryptJson(encKey, encAccess);
     const access_token = String(accessObj?.v || "");
     if (!access_token) return json({ ok: false, error: "bad_access_token" }, 400);
-
- 
     
-    // Primary/alt hosts based on stored environment
-    const envStr = String(environment || "").trim().toLowerCase();
+    // NEW: derive environment from DB column OR secrets_blob
+    let envStr = String(environment || "").trim().toLowerCase();
+    if (!envStr && secrets_blob) {
+      try {
+        const sec = await decryptJson(encKey, secrets_blob);
+        envStr = String(sec?.environment || "").trim().toLowerCase();
+      } catch {}
+    }
+    
     const primaryBase = (envStr === "production" || envStr === "prod" || envStr === "live")
       ? "https://api.ebay.com"
       : "https://api.sandbox.ebay.com";
+    const altBase = primaryBase.includes("sandbox")
+      ? "https://api.ebay.com"
+      : "https://api.sandbox.ebay.com";
+
     const altBase = primaryBase.includes("sandbox")
       ? "https://api.ebay.com"
       : "https://api.sandbox.ebay.com";
