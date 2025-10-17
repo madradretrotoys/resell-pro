@@ -1073,9 +1073,34 @@ function setMarketplaceVisibility() {
             
         `;
 
-        card.appendChild(body);
-  
+                card.appendChild(body);
+
+        // If tenant is connected to eBay, pull policies and populate the selects
+        (async () => {
+          try {
+            if (!connected) return; // leave disabled if not connected
+            const pol = await api("/api/marketplaces/ebay/policies", { method: "GET" });
+            if (!pol || pol.ok === false) return;
+
+            const shipSel = body.querySelector("#ebay_shippingPolicy");
+            const paySel  = body.querySelector("#ebay_paymentPolicy");
+            const retSel  = body.querySelector("#ebay_returnPolicy");
+
+            // Use existing helper; map { id, name }
+            fillSelect(shipSel, pol.shipping || [], { textKey: "name", valueKey: "id" });
+            fillSelect(paySel,  pol.payment  || [], { textKey: "name", valueKey: "id" });
+            fillSelect(retSel,  pol.returns  || [], { textKey: "name", valueKey: "id" });
+
+            // Enable once options are loaded
+            [shipSel, paySel, retSel].forEach(s => { if (s) { s.disabled = false; s.title = ""; } });
+          } catch (e) {
+            console.warn("ebay policies load failed", e);
+          }
+        })();
+
         // Wire local show/hide inside the eBay card (client-only)
+        const formatSel   = body.querySelector('#ebay_formatSelect');
+
         const formatSel   = body.querySelector('#ebay_formatSelect');
         const bestOffer   = body.querySelector('#ebay_bestOffer');
         const promoteChk  = body.querySelector('#ebay_promote');
