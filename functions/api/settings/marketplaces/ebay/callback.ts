@@ -123,6 +123,19 @@ async function loadClientCreds(env: Env, tenantId: string, marketplaceId: string
   return plat;
 }
 
+// 1) Add `environment` to the args you pass into persistTokens(...)
+await persistTokens(env, {
+  tenantId,
+  marketplaceId,
+  access_token: await protect(encKey, json.access_token),
+  refresh_token: json.refresh_token ? await protect(encKey, json.refresh_token) : null,
+  token_expires_at: tokenExpiresAt,
+  status: "connected",
+  status_reason: "eBay OAuth connected",
+  secrets_blob: secretsBlob,
+  environment, // <— pass it explicitly
+});
+
 async function persistTokens(env: Env, args: {
   tenantId: string;
   marketplaceId: string;
