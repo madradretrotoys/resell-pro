@@ -65,25 +65,35 @@ export const onRequestGet: PagesFunction<Env> = async ({ request, env }) => {
     if (!allow) return json({ ok: false, error: "forbidden" }, 403);
 
     // Tenant’s eBay connection
+        // Tenant’s eBay connection (pick the newest connected row deterministically)
     const rows = await sql<{ access_token: string | null; environment: string | null }[]>`
       SELECT mc.access_token, mc.environment
       FROM app.marketplace_connections mc
       JOIN app.marketplaces_available ma ON ma.id = mc.marketplace_id
-      WHERE mc.tenant_id = ${tenant_id} AND ma.slug = 'ebay'
+      WHERE mc.tenant_id = ${tenant_id}
+        AND ma.slug = 'ebay'
+        AND mc.status = 'connected'
+      ORDER BY mc.updated_at DESC
       LIMIT 1
     `;
+
     if (rows.length === 0) return json({ ok: false, error: "not_connected" }, 400);
-    const { access_token, environment } = rows[0] || {};
+        const { access_token, environment } = rows[0] || {};
     if (!access_token) return json({ ok: false, error: "no_access_token" }, 400);
 
-    const base = String(environment || "").toLowerCase() === "production"
-      ? "https://api.ebay.com"
-      : "https://api.sandbox.ebay.com";
+    // Normalize environment → host
+    function envToBase(envStr?: string) {
+      const v = String(envStr || "").trim().toLowerCase();
+      if (["prod", "production", "live"].includes(v)) return "https://api.ebay.com";
+      if (["sbx", "sandbox", "test"].includes(v))   return "https://api.sandbox.ebay.com";
+      // Default to production if unknown
+      return "https://api.ebay.com";
+    }
 
-    async function getList(path: string, key: string): Promise<Array<{ id: string; name: string }>> {
-      const res = await fetch(base + path, {
+    async function getListFrom(baseUrl: string, path: string, key: string): Promise<Array<{ id: string; name: string }>> {
+      const res = await fetch(baseUrl + path, {
         method: "GET",
-       headers: {
+        headers: {
           "Authorization": `Bearer ${access_token}`,
           "Content-Type": "application/json",
           "Accept": "application/json",
@@ -91,26 +101,57 @@ export const onRequestGet: PagesFunction<Env> = async ({ request, env }) => {
       });
       if (!res.ok) {
         const txt = await res.text().catch(() => "");
+        // include status code to help upstream mapping
         throw new Error(`ebay_${key}_failed ${res.status} ${txt}`.slice(0, 512));
       }
       const data = await res.json();
       const arr = Array.isArray(data?.[key]) ? data[key] : [];
       return arr
         .map((p: any) => {
-          // e.g. fulfillmentPolicies[].fulfillmentPolicyId / paymentPolicies[].paymentPolicyId / returnPolicies[].returnPolicyId
           const idKey = Object.keys(p).find(k => /PolicyId$/i.test(k));
           return { id: String(idKey ? p[idKey] : ""), name: String(p?.name ?? "") };
         })
         .filter(r => r.id && r.name);
     }
 
-        try {
-      const [shipping, payment, returns] = await Promise.all([
-        getList("/sell/account/v1/fulfillment_policy?marketplace_id=EBAY_US", "fulfillmentPolicies"),
-        getList("/sell/account/v1/payment_policy?marketplace_id=EBAY_US", "paymentPolicies"),
-        getList("/sell/account/v1/return_policy?marketplace_id=EBAY_US", "returnPolicies"),
-      ]);
+    async function fetchPoliciesWithFallback() {
+      const primaryBase = envToBase(environment);
+      const altBase = primaryBase.includes("sandbox")
+        ? "https://api.ebay.com"
+        : "https://api.sandbox.ebay.com";
+
+      // try primary host first
+      try {
+        const [shipping, payment, returns] = await Promise.all([
+          getListFrom(primaryBase, "/sell/account/v1/fulfillment_policy?marketplace_id=EBAY_US", "fulfillmentPolicies"),
+          getListFrom(primaryBase, "/sell/account/v1/payment_policy?marketplace_id=EBAY_US", "paymentPolicies"),
+          getListFrom(primaryBase, "/sell/account/v1/return_policy?marketplace_id=EBAY_US", "returnPolicies"),
+        ]);
+        return { shipping, payment, returns, base: primaryBase };
+      } catch (e: any) {
+        const msg = String(e?.message || "");
+        // If Invalid access token (401), try the other host once
+        if (msg.includes(" 401")) {
+          const [shipping, payment, returns] = await Promise.all([
+            getListFrom(altBase, "/sell/account/v1/fulfillment_policy?marketplace_id=EBAY_US", "fulfillmentPolicies"),
+            getListFrom(altBase, "/sell/account/v1/payment_policy?marketplace_id=EBAY_US", "paymentPolicies"),
+            getListFrom(altBase, "/sell/account/v1/return_policy?marketplace_id=EBAY_US", "returnPolicies"),
+          ]);
+          return { shipping, payment, returns, base: altBase };
+        }
+        throw e;
+      }
+    }
+
+    try {
+      const { shipping, payment, returns } = await fetchPoliciesWithFallback();
       return json({ ok: true, shipping, payment, returns }, 200);
+    } catch (err: any) {
+      const msg = String(err?.message || err || "");
+      if (msg.includes(" 401")) return json({ ok: false, error: "reauth_required", message: msg }, 401);
+      return json({ ok: false, error: "server_error", message: msg }, 500);
+    }
+
     } catch (err: any) {
       const msg = String(err?.message || err || "");
       // Map eBay 401s to a clear client result so the UI can show “re-auth required”
