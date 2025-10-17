@@ -186,14 +186,21 @@ export const onRequestGet: PagesFunction<Env> = async ({ request, env }) => {
     const bearer = `Bearer ${refreshed ? refreshed : access_token}`;
     
     // Common fetcher that uses the (possibly refreshed) access token
-    async function getList(baseUrl: string, path: string, key: string): Promise<Array<{ id: string; name: string }>> {
-      const res = await fetch(baseUrl + path, {
-        method: "GET",
-        headers: {
-          "authorization": bearer,
-          "accept": "application/json",
-        },
-      });
+    async function getList(
+    baseUrl: string,
+    path: string,
+    key: string,
+    marketplaceId = "EBAY_US"
+  ): Promise<Array<{ id: string; name: string }>> {
+    const res = await fetch(baseUrl + path, {
+      method: "GET",
+      headers: {
+        "authorization": bearer,
+        "accept": "application/json",
+        // Account API prefers marketplace via header (not query string)
+        "X-EBAY-C-MARKETPLACE-ID": marketplaceId,
+      },
+    });
       if (!res.ok) {
         const txt = await res.text().catch(() => "");
         throw new Error(`ebay_${key}_failed ${res.status} ${txt}`.slice(0, 512));
@@ -215,17 +222,17 @@ export const onRequestGet: PagesFunction<Env> = async ({ request, env }) => {
     
     try {
       [shipping, payment, returns] = await Promise.all([
-        getList(primaryBase, "/sell/account/v1/fulfillment_policy?marketplace_id=EBAY_US", "fulfillmentPolicies"),
-        getList(primaryBase, "/sell/account/v1/payment_policy?marketplace_id=EBAY_US", "paymentPolicies"),
-        getList(primaryBase, "/sell/account/v1/return_policy?marketplace_id=EBAY_US", "returnPolicies"),
+        getList(primaryBase, "/sell/account/v1/fulfillment_policy", "fulfillmentPolicies"),
+        getList(primaryBase, "/sell/account/v1/payment_policy",    "paymentPolicies"),
+        getList(primaryBase, "/sell/account/v1/return_policy",     "returnPolicies"),
       ]);
     } catch (e: any) {
       const msg1 = String(e?.message || e || "");
       if (!msg1.includes(" 401")) throw e;
       [shipping, payment, returns] = await Promise.all([
-        getList(altBase, "/sell/account/v1/fulfillment_policy?marketplace_id=EBAY_US", "fulfillmentPolicies"),
-        getList(altBase, "/sell/account/v1/payment_policy?marketplace_id=EBAY_US", "paymentPolicies"),
-        getList(altBase, "/sell/account/v1/return_policy?marketplace_id=EBAY_US", "returnPolicies"),
+        getList(altBase, "/sell/account/v1/fulfillment_policy", "fulfillmentPolicies"),
+        getList(altBase, "/sell/account/v1/payment_policy",    "paymentPolicies"),
+        getList(altBase, "/sell/account/v1/return_policy",     "returnPolicies"),
       ]);
     } 
 
