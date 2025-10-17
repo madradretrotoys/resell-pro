@@ -1402,8 +1402,77 @@ document.addEventListener("intake:item-changed", () => refreshDrafts({ force: tr
       const byLbl = findControlByLabel(label || "");
       return byLbl ? (byLbl.value ?? "") : "";
     }
+
+    // NEW: Collect eBay-specific marketplace listing fields and coerce types.
+    // Maps directly to app.item_marketplace_listing columns.
+    function getEbayListingFields() {
+      const fmt = (document.getElementById("ebay_formatSelect")?.value || "").toLowerCase(); // "fixed" | "auction" | ""
+      const isFixed   = fmt === "fixed";
+      const isAuction = fmt === "auction";
+
+      // raw values
+      const shipping_policy = document.getElementById("ebay_shippingPolicy")?.value || "";
+      const payment_policy  = document.getElementById("ebay_paymentPolicy")?.value || "";
+      const return_policy   = document.getElementById("ebay_returnPolicy")?.value || "";
+      const shipping_zip    = document.getElementById("ebay_shipZip")?.value || "";
+      const pricing_format  = fmt || "";
+
+      // numbers (coerce only if non-empty)
+      const num = (id) => {
+        const v = document.getElementById(id)?.value ?? "";
+        return String(v).trim() === "" ? undefined : Number(v);
+      };
+
+      const buy_it_now_price   = num("ebay_bin");
+      const starting_bid       = num("ebay_start");
+      const reserve_price      = num("ebay_reserve");
+      const promote_percent    = num("ebay_promotePct");
+      const auto_accept_amount = num("ebay_autoAccept");
+      const minimum_offer_amount = num("ebay_minOffer");
+
+      // booleans
+      const allow_best_offer = !!document.getElementById("ebay_bestOffer")?.checked;
+      const promote          = !!document.getElementById("ebay_promote")?.checked;
+
+      // “Duration” (present in UI); DB column may not exist yet — send anyway so backend can adopt later.
+      const duration = document.getElementById("ebay_duration")?.value || "";
+
+      // prune helper (drop empty strings/undefined/null)
+      const prune = (obj) => {
+        const out = {};
+        for (const [k, v] of Object.entries(obj || {})) {
+          if (v === null || v === undefined) continue;
+          if (typeof v === "string" && v.trim() === "") continue;
+          out[k] = v;
+        }
+        return out;
+      };
+
+      // Respect Fixed vs Auction visibility rules
+      const base = {
+        shipping_policy,
+        payment_policy,
+        return_policy,
+        shipping_zip,
+        pricing_format,
+        buy_it_now_price,
+        allow_best_offer: isFixed ? allow_best_offer : undefined,
+        auto_accept_amount: isFixed && allow_best_offer ? auto_accept_amount : undefined,
+        minimum_offer_amount: isFixed && allow_best_offer ? minimum_offer_amount : undefined,
+        promote,
+        promote_percent: promote ? promote_percent : undefined,
+      };
+
+      const auctionExtras = isAuction ? {
+        duration,
+        starting_bid,
+        reserve_price,
+      } : {};
+
+      return prune({ ...base, ...auctionExtras });
+    }
     
-    function buildPayload(isDraft = false) {
+       function buildPayload(isDraft = false) {
       // helper: drop empty strings/null/undefined
       const prune = (obj) => {
         const out = {};
@@ -1434,7 +1503,7 @@ document.addEventListener("intake:item-changed", () => refreshDrafts({ force: tr
         condition_key:        valByIdOrLabel("conditionSelect", "Condition"),
         brand_key:            valByIdOrLabel("brandSelect", "Brand"),
         color_key:            valByIdOrLabel("colorSelect", "Primary Color"),
-        product_description: valByIdOrLabel(null, "Long Description"),
+        product_description:  valByIdOrLabel(null, "Long Description"),
         shipping_box_key:     valByIdOrLabel("shippingBoxSelect", "Shipping Box"),
         weight_lb:  (() => { const v = valByIdOrLabel("shipWeightLb", "Weight (lb)"); return v !== "" ? Number(v) : undefined; })(),
         weight_oz:  (() => { const v = valByIdOrLabel("shipWeightOz", "Weight (oz)"); return v !== "" ? Number(v) : undefined; })(),
@@ -1442,18 +1511,26 @@ document.addEventListener("intake:item-changed", () => refreshDrafts({ force: tr
         shipbx_width:  (() => { const v = valByIdOrLabel("shipWidth", "Width"); return v !== "" ? Number(v) : undefined; })(),
         shipbx_height: (() => { const v = valByIdOrLabel("shipHeight", "Height"); return v !== "" ? Number(v) : undefined; })(),
       };
-    
+
+      // NEW: eBay marketplace listing fields (maps to app.item_marketplace_listing)
+      const ebayListing = getEbayListingFields();
+
       if (isDraft) {
-        // Send any non-empty fields for drafts (Basic + Marketplace)
+        // Send any non-empty fields for drafts (Basic + Marketplace + eBay listing fields)
         const inventory = prune(invAll);
         const listing   = prune(listingAll);
         const payload = { status: "draft", inventory };
+
         if (Object.keys(listing).length > 0) payload.listing = listing;
+        if (Object.keys(ebayListing).length > 0) {
+          // Backend: upsert into app.item_marketplace_listing when present
+          payload.marketplace_listing = { ebay: ebayListing };
+        }
         // NOTE: we still omit marketplaces_selected for drafts for now
         return payload;
       }
     
-      // Active/new items (unchanged behavior)
+      // Active/new items
       const salesChannel = valByIdOrLabel("salesChannelSelect", "Sales Channel");
       const isStoreOnly = /store only/i.test(String(salesChannel || ""));
       const inventory = prune(invAll);
@@ -1464,8 +1541,16 @@ document.addEventListener("intake:item-changed", () => refreshDrafts({ force: tr
     
       const listing = prune(listingAll);
       const marketplaces_selected = Array.from(selectedMarketplaceIds.values());
-      return { inventory, listing, marketplaces_selected };
+
+      const payload = { inventory, listing, marketplaces_selected };
+
+      if (Object.keys(ebayListing).length > 0) {
+        // Backend: upsert into app.item_marketplace_listing when present
+        payload.marketplace_listing = { ebay: ebayListing };
+      }
+      return payload;
     }
+
 
      async function submitIntake(mode = "active") {
       if (mode !== "draft" && !computeValidity()) return;
