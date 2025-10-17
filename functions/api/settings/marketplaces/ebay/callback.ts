@@ -109,19 +109,21 @@ function appReturnUrl(current: URL) {
 }
 
 async function loadClientCreds(env: Env, tenantId: string, marketplaceId: string, environment: "sandbox"|"production") {
-  // Read the row from app.marketplace_connections and decrypt secrets_blob if present;
-  // else fall back to platform ENV.
-  const row = await selectConnection(env, tenantId, marketplaceId);
+  // Prefer a row that matches the requested environment
+  const row = await selectConnection(env, tenantId, marketplaceId, environment);
+
   if (row?.secrets_blob) {
     const data = await decryptJson(env.RP_ENCRYPTION_KEY || "", row.secrets_blob);
-    return { clientId: data.client_id, clientSecret: data.client_secret, runame: data.runame };
+    // Only use the saved creds if they were issued for the same environment
+    if (String(data?.environment).toLowerCase() === environment) {
+      return { clientId: data.client_id, clientSecret: data.client_secret, runame: data.runame };
+    }
   }
-  // Fallback: platform env
-  // You can also import the helper from start.ts if you prefer to DRY it.
-  const plat = (environment === "production")
-    ? { clientId: (env as any).EBAY_PROD_CLIENT_ID, clientSecret: (env as any).EBAY_PROD_CLIENT_SECRET, runame: (env as any).EBAY_PROD_RUNAME }
+
+  // Fallback to platform-level creds for this environment
+  return (environment === "production")
+    ? { clientId: (env as any).EBAY_PROD_CLIENT_ID,  clientSecret: (env as any).EBAY_PROD_CLIENT_SECRET,  runame: (env as any).EBAY_PROD_RUNAME }
     : { clientId: (env as any).EBAY_SANDBOX_CLIENT_ID, clientSecret: (env as any).EBAY_SANDBOX_CLIENT_SECRET, runame: (env as any).EBAY_SANDBOX_RUNAME };
-  return plat;
 }
 
 // 2) Update persistTokens signature to accept it:
@@ -215,9 +217,18 @@ async function decryptJson(base64Key: string, blob: string): Promise<any> {
   return JSON.parse(new TextDecoder().decode(pt));
 }
 
-async function selectConnection(env: Env, tenantId: string, marketplaceId: string) {
-  const sql = `SELECT secrets_blob FROM app.marketplace_connections WHERE tenant_id=$1 AND marketplace_id=$2`;
-  const rows = await querySql(env, sql, [tenantId, marketplaceId]);
+async function selectConnection(env: Env, tenantId: string, marketplaceId: string, environment: "sandbox"|"production") {
+  // Scope by environment so sandbox/prod rows don’t collide
+  const sql = `
+    SELECT secrets_blob
+      FROM app.marketplace_connections
+     WHERE tenant_id=$1
+       AND marketplace_id=$2
+       AND environment=$3
+     ORDER BY updated_at DESC
+     LIMIT 1
+  `;
+  const rows = await querySql(env, sql, [tenantId, marketplaceId, environment]);
   return rows[0] || null;
 }
 
