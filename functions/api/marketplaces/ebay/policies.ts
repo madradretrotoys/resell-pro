@@ -83,7 +83,11 @@ export const onRequestGet: PagesFunction<Env> = async ({ request, env }) => {
     async function getList(path: string, key: string): Promise<Array<{ id: string; name: string }>> {
       const res = await fetch(base + path, {
         method: "GET",
-        headers: { "Authorization": `Bearer ${access_token}`, "Content-Type": "application/json" },
+       headers: {
+          "Authorization": `Bearer ${access_token}`,
+          "Content-Type": "application/json",
+          "Accept": "application/json",
+        },
       });
       if (!res.ok) {
         const txt = await res.text().catch(() => "");
@@ -100,14 +104,21 @@ export const onRequestGet: PagesFunction<Env> = async ({ request, env }) => {
         .filter(r => r.id && r.name);
     }
 
-    const [shipping, payment, returns] = await Promise.all([
-      getList("/sell/account/v1/fulfillment_policy", "fulfillmentPolicies"),
-      getList("/sell/account/v1/payment_policy", "paymentPolicies"),
-      getList("/sell/account/v1/return_policy", "returnPolicies"),
-    ]);
-
-    return json({ ok: true, shipping, payment, returns }, 200);
+        try {
+      const [shipping, payment, returns] = await Promise.all([
+        getList("/sell/account/v1/fulfillment_policy?marketplace_id=EBAY_US", "fulfillmentPolicies"),
+        getList("/sell/account/v1/payment_policy?marketplace_id=EBAY_US", "paymentPolicies"),
+        getList("/sell/account/v1/return_policy?marketplace_id=EBAY_US", "returnPolicies"),
+      ]);
+      return json({ ok: true, shipping, payment, returns }, 200);
+    } catch (err: any) {
+      const msg = String(err?.message || err || "");
+      // Map eBay 401s to a clear client result so the UI can show “re-auth required”
+      if (msg.includes(" 401")) return json({ ok: false, error: "reauth_required", message: msg }, 401);
+      return json({ ok: false, error: "server_error", message: msg }, 500);
+    }
   } catch (e: any) {
     return json({ ok: false, error: "server_error", message: String(e?.message || e) }, 500);
   }
+
 };
