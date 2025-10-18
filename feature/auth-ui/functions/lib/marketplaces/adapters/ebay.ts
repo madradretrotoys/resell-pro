@@ -1,3 +1,4 @@
+// begin ebay.ts file
 import type { MarketplaceAdapter, CreateParams, CreateResult } from '../types';
 import { getSql } from '../../../../_shared/db';
 
@@ -216,3 +217,4 @@ async function create(params: CreateParams): Promise<CreateResult> {
 }
 
 export const ebayAdapter: MarketplaceAdapter = { create };
+// end ebay.ts file
