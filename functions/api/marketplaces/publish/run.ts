@@ -88,31 +88,58 @@ async function executeLockedJob(env: Env, job: any) {
 
 // Exported: process a specific queued job by id (used by intake.ts inline mode)
 export async function processJobById(env: Env, jobId: string) {
-  const sql = getSql(env);
   console.log("[runner] start.processJobById", jobId);
-  // try to lock this job if it's queued
-  const [job] = await sql/*sql*/`
-    UPDATE app.marketplace_publish_jobs
-       SET status = 'running',
-           locked_at = now(),
-           locked_by = 'intake.inline'
-     WHERE job_id = ${jobId}
-       AND status = 'queued'
-     RETURNING *
-  `;
 
-  // If already running/succeeded/failed, surface a useful response
-  if (!job) {
-    const [existing] = await sql/*sql*/`
-      SELECT job_id, status, last_error FROM app.marketplace_publish_jobs WHERE job_id = ${jobId} LIMIT 1
-    `;
-    if (!existing) return { ok: false, error: 'job_not_found' as const };
-    if (existing.status === 'succeeded') return { ok: true, job_id: existing.job_id, status: 'succeeded' as const };
-    if (existing.status === 'running')  return { ok: true, job_id: existing.job_id, status: 'running' as const };
-    // failed/dead or anything else → just return the state
-    return { ok: false, job_id: existing.job_id, status: existing.status as any, error: existing.last_error || null };
+  // 1) Initialize SQL safely
+  let sql: ReturnType<typeof getSql>;
+  try {
+    sql = getSql(env);
+  } catch (e: any) {
+    const msg = String(e?.message || e);
+    console.error("[runner] getSql failed", msg);
+    return { ok: false, error: "db_init_failed", message: msg };
   }
 
+  // 2) Lock this job (queued → running) with a hard guard
+  let job: any | undefined;
+  try {
+    const rows = await sql/*sql*/`
+      UPDATE app.marketplace_publish_jobs
+         SET status = 'running',
+             locked_at = now(),
+             locked_by = 'intake.inline'
+       WHERE job_id = ${jobId}
+         AND status = 'queued'
+       RETURNING *
+    `;
+    job = rows?.[0];
+  } catch (e: any) {
+    const msg = String(e?.message || e);
+    console.error("[runner] lock failed", { jobId, msg });
+    return { ok: false, error: "lock_failed", message: msg };
+  }
+
+  // 3) If not locked, report current state instead of throwing
+  if (!job) {
+    try {
+      const [existing] = await sql/*sql*/`
+        SELECT job_id, status, last_error
+        FROM app.marketplace_publish_jobs
+        WHERE job_id = ${jobId}
+        LIMIT 1
+      `;
+      if (!existing) return { ok: false, error: "job_not_found" as const };
+      if (existing.status === "succeeded") return { ok: true, job_id: existing.job_id, status: "succeeded" as const };
+      if (existing.status === "running")  return { ok: true, job_id: existing.job_id, status: "running" as const };
+      return { ok: false, job_id: existing.job_id, status: existing.status as any, error: existing.last_error || null };
+    } catch (e: any) {
+      const msg = String(e?.message || e);
+      console.error("[runner] state probe failed", { jobId, msg });
+      return { ok: false, error: "state_probe_failed", message: msg };
+    }
+  }
+
+  // 4) Execute the locked job (existing guarded logic)
   try {
     const res = await executeLockedJob(env, job);
     console.log("[runner] exec", { item_id: job.item_id, marketplace_id: job.marketplace_id });
@@ -150,6 +177,9 @@ export async function processJobById(env: Env, jobId: string) {
   }
 }
 
+
+
+
 // Public endpoint remains: process the next queued job
 export async function onRequestPost(ctx: { env: Env, request: Request }) {
   try {
@@ -157,25 +187,36 @@ export async function onRequestPost(ctx: { env: Env, request: Request }) {
 
     // pick one job and lock it to running
     const [job] = await sql/*sql*/`
-      WITH next AS ( ... )
-      UPDATE app.marketplace_publish_jobs j
-        ...
-      RETURNING j.*
-    `;
-
-    if (!job) return json({ ok: true, taken: 0 });
-
-    // reuse the same executor
-    const res = await processJobById(ctx.env, job.job_id);
-    if ((res as any)?.ok) {
-      return json({ ok: true, job_id: (res as any).job_id, status: (res as any).status, remote: (res as any).remote });
+        WITH next AS (
+          SELECT job_id
+          FROM app.marketplace_publish_jobs
+          WHERE status = 'queued'
+            AND run_at <= now()
+          ORDER BY run_at ASC
+          LIMIT 1
+          FOR UPDATE SKIP LOCKED
+        )
+        UPDATE app.marketplace_publish_jobs j
+           SET status = 'running',
+               locked_at = now(),
+               locked_by = 'api/marketplaces/publish/run'
+         WHERE j.job_id IN (SELECT job_id FROM next)
+         RETURNING j.*
+      `;
+  
+      if (!job) return json({ ok: true, taken: 0 });
+  
+      // reuse the same executor
+      const res = await processJobById(ctx.env, job.job_id);
+      if ((res as any)?.ok) {
+        return json({ ok: true, job_id: (res as any).job_id, status: (res as any).status, remote: (res as any).remote });
+      }
+      return json({ ok: false, job_id: (res as any).job_id, error: (res as any).error, status: (res as any).status }, 502);
+    } catch (e: any) {
+      const msg = String(e?.message || e);
+      console.error("[runner] unhandled", msg);
+      return json({ ok: false, error: "runner_crash", message: msg }, 500);
     }
-    return json({ ok: false, job_id: (res as any).job_id, error: (res as any).error, status: (res as any).status });
-  } catch (e: any) {
-    // hard guard so we never bubble up a 502 again
-    const msg = String(e?.message || e);
-    console.error("[runner] unhandled", msg);
-    return json({ ok: false, error: "runner_crash", message: msg }, 500);
   }
-}
+
 
