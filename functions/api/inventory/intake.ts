@@ -131,9 +131,20 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
     const rawStatus = (body?.status || inv?.item_status || "active");
     const status = String(rawStatus).toLowerCase() === "draft" ? "draft" : "active";
     const isDraft = status === "draft";
-
+    
     // Optional: if present, we update instead of insert
     const item_id_in: string | null = body?.item_id ? String(body.item_id) : null;
+    
+    // === DEBUG: show payload routing decisions ===
+    console.log("[intake] payload", {
+      status,
+      isDraft,
+      item_id_in,
+      marketplaces_selected: body?.marketplaces_selected ?? null,
+      has_ebay_block: !!ebay,
+      listing_keys_present: !!lst && Object.values(lst).some(v => v !== null && v !== undefined && String(v) !== "")
+    });
+
 
     // If the client requested a delete, do it now (and exit)
     if (body?.action === "delete") {
@@ -178,6 +189,7 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
     
        // If item_id was provided, UPDATE existing rows instead of INSERT
         if (item_id_in) {
+          console.log("[intake] branch", { kind: isDraft ? "UPDATE_DRAFT" : "UPDATE_ACTIVE", item_id_in });
         // Load existing inventory row
         const existing = await sql<{ item_id: string; sku: string | null; item_status: string | null }[]>`
           SELECT item_id, sku, item_status
@@ -499,6 +511,7 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
     // 2) Insert into inventory (drafts carry NULL sku; active allocates)
     // === CREATE DRAFT: store any provided inventory fields; also upsert listing if sent ===
     if (isDraft) {
+      console.log("[intake] branch", { kind: "CREATE_DRAFT" });
       const invRows = await sql<{ item_id: string }[]>`
         WITH s AS (
           SELECT set_config('app.actor_user_id', ${actor_user_id}, true)
@@ -594,6 +607,7 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
 
    // 1) Allocate next SKU (already guarded earlier; keep as-is)
     // 2) Insert full inventory
+    console.log("[intake] branch", { kind: "CREATE_ACTIVE" });
     const invRows = await sql<{ item_id: string }[]>`
       WITH s AS (
         SELECT set_config('app.actor_user_id', ${actor_user_id}, true)
@@ -760,6 +774,8 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
       `;
     }    
     // 5) Return success
+    console.log("[intake] return", { where: "CREATE_ACTIVE", item_id, status, ms: Date.now() - t0 });
+
     return json({ ok: true, item_id, sku, status: 'active', ms: Date.now() - t0 }, 200);
 
 
