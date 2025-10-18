@@ -1,6 +1,6 @@
 // begin ebay.ts file
 import type { MarketplaceAdapter, CreateParams, CreateResult } from '../types';
-import { getSql } from '../../../../_shared/db';
+import { getSql } from '../../../_shared/db';
 
 type EbayEnv = 'production' | 'sandbox';
 
