@@ -88,6 +88,7 @@ export const onRequestGet: PagesFunction<Env> = async (context) => {
     status: "connected",
     status_reason: "eBay OAuth connected",
     secrets_blob: secretsBlob,
+    environment, 
   });
 
   // Redirect back to Settings → Marketplaces
@@ -108,21 +109,24 @@ function appReturnUrl(current: URL) {
 }
 
 async function loadClientCreds(env: Env, tenantId: string, marketplaceId: string, environment: "sandbox"|"production") {
-  // Read the row from app.marketplace_connections and decrypt secrets_blob if present;
-  // else fall back to platform ENV.
-  const row = await selectConnection(env, tenantId, marketplaceId);
+  // Prefer a row that matches the requested environment
+  const row = await selectConnection(env, tenantId, marketplaceId, environment);
+
   if (row?.secrets_blob) {
     const data = await decryptJson(env.RP_ENCRYPTION_KEY || "", row.secrets_blob);
-    return { clientId: data.client_id, clientSecret: data.client_secret, runame: data.runame };
+    // Only use the saved creds if they were issued for the same environment
+    if (String(data?.environment).toLowerCase() === environment) {
+      return { clientId: data.client_id, clientSecret: data.client_secret, runame: data.runame };
+    }
   }
-  // Fallback: platform env
-  // You can also import the helper from start.ts if you prefer to DRY it.
-  const plat = (environment === "production")
-    ? { clientId: (env as any).EBAY_PROD_CLIENT_ID, clientSecret: (env as any).EBAY_PROD_CLIENT_SECRET, runame: (env as any).EBAY_PROD_RUNAME }
+
+  // Fallback to platform-level creds for this environment
+  return (environment === "production")
+    ? { clientId: (env as any).EBAY_PROD_CLIENT_ID,  clientSecret: (env as any).EBAY_PROD_CLIENT_SECRET,  runame: (env as any).EBAY_PROD_RUNAME }
     : { clientId: (env as any).EBAY_SANDBOX_CLIENT_ID, clientSecret: (env as any).EBAY_SANDBOX_CLIENT_SECRET, runame: (env as any).EBAY_SANDBOX_RUNAME };
-  return plat;
 }
 
+// 2) Update persistTokens signature to accept it:
 async function persistTokens(env: Env, args: {
   tenantId: string;
   marketplaceId: string;
@@ -132,23 +136,25 @@ async function persistTokens(env: Env, args: {
   status: string;
   status_reason?: string;
   secrets_blob: string;
+  environment: "sandbox" | "production";   // <— added
 }) {
   const sql = `
-    INSERT INTO app.marketplace_connections
-      (tenant_id, marketplace_id, access_token, refresh_token, token_expires_at, status, status_reason, secrets_blob, last_success_at)
-    VALUES
-      ($1, $2, $3, $4, $5, $6, $7, $8, now())
-    ON CONFLICT (tenant_id, marketplace_id)
-    DO UPDATE SET
-      access_token = EXCLUDED.access_token,
-      refresh_token = EXCLUDED.refresh_token,
-      token_expires_at = EXCLUDED.token_expires_at,
-      status = EXCLUDED.status,
-      status_reason = EXCLUDED.status_reason,
-      secrets_blob = EXCLUDED.secrets_blob,
-      last_success_at = now(),
-      updated_at = now()
-  `;
+  INSERT INTO app.marketplace_connections
+    (tenant_id, marketplace_id, access_token, refresh_token, token_expires_at, status, status_reason, secrets_blob, environment, last_success_at)
+  VALUES
+    ($1, $2, $3, $4, $5, $6, $7, $8, $9, now())
+  ON CONFLICT (tenant_id, marketplace_id)
+  DO UPDATE SET
+    access_token = EXCLUDED.access_token,
+    refresh_token = EXCLUDED.refresh_token,
+    token_expires_at = EXCLUDED.token_expires_at,
+    status = EXCLUDED.status,
+    status_reason = EXCLUDED.status_reason,
+    secrets_blob = EXCLUDED.secrets_blob,
+    environment = EXCLUDED.environment,
+    last_success_at = now(),
+    updated_at = now()
+`;
   await execSql(env, sql, [
     args.tenantId,
     args.marketplaceId,
@@ -158,6 +164,7 @@ async function persistTokens(env: Env, args: {
     args.status,
     args.status_reason || null,
     args.secrets_blob,
+    args.environment,   // <— use the explicit arg; no JSON.parse(atob(...))
   ]);
 }
 
@@ -210,9 +217,18 @@ async function decryptJson(base64Key: string, blob: string): Promise<any> {
   return JSON.parse(new TextDecoder().decode(pt));
 }
 
-async function selectConnection(env: Env, tenantId: string, marketplaceId: string) {
-  const sql = `SELECT secrets_blob FROM app.marketplace_connections WHERE tenant_id=$1 AND marketplace_id=$2`;
-  const rows = await querySql(env, sql, [tenantId, marketplaceId]);
+async function selectConnection(env: Env, tenantId: string, marketplaceId: string, environment: "sandbox"|"production") {
+  // Scope by environment so sandbox/prod rows don’t collide
+  const sql = `
+    SELECT secrets_blob
+      FROM app.marketplace_connections
+     WHERE tenant_id=$1
+       AND marketplace_id=$2
+       AND environment=$3
+     ORDER BY updated_at DESC
+     LIMIT 1
+  `;
+  const rows = await querySql(env, sql, [tenantId, marketplaceId, environment]);
   return rows[0] || null;
 }
 
@@ -261,5 +277,3 @@ async function _neon(env: Env, text: string, params: unknown[]) {
   const strings = Object.assign([...parts], { raw: [...parts] }) as TemplateStringsArray;
   return (await sql(strings, ...(params as any[]))) as any[];
 }
-
-

@@ -7,6 +7,16 @@
     <p class="subtitle">Connect marketplaces and configure listing defaults (in progress)</p>
   </header>
 
+  <!-- NEW: Environment selector -->
+  <div class="card" id="mp-env-card" style="margin-bottom:1rem;">
+    <strong>eBay Environment</strong>
+    <div style="display:flex; gap:1rem; margin-top:.5rem;">
+      <label><input type="radio" name="mp-env" value="sandbox"> Sandbox</label>
+      <label><input type="radio" name="mp-env" value="production"> Production</label>
+    </div>
+    <small class="text-muted">This controls where the eBay OAuth flow starts. Your selection is saved in localStorage (<code>mp_env</code>).</small>
+  </div>
+
   <!-- Global banner -->
   <div id="settings-marketplaces-banner" class="banner" hidden></div>
 

@@ -978,19 +978,19 @@ function setMarketplaceVisibility() {
           <div class="legacy-grid-2 gap-3">
             <div class="field">
               <label>Shipping Policy <span class="text-red-600" aria-hidden="true">*</span></label>
-              <select id="ebay_shippingPolicy" required disabled title="Data wiring in later phase">
+              <select id="ebay_shippingPolicy" required enabled title="Data wiring in later phase">
                 <option value="">&lt;select&gt;</option>
               </select>
             </div>
             <div class="field">
               <label>Payment Policy <span class="text-red-600" aria-hidden="true">*</span></label>
-              <select id="ebay_paymentPolicy" required disabled title="Data wiring in later phase">
+              <select id="ebay_paymentPolicy" required enabled title="Data wiring in later phase">
                 <option value="">&lt;select&gt;</option>
               </select>
             </div>
             <div class="field">
               <label>Return Policy <span class="text-red-600" aria-hidden="true">*</span></label>
-              <select id="ebay_returnPolicy" required disabled title="Data wiring in later phase">
+              <select id="ebay_returnPolicy" required enabled title="Data wiring in later phase">
                 <option value="">&lt;select&gt;</option>
               </select>
             </div>
@@ -1073,10 +1073,50 @@ function setMarketplaceVisibility() {
             
         `;
 
-        card.appendChild(body);
-  
+                card.appendChild(body);
+
+        // If tenant is connected to eBay, pull policies and populate the selects
+        (async () => {
+          try {
+            if (!connected) return; // leave disabled if not connected
+            const pol = await api("/api/marketplaces/ebay/policies", { method: "GET" });
+            if (!pol || pol.ok === false) return;
+
+            const shipSel = body.querySelector("#ebay_shippingPolicy");
+            const paySel  = body.querySelector("#ebay_paymentPolicy");
+            const retSel  = body.querySelector("#ebay_returnPolicy");
+
+            // Use existing helper; map { id, name }
+            fillSelect(shipSel, pol.shipping || [], { textKey: "name", valueKey: "id" });
+            fillSelect(paySel,  pol.payment  || [], { textKey: "name", valueKey: "id" });
+            fillSelect(retSel,  pol.returns  || [], { textKey: "name", valueKey: "id" });
+
+            // Enable once options are loaded
+            [shipSel, paySel, retSel].forEach(s => { if (s) { s.disabled = false; s.title = ""; } });
+
+            // Re-apply any saved policy ids AFTER options are present (fixes race on Load)
+            try {
+              const saved = (window && window.__ebaySavedPolicies) || null;
+              if (saved) {
+                if (shipSel) shipSel.value = saved.shipping_policy ?? "";
+                if (paySel)  paySel.value  = saved.payment_policy  ?? "";
+                if (retSel)  retSel.value  = saved.return_policy   ?? "";
+                // Nudge validity/UX
+                shipSel?.dispatchEvent(new Event("change"));
+                paySel?.dispatchEvent(new Event("change"));
+                retSel?.dispatchEvent(new Event("change"));
+                try { computeValidity(); } catch {}
+              }
+            } catch {}
+          } catch (e) {
+            console.warn("ebay policies load failed", e);
+          }
+        })();
+
         // Wire local show/hide inside the eBay card (client-only)
         const formatSel   = body.querySelector('#ebay_formatSelect');
+
+        
         const bestOffer   = body.querySelector('#ebay_bestOffer');
         const promoteChk  = body.querySelector('#ebay_promote');
   
@@ -1377,8 +1417,144 @@ document.addEventListener("intake:item-changed", () => refreshDrafts({ force: tr
       const byLbl = findControlByLabel(label || "");
       return byLbl ? (byLbl.value ?? "") : "";
     }
+
+    // NEW: Collect eBay-specific marketplace listing fields and coerce types.
+    // Maps directly to app.item_marketplace_listing columns.
+    function getEbayListingFields() {
+      const fmt = (document.getElementById("ebay_formatSelect")?.value || "").toLowerCase(); // "fixed" | "auction" | ""
+      const isFixed   = fmt === "fixed";
+      const isAuction = fmt === "auction";
+
+      // raw values
+      const shipping_policy = document.getElementById("ebay_shippingPolicy")?.value || "";
+      const payment_policy  = document.getElementById("ebay_paymentPolicy")?.value || "";
+      const return_policy   = document.getElementById("ebay_returnPolicy")?.value || "";
+      const shipping_zip    = document.getElementById("ebay_shipZip")?.value || "";
+      const pricing_format  = fmt || "";
+
+      // numbers (coerce only if non-empty)
+      const num = (id) => {
+        const v = document.getElementById(id)?.value ?? "";
+        return String(v).trim() === "" ? undefined : Number(v);
+      };
+
+      const buy_it_now_price   = num("ebay_bin");
+      const starting_bid       = num("ebay_start");
+      const reserve_price      = num("ebay_reserve");
+      const promote_percent    = num("ebay_promotePct");
+      const auto_accept_amount = num("ebay_autoAccept");
+      const minimum_offer_amount = num("ebay_minOffer");
+
+      // booleans
+      const allow_best_offer = !!document.getElementById("ebay_bestOffer")?.checked;
+      const promote          = !!document.getElementById("ebay_promote")?.checked;
+
+      // “Duration” (present in UI); DB column may not exist yet — send anyway so backend can adopt later.
+      const duration = document.getElementById("ebay_duration")?.value || "";
+
+      // prune helper (drop empty strings/undefined/null)
+      const prune = (obj) => {
+        const out = {};
+        for (const [k, v] of Object.entries(obj || {})) {
+          if (v === null || v === undefined) continue;
+          if (typeof v === "string" && v.trim() === "") continue;
+          out[k] = v;
+        }
+        return out;
+      };
+
+      // Respect Fixed vs Auction visibility rules
+      const base = {
+        shipping_policy,
+        payment_policy,
+        return_policy,
+        shipping_zip,
+        pricing_format,
+        buy_it_now_price,
+        allow_best_offer: isFixed ? allow_best_offer : undefined,
+        auto_accept_amount: isFixed && allow_best_offer ? auto_accept_amount : undefined,
+        minimum_offer_amount: isFixed && allow_best_offer ? minimum_offer_amount : undefined,
+        promote,
+        promote_percent: promote ? promote_percent : undefined,
+      };
+
+      const auctionExtras = isAuction ? {
+        duration,
+        starting_bid,
+        reserve_price,
+      } : {};
+
+              return prune({ ...base, ...auctionExtras });
+        }
     
-    function buildPayload(isDraft = false) {
+                // Hydrate the eBay card from saved data (called after tiles/cards are rendered)
+        function hydrateEbayFromSaved(ebay, ebayMarketplaceId) {
+          if (!ebay) return;
+
+          // Stash saved policy ids globally so the policy-loader can re-apply AFTER options arrive
+          try {
+            window.__ebaySavedPolicies = {
+              shipping_policy: ebay.shipping_policy ?? "",
+              payment_policy:  ebay.payment_policy  ?? "",
+              return_policy:   ebay.return_policy   ?? ""
+            };
+          } catch {}
+
+          // Ensure the eBay tile/card is visible and rendered
+          try {
+            if (ebayMarketplaceId && typeof ebayMarketplaceId === "number") {
+              selectedMarketplaceIds.add(Number(ebayMarketplaceId));
+            } else if (__metaCache?.marketplaces) {
+              const row = (__metaCache.marketplaces || []).find(m => String(m.slug || "").toLowerCase() === "ebay");
+              if (row && row.id != null) selectedMarketplaceIds.add(Number(row.id));
+            }
+            renderMarketplaceTiles(__metaCache);
+            renderMarketplaceCards(__metaCache);
+          } catch {}
+    
+          // Now set values inside the eBay card
+          const setVal = (sel, v) => { if (sel) sel.value = v ?? ""; };
+          const setNum = (id, v) => { const el = document.getElementById(id); if (el) el.value = (v ?? "") === "" ? "" : String(v); };
+          const setChk = (id, v) => { const el = document.getElementById(id); if (el) el.checked = !!v; };
+    
+          // Policies: attempt immediate set (may be overridden by async loader; Patch 1 will re-apply)
+          setVal(document.getElementById("ebay_shippingPolicy"), ebay.shipping_policy);
+          setVal(document.getElementById("ebay_paymentPolicy"),  ebay.payment_policy);
+          setVal(document.getElementById("ebay_returnPolicy"),   ebay.return_policy);
+
+          setVal(document.getElementById("ebay_shipZip"),        ebay.shipping_zip);
+    
+          setVal(document.getElementById("ebay_formatSelect"),   ebay.pricing_format);
+          setVal(document.getElementById("ebay_duration"),       ebay.duration);
+    
+          setNum("ebay_bin",       ebay.buy_it_now_price);
+          setNum("ebay_start",     ebay.starting_bid);
+          setNum("ebay_reserve",   ebay.reserve_price);
+          setChk("ebay_bestOffer", ebay.allow_best_offer);
+    
+          setNum("ebay_autoAccept", ebay.auto_accept_amount);
+          setNum("ebay_minOffer",   ebay.minimum_offer_amount);
+    
+          setChk("ebay_promote",    ebay.promote);
+          setNum("ebay_promotePct", ebay.promote_percent);
+    
+          // Re-apply eBay visibility rules so hidden/required states match values
+          try {
+            const fmt = document.getElementById("ebay_formatSelect");
+            const bo  = document.getElementById("ebay_bestOffer");
+            const pr  = document.getElementById("ebay_promote");
+            fmt?.dispatchEvent(new Event("change"));
+            bo?.dispatchEvent(new Event("change"));
+            pr?.dispatchEvent(new Event("change"));
+          } catch {}
+    
+          // Also re-validate the whole form
+          try { computeValidity(); } catch {}
+        }
+
+
+    
+       function buildPayload(isDraft = false) {
       // helper: drop empty strings/null/undefined
       const prune = (obj) => {
         const out = {};
@@ -1409,7 +1585,7 @@ document.addEventListener("intake:item-changed", () => refreshDrafts({ force: tr
         condition_key:        valByIdOrLabel("conditionSelect", "Condition"),
         brand_key:            valByIdOrLabel("brandSelect", "Brand"),
         color_key:            valByIdOrLabel("colorSelect", "Primary Color"),
-        product_description: valByIdOrLabel(null, "Long Description"),
+        product_description:  valByIdOrLabel(null, "Long Description"),
         shipping_box_key:     valByIdOrLabel("shippingBoxSelect", "Shipping Box"),
         weight_lb:  (() => { const v = valByIdOrLabel("shipWeightLb", "Weight (lb)"); return v !== "" ? Number(v) : undefined; })(),
         weight_oz:  (() => { const v = valByIdOrLabel("shipWeightOz", "Weight (oz)"); return v !== "" ? Number(v) : undefined; })(),
@@ -1417,18 +1593,26 @@ document.addEventListener("intake:item-changed", () => refreshDrafts({ force: tr
         shipbx_width:  (() => { const v = valByIdOrLabel("shipWidth", "Width"); return v !== "" ? Number(v) : undefined; })(),
         shipbx_height: (() => { const v = valByIdOrLabel("shipHeight", "Height"); return v !== "" ? Number(v) : undefined; })(),
       };
-    
+
+      // NEW: eBay marketplace listing fields (maps to app.item_marketplace_listing)
+      const ebayListing = getEbayListingFields();
+
       if (isDraft) {
-        // Send any non-empty fields for drafts (Basic + Marketplace)
+        // Send any non-empty fields for drafts (Basic + Marketplace + eBay listing fields)
         const inventory = prune(invAll);
         const listing   = prune(listingAll);
         const payload = { status: "draft", inventory };
+
         if (Object.keys(listing).length > 0) payload.listing = listing;
+        if (Object.keys(ebayListing).length > 0) {
+          // Backend: upsert into app.item_marketplace_listing when present
+          payload.marketplace_listing = { ebay: ebayListing };
+        }
         // NOTE: we still omit marketplaces_selected for drafts for now
         return payload;
       }
     
-      // Active/new items (unchanged behavior)
+      // Active/new items
       const salesChannel = valByIdOrLabel("salesChannelSelect", "Sales Channel");
       const isStoreOnly = /store only/i.test(String(salesChannel || ""));
       const inventory = prune(invAll);
@@ -1439,8 +1623,16 @@ document.addEventListener("intake:item-changed", () => refreshDrafts({ force: tr
     
       const listing = prune(listingAll);
       const marketplaces_selected = Array.from(selectedMarketplaceIds.values());
-      return { inventory, listing, marketplaces_selected };
+
+      const payload = { inventory, listing, marketplaces_selected };
+
+      if (Object.keys(ebayListing).length > 0) {
+        // Backend: upsert into app.item_marketplace_listing when present
+        payload.marketplace_listing = { ebay: ebayListing };
+      }
+      return payload;
     }
+
 
      async function submitIntake(mode = "active") {
       if (mode !== "draft" && !computeValidity()) return;
@@ -1579,7 +1771,7 @@ document.addEventListener("intake:item-changed", () => refreshDrafts({ force: tr
       const sales = document.getElementById("salesChannelSelect") || findControlByLabel("Sales Channel");
       if (sales) sales.value = inv?.instore_online ?? "";
     
-      // Marketplace Listing Details (optional for drafts)
+            // Marketplace Listing Details (optional for drafts)
       if (listing) {
         
           const mpCat = document.getElementById("marketplaceCategorySelect") || findControlByLabel("Marketplace Category");
@@ -1596,9 +1788,13 @@ document.addEventListener("intake:item-changed", () => refreshDrafts({ force: tr
         
           const shipBox = document.getElementById("shippingBoxSelect") || findControlByLabel("Shipping Box");
           if (shipBox) shipBox.value = listing.shipping_box_key ?? "";
+
+          // Long Description (textarea)
+          const longDesc = document.getElementById("longDescriptionTextarea") || findControlByLabel("Long Description");
+          if (longDesc) longDesc.value = listing.product_description ?? "";
           
-        
     
+
         const lb  = document.getElementById("weightLbInput") || findControlByLabel("Weight (lb)");
         const oz  = document.getElementById("weightOzInput") || findControlByLabel("Weight (oz)");
         const len = document.getElementById("lengthInput")   || findControlByLabel("Length");
@@ -1704,11 +1900,24 @@ document.addEventListener("intake:item-changed", () => refreshDrafts({ force: tr
       try {
         const res = await api(`/api/inventory/intake?item_id=${encodeURIComponent(item_id)}`, { method: "GET" });
         if (!res || res.ok === false) throw new Error(res?.error || "fetch_failed");
+
+        // Basic + listing fields (now includes Long Description)
         populateFromSaved(res.inventory || {}, res.listing || null);
+
+        // If the draft has an eBay listing row, auto-select the eBay tile and hydrate the card
+        try {
+          const ebaySaved = res?.marketplace_listing?.ebay || null;
+          const ebayId    = res?.marketplace_listing?.ebay_marketplace_id || null;
+          if (ebaySaved) {
+            hydrateEbayFromSaved(ebaySaved, ebayId);
+          }
+        } catch {}
+
         // Photos: hydrate thumbnails from GET response
         bootstrapPhotos(Array.isArray(res.images) ? res.images : [], item_id);
         // Enter view mode (treat as previously-saved edit path). Drafts have no SKU.
         enterViewMode({ item_id, hasSku: !!res?.inventory?.sku });
+
       } catch (err) {
         console.error("drafts:load:error", err);
         alert("Failed to load draft.");

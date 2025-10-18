@@ -13,17 +13,39 @@ export async function init(ctx) {
   const show = (el) => { el && (el.hidden = false); };
   const hide = (el) => { el && (el.hidden = true); };
 
-  try { window.ui?.setTitle?.("Marketplace Settings"); } catch {}
-
-  hide(banner);
-  hide(denied);
-  show(loading);
-  hide(content);
-
-  try {
-    // Use router-provided session; do NOT re-fetch here
-    console.log("[mp] init() starting");
-    // Use router-provided session; do NOT re-fetch here
+    try { window.ui?.setTitle?.("Marketplace Settings"); } catch {}
+  
+    hide(banner);
+    hide(denied);
+    show(loading);
+    hide(content);
+  
+    // NEW: environment selector wiring
+    try {
+      const currentEnv = (window.localStorage.getItem('mp_env') || 'sandbox').toLowerCase();
+      const radios = document.querySelectorAll('input[name="mp-env"]');
+      radios.forEach(r => {
+        r.checked = r.value === currentEnv;
+        r.addEventListener('change', (ev) => {
+          const val = ev.currentTarget.value;
+          window.localStorage.setItem('mp_env', val);
+          console.log('[mp] env set to', val);
+          // optional: quick confirmation
+          const banner = document.getElementById('settings-marketplaces-banner');
+          if (banner) {
+            banner.textContent = `eBay environment set to ${val}.`;
+            banner.className = 'banner info';
+            banner.hidden = false;
+            setTimeout(() => (banner.hidden = true), 3000);
+          }
+        });
+      });
+    } catch {}
+  
+    try {
+      // Use router-provided session; do NOT re-fetch here
+      console.log("[mp] init() starting");
+    
     const session = ctx?.session;
     console.log("[mp] session role:", session?.user?.role || session?.role);
 
