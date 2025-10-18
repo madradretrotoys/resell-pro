@@ -89,7 +89,7 @@ async function executeLockedJob(env: Env, job: any) {
 // Exported: process a specific queued job by id (used by intake.ts inline mode)
 export async function processJobById(env: Env, jobId: string) {
   const sql = getSql(env);
-
+  console.log("[runner] start.processJobById", jobId);
   // try to lock this job if it's queued
   const [job] = await sql/*sql*/`
     UPDATE app.marketplace_publish_jobs
@@ -115,6 +115,7 @@ export async function processJobById(env: Env, jobId: string) {
 
   try {
     const res = await executeLockedJob(env, job);
+    console.log("[runner] exec", { item_id: job.item_id, marketplace_id: job.marketplace_id });
     return res;
   } catch (err: any) {
     const msg = String(err?.message || err).slice(0, 500);
