@@ -191,30 +191,131 @@ async function create(params: CreateParams): Promise<CreateResult> {
     }
   };
 
-  // 5) Call eBay (direct; swap to your proxy if desired)
+  // 5) Call eBay using the Sell Inventory flow:
+  //    (1) PUT inventory_item {sku}
+  //    (2) POST offer
+  //    (3) POST publish
+
   const base = ebayBase(envStr as EbayEnv);
-  const url = `${base}/sell/inventory/v1/listing`; // align with your chosen eBay API/gateway
 
-  const res = await fetch(url, {
-    method: 'POST',
-    headers: {
-      'authorization': `Bearer ${accessToken}`,
-      'content-type': 'application/json'
-    },
-    body: JSON.stringify(payload)
-  });
-
-  if (!res.ok) {
-    const txt = await res.text().catch(() => '');
-    throw new Error(txt.slice(0, 500));
+  // simple helper to normalize error text
+  async function ebayFetch(path: string, init: RequestInit) {
+    const r = await fetch(`${base}${path}`, {
+      ...init,
+      headers: {
+        ...(init.headers || {}),
+        'authorization': `Bearer ${accessToken}`,
+        'content-type': 'application/json'
+      }
+    });
+    if (!r.ok) {
+      const t = await r.text().catch(() => '');
+      // surface eBay’s message so we can see the real cause in UI/logs
+      throw new Error(`${r.status} ${r.statusText} :: ${t}`.slice(0, 500));
+    }
+    const ct = r.headers.get('content-type') || '';
+    return ct.includes('application/json') ? r.json() : r.text();
   }
 
-  const out = await res.json().catch(() => ({}));
-  const remoteId  = out?.id || out?.listingId || out?.itemId || null;
-  const remoteUrl = out?.url || out?.itemWebUrl || null;
+  // (1) PUT inventory item
+  const sku = String(item?.sku || '').trim();
+  if (!sku) throw new Error('Missing SKU');
+
+  const imageUrls: string[] = [];
+  if (primary) imageUrls.push(primary);
+  if (Array.isArray(gallery) && gallery.length) imageUrls.push(...gallery);
+
+  // map our fields into eBay inventory item structure
+  const inventoryItemBody = {
+    condition: profile?.condition_key ? 'USED' : 'NEW', // TODO: map your condition_key → eBay condition properly
+    product: {
+      title: item?.product_short_title || '',
+      description: profile?.product_description || '',
+      aspects: {
+        brand: profile?.brand_name ? [profile.brand_name] : undefined,
+        color: profile?.primary_color ? [profile.primary_color] : undefined,
+      },
+      imageUrls
+    },
+    packageWeightAndSize: {
+      packageWeight: {
+        unit: 'POUND',
+        value: Number(profile?.weight_lb || 0) + (Number(profile?.weight_oz || 0) / 16)
+      },
+      packageSize: {
+        dimensions: {
+          height: Number(profile?.shipbx_height || 0),
+          length: Number(profile?.shipbx_length || 0),
+          width:  Number(profile?.shipbx_width  || 0)
+        },
+        unit: 'INCH'
+      }
+    }
+  };
+
+  await ebayFetch(`/sell/inventory/v1/inventory_item/${encodeURIComponent(sku)}`, {
+    method: 'PUT',
+    body: JSON.stringify(inventoryItemBody)
+  });
+
+  // (2) POST offer
+  const marketplaceId = 'EBAY_US'; // TODO: make dynamic if you will support other sites
+  const isFixed = pricingFormat === 'fixed';
+  const priceValue =
+    (mpListing?.buy_it_now_price ?? item?.price ?? null) != null
+      ? Number(mpListing?.buy_it_now_price ?? item?.price)
+      : null;
+
+  const offerBody: any = {
+    sku,
+    marketplaceId,
+    format: isFixed ? 'FIXED_PRICE' : 'AUCTION',
+    availableQuantity: Number(item?.qty || 1),
+    listingDescription: profile?.product_description || '',
+    categoryId: ebayCategoryId || undefined,
+    listingPolicies: {
+      fulfillmentPolicyId: mpListing?.shipping_policy || null,
+      paymentPolicyId:     mpListing?.payment_policy  || null,
+      returnPolicyId:      mpListing?.return_policy   || null,
+    },
+    pricingSummary: isFixed
+      ? { price: { currency: 'USD', value: priceValue || 0 } }
+      : {
+          auctionReservePrice: mpListing?.reserve_price != null ? { currency: 'USD', value: Number(mpListing.reserve_price) } : undefined,
+          auctionStartPrice:   mpListing?.starting_bid  != null ? { currency: 'USD', value: Number(mpListing.starting_bid) }  : undefined
+        }
+  };
+
+  // clean nulls so eBay doesn’t choke
+  function stripNulls(obj: any) {
+    if (obj && typeof obj === 'object') {
+      for (const k of Object.keys(obj)) {
+        if (obj[k] && typeof obj[k] === 'object') stripNulls(obj[k]);
+        if (obj[k] == null) delete obj[k];
+      }
+    }
+    return obj;
+  }
+  stripNulls(offerBody);
+
+  const offerRes = await ebayFetch(`/sell/inventory/v1/offer`, {
+    method: 'POST',
+    body: JSON.stringify(offerBody)
+  });
+
+  const offerId = offerRes?.offerId || offerRes?.id;
+  if (!offerId) throw new Error(`Offer creation succeeded but no offerId returned: ${JSON.stringify(offerRes).slice(0,200)}`);
+
+  // (3) POST publish
+  const pubRes = await ebayFetch(`/sell/inventory/v1/offer/${encodeURIComponent(offerId)}/publish`, {
+    method: 'POST',
+    body: JSON.stringify({}) // empty body per API
+  });
+
+  const remoteId  = pubRes?.listingId || pubRes?.itemId || null;
+  const remoteUrl = pubRes?.listing?.itemWebUrl || pubRes?.itemWebUrl || null;
 
   return { remoteId, remoteUrl, warnings };
-}
 
 export const ebayAdapter: MarketplaceAdapter = { create };
 // end ebay.ts file
