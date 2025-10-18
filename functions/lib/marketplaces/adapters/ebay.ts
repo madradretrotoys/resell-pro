@@ -225,15 +225,33 @@ async function create(params: CreateParams): Promise<CreateResult> {
   if (primary) imageUrls.push(primary);
   if (Array.isArray(gallery) && gallery.length) imageUrls.push(...gallery);
 
+  // Map our richer UI labels to eBay's 2-value enum: NEW or USED
+  const rawCond = String(profile?.item_condition || '').trim().toLowerCase();
+  
+  // helpers
+  const isNew =
+    rawCond.startsWith('new') ||               // "New With Imperfections", "New Without Tags/Box", etc.
+    rawCond === '' ;                           // default to NEW if empty
+  
+  const conditionEnum = isNew ? 'NEW' : 'USED';
+  
+  // include a short note only for USED items
+  const conditionDescription =
+    !isNew && profile?.product_description
+      ? String(profile.product_description).slice(0, 1000)
+      : undefined;
+
   // map our fields into eBay inventory item structure
-  const inventoryItemBody = {
-    condition: profile?.condition_key ? 'USED' : 'NEW', // TODO: map your condition_key → eBay condition properly
+  const inventoryItemBody: any = {
+    condition: conditionEnum,
+    ...(conditionDescription ? { conditionDescription } : {}),
     product: {
       title: item?.product_short_title || '',
       description: profile?.product_description || '',
       aspects: {
-        brand: profile?.brand_name ? [profile.brand_name] : undefined,
-        color: profile?.primary_color ? [profile.primary_color] : undefined,
+        // eBay expects string[] values for aspects. Omit when not present.
+        brand: profile?.brand_name ? [String(profile.brand_name)] : undefined,
+        color: profile?.primary_color ? [String(profile.primary_color)] : undefined,
       },
       imageUrls
     },
