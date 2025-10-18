@@ -219,8 +219,8 @@ export async function onRequestPost(ctx: { env: Env, request: Request }) {
 
     if (!job) return json({ ok: true, taken: 0 });
 
-    // reuse the same executor
-    const res = await processJobById(ctx.env, job.job_id);
+    // job is already locked → execute it directly
+    const res = await executeLockedJob(ctx.env, job);
 
     if ((res as any)?.ok) {
       return json({ ok: true, job_id: (res as any).job_id, status: (res as any).status, remote: (res as any).remote });
