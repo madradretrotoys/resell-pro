@@ -1,3 +1,5 @@
+
+// begin adapter-registry.ts file
 import type { MarketplaceAdapter } from './types';
 import { ebayAdapter } from './adapters/ebay';
 
@@ -19,3 +21,4 @@ export function getRegistry() {
     bySlug: (slug: string) => registryBySlug.get(slug)
   };
 }
+// end adapter-registry.ts file
