@@ -182,54 +182,56 @@ export async function processJobById(env: Env, jobId: string) {
 
 // Public endpoint remains: process the next queued job
 export async function onRequestPost(ctx: { env: Env, request: Request }) {
-  const sql = getSql(ctx.env);
+  try {
+    const sql = getSql(ctx.env);
 
-  const url = new URL(ctx.request.url);
-  const specific = url.searchParams.get("job_id");
+    const url = new URL(ctx.request.url);
+    const specific = url.searchParams.get("job_id");
 
-  // If a specific job_id is provided, lock THAT job; otherwise pick the next queued one.
-  const [job] = specific
-    ? await sql/*sql*/`
-        UPDATE app.marketplace_publish_jobs j
-           SET status   = 'running',
-               locked_at = now(),
-               locked_by = 'api/marketplaces/publish/run'
-         WHERE j.job_id = ${specific}
-           AND j.status = 'queued'
-         RETURNING j.*
-      `
-    : await sql/*sql*/`
-        WITH next AS (
-          SELECT job_id
-          FROM app.marketplace_publish_jobs
-          WHERE status = 'queued'
-            AND run_at <= now()
-          ORDER BY run_at ASC
-          LIMIT 1
-          FOR UPDATE SKIP LOCKED
-        )
-        UPDATE app.marketplace_publish_jobs j
-           SET status = 'running',
-               locked_at = now(),
-               locked_by = 'api/marketplaces/publish/run'
-         WHERE j.job_id IN (SELECT job_id FROM next)
-         RETURNING j.*
-      `;
+    // If a specific job_id is provided, lock THAT job; otherwise pick the next queued one.
+    const [job] = specific
+      ? await sql/*sql*/`
+          UPDATE app.marketplace_publish_jobs j
+             SET status   = 'running',
+                 locked_at = now(),
+                 locked_by = 'api/marketplaces/publish/run'
+           WHERE j.job_id = ${specific}
+             AND j.status = 'queued'
+           RETURNING j.*
+        `
+      : await sql/*sql*/`
+          WITH next AS (
+            SELECT job_id
+            FROM app.marketplace_publish_jobs
+            WHERE status = 'queued'
+              AND run_at <= now()
+            ORDER BY run_at ASC
+            LIMIT 1
+            FOR UPDATE SKIP LOCKED
+          )
+          UPDATE app.marketplace_publish_jobs j
+             SET status = 'running',
+                 locked_at = now(),
+                 locked_by = 'api/marketplaces/publish/run'
+           WHERE j.job_id IN (SELECT job_id FROM next)
+           RETURNING j.*
+        `;
 
-  if (!job) return json({ ok: true, taken: 0 });
+    if (!job) return json({ ok: true, taken: 0 });
 
-  // reuse the same executor
-  const res = await processJobById(ctx.env, job.job_id);
+    // reuse the same executor
+    const res = await processJobById(ctx.env, job.job_id);
 
-      if ((res as any)?.ok) {
-        return json({ ok: true, job_id: (res as any).job_id, status: (res as any).status, remote: (res as any).remote });
-      }
-      return json({ ok: false, job_id: (res as any).job_id, error: (res as any).error, status: (res as any).status }, 502);
-    } catch (e: any) {
-      const msg = String(e?.message || e);
-      console.error("[runner] unhandled", msg);
-      return json({ ok: false, error: "runner_crash", message: msg }, 500);
+    if ((res as any)?.ok) {
+      return json({ ok: true, job_id: (res as any).job_id, status: (res as any).status, remote: (res as any).remote });
     }
+    return json({ ok: false, job_id: (res as any).job_id, error: (res as any).error, status: (res as any).status }, 502);
+  } catch (e: any) {
+    const msg = String(e?.message || e);
+    console.error("[runner] unhandled", msg);
+    return json({ ok: false, error: "runner_crash", message: msg }, 500);
   }
+}
+
 
 
