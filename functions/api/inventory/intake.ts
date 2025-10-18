@@ -1,6 +1,6 @@
 // functions/api/inventory/intake.ts
 import { neon } from "@neondatabase/serverless";
-import { processJobById } from "../marketplaces/publish/run";
+import { processJobById } from '../marketplaces/publish/run';
 
 type Role = "owner" | "admin" | "manager" | "clerk";
 const json = (data: any, status = 200) =>
