@@ -685,13 +685,14 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
 
     
     // 4) Enqueue marketplace publish jobs (non-blocking)
-    //    We look at marketplaces_selected (array of slugs, e.g. ['ebay'])
-    //    and enqueue one 'create' job per enabled marketplace for this tenant.
+    //    Accepts marketplaces_selected as either slugs (e.g., ['ebay']) OR numeric IDs (e.g., [1]).
     try {
-      const selectedSlugs = Array.isArray(body?.marketplaces_selected) ? body.marketplaces_selected : [];
+      const rawSel = Array.isArray(body?.marketplaces_selected) ? body.marketplaces_selected : [];
+      const slugs = rawSel.filter((v: any) => typeof v === 'string' && v.trim() !== '').map((s: string) => s.toLowerCase());
+      const ids   = rawSel.filter((v: any) => Number.isInteger(v)).map((n: number) => Number(n));
     
-      if (selectedSlugs.length > 0) {
-        // Resolve marketplace IDs the tenant actually has enabled
+      if (slugs.length > 0 || ids.length > 0) {
+        // Resolve tenant-enabled marketplaces by either slug OR id
         const rows = await sql/*sql*/`
           SELECT ma.id, ma.slug
           FROM app.marketplaces_available ma
@@ -699,12 +700,12 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
             ON tm.marketplace_id = ma.id
            AND tm.tenant_id = ${tenant_id}
            AND tm.enabled = true
-          WHERE ma.slug = ANY(${selectedSlugs})
+          WHERE (${slugs.length > 0} AND ma.slug = ANY(${slugs}))
+             OR (${ids.length > 0}   AND ma.id   = ANY(${ids}))
         `;
     
-        // Enqueue one 'create' job per marketplace (skip if an in-flight job already exists)
-        // Note: we also flip IML.status to 'pending' for any draft rows we just enqueued.
         for (const r of rows) {
+          // Insert one queued 'create' job; skip if already queued/running (partial unique index)
           await sql/*sql*/`
             INSERT INTO app.marketplace_publish_jobs
               (tenant_id, item_id, marketplace_id, op, status)
@@ -719,6 +720,7 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
             )
           `;
     
+          // Flip IML to 'pending' if we just queued a create from a 'draft' row
           await sql/*sql*/`
             UPDATE app.item_marketplace_listing
                SET status = 'pending', updated_at = now()
@@ -730,7 +732,6 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
         }
       }
     } catch (enqueueErr) {
-      // Do not fail the intake on enqueue errors; log an event for traceability.
       await sql/*sql*/`
         INSERT INTO app.item_marketplace_events
           (item_id, tenant_id, marketplace_id, kind, error_message)
