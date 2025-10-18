@@ -391,7 +391,7 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
                 shipbx_height    = EXCLUDED.shipbx_height
             `;
   
-                        // Upsert selected marketplaces (prototype). Only eBay has field data today.
+            // Upsert selected marketplaces (prototype). Only eBay has field data today.
             {
               const mpIds: number[] = Array.isArray(body?.marketplaces_selected)
                 ? body.marketplaces_selected.map((n: any) => Number(n)).filter((n) => !Number.isNaN(n))
@@ -436,7 +436,7 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
                 }
               }
             }
- 
+          }
           return json({ ok: true, item_id, sku: retSku, status, ms: Date.now() - t0 }, 200);
         }
 
