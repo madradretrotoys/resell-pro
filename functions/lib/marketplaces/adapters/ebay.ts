@@ -1,1 +1,220 @@
+// begin ebay.ts file
+import type { MarketplaceAdapter, CreateParams, CreateResult } from '../types';
+import { getSql } from '../../../../_shared/db';
 
+type EbayEnv = 'production' | 'sandbox';
+
+function ebayBase(env: EbayEnv) {
+  return env === 'production' ? 'https://api.ebay.com' : 'https://api.sandbox.ebay.com';
+}
+
+function pickPrimary(images: Array<{ cdn_url: string; is_primary: boolean; sort_order: number }>) {
+  if (!images?.length) return { primary: null as string | null, gallery: [] as string[] };
+  const sorted = [...images].sort((a, b) => (b.is_primary ? 1 : 0) - (a.is_primary ? 1 : 0) || a.sort_order - b.sort_order);
+  const primary = sorted[0]?.cdn_url || null;
+  const gallery = sorted.slice(1).map(i => i.cdn_url).filter(Boolean);
+  return { primary, gallery };
+}
+
+// --- Local decrypt helper (AES-GCM), compatible with your persistTokens/protect() format { v: "token" } ---
+function b64d(s: string) { return Uint8Array.from(atob(s), c => c.charCodeAt(0)); }
+async function decryptJson(base64Key: string, blob: string): Promise<any> {
+  if (!blob) return null;
+  const [ivB64, ctB64] = blob.split(".");
+  const iv = b64d(ivB64);
+  const ct = b64d(ctB64);
+  if (!base64Key) return JSON.parse(new TextDecoder().decode(ct));
+  const key = await crypto.subtle.importKey("raw", b64d(base64Key), { name: "AES-GCM" }, false, ["decrypt"]);
+  const pt = new Uint8Array(await crypto.subtle.decrypt({ name: "AES-GCM", iv }, key, ct));
+  return JSON.parse(new TextDecoder().decode(pt));
+}
+
+function msUntil(iso: string | null | undefined) {
+  if (!iso) return -1;
+  const t = Date.parse(iso);
+  if (!Number.isFinite(t)) return -1;
+  return t - Date.now();
+}
+
+async function create(params: CreateParams): Promise<CreateResult> {
+  const { env, tenant_id, item, profile, mpListing, images } = params;
+  const sql = getSql(env);
+
+  // 1) Basic presence checks
+  const warnings: string[] = [];
+  if (!item?.sku) warnings.push('Missing SKU');
+  if (!item?.product_short_title) warnings.push('Missing title');
+  if (!images?.length) warnings.push('No images attached');
+
+  // 2) Resolve eBay category id from marketplace_category_ebay_map via listing_category_key
+  let ebayCategoryId: string | null = null;
+  if (profile?.listing_category_key) {
+    const rows = await sql/*sql*/`
+      SELECT mcem.ebay_category_id
+      FROM app.marketplace_category_ebay_map mcem
+      WHERE mcem.category_key = ${profile.listing_category_key}
+      ORDER BY mcem.updated_at DESC NULLS LAST
+      LIMIT 1
+    `;
+    ebayCategoryId = rows?.[0]?.ebay_category_id ? String(rows[0].ebay_category_id) : null;
+  } else {
+    warnings.push('No listing_category_key on profile');
+  }
+
+  // 3) Load tenant connection (including token_expires_at) and DECRYPT the stored access_token
+  const conn = await sql/*sql*/`
+    SELECT mc.access_token, mc.token_expires_at, mc.environment, mc.secrets_blob
+    FROM app.marketplace_connections mc
+    JOIN app.marketplaces_available ma ON ma.id = mc.marketplace_id
+    WHERE mc.tenant_id = ${tenant_id}
+      AND ma.slug = 'ebay'
+      AND mc.status = 'connected'
+    ORDER BY mc.updated_at DESC
+    LIMIT 1
+  `;
+  if (!conn?.length) throw new Error('Tenant not connected to eBay');
+
+  const encKey = env.RP_ENCRYPTION_KEY || "";
+  const encAccess = String(conn[0].access_token || "");
+  if (!encAccess) throw new Error('No access_token stored');
+
+  let accessObj = await decryptJson(encKey, encAccess);
+  let accessToken = String(accessObj?.v || "").trim();
+  if (!accessToken) throw new Error('Decrypted access_token is empty');
+
+  // Resolve environment: prefer explicit column, fall back to secrets_blob.environment
+  let envStr = String(conn[0].environment || "").trim().toLowerCase() as EbayEnv | "";
+  if (!envStr) {
+    try {
+      const secrets = await decryptJson(encKey, String(conn[0].secrets_blob || ""));
+      const e = String(secrets?.environment || "").trim().toLowerCase();
+      if (e === "production" || e === "sandbox") envStr = e as EbayEnv;
+    } catch {}
+  }
+  if (envStr !== "production" && envStr !== "sandbox") envStr = "sandbox";
+
+  // 3b) Auto-refresh if expiring in ≤ 120s using your existing refresh route
+  const expiresInMs = msUntil(String(conn[0].token_expires_at || ""));
+  if (expiresInMs >= 0 && expiresInMs <= 120_000) {
+    // Determine the app origin to call the internal refresh route
+    const origin =
+      (env as any).APP_BASE_URL ||
+      (env as any).PUBLIC_APP_URL ||
+      (env as any).ORIGIN ||
+      '';
+    const refreshUrl = origin
+      ? `${origin.replace(/\/+$/, '')}/api/settings/marketplaces/ebay/refresh`
+      : '/api/settings/marketplaces/ebay/refresh';
+
+    const r = await fetch(refreshUrl, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'x-tenant-id': String(tenant_id)
+      },
+      body: JSON.stringify({ marketplace_id: 'ebay' })
+    });
+
+    if (!r.ok) {
+      const txt = await r.text().catch(() => '');
+      throw new Error(`refresh_failed: ${r.status} ${txt}`.slice(0, 500));
+    }
+
+    // Re-select and decrypt the fresh token
+    const conn2 = await sql/*sql*/`
+      SELECT mc.access_token
+      FROM app.marketplace_connections mc
+      JOIN app.marketplaces_available ma ON ma.id = mc.marketplace_id
+      WHERE mc.tenant_id = ${tenant_id}
+        AND ma.slug = 'ebay'
+        AND mc.status = 'connected'
+      ORDER BY mc.updated_at DESC
+      LIMIT 1
+    `;
+    const encAccess2 = String(conn2?.[0]?.access_token || "");
+    if (!encAccess2) throw new Error('refresh_ok_but_no_access_token');
+    accessObj = await decryptJson(encKey, encAccess2);
+    accessToken = String(accessObj?.v || "").trim();
+    if (!accessToken) throw new Error('refresh_ok_but_access_token_empty');
+  }
+
+  // 4) Build payload from our rows (Rows 1–27, 29, 30; skip 33–38)
+  const { primary, gallery } = pickPrimary(images || []);
+  const pricingFormat = String(mpListing?.pricing_format || 'fixed'); // 'fixed' | 'auction'
+  const isFixed = pricingFormat === 'fixed';
+
+  const payload = {
+    title: item?.product_short_title || '',
+    sku: item?.sku || '',                              // Row 29 → eBay Custom Label
+    description: profile?.product_description || '',
+    categoryId: ebayCategoryId || undefined,           // Row 30 resolved via map
+    aspects: {
+      condition_key: profile?.condition_key || null,
+      brand_key: profile?.brand_key || null,
+      color_key: profile?.color_key || null
+    },
+    pricing: isFixed
+      ? {
+          format: 'fixed',
+          buyItNowPrice: mpListing?.buy_it_now_price ?? item?.price ?? null,
+          allowBestOffer: !!mpListing?.allow_best_offer,
+          autoAcceptAmount: mpListing?.auto_accept_amount ?? null,
+          minimumOfferAmount: mpListing?.minimum_offer_amount ?? null
+        }
+      : {
+          format: 'auction',
+          startingBid: mpListing?.starting_bid ?? null,
+          reservePrice: mpListing?.reserve_price ?? null,
+          duration: mpListing?.duration ?? null,
+          allowBestOffer: !!mpListing?.allow_best_offer
+        },
+    fulfillment: {
+      shippingZip: mpListing?.shipping_zip || null,
+      shippingPolicy: mpListing?.shipping_policy || null,
+      paymentPolicy: mpListing?.payment_policy || null,
+      returnPolicy: mpListing?.return_policy || null,
+      package: {
+        weightLb: profile?.weight_lb ?? 0,
+        weightOz: profile?.weight_oz ?? 0,
+        length: profile?.shipbx_length ?? 0,
+        width:  profile?.shipbx_width  ?? 0,
+        height: profile?.shipbx_height ?? 0
+      }
+    },
+    images: {
+      primary,
+      gallery
+    },
+    promotions: {
+      promote: !!mpListing?.promote,
+      promotePercent: mpListing?.promote_percent ?? null
+    }
+  };
+
+  // 5) Call eBay (direct; swap to your proxy if desired)
+  const base = ebayBase(envStr as EbayEnv);
+  const url = `${base}/sell/inventory/v1/listing`; // align with your chosen eBay API/gateway
+
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'authorization': `Bearer ${accessToken}`,
+      'content-type': 'application/json'
+    },
+    body: JSON.stringify(payload)
+  });
+
+  if (!res.ok) {
+    const txt = await res.text().catch(() => '');
+    throw new Error(txt.slice(0, 500));
+  }
+
+  const out = await res.json().catch(() => ({}));
+  const remoteId  = out?.id || out?.listingId || out?.itemId || null;
+  const remoteUrl = out?.url || out?.itemWebUrl || null;
+
+  return { remoteId, remoteUrl, warnings };
+}
+
+export const ebayAdapter: MarketplaceAdapter = { create };
+// end ebay.ts file
