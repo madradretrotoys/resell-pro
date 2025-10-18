@@ -54,6 +54,53 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
 
     const sql = neon(String(env.DATABASE_URL));
 
+    // Resolve eBay marketplace id once per request
+    const ebayRow = await sql<{ id: number }[]>`SELECT id FROM app.marketplaces_available WHERE slug = 'ebay' LIMIT 1`;
+    const EBAY_MARKETPLACE_ID = ebayRow[0]?.id ?? null;
+
+    // Normalize/null-out eBay fields according to pricing_format & toggles
+    const normalizeEbay = (src: any) => {
+      if (!src || typeof src !== "object") return null;
+      const s: any = { ...src };
+      const fmt = String(s.pricing_format || "").toLowerCase();
+      const isFixed = fmt === "fixed";
+      const isAuction = fmt === "auction";
+      // coerce numbers
+      const toNum = (v: any) => (v === "" || v == null ? null : Number(v));
+      s.buy_it_now_price     = toNum(s.buy_it_now_price);
+      s.starting_bid         = toNum(s.starting_bid);
+      s.reserve_price        = toNum(s.reserve_price);
+      s.promote_percent      = toNum(s.promote_percent);
+      s.auto_accept_amount   = toNum(s.auto_accept_amount);
+      s.minimum_offer_amount = toNum(s.minimum_offer_amount);
+      // booleans
+      s.promote = !!s.promote;
+      s.allow_best_offer = !!s.allow_best_offer;
+      // strings
+      s.shipping_policy = (s.shipping_policy ?? "").trim() || null;
+      s.payment_policy  = (s.payment_policy  ?? "").trim() || null;
+      s.return_policy   = (s.return_policy   ?? "").trim() || null;
+      s.shipping_zip    = (s.shipping_zip    ?? "").trim() || null;
+      s.pricing_format  = fmt || null;
+      s.duration        = (s.duration ?? "").trim() || null;
+
+      // visibility rules -> null
+      if (isFixed) {
+        s.starting_bid = null;
+        s.reserve_price = null;
+        s.duration = null;
+        if (!s.allow_best_offer) {
+          s.auto_accept_amount = null;
+          s.minimum_offer_amount = null;
+        }
+      }
+      if (!s.promote) s.promote_percent = null;
+
+      return s;
+    };
+
+
+    
     // AuthZ (creation requires can_inventory_intake or elevated role)
     const actor = await sql<{ role: Role; active: boolean; can_inventory_intake: boolean | null }[]>`
       SELECT m.role, m.active, COALESCE(p.can_inventory_intake, false) AS can_inventory_intake
@@ -72,7 +119,8 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
     const body = await request.json();
     const inv = body?.inventory || {};
     const lst = body?.listing || {};
-
+    const ebay = body?.marketplace_listing?.ebay || null;
+    
     // Status: support Option A drafts; default to 'active' for existing flows
     const rawStatus = (body?.status || inv?.item_status || "active");
     const status = String(rawStatus).toLowerCase() === "draft" ? "draft" : "active";
@@ -194,7 +242,45 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
               shipbx_height        = EXCLUDED.shipbx_height
           `;
           }
-        
+
+
+          // Upsert eBay marketplace listing when present (draft update)
+          if (EBAY_MARKETPLACE_ID && ebay) {
+            const e = normalizeEbay(ebay);
+            if (e) {
+              await sql/*sql*/`
+                INSERT INTO app.item_marketplace_listing
+                  (item_id, tenant_id, marketplace_id, status,
+                   shipping_policy, payment_policy, return_policy, shipping_zip, pricing_format,
+                   buy_it_now_price, allow_best_offer, auto_accept_amount, minimum_offer_amount,
+                   promote, promote_percent, duration, starting_bid, reserve_price)
+                VALUES
+                  (${item_id}, ${tenant_id}, ${EBAY_MARKETPLACE_ID}, 'draft',
+                   ${e.shipping_policy}, ${e.payment_policy}, ${e.return_policy}, ${e.shipping_zip}, ${e.pricing_format},
+                   ${e.buy_it_now_price}, ${e.allow_best_offer}, ${e.auto_accept_amount}, ${e.minimum_offer_amount},
+                   ${e.promote}, ${e.promote_percent}, ${e.duration}, ${e.starting_bid}, ${e.reserve_price})
+                ON CONFLICT (item_id, marketplace_id)
+                DO UPDATE SET
+                  status = 'draft',
+                  shipping_policy = EXCLUDED.shipping_policy,
+                  payment_policy  = EXCLUDED.payment_policy,
+                  return_policy   = EXCLUDED.return_policy,
+                  shipping_zip    = EXCLUDED.shipping_zip,
+                  pricing_format  = EXCLUDED.pricing_format,
+                  buy_it_now_price = EXCLUDED.buy_it_now_price,
+                  allow_best_offer = EXCLUDED.allow_best_offer,
+                  auto_accept_amount = EXCLUDED.auto_accept_amount,
+                  minimum_offer_amount = EXCLUDED.minimum_offer_amount,
+                  promote = EXCLUDED.promote,
+                  promote_percent = EXCLUDED.promote_percent,
+                  duration = EXCLUDED.duration,
+                  starting_bid = EXCLUDED.starting_bid,
+                  reserve_price = EXCLUDED.reserve_price,
+                  updated_at = now()
+              `;
+            }
+          }
+          
           return json({ ok: true, item_id, sku: updInv[0].sku, status, ms: Date.now() - t0 }, 200);
         }
 
