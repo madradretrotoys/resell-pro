@@ -1093,6 +1093,21 @@ function setMarketplaceVisibility() {
 
             // Enable once options are loaded
             [shipSel, paySel, retSel].forEach(s => { if (s) { s.disabled = false; s.title = ""; } });
+
+            // Re-apply any saved policy ids AFTER options are present (fixes race on Load)
+            try {
+              const saved = (window && window.__ebaySavedPolicies) || null;
+              if (saved) {
+                if (shipSel) shipSel.value = saved.shipping_policy ?? "";
+                if (paySel)  paySel.value  = saved.payment_policy  ?? "";
+                if (retSel)  retSel.value  = saved.return_policy   ?? "";
+                // Nudge validity/UX
+                shipSel?.dispatchEvent(new Event("change"));
+                paySel?.dispatchEvent(new Event("change"));
+                retSel?.dispatchEvent(new Event("change"));
+                try { computeValidity(); } catch {}
+              }
+            } catch {}
           } catch (e) {
             console.warn("ebay policies load failed", e);
           }
@@ -1472,10 +1487,19 @@ document.addEventListener("intake:item-changed", () => refreshDrafts({ force: tr
               return prune({ ...base, ...auctionExtras });
         }
     
-        // Hydrate the eBay card from saved data (called after tiles/cards are rendered)
+                // Hydrate the eBay card from saved data (called after tiles/cards are rendered)
         function hydrateEbayFromSaved(ebay, ebayMarketplaceId) {
           if (!ebay) return;
-    
+
+          // Stash saved policy ids globally so the policy-loader can re-apply AFTER options arrive
+          try {
+            window.__ebaySavedPolicies = {
+              shipping_policy: ebay.shipping_policy ?? "",
+              payment_policy:  ebay.payment_policy  ?? "",
+              return_policy:   ebay.return_policy   ?? ""
+            };
+          } catch {}
+
           // Ensure the eBay tile/card is visible and rendered
           try {
             if (ebayMarketplaceId && typeof ebayMarketplaceId === "number") {
@@ -1493,9 +1517,11 @@ document.addEventListener("intake:item-changed", () => refreshDrafts({ force: tr
           const setNum = (id, v) => { const el = document.getElementById(id); if (el) el.value = (v ?? "") === "" ? "" : String(v); };
           const setChk = (id, v) => { const el = document.getElementById(id); if (el) el.checked = !!v; };
     
+          // Policies: attempt immediate set (may be overridden by async loader; Patch 1 will re-apply)
           setVal(document.getElementById("ebay_shippingPolicy"), ebay.shipping_policy);
           setVal(document.getElementById("ebay_paymentPolicy"),  ebay.payment_policy);
           setVal(document.getElementById("ebay_returnPolicy"),   ebay.return_policy);
+
           setVal(document.getElementById("ebay_shipZip"),        ebay.shipping_zip);
     
           setVal(document.getElementById("ebay_formatSelect"),   ebay.pricing_format);
@@ -1525,6 +1551,7 @@ document.addEventListener("intake:item-changed", () => refreshDrafts({ force: tr
           // Also re-validate the whole form
           try { computeValidity(); } catch {}
         }
+
 
     
        function buildPayload(isDraft = false) {
