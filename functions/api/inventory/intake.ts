@@ -766,6 +766,28 @@ export const onRequestGet: PagesFunction = async ({ request, env }) => {
       WHERE item_id = ${item_id} AND tenant_id = ${tenant_id}
       ORDER BY sort_order ASC, created_at ASC
     `;
+
+    // Load the eBay marketplace listing row (if any) to hydrate edit UI
+    const ebayIdRows = await sql<{ id: number }[]>`
+      SELECT id FROM app.marketplaces_available WHERE slug = 'ebay' LIMIT 1
+    `;
+    const EBAY_ID = ebayIdRows[0]?.id ?? null;
+
+    let ebayListing: any = null;
+    if (EBAY_ID != null) {
+      const rows = await sql<any[]>`
+        SELECT
+          status,
+          shipping_policy, payment_policy, return_policy, shipping_zip, pricing_format,
+          buy_it_now_price, allow_best_offer, auto_accept_amount, minimum_offer_amount,
+          promote, promote_percent, duration, starting_bid, reserve_price
+        FROM app.item_marketplace_listing
+        WHERE item_id = ${item_id} AND tenant_id = ${tenant_id} AND marketplace_id = ${EBAY_ID}
+        LIMIT 1
+      `;
+      if (rows.length) ebayListing = rows[0];
+    }
+
     
     return new Response(JSON.stringify({
       ok: true,
