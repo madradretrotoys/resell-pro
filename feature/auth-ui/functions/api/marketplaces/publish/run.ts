@@ -1,3 +1,4 @@
+//Begin run.ts
 import { json } from 'itty-router-extras';
 import { getSql } from '../../_shared/db'; // your existing db helper
 import { getRegistry } from '../../lib/marketplaces/adapter-registry';
@@ -132,3 +133,4 @@ export async function onRequestPost(ctx: { env: Env, request: Request }) {
     return json({ ok: false, job_id: job.job_id, error: msg });
   }
 }
+//end run.ts
