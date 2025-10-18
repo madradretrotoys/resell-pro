@@ -1,3 +1,4 @@
+//begin subscribe.ts
 import type { PagesFunction } from "@cloudflare/workers-types";
 import { neon } from "@neondatabase/serverless";
 
@@ -74,3 +75,4 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
   }
 };
 
+//end subscribe.ts
