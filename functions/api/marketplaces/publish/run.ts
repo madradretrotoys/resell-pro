@@ -182,11 +182,23 @@ export async function processJobById(env: Env, jobId: string) {
 
 // Public endpoint remains: process the next queued job
 export async function onRequestPost(ctx: { env: Env, request: Request }) {
-  try {
-    const sql = getSql(ctx.env);
+  const sql = getSql(ctx.env);
 
-    // pick one job and lock it to running
-    const [job] = await sql/*sql*/`
+  const url = new URL(ctx.request.url);
+  const specific = url.searchParams.get("job_id");
+
+  // If a specific job_id is provided, lock THAT job; otherwise pick the next queued one.
+  const [job] = specific
+    ? await sql/*sql*/`
+        UPDATE app.marketplace_publish_jobs j
+           SET status   = 'running',
+               locked_at = now(),
+               locked_by = 'api/marketplaces/publish/run'
+         WHERE j.job_id = ${specific}
+           AND j.status = 'queued'
+         RETURNING j.*
+      `
+    : await sql/*sql*/`
         WITH next AS (
           SELECT job_id
           FROM app.marketplace_publish_jobs
@@ -203,11 +215,12 @@ export async function onRequestPost(ctx: { env: Env, request: Request }) {
          WHERE j.job_id IN (SELECT job_id FROM next)
          RETURNING j.*
       `;
-  
-      if (!job) return json({ ok: true, taken: 0 });
-  
-      // reuse the same executor
-      const res = await processJobById(ctx.env, job.job_id);
+
+  if (!job) return json({ ok: true, taken: 0 });
+
+  // reuse the same executor
+  const res = await processJobById(ctx.env, job.job_id);
+
       if ((res as any)?.ok) {
         return json({ ok: true, job_id: (res as any).job_id, status: (res as any).status, remote: (res as any).remote });
       }
