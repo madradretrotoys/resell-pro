@@ -5,7 +5,7 @@
   "type": "module",
   "dependencies": {
     "@neondatabase/serverless": "^0.10.3",
-    "bcryptjs": "^2.4.3",
-    "itty-router-extras": "^0.5.2"
+    "bcryptjs": "^2.4.3"
+    
   }
 }
