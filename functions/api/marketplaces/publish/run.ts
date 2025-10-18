@@ -1,10 +1,7 @@
-
-
 import { json } from 'itty-router-extras';
 import { getSql } from '../../_shared/db';
 import { getRegistry } from '../../lib/marketplaces/adapter-registry';
 import type { Env } from '../../_shared/types';
-
 
 // Execute a specific job that is already locked to 'running'
 async function executeLockedJob(env: Env, job: any) {
