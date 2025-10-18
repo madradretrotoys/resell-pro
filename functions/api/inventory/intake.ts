@@ -57,6 +57,12 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
     // Resolve eBay marketplace id once per request
     const ebayRow = await sql<{ id: number }[]>`SELECT id FROM app.marketplaces_available WHERE slug = 'ebay' LIMIT 1`;
     const EBAY_MARKETPLACE_ID = ebayRow[0]?.id ?? null;
+    console.log("[intake] ctx", {
+      tenant_id,
+      actor_user_id,
+      EBAY_MARKETPLACE_ID,
+      request_ms: Date.now() - t0
+    });
 
     // Normalize/null-out eBay fields according to pricing_format & toggles
     const normalizeEbay = (src: any) => {
@@ -684,14 +690,25 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
     }
 
     
-    // 4) Enqueue marketplace publish jobs (non-blocking)
-    //    Accepts marketplaces_selected as either slugs (e.g., ['ebay']) OR numeric IDs (e.g., [1]).
+    // 4) Enqueue marketplace publish jobs (non-blocking) with detailed logs
     try {
       const rawSel = Array.isArray(body?.marketplaces_selected) ? body.marketplaces_selected : [];
-      const slugs = rawSel.filter((v: any) => typeof v === 'string' && v.trim() !== '').map((s: string) => s.toLowerCase());
-      const ids   = rawSel.filter((v: any) => Number.isInteger(v)).map((n: number) => Number(n));
+      console.log("[intake] enqueue.start", { item_id, status, rawSel });
     
-      if (slugs.length > 0 || ids.length > 0) {
+      // Accept slugs (strings) and numeric ids (numbers OR numeric strings)
+      const slugs = rawSel
+        .filter((v: any) => typeof v === "string" && isNaN(Number(v)) && v.trim() !== "")
+        .map((s: string) => s.toLowerCase());
+      const ids = rawSel
+        .map((v: any) => (typeof v === "number" && Number.isInteger(v)) ? v
+          : (typeof v === "string" && /^\d+$/.test(v) ? Number(v) : null))
+        .filter((n: number | null): n is number => n !== null);
+    
+      console.log("[intake] enqueue.parsed", { slugs, ids });
+    
+      if (slugs.length === 0 && ids.length === 0) {
+        console.log("[intake] enqueue.skip_no_selection");
+      } else {
         // Resolve tenant-enabled marketplaces by either slug OR id
         const rows = await sql/*sql*/`
           SELECT ma.id, ma.slug
@@ -703,9 +720,10 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
           WHERE (${slugs.length > 0} AND ma.slug = ANY(${slugs}))
              OR (${ids.length > 0}   AND ma.id   = ANY(${ids}))
         `;
+        console.log("[intake] enqueue.match_enabled", { count: rows.length, rows });
     
         for (const r of rows) {
-          // Insert one queued 'create' job; skip if already queued/running (partial unique index)
+          console.log("[intake] enqueue.insert_job", { marketplace_id: r.id, slug: r.slug, item_id });
           await sql/*sql*/`
             INSERT INTO app.marketplace_publish_jobs
               (tenant_id, item_id, marketplace_id, op, status)
@@ -720,7 +738,7 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
             )
           `;
     
-          // Flip IML to 'pending' if we just queued a create from a 'draft' row
+          console.log("[intake] enqueue.flip_iml_pending", { marketplace_id: r.id, item_id });
           await sql/*sql*/`
             UPDATE app.item_marketplace_listing
                SET status = 'pending', updated_at = now()
@@ -731,14 +749,16 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
           `;
         }
       }
+    
+      console.log("[intake] enqueue.done", { item_id });
     } catch (enqueueErr) {
+      console.error("[intake] enqueue.error", { item_id, error: String(enqueueErr) });
       await sql/*sql*/`
         INSERT INTO app.item_marketplace_events
           (item_id, tenant_id, marketplace_id, kind, error_message)
         VALUES (${item_id}, ${tenant_id}, 0, 'enqueue_failed', ${String(enqueueErr).slice(0,500)})
       `;
-    }
-    
+    }    
     // 5) Return success
     return json({ ok: true, item_id, sku, status: 'active', ms: Date.now() - t0 }, 200);
 
