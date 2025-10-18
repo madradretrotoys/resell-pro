@@ -151,31 +151,30 @@ export async function processJobById(env: Env, jobId: string) {
 
 // Public endpoint remains: process the next queued job
 export async function onRequestPost(ctx: { env: Env, request: Request }) {
-  const sql = getSql(ctx.env);
+  try {
+    const sql = getSql(ctx.env);
 
-  // pick one job and lock it to running
-  const [job] = await sql/*sql*/`
-    WITH next AS (
-      SELECT job_id
-      FROM app.marketplace_publish_jobs
-      WHERE status = 'queued'
-        AND run_at <= now()
-      ORDER BY run_at ASC
-      LIMIT 1
-      FOR UPDATE SKIP LOCKED
-    )
-    UPDATE app.marketplace_publish_jobs j
-       SET status = 'running',
-           locked_at = now(),
-           locked_by = 'api/marketplaces/publish/run'
-     WHERE j.job_id IN (SELECT job_id FROM next)
-     RETURNING j.*
-  `;
+    // pick one job and lock it to running
+    const [job] = await sql/*sql*/`
+      WITH next AS ( ... )
+      UPDATE app.marketplace_publish_jobs j
+        ...
+      RETURNING j.*
+    `;
 
-  if (!job) return json({ ok: true, taken: 0 });
+    if (!job) return json({ ok: true, taken: 0 });
 
-  // reuse the same executor
-  const res = await processJobById(ctx.env, job.job_id);
-  if ((res as any)?.ok) return json({ ok: true, job_id: (res as any).job_id, status: (res as any).status, remote: (res as any).remote });
-  return json({ ok: false, job_id: (res as any).job_id, error: (res as any).error, status: (res as any).status });
+    // reuse the same executor
+    const res = await processJobById(ctx.env, job.job_id);
+    if ((res as any)?.ok) {
+      return json({ ok: true, job_id: (res as any).job_id, status: (res as any).status, remote: (res as any).remote });
+    }
+    return json({ ok: false, job_id: (res as any).job_id, error: (res as any).error, status: (res as any).status });
+  } catch (e: any) {
+    // hard guard so we never bubble up a 502 again
+    const msg = String(e?.message || e);
+    console.error("[runner] unhandled", msg);
+    return json({ ok: false, error: "runner_crash", message: msg }, 500);
+  }
 }
+
