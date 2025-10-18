@@ -773,10 +773,39 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
         VALUES (${item_id}, ${tenant_id}, ${EBAY_MARKETPLACE_ID}, 'enqueue_failed', ${String(enqueueErr).slice(0,500)})
       `;
     }  
-    // 5) Return success
-    console.log("[intake] return", { where: "CREATE_ACTIVE", item_id, status, ms: Date.now() - t0 });
-
-    return json({ ok: true, item_id, sku, status: 'active', ms: Date.now() - t0 }, 200);
+    // 5) Immediately process the just-enqueued jobs (Option A: inline publish)
+    //    We attempt to process each queued job for this item/tenant right now,
+    //    so Save as Active only returns after eBay publish completes (or fails).
+    try {
+      // Find any queued jobs for this item created by the enqueue block above
+      const queued = await sql/*sql*/`
+        SELECT job_id, marketplace_id
+        FROM app.marketplace_publish_jobs
+        WHERE tenant_id = ${tenant_id}
+          AND item_id   = ${item_id}
+          AND status    = 'queued'
+        ORDER BY created_at ASC
+      `;
+    
+      const results: any[] = [];
+      for (const j of queued) {
+        console.log("[intake] inline.process", { job_id: j.job_id, marketplace_id: j.marketplace_id });
+        const r = await processJobById(env as any, String(j.job_id));
+        results.push(r);
+      }
+    
+      // If any failed, surface the first failure back to the client
+      const failed = results.find(r => !r?.ok);
+      if (failed) {
+        return json({ ok: false, error: 'publish_failed', detail: failed.error || null, item_id, sku }, 502);
+      }
+    
+      return json({ ok: true, item_id, sku, status: 'active', published: true, jobs: results.map(r => ({ job_id: r.job_id, status: r.status })), ms: Date.now() - t0 }, 200);
+    } catch (inlineErr: any) {
+      // If inline processing throws, we still return a server error with context
+      const msg = String(inlineErr?.message || inlineErr).slice(0, 500);
+      return json({ ok: false, error: 'publish_inline_error', message: msg, item_id, sku }, 500);
+    }
 
 
   } catch (e: any) {
