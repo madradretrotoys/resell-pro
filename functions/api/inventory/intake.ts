@@ -755,7 +755,7 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
           console.log("[intake] enqueue.flip_iml_pending", { marketplace_id: r.id, item_id });
           await sql/*sql*/`
             UPDATE app.item_marketplace_listing
-               SET status = 'pending', updated_at = now()
+               SET updated_at = now()
              WHERE tenant_id = ${tenant_id}
                AND item_id = ${item_id}
                AND marketplace_id = ${r.id}
@@ -770,9 +770,9 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
       await sql/*sql*/`
         INSERT INTO app.item_marketplace_events
           (item_id, tenant_id, marketplace_id, kind, error_message)
-        VALUES (${item_id}, ${tenant_id}, 0, 'enqueue_failed', ${String(enqueueErr).slice(0,500)})
+        VALUES (${item_id}, ${tenant_id}, ${EBAY_MARKETPLACE_ID}, 'enqueue_failed', ${String(enqueueErr).slice(0,500)})
       `;
-    }    
+    }  
     // 5) Return success
     console.log("[intake] return", { where: "CREATE_ACTIVE", item_id, status, ms: Date.now() - t0 });
 
