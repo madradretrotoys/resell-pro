@@ -1,4 +1,5 @@
-// functions/api/marketplaces/ebay/callback.ts
+
+// begin functions/api/marketplaces/ebay/callback.ts
 // Handles eBay redirect back to our app. Exchanges code → tokens, saves to DB, and redirects to the app screen.
 
 export const onRequestGet: PagesFunction<Env> = async (context) => {
@@ -277,3 +278,4 @@ async function _neon(env: Env, text: string, params: unknown[]) {
   const strings = Object.assign([...parts], { raw: [...parts] }) as TemplateStringsArray;
   return (await sql(strings, ...(params as any[]))) as any[];
 }
+// end functions/api/marketplaces/ebay/callback.ts
