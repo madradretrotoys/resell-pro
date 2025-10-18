@@ -684,7 +684,61 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
     }
 
     
-    // 4) Return success
+    // 4) Enqueue marketplace publish jobs (non-blocking)
+    //    We look at marketplaces_selected (array of slugs, e.g. ['ebay'])
+    //    and enqueue one 'create' job per enabled marketplace for this tenant.
+    try {
+      const selectedSlugs = Array.isArray(body?.marketplaces_selected) ? body.marketplaces_selected : [];
+    
+      if (selectedSlugs.length > 0) {
+        // Resolve marketplace IDs the tenant actually has enabled
+        const rows = await sql/*sql*/`
+          SELECT ma.id, ma.slug
+          FROM app.marketplaces_available ma
+          JOIN app.tenant_marketplaces tm
+            ON tm.marketplace_id = ma.id
+           AND tm.tenant_id = ${tenant_id}
+           AND tm.enabled = true
+          WHERE ma.slug = ANY(${selectedSlugs})
+        `;
+    
+        // Enqueue one 'create' job per marketplace (skip if an in-flight job already exists)
+        // Note: we also flip IML.status to 'pending' for any draft rows we just enqueued.
+        for (const r of rows) {
+          await sql/*sql*/`
+            INSERT INTO app.marketplace_publish_jobs
+              (tenant_id, item_id, marketplace_id, op, status)
+            SELECT ${tenant_id}, ${item_id}, ${r.id}, 'create', 'queued'
+            WHERE NOT EXISTS (
+              SELECT 1 FROM app.marketplace_publish_jobs j
+              WHERE j.tenant_id = ${tenant_id}
+                AND j.item_id = ${item_id}
+                AND j.marketplace_id = ${r.id}
+                AND j.op = 'create'
+                AND j.status IN ('queued','running')
+            )
+          `;
+    
+          await sql/*sql*/`
+            UPDATE app.item_marketplace_listing
+               SET status = 'pending', updated_at = now()
+             WHERE tenant_id = ${tenant_id}
+               AND item_id = ${item_id}
+               AND marketplace_id = ${r.id}
+               AND status IN ('draft')
+          `;
+        }
+      }
+    } catch (enqueueErr) {
+      // Do not fail the intake on enqueue errors; log an event for traceability.
+      await sql/*sql*/`
+        INSERT INTO app.item_marketplace_events
+          (item_id, tenant_id, marketplace_id, kind, error_message)
+        VALUES (${item_id}, ${tenant_id}, 0, 'enqueue_failed', ${String(enqueueErr).slice(0,500)})
+      `;
+    }
+    
+    // 5) Return success
     return json({ ok: true, item_id, sku, status: 'active', ms: Date.now() - t0 }, 200);
 
 
