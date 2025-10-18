@@ -205,9 +205,12 @@ async function create(params: CreateParams): Promise<CreateResult> {
       headers: {
         ...(init.headers || {}),
         'authorization': `Bearer ${accessToken}`,
-        'content-type': 'application/json'
+        'content-type': 'application/json',
+        // Required by Sell Inventory for localized fields (title/description)
+        'content-language': 'en-US'
       }
     });
+    
     if (!r.ok) {
       const t = await r.text().catch(() => '');
       // surface eBay’s message so we can see the real cause in UI/logs
