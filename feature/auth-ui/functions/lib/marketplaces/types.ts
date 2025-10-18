@@ -1,3 +1,5 @@
+
+// Begin types.ts file
 export type CreateParams = {
   env: any;
   tenant_id: string;
@@ -17,3 +19,4 @@ export interface MarketplaceAdapter {
   create(params: CreateParams): Promise<CreateResult>;
   // future: update(), end()
 }
+// end types.ts file
