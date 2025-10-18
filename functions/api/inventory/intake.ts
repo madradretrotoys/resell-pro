@@ -391,45 +391,51 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
                 shipbx_height    = EXCLUDED.shipbx_height
             `;
   
-            // NEW: Upsert selected marketplaces into app.item_marketplace_listing (prototype: status 'draft')
+            // Upsert selected marketplaces (prototype). Only eBay has field data today.
             {
               const mpIds: number[] = Array.isArray(body?.marketplaces_selected)
                 ? body.marketplaces_selected.map((n: any) => Number(n)).filter((n) => !Number.isNaN(n))
                 : [];
+
+              // Normalize the ebay payload once
+              const e = ebay ? normalizeEbay(ebay) : null;
+
               for (const mpId of mpIds) {
-                await sql/*sql*/`
-                INSERT INTO app.item_marketplace_listing
-                  (item_id, tenant_id, marketplace_id, status,
-                   shipping_policy, payment_policy, return_policy, shipping_zip, pricing_format,
-                   buy_it_now_price, allow_best_offer, auto_accept_amount, minimum_offer_amount,
-                   promote, promote_percent, duration, starting_bid, reserve_price)
-                VALUES
-                  (${item_id}, ${tenant_id}, ${EBAY_MARKETPLACE_ID}, 'draft',
-                   ${e.shipping_policy}, ${e.payment_policy}, ${e.return_policy}, ${e.shipping_zip}, ${e.pricing_format},
-                   ${e.buy_it_now_price}, ${e.allow_best_offer}, ${e.auto_accept_amount}, ${e.minimum_offer_amount},
-                   ${e.promote}, ${e.promote_percent}, ${e.duration}, ${e.starting_bid}, ${e.reserve_price})
-                ON CONFLICT (item_id, marketplace_id)
-                DO UPDATE SET
-                  status = 'draft',
-                  shipping_policy = EXCLUDED.shipping_policy,
-                  payment_policy  = EXCLUDED.payment_policy,
-                  return_policy   = EXCLUDED.return_policy,
-                  shipping_zip    = EXCLUDED.shipping_zip,
-                  pricing_format  = EXCLUDED.pricing_format,
-                  buy_it_now_price = EXCLUDED.buy_it_now_price,
-                  allow_best_offer = EXCLUDED.allow_best_offer,
-                  auto_accept_amount = EXCLUDED.auto_accept_amount,
-                  minimum_offer_amount = EXCLUDED.minimum_offer_amount,
-                  promote = EXCLUDED.promote,
-                  promote_percent = EXCLUDED.promote_percent,
-                  duration = EXCLUDED.duration,
-                  starting_bid = EXCLUDED.starting_bid,
-                  reserve_price = EXCLUDED.reserve_price,
-                  updated_at = now()
-              `;
+                // Only write the rich field set for eBay
+                if (mpId === EBAY_MARKETPLACE_ID && e) {
+                  await sql/*sql*/`
+                    INSERT INTO app.item_marketplace_listing
+                      (item_id, tenant_id, marketplace_id, status,
+                       shipping_policy, payment_policy, return_policy, shipping_zip, pricing_format,
+                       buy_it_now_price, allow_best_offer, auto_accept_amount, minimum_offer_amount,
+                       promote, promote_percent, duration, starting_bid, reserve_price)
+                    VALUES
+                      (${item_id}, ${tenant_id}, ${mpId}, 'draft',
+                       ${e.shipping_policy}, ${e.payment_policy}, ${e.return_policy}, ${e.shipping_zip}, ${e.pricing_format},
+                       ${e.buy_it_now_price}, ${e.allow_best_offer}, ${e.auto_accept_amount}, ${e.minimum_offer_amount},
+                       ${e.promote}, ${e.promote_percent}, ${e.duration}, ${e.starting_bid}, ${e.reserve_price})
+                    ON CONFLICT (item_id, marketplace_id)
+                    DO UPDATE SET
+                      status = 'draft',
+                      shipping_policy = EXCLUDED.shipping_policy,
+                      payment_policy  = EXCLUDED.payment_policy,
+                      return_policy   = EXCLUDED.return_policy,
+                      shipping_zip    = EXCLUDED.shipping_zip,
+                      pricing_format  = EXCLUDED.pricing_format,
+                      buy_it_now_price = EXCLUDED.buy_it_now_price,
+                      allow_best_offer = EXCLUDED.allow_best_offer,
+                      auto_accept_amount = EXCLUDED.auto_accept_amount,
+                      minimum_offer_amount = EXCLUDED.minimum_offer_amount,
+                      promote = EXCLUDED.promote,
+                      promote_percent = EXCLUDED.promote_percent,
+                      duration = EXCLUDED.duration,
+                      starting_bid = EXCLUDED.starting_bid,
+                      reserve_price = EXCLUDED.reserve_price,
+                      updated_at = now()
+                  `;
+                }
               }
             }
-          }  
           return json({ ok: true, item_id, sku: retSku, status, ms: Date.now() - t0 }, 200);
         }
 
@@ -793,7 +799,8 @@ export const onRequestGet: PagesFunction = async ({ request, env }) => {
       ok: true,
       inventory: invRows[0],
       listing: lstRows[0] || null,
-      images: imgRows
+      images: imgRows,
+      marketplace_listing: { ebay: ebayListing }
     }), { status: 200, headers: { "content-type": "application/json", "cache-control": "no-store" } });
 
 
