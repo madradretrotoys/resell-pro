@@ -260,7 +260,7 @@ async function create(params: CreateParams): Promise<CreateResult> {
 
   // (2) POST offer
   const marketplaceId = 'EBAY_US'; // TODO: make dynamic if you will support other sites
-  const isFixed = pricingFormat === 'fixed';
+  // reuse isFixed from earlier payload build
   const priceValue =
     (mpListing?.buy_it_now_price ?? item?.price ?? null) != null
       ? Number(mpListing?.buy_it_now_price ?? item?.price)
@@ -316,6 +316,7 @@ async function create(params: CreateParams): Promise<CreateResult> {
   const remoteUrl = pubRes?.listing?.itemWebUrl || pubRes?.itemWebUrl || null;
 
   return { remoteId, remoteUrl, warnings };
+} // <-- close async function create
 
 export const ebayAdapter: MarketplaceAdapter = { create };
 // end ebay.ts file
