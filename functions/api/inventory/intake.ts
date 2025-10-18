@@ -801,7 +801,7 @@ export const onRequestGet: PagesFunction = async ({ request, env }) => {
       inventory: invRows[0],
       listing: lstRows[0] || null,
       images: imgRows,
-      marketplace_listing: { ebay: ebayListing }
+      marketplace_listing: { ebay: ebayListing, ebay_marketplace_id: EBAY_ID }
     }), { status: 200, headers: { "content-type": "application/json", "cache-control": "no-store" } });
 
 
