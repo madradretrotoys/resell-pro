@@ -177,7 +177,3 @@ export async function onRequestPost(ctx: { env: Env, request: Request }) {
   if ((res as any)?.ok) return json({ ok: true, job_id: (res as any).job_id, status: (res as any).status, remote: (res as any).remote });
   return json({ ok: false, job_id: (res as any).job_id, error: (res as any).error, status: (res as any).status });
 }
-
-
-
-//end run.ts
