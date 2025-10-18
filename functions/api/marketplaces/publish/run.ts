@@ -1,4 +1,9 @@
-import { json } from 'itty-router-extras';
+function json(status: number, data: unknown) {
+  return new Response(JSON.stringify(data), {
+    status,
+    headers: { "content-type": "application/json; charset=utf-8" },
+  });
+}
 import { getSql } from '../../../_shared/db';
 import { getRegistry } from '../../../lib/marketplaces/adapter-registry';
 import type { Env } from '../../../_shared/types';
