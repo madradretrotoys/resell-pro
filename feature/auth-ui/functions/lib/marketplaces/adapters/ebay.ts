@@ -15,6 +15,19 @@ function pickPrimary(images: Array<{ cdn_url: string; is_primary: boolean; sort_
   return { primary, gallery };
 }
 
+// --- Local decrypt helper (AES-GCM), compatible with your persistTokens/protect() format { v: "token" } ---
+function b64d(s: string) { return Uint8Array.from(atob(s), c => c.charCodeAt(0)); }
+async function decryptJson(base64Key: string, blob: string): Promise<any> {
+  if (!blob) return null;
+  const [ivB64, ctB64] = blob.split(".");
+  const iv = b64d(ivB64);
+  const ct = b64d(ctB64);
+  if (!base64Key) return JSON.parse(new TextDecoder().decode(ct));
+  const key = await crypto.subtle.importKey("raw", b64d(base64Key), { name: "AES-GCM" }, false, ["decrypt"]);
+  const pt = new Uint8Array(await crypto.subtle.decrypt({ name: "AES-GCM", iv }, key, ct));
+  return JSON.parse(new TextDecoder().decode(pt));
+}
+
 async function create(params: CreateParams): Promise<CreateResult> {
   const { env, tenant_id, item, profile, mpListing, images } = params;
   const sql = getSql(env);
@@ -40,9 +53,9 @@ async function create(params: CreateParams): Promise<CreateResult> {
     warnings.push('No listing_category_key on profile');
   }
 
-  // 3) Pull tenant eBay connection (assumes access_token is usable as stored)
+  // 3) Load tenant connection and DECRYPT the stored access_token
   const conn = await sql/*sql*/`
-    SELECT mc.access_token, COALESCE(mc.environment, 'sandbox') AS environment
+    SELECT mc.access_token, mc.environment, mc.secrets_blob
     FROM app.marketplace_connections mc
     JOIN app.marketplaces_available ma ON ma.id = mc.marketplace_id
     WHERE mc.tenant_id = ${tenant_id}
@@ -51,14 +64,26 @@ async function create(params: CreateParams): Promise<CreateResult> {
     ORDER BY mc.updated_at DESC
     LIMIT 1
   `;
-  if (!conn?.length) {
-    throw new Error('Tenant not connected to eBay');
+  if (!conn?.length) throw new Error('Tenant not connected to eBay');
+
+  const encKey = env.RP_ENCRYPTION_KEY || "";
+  const encAccess = String(conn[0].access_token || "");
+  if (!encAccess) throw new Error('No access_token stored');
+
+  const accessObj = await decryptJson(encKey, encAccess);
+  const accessToken = String(accessObj?.v || "").trim();
+  if (!accessToken) throw new Error('Decrypted access_token is empty');
+
+  // Resolve environment: prefer explicit column, fall back to secrets_blob.environment
+  let envStr = String(conn[0].environment || "").trim().toLowerCase() as EbayEnv | "";
+  if (!envStr) {
+    try {
+      const secrets = await decryptJson(encKey, String(conn[0].secrets_blob || ""));
+      const e = String(secrets?.environment || "").trim().toLowerCase();
+      if (e === "production" || e === "sandbox") envStr = e as EbayEnv;
+    } catch {}
   }
-  const accessToken = String(conn[0].access_token || '').trim();
-  const envStr = String(conn[0].environment || 'sandbox').toLowerCase() as EbayEnv;
-  if (!accessToken) {
-    throw new Error('Empty eBay access token');
-  }
+  if (envStr !== "production" && envStr !== "sandbox") envStr = "sandbox";
 
   // 4) Build payload from our rows (Rows 1–27, 29, 30; skip 33–38)
   const { primary, gallery } = pickPrimary(images || []);
@@ -66,18 +91,15 @@ async function create(params: CreateParams): Promise<CreateResult> {
   const isFixed = pricingFormat === 'fixed';
 
   const payload = {
-    // Core
     title: item?.product_short_title || '',
     sku: item?.sku || '',                              // Row 29 → eBay Custom Label
     description: profile?.product_description || '',
     categoryId: ebayCategoryId || undefined,           // Row 30 resolved via map
-    // Item specifics (lightweight — can be expanded to exact eBay aspect names/IDs if needed)
     aspects: {
       condition_key: profile?.condition_key || null,
       brand_key: profile?.brand_key || null,
       color_key: profile?.color_key || null
     },
-    // Pricing
     pricing: isFixed
       ? {
           format: 'fixed',
@@ -93,7 +115,6 @@ async function create(params: CreateParams): Promise<CreateResult> {
           duration: mpListing?.duration ?? null,
           allowBestOffer: !!mpListing?.allow_best_offer
         },
-    // Fulfillment/policies
     fulfillment: {
       shippingZip: mpListing?.shipping_zip || null,
       shippingPolicy: mpListing?.shipping_policy || null,
@@ -117,10 +138,9 @@ async function create(params: CreateParams): Promise<CreateResult> {
     }
   };
 
-  // 5) Call eBay (Inventory/Listings). We use a single adapter endpoint that your gateway can evolve behind the scenes.
-  // NOTE: If you already have a proxy route, you can point to it instead. This calls eBay directly.
-  const base = ebayBase(envStr);
-  const url = `${base}/sell/inventory/v1/listing`; // placeholder endpoint path; align with your gateway or chosen eBay API
+  // 5) Call eBay (direct; swap to your proxy if desired)
+  const base = ebayBase(envStr as EbayEnv);
+  const url = `${base}/sell/inventory/v1/listing`; // align with your chosen eBay API/gateway
 
   const res = await fetch(url, {
     method: 'POST',
@@ -132,7 +152,7 @@ async function create(params: CreateParams): Promise<CreateResult> {
   });
 
   if (!res.ok) {
-    const txt = await res.text();
+    const txt = await res.text().catch(() => '');
     throw new Error(txt.slice(0, 500));
   }
 
@@ -140,11 +160,7 @@ async function create(params: CreateParams): Promise<CreateResult> {
   const remoteId  = out?.id || out?.listingId || out?.itemId || null;
   const remoteUrl = out?.url || out?.itemWebUrl || null;
 
-  return {
-    remoteId,
-    remoteUrl,
-    warnings
-  };
+  return { remoteId, remoteUrl, warnings };
 }
 
 export const ebayAdapter: MarketplaceAdapter = { create };
