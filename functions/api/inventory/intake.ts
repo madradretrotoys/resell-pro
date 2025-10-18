@@ -789,6 +789,9 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
       `;
     
       const results: any[] = [];
+      if (typeof (processJobById as any) !== "function") {
+        throw new Error("processJobById is not defined");
+      }
       for (const j of queued) {
         console.log("[intake] inline.process", { job_id: j.job_id, marketplace_id: j.marketplace_id });
         const r = await processJobById(env as any, String(j.job_id));
