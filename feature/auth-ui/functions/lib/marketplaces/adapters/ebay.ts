@@ -28,6 +28,13 @@ async function decryptJson(base64Key: string, blob: string): Promise<any> {
   return JSON.parse(new TextDecoder().decode(pt));
 }
 
+function msUntil(iso: string | null | undefined) {
+  if (!iso) return -1;
+  const t = Date.parse(iso);
+  if (!Number.isFinite(t)) return -1;
+  return t - Date.now();
+}
+
 async function create(params: CreateParams): Promise<CreateResult> {
   const { env, tenant_id, item, profile, mpListing, images } = params;
   const sql = getSql(env);
@@ -53,9 +60,9 @@ async function create(params: CreateParams): Promise<CreateResult> {
     warnings.push('No listing_category_key on profile');
   }
 
-  // 3) Load tenant connection and DECRYPT the stored access_token
+  // 3) Load tenant connection (including token_expires_at) and DECRYPT the stored access_token
   const conn = await sql/*sql*/`
-    SELECT mc.access_token, mc.environment, mc.secrets_blob
+    SELECT mc.access_token, mc.token_expires_at, mc.environment, mc.secrets_blob
     FROM app.marketplace_connections mc
     JOIN app.marketplaces_available ma ON ma.id = mc.marketplace_id
     WHERE mc.tenant_id = ${tenant_id}
@@ -70,8 +77,8 @@ async function create(params: CreateParams): Promise<CreateResult> {
   const encAccess = String(conn[0].access_token || "");
   if (!encAccess) throw new Error('No access_token stored');
 
-  const accessObj = await decryptJson(encKey, encAccess);
-  const accessToken = String(accessObj?.v || "").trim();
+  let accessObj = await decryptJson(encKey, encAccess);
+  let accessToken = String(accessObj?.v || "").trim();
   if (!accessToken) throw new Error('Decrypted access_token is empty');
 
   // Resolve environment: prefer explicit column, fall back to secrets_blob.environment
@@ -84,6 +91,51 @@ async function create(params: CreateParams): Promise<CreateResult> {
     } catch {}
   }
   if (envStr !== "production" && envStr !== "sandbox") envStr = "sandbox";
+
+  // 3b) Auto-refresh if expiring in ≤ 120s using your existing refresh route
+  const expiresInMs = msUntil(String(conn[0].token_expires_at || ""));
+  if (expiresInMs >= 0 && expiresInMs <= 120_000) {
+    // Determine the app origin to call the internal refresh route
+    const origin =
+      (env as any).APP_BASE_URL ||
+      (env as any).PUBLIC_APP_URL ||
+      (env as any).ORIGIN ||
+      '';
+    const refreshUrl = origin
+      ? `${origin.replace(/\/+$/, '')}/api/settings/marketplaces/ebay/refresh`
+      : '/api/settings/marketplaces/ebay/refresh';
+
+    const r = await fetch(refreshUrl, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'x-tenant-id': String(tenant_id)
+      },
+      body: JSON.stringify({ marketplace_id: 'ebay' })
+    });
+
+    if (!r.ok) {
+      const txt = await r.text().catch(() => '');
+      throw new Error(`refresh_failed: ${r.status} ${txt}`.slice(0, 500));
+    }
+
+    // Re-select and decrypt the fresh token
+    const conn2 = await sql/*sql*/`
+      SELECT mc.access_token
+      FROM app.marketplace_connections mc
+      JOIN app.marketplaces_available ma ON ma.id = mc.marketplace_id
+      WHERE mc.tenant_id = ${tenant_id}
+        AND ma.slug = 'ebay'
+        AND mc.status = 'connected'
+      ORDER BY mc.updated_at DESC
+      LIMIT 1
+    `;
+    const encAccess2 = String(conn2?.[0]?.access_token || "");
+    if (!encAccess2) throw new Error('refresh_ok_but_no_access_token');
+    accessObj = await decryptJson(encKey, encAccess2);
+    accessToken = String(accessObj?.v || "").trim();
+    if (!accessToken) throw new Error('refresh_ok_but_access_token_empty');
+  }
 
   // 4) Build payload from our rows (Rows 1–27, 29, 30; skip 33–38)
   const { primary, gallery } = pickPrimary(images || []);
