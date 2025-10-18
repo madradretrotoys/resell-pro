@@ -1469,8 +1469,63 @@ document.addEventListener("intake:item-changed", () => refreshDrafts({ force: tr
         reserve_price,
       } : {};
 
-      return prune({ ...base, ...auctionExtras });
-    }
+              return prune({ ...base, ...auctionExtras });
+        }
+    
+        // Hydrate the eBay card from saved data (called after tiles/cards are rendered)
+        function hydrateEbayFromSaved(ebay, ebayMarketplaceId) {
+          if (!ebay) return;
+    
+          // Ensure the eBay tile/card is visible and rendered
+          try {
+            if (ebayMarketplaceId && typeof ebayMarketplaceId === "number") {
+              selectedMarketplaceIds.add(Number(ebayMarketplaceId));
+            } else if (__metaCache?.marketplaces) {
+              const row = (__metaCache.marketplaces || []).find(m => String(m.slug || "").toLowerCase() === "ebay");
+              if (row && row.id != null) selectedMarketplaceIds.add(Number(row.id));
+            }
+            renderMarketplaceTiles(__metaCache);
+            renderMarketplaceCards(__metaCache);
+          } catch {}
+    
+          // Now set values inside the eBay card
+          const setVal = (sel, v) => { if (sel) sel.value = v ?? ""; };
+          const setNum = (id, v) => { const el = document.getElementById(id); if (el) el.value = (v ?? "") === "" ? "" : String(v); };
+          const setChk = (id, v) => { const el = document.getElementById(id); if (el) el.checked = !!v; };
+    
+          setVal(document.getElementById("ebay_shippingPolicy"), ebay.shipping_policy);
+          setVal(document.getElementById("ebay_paymentPolicy"),  ebay.payment_policy);
+          setVal(document.getElementById("ebay_returnPolicy"),   ebay.return_policy);
+          setVal(document.getElementById("ebay_shipZip"),        ebay.shipping_zip);
+    
+          setVal(document.getElementById("ebay_formatSelect"),   ebay.pricing_format);
+          setVal(document.getElementById("ebay_duration"),       ebay.duration);
+    
+          setNum("ebay_bin",       ebay.buy_it_now_price);
+          setNum("ebay_start",     ebay.starting_bid);
+          setNum("ebay_reserve",   ebay.reserve_price);
+          setChk("ebay_bestOffer", ebay.allow_best_offer);
+    
+          setNum("ebay_autoAccept", ebay.auto_accept_amount);
+          setNum("ebay_minOffer",   ebay.minimum_offer_amount);
+    
+          setChk("ebay_promote",    ebay.promote);
+          setNum("ebay_promotePct", ebay.promote_percent);
+    
+          // Re-apply eBay visibility rules so hidden/required states match values
+          try {
+            const fmt = document.getElementById("ebay_formatSelect");
+            const bo  = document.getElementById("ebay_bestOffer");
+            const pr  = document.getElementById("ebay_promote");
+            fmt?.dispatchEvent(new Event("change"));
+            bo?.dispatchEvent(new Event("change"));
+            pr?.dispatchEvent(new Event("change"));
+          } catch {}
+    
+          // Also re-validate the whole form
+          try { computeValidity(); } catch {}
+        }
+
     
        function buildPayload(isDraft = false) {
       // helper: drop empty strings/null/undefined
@@ -1689,7 +1744,7 @@ document.addEventListener("intake:item-changed", () => refreshDrafts({ force: tr
       const sales = document.getElementById("salesChannelSelect") || findControlByLabel("Sales Channel");
       if (sales) sales.value = inv?.instore_online ?? "";
     
-      // Marketplace Listing Details (optional for drafts)
+            // Marketplace Listing Details (optional for drafts)
       if (listing) {
         
           const mpCat = document.getElementById("marketplaceCategorySelect") || findControlByLabel("Marketplace Category");
@@ -1706,9 +1761,13 @@ document.addEventListener("intake:item-changed", () => refreshDrafts({ force: tr
         
           const shipBox = document.getElementById("shippingBoxSelect") || findControlByLabel("Shipping Box");
           if (shipBox) shipBox.value = listing.shipping_box_key ?? "";
+
+          // Long Description (textarea)
+          const longDesc = document.getElementById("longDescriptionTextarea") || findControlByLabel("Long Description");
+          if (longDesc) longDesc.value = listing.product_description ?? "";
           
-        
     
+
         const lb  = document.getElementById("weightLbInput") || findControlByLabel("Weight (lb)");
         const oz  = document.getElementById("weightOzInput") || findControlByLabel("Weight (oz)");
         const len = document.getElementById("lengthInput")   || findControlByLabel("Length");
@@ -1814,11 +1873,24 @@ document.addEventListener("intake:item-changed", () => refreshDrafts({ force: tr
       try {
         const res = await api(`/api/inventory/intake?item_id=${encodeURIComponent(item_id)}`, { method: "GET" });
         if (!res || res.ok === false) throw new Error(res?.error || "fetch_failed");
+
+        // Basic + listing fields (now includes Long Description)
         populateFromSaved(res.inventory || {}, res.listing || null);
+
+        // If the draft has an eBay listing row, auto-select the eBay tile and hydrate the card
+        try {
+          const ebaySaved = res?.marketplace_listing?.ebay || null;
+          const ebayId    = res?.marketplace_listing?.ebay_marketplace_id || null;
+          if (ebaySaved) {
+            hydrateEbayFromSaved(ebaySaved, ebayId);
+          }
+        } catch {}
+
         // Photos: hydrate thumbnails from GET response
         bootstrapPhotos(Array.isArray(res.images) ? res.images : [], item_id);
         // Enter view mode (treat as previously-saved edit path). Drafts have no SKU.
         enterViewMode({ item_id, hasSku: !!res?.inventory?.sku });
+
       } catch (err) {
         console.error("drafts:load:error", err);
         alert("Failed to load draft.");
