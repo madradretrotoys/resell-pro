@@ -197,7 +197,37 @@ async function create(params: CreateParams): Promise<CreateResult> {
   //    (3) POST publish
 
   const base = ebayBase(envStr as EbayEnv);
+  // One-time helper to make sure our Merchant Inventory Location exists.
+  // If it doesn't, create a minimal US location using the item's ZIP.
+  async function ensureLocation(key: string, zip: string) {
+    try {
+      await ebayFetch(`/sell/inventory/v1/location/${encodeURIComponent(key)}`, { method: 'GET' });
+      return; // exists
+    } catch (e: any) {
+      const msg = String(e?.message || '');
+      // Only auto-create when the GET truly 404s for "not found"
+      if (!msg.startsWith('404')) throw e;
+    }
 
+    const payload = {
+      name: 'Primary Store',
+      locationType: 'STORE',
+      merchantLocationStatus: 'ENABLED',
+      locationWebUrl: 'https://resellpros.com',
+      locationAddress: {
+        addressLine1: 'Address Pending',
+        city: 'Unknown',
+        stateOrProvince: 'NA',
+        postalCode: String(zip || '').trim(),
+        countryCode: 'US'
+      }
+    };
+
+    await ebayFetch(`/sell/inventory/v1/location/${encodeURIComponent(key)}`, {
+      method: 'PUT',
+      body: JSON.stringify(payload)
+    });
+  }
   // simple helper to normalize error text
   async function ebayFetch(path: string, init: RequestInit) {
     const r = await fetch(`${base}${path}`, {
@@ -286,6 +316,13 @@ async function create(params: CreateParams): Promise<CreateResult> {
     (mpListing?.buy_it_now_price ?? item?.price ?? null) != null
       ? Number(mpListing?.buy_it_now_price ?? item?.price)
       : null;
+
+  const merchantLocationKey = 'store_001';
+  const shippingZip = String(mpListing?.shipping_zip || '').trim();
+  if (!shippingZip) throw new Error('Missing shipping ZIP for eBay offer (shipping_zip).');
+
+  // Ensure the eBay Inventory Location exists (create if needed)
+  await ensureLocation(merchantLocationKey, shippingZip);
   // Ensure the Inventory Location key we'll reference actually exists.
   // (We fail fast with a clear message rather than guessing address fields.)
   const merchantLocationKey = 'store_001';
@@ -296,27 +333,19 @@ async function create(params: CreateParams): Promise<CreateResult> {
       `eBay Inventory Location "${merchantLocationKey}" not found. Create it in the target environment (address with US + ZIP) and retry. Details: ${String(e?.message || e).slice(0,200)}`
     );
   }
-  const offerBody: any = {
+   const offerBody: any = {
     sku,
     marketplaceId,
     format: isFixed ? 'FIXED_PRICE' : 'AUCTION',
     availableQuantity: Number(item?.qty || 1),
     listingDescription: profile?.product_description || '',
     categoryId: ebayCategoryId || undefined,
+    merchantLocationKey, // ← this satisfies Item.Country via the Inventory Location
     listingPolicies: {
       fulfillmentPolicyId: mpListing?.shipping_policy || null,
       paymentPolicyId:     mpListing?.payment_policy  || null,
       returnPolicyId:      mpListing?.return_policy   || null,
     },
-    // Include explicit listing location so eBay has Item.Country + ZIP
-    ...(mpListing?.shipping_zip
-      ? {
-          itemLocation: {
-            countryCode: 'US',
-            postalCode: String(mpListing.shipping_zip).trim()
-          }
-        }
-      : {}),
     pricingSummary: isFixed
       ? { price: { currency: 'USD', value: priceValue || 0 } }
       : {
