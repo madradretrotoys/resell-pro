@@ -46,6 +46,9 @@ async function create(params: CreateParams): Promise<CreateResult> {
   if (!item?.product_short_title) warnings.push('Missing title');
   if (!images?.length) warnings.push('No images attached');
 
+  // Declare holder for resolved eBay category id
+  let ebayCategoryId: string | null = null;
+
   // Resolve eBay category id (UUID -> label -> ebay id) in one query
   try {
     const rows = await sql/*sql*/`
