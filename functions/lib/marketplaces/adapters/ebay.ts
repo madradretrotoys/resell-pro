@@ -47,24 +47,28 @@ async function create(params: CreateParams): Promise<CreateResult> {
   if (!images?.length) warnings.push('No images attached');
 
   // Resolve eBay category id (UUID -> label -> ebay id) in one query
-  let ebayCategoryId: string | null = null;
   try {
     const rows = await sql/*sql*/`
       SELECT mcem.ebay_category_id
-      FROM app.marketplace_category_ebay_map mcem
-      JOIN app.marketplace_categories mc
-        ON mc.category_key = mcem.category_key
-      WHERE mc.category_id = ${profile.listing_category_key}  -- UUID from UI/profile
+      FROM app.marketplace_category_ebay_map AS mcem
+      JOIN app.marketplace_categories      AS mc
+        ON mc.category_key::text = mcem.category_key
+      JOIN app.marketplaces_available      AS ma
+        ON ma.id = mcem.marketplace_id
+      WHERE ma.slug = 'ebay'
+        AND mc.category_key = ${profile.listing_category_key}::uuid
       ORDER BY mcem.updated_at DESC NULLS LAST
       LIMIT 1
     `;
     ebayCategoryId = rows?.[0]?.ebay_category_id != null ? String(rows[0].ebay_category_id) : null;
-  
+
     console.log('[ebay:category.resolve]', {
       listing_category_key: profile?.listing_category_key, // UUID
       resolved: ebayCategoryId
     });
-  } catch {}
+  } catch (err) {
+    console.error('[ebay:category.resolve:error]', err);
+  }
 
   if (!ebayCategoryId) {
     throw new Error(
