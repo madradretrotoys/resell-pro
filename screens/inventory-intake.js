@@ -2048,6 +2048,7 @@ document.addEventListener("intake:item-changed", () => refreshDrafts({ force: tr
           } catch (e) {}
 
           // notify photos module to flush any pending uploads
+            
           try {
             document.dispatchEvent(
               new CustomEvent("intake:item-saved", {
@@ -2055,7 +2056,7 @@ document.addEventListener("intake:item-changed", () => refreshDrafts({ force: tr
                 detail: {
                   item_id: __currentItemId,
                   save_status: mode,                 // "active" | "draft"
-                  job_ids: Array.isArray(resp?.job_ids) ? resp.job_ids : [] // from intake POST response
+                  job_ids: Array.isArray(res?.job_ids) ? res.job_ids : [] // use the real response variable
                 }
               })
             );
