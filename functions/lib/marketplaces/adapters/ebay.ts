@@ -361,8 +361,9 @@ async function create(params: CreateParams): Promise<CreateResult> {
       : undefined;
 
   // map our fields into eBay inventory item structure
+  const computedQty = Math.max(1, Number((item && item.qty) != null ? item.qty : 1));
   const inventoryItemBody: any = {
-    condition: conditionEnum,
+    condition: conditionEnum,  
     ...(conditionDescription ? { conditionDescription } : {}),
     product: {
       title: item?.product_short_title || '',
@@ -381,20 +382,22 @@ async function create(params: CreateParams): Promise<CreateResult> {
       // omit imageUrls for this test so we can isolate the 25001 cause
       ...(false ? { imageUrls } : {})
     },
-    packageWeight: {
-      unit: 'POUND',
-      // Publish validator for EBAY_US expects POUNDS with max 2 decimal places.
-      // Round to 2dp and enforce a positive minimum.
-      value: (() => {
-        const lb = Number(profile?.weight_lb ?? 0);
-        const oz = Number(profile?.weight_oz ?? 0);
-        const pounds = lb + (oz / 16);
-        const twoDp = Math.round(pounds * 100) / 100;      // 2-decimal precision
-        const safe = Math.max(0.01, twoDp);
-        // avoid serialization surprises like 2.3 -> 2.299999... by re-numbering toFixed
-        return Number(safe.toFixed(2));
-      })()
-    },
+    // ✅ eBay expects BOTH weight & size inside packageWeightAndSize
+    packageWeightAndSize: {
+      packageWeight: {
+        unit: 'POUND',
+        // Publish validator for EBAY_US expects POUNDS with max 2 decimal places.
+        // Round to 2dp and enforce a positive minimum.
+        value: (() => {
+          const lb = Number(profile?.weight_lb ?? 0);
+          const oz = Number(profile?.weight_oz ?? 0);
+          const pounds = lb + (oz / 16);
+          const twoDp = Math.round(pounds * 100) / 100;      // 2-decimal precision
+          const safe = Math.max(0.01, twoDp);
+          // avoid serialization surprises like 2.3 -> 2.299999... by re-numbering toFixed
+          return Number(safe.toFixed(2));
+        })()
+      },
       packageSize: {
         dimensions: {
           height: Number(profile?.shipbx_height || 0),
@@ -404,9 +407,7 @@ async function create(params: CreateParams): Promise<CreateResult> {
         unit: 'INCH'
       }
     },
-    // Compute inventory quantity without optional chaining/nullish coalescing
-    // to avoid Wrangler parser issues.
-    const computedQty = Math.max(1, Number((item && item.qty) != null ? item.qty : 1));
+  
     availability: {
       shipToLocationAvailability: {
         // eBay validates publish against the Inventory Item’s availability.
