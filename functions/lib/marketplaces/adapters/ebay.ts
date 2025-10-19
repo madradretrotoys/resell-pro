@@ -229,26 +229,53 @@ async function create(params: CreateParams): Promise<CreateResult> {
     });
   }
   // simple helper to normalize error text
-  async function ebayFetch(path: string, init: RequestInit) {
-    const r = await fetch(`${base}${path}`, {
-      ...init,
-      headers: {
+    // simple on/off switch via env if you want (default true for now)
+    const DEBUG_EBAY = true;
+  
+    function safeStringify(obj: any) {
+      try { return JSON.stringify(obj, null, 2); } catch { return String(obj); }
+    }
+  
+    async function ebayFetch(path: string, init: RequestInit) {
+      const url = `${base}${path}`;
+      const headers = {
         ...(init.headers || {}),
         'authorization': `Bearer ${accessToken}`,
         'content-type': 'application/json',
-        // Required by Sell Inventory for localized fields (title/description)
         'content-language': 'en-US'
+      };
+  
+      if (DEBUG_EBAY) {
+        // Never log the token
+        const { authorization, ...rest } = headers as any;
+        console.log('[ebay:request]', { url, method: init.method || 'GET', headers: rest });
+        if (init.body) {
+          console.log('[ebay:request.body]', typeof init.body === 'string' ? init.body : safeStringify(init.body));
+        }
       }
-    });
-    
-    if (!r.ok) {
-      const t = await r.text().catch(() => '');
-      // surface eBay’s message so we can see the real cause in UI/logs
-      throw new Error(`${r.status} ${r.statusText} :: ${t}`.slice(0, 500));
+  
+      const r = await fetch(url, { ...init, headers });
+  
+      const txt = await r.text().catch(() => '');
+      if (DEBUG_EBAY) {
+        console.log('[ebay:response.status]', r.status, r.statusText, 'for', path);
+        // Log a truncated body to avoid massive dumps
+        console.log('[ebay:response.body]', txt.slice(0, 4000));
+      }
+  
+      if (!r.ok) {
+        throw new Error(`${r.status} ${r.statusText} :: ${txt}`.slice(0, 1000));
+      }
+  
+      try {
+        return txt && (r.headers.get('content-type') || '').includes('application/json')
+          ? JSON.parse(txt)
+          : txt;
+      } catch {
+        return txt;
+      }
     }
-    const ct = r.headers.get('content-type') || '';
-    return ct.includes('application/json') ? r.json() : r.text();
-  }
+
 
   // (1) PUT inventory item
   const sku = String(item?.sku || '').trim();
@@ -303,7 +330,7 @@ async function create(params: CreateParams): Promise<CreateResult> {
       }
     }
   };
-
+   console.log('[ebay:inventory_item.put.body]', safeStringify(inventoryItemBody));
   await ebayFetch(`/sell/inventory/v1/inventory_item/${encodeURIComponent(sku)}`, {
     method: 'PUT',
     body: JSON.stringify(inventoryItemBody)
@@ -365,7 +392,7 @@ async function create(params: CreateParams): Promise<CreateResult> {
     return obj;
   }
   stripNulls(offerBody);
-
+  console.log('[ebay:offer.post.body]', safeStringify(offerBody));
   const offerRes = await ebayFetch(`/sell/inventory/v1/offer`, {
     method: 'POST',
     body: JSON.stringify(offerBody)
