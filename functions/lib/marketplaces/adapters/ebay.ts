@@ -371,6 +371,12 @@ async function create(params: CreateParams): Promise<CreateResult> {
         // eBay expects string[] values for aspects. Omit when not present.
         brand: profile?.brand_name ? [String(profile.brand_name)] : undefined,
         color: profile?.primary_color ? [String(profile.primary_color)] : undefined,
+
+        // ── Mapped specifics from marketplace_category_ebay_map (only when present) ──
+        ...(mappedSpecifics?.type      ? { Type:      [String(mappedSpecifics.type)] }       : {}),
+        ...(mappedSpecifics?.model     ? { Model:     [String(mappedSpecifics.model)] }      : {}),
+        ...(mappedSpecifics?.franchise ? { Franchise: [String(mappedSpecifics.franchise)] }  : {}),
+        ...(mappedSpecifics?.sport     ? { Sport:     [String(mappedSpecifics.sport)] }      : {}),
       },
       // omit imageUrls for this test so we can isolate the 25001 cause
       ...(false ? { imageUrls } : {})
