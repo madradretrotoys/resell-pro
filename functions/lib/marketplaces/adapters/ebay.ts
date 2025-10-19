@@ -384,6 +384,8 @@ async function create(params: CreateParams): Promise<CreateResult> {
     },
     // ✅ eBay expects BOTH weight & size inside packageWeightAndSize
     packageWeightAndSize: {
+      // Explicit package type to avoid "LETTER" defaults at publish
+      packageType: 'PARCEL_OR_PADDED_ENVELOPE',
       packageWeight: {
         unit: 'POUND',
         // Publish validator for EBAY_US expects POUNDS with max 2 decimal places.
