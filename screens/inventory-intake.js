@@ -451,6 +451,16 @@ export async function init() {
         for (const f of pending) {
           await uploadAndAttach(f);
         }
+
+        // 2) If this was an Active save, now that images exist server-side, trigger publish
+        if (String(saveStatus).toLowerCase() === "active") {
+          // fire-and-forget; server will pick up queued jobs for this item_id
+          api(`/api/marketplaces/publish/run?item_id=${encodeURIComponent(__currentItemId)}`, {
+            method: "POST"
+          }).catch(() => {});
+        }
+        
+        
       } catch (e) {
         console.error("photos:flush:error", e);
       }
