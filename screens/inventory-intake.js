@@ -441,30 +441,30 @@ export async function init() {
     });
   
       document.addEventListener("intake:item-saved", async (ev) => {
-      try {
-        const id = ev?.detail?.item_id;
-        if (!id) return;
-        __currentItemId = id;
-    
-        if (__pendingFiles.length === 0) return;
-        const pending = __pendingFiles.splice(0, __pendingFiles.length);
-        for (const f of pending) {
-          await uploadAndAttach(f);
+        try {
+          const id = ev?.detail?.item_id;
+          const saveStatus = String(ev?.detail?.save_status || "").toLowerCase(); // "active" | "draft"
+          if (!id) return;
+          __currentItemId = id;
+      
+          // 1) Flush any pending uploads FIRST (if none, this is a fast no-op)
+          if (__pendingFiles.length > 0) {
+            const pending = __pendingFiles.splice(0, __pendingFiles.length);
+            for (const f of pending) {
+              await uploadAndAttach(f);
+            }
+          }
+      
+          // 2) If it was an Active save, trigger publish now that images exist server-side
+          if (saveStatus === "active") {
+            fetch(`/api/marketplaces/publish/run?item_id=${encodeURIComponent(__currentItemId)}`, {
+              method: "POST"
+            }).catch(() => {});
+          }
+        } catch (e) {
+          console.error("photos:flush:error", e);
         }
-
-        // 2) If this was an Active save, now that images exist server-side, trigger publish
-        if (String(saveStatus).toLowerCase() === "active") {
-          // fire-and-forget; server will pick up queued jobs for this item_id
-          api(`/api/marketplaces/publish/run?item_id=${encodeURIComponent(__currentItemId)}`, {
-            method: "POST"
-          }).catch(() => {});
-        }
-        
-        
-      } catch (e) {
-        console.error("photos:flush:error", e);
-      }
-    });
+      });
   }
 
 
@@ -2043,9 +2043,14 @@ document.addEventListener("intake:item-changed", () => refreshDrafts({ force: tr
             if (form && __currentItemId) form.dataset.itemId = __currentItemId;
           } catch (e) {}
 
-          // NEW: notify photos module so it can flush any pending uploads
+          // notify photos module to flush any pending uploads
           try {
-            document.dispatchEvent(new CustomEvent("intake:item-saved", { detail: { item_id: __currentItemId } }));
+            document.dispatchEvent(
+              new CustomEvent("intake:item-saved", {
+                // pass the current save mode so we know whether to publish
+                detail: { item_id: __currentItemId, save_status: mode } // "active" | "draft"
+              })
+            );
           } catch {}
           
         } catch {}
