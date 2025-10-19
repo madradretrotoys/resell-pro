@@ -313,7 +313,8 @@ async function create(params: CreateParams): Promise<CreateResult> {
         brand: profile?.brand_name ? [String(profile.brand_name)] : undefined,
         color: profile?.primary_color ? [String(profile.primary_color)] : undefined,
       },
-      imageUrls
+      // omit imageUrls for this test so we can isolate the 25001 cause
+      ...(false ? { imageUrls } : {})
     },
     packageWeightAndSize: {
       packageWeight: {
