@@ -299,6 +299,15 @@ async function create(params: CreateParams): Promise<CreateResult> {
       paymentPolicyId:     mpListing?.payment_policy  || null,
       returnPolicyId:      mpListing?.return_policy   || null,
     },
+    // Include explicit listing location so eBay has Item.Country + ZIP
+    ...(mpListing?.shipping_zip
+      ? {
+          itemLocation: {
+            countryCode: 'US',
+            postalCode: String(mpListing.shipping_zip).trim()
+          }
+        }
+      : {}),
     pricingSummary: isFixed
       ? { price: { currency: 'USD', value: priceValue || 0 } }
       : {
