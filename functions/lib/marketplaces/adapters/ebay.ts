@@ -384,7 +384,14 @@ async function create(params: CreateParams): Promise<CreateResult> {
     packageWeightAndSize: {
       packageWeight: {
         unit: 'POUND',
-        value: Number(profile?.weight_lb || 0) + (Number(profile?.weight_oz || 0) / 16)
+        // eBay publish validator rejects >3 decimal places. Round and enforce > 0.
+        value: (() => {
+          const lb = Number(profile?.weight_lb ?? 0);
+          const oz = Number(profile?.weight_oz ?? 0);
+          const pounds = lb + (oz / 16);
+          const rounded = Math.round(pounds * 1000) / 1000; // 3-decimal precision
+          return Math.max(0.001, rounded);
+        })()
       },
       packageSize: {
         dimensions: {
