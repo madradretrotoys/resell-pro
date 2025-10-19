@@ -226,7 +226,7 @@ async function create(params: CreateParams): Promise<CreateResult> {
       locationStatus: 'ENABLED',
       locationWebUrl: 'https://resellpros.com',
       locationAddress: {
-        addressLine1: '5026 Kipling Street',
+        addressLine1: '5030 Kipling Street',
         city: 'Wheat Ridge',
         stateOrProvince: 'CO',
         postalCode: String(zip || '').trim(),
