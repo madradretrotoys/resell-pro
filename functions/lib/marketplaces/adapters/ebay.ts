@@ -46,13 +46,21 @@ async function create(params: CreateParams): Promise<CreateResult> {
   if (!item?.product_short_title) warnings.push('Missing title');
   if (!images?.length) warnings.push('No images attached');
 
-  // Declare holder for resolved eBay category id
+    // Declare holders for resolved category + mapped specifics
   let ebayCategoryId: string | null = null;
+  let mappedSpecifics: { type: string | null; model: string | null; franchise: string | null; sport: string | null } = {
+    type: null, model: null, franchise: null, sport: null
+  };
 
-  // Resolve eBay category id (UUID -> label -> ebay id) in one query
+  // Resolve eBay category id (UUID -> label -> ebay id) AND pull mapped item-specific values
   try {
     const rows = await sql/*sql*/`
-      SELECT mcem.ebay_category_id
+      SELECT
+        mcem.ebay_category_id,
+        mcem.type_value,
+        mcem.model_value,
+        mcem.franchise_value,
+        mcem.sport_value
       FROM app.marketplace_category_ebay_map AS mcem
       JOIN app.marketplace_categories      AS mc
         ON mc.category_key = mcem.category_key_uuid
@@ -63,15 +71,24 @@ async function create(params: CreateParams): Promise<CreateResult> {
       ORDER BY mcem.updated_at DESC NULLS LAST
       LIMIT 1
     `;
-    ebayCategoryId = rows?.[0]?.ebay_category_id != null ? String(rows[0].ebay_category_id) : null;
+    const row = rows?.[0] || null;
+    ebayCategoryId  = row?.ebay_category_id != null ? String(row.ebay_category_id) : null;
+    mappedSpecifics = {
+      type:       row?.type_value       ?? null,
+      model:      row?.model_value      ?? null,
+      franchise:  row?.franchise_value  ?? null,
+      sport:      row?.sport_value      ?? null,
+    };
 
     console.log('[ebay:category.resolve]', {
-      listing_category_key: profile?.listing_category_key, // UUID
-      resolved: ebayCategoryId
+      listing_category_key: profile?.listing_category_key,
+      resolved: ebayCategoryId,
+      mappedSpecifics
     });
   } catch (err) {
     console.error('[ebay:category.resolve:error]', err);
   }
+ 
 
   if (!ebayCategoryId) {
     throw new Error(
@@ -400,7 +417,17 @@ async function create(params: CreateParams): Promise<CreateResult> {
   // Ensure the eBay Inventory Location exists (create if needed & verify)
   await ensureLocation(merchantLocationKey, shippingZip);
   // (No extra GET needed here; ensureLocation already verified.)
-  
+   // Build itemSpecifics from mapping table values (omit when null/empty)
+    const itemSpecifics: Array<{ name: string; values: string[] }> = [];
+    const pushIf = (name: string, val: unknown) => {
+      const s = String(val ?? '').trim();
+      if (s) itemSpecifics.push({ name, values: [s] });
+    };
+    pushIf('Type',      mappedSpecifics.type);
+    pushIf('Model',     mappedSpecifics.model);
+    pushIf('Franchise', mappedSpecifics.franchise);
+    pushIf('Sport',     mappedSpecifics.sport);
+    
    const offerBody: any = {
     sku,
     marketplaceId,
