@@ -223,6 +223,7 @@ async function create(params: CreateParams): Promise<CreateResult> {
       name: 'Primary Store',
       locationType: 'STORE',
       merchantLocationStatus: 'ENABLED',
+      locationStatus: 'ENABLED',
       locationWebUrl: 'https://resellpros.com',
       locationAddress: {
         addressLine1: '5026 Kipling Street',
