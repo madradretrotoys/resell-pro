@@ -203,10 +203,17 @@ async function create(params: CreateParams): Promise<CreateResult> {
   // Deterministic: if initial GET is not 200, PUT to create, then GET to verify.
   
   async function ensureLocation(key: string, zip: string) {
-    // 0) Optional: list current keys for visibility in logs
+    // 0) One-time: list all existing merchant locations for visibility (env + count + keys + raw)
     try {
       const listed = await ebayFetch(`/sell/inventory/v1/location?limit=200`, { method: 'GET' });
-      console.log('[ebay:locations.list.keys]', Array.isArray(listed?.locations) ? listed.locations.map((l: any) => l?.merchantLocationKey) : listed);
+      const arr = Array.isArray((listed as any)?.locations) ? (listed as any).locations : [];
+      const keys = arr.map((l: any) => l?.merchantLocationKey).filter(Boolean);
+      console.log('[ebay:locations.list]', {
+        base,                             // shows production vs sandbox host
+        count: arr.length,
+        keys,
+        raw: listed                       // full payload for debugging
+      });
     } catch { /* listing is best-effort */ }
 
     // 1) Try to read the location
