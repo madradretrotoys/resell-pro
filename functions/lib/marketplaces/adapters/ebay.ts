@@ -229,7 +229,7 @@ async function create(params: CreateParams): Promise<CreateResult> {
         city: 'Wheat Ridge',
         stateOrProvince: 'CO',
         postalCode: String(zip || '').trim(),
-        countryCode: 'US'
+        country: 'US'
       }
     };
     await ebayFetch(`/sell/inventory/v1/location/${encodeURIComponent(key)}`, {
