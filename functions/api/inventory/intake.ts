@@ -775,9 +775,28 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
       `;
     }  
     
-    // do NOT run publish inline. Return now so the client can upload images,
-    // then a runner (or a later manual trigger) will process the queued jobs.
-    return json({ ok: true, item_id, sku, status, published: false, ms: Date.now() - t0 }, 200);
+    // Do NOT run publish inline.
+    // Look up any jobs we just queued for this item so the client can trigger them by job_id.
+    const enqueued = await sql/*sql*/`
+      SELECT job_id
+      FROM app.marketplace_publish_jobs
+      WHERE tenant_id = ${tenant_id}
+        AND item_id   = ${item_id}
+        AND status    = 'queued'
+      ORDER BY created_at ASC
+    `;
+
+    const job_ids = Array.isArray(enqueued) ? enqueued.map((r: any) => String(r.job_id)) : [];
+
+    return json({
+      ok: true,
+      item_id,
+      sku,
+      status,
+      published: false,
+      job_ids,
+      ms: Date.now() - t0
+    }, 200);
 
   } catch (e: any) {
     // Try a friendlier error
