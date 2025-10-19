@@ -199,16 +199,26 @@ async function create(params: CreateParams): Promise<CreateResult> {
   const base = ebayBase(envStr as EbayEnv);
   // One-time helper to make sure our Merchant Inventory Location exists.
   // If it doesn't, create a minimal US location using the item's ZIP.
+    // One-time helper to ensure a Merchant Inventory Location exists.
+  // Deterministic: if initial GET is not 200, PUT to create, then GET to verify.
   async function ensureLocation(key: string, zip: string) {
+    // 0) Optional: list current keys for visibility in logs
+    try {
+      const listed = await ebayFetch(`/sell/inventory/v1/location?limit=200`, { method: 'GET' });
+      console.log('[ebay:locations.list.keys]', Array.isArray(listed?.locations) ? listed.locations.map((l: any) => l?.merchantLocationKey) : listed);
+    } catch { /* listing is best-effort */ }
+
+    // 1) Try to read the location
+    let exists = false;
     try {
       await ebayFetch(`/sell/inventory/v1/location/${encodeURIComponent(key)}`, { method: 'GET' });
-      return; // exists
-    } catch (e: any) {
-      const msg = String(e?.message || '');
-      // Only auto-create when the GET truly 404s for "not found"
-      if (!msg.startsWith('404')) throw e;
+      exists = true;
+    } catch {
+      exists = false;
     }
+    if (exists) return;
 
+    // 2) Create minimal US location (using ZIP you already collect)
     const payload = {
       name: 'Primary Store',
       locationType: 'STORE',
@@ -222,12 +232,15 @@ async function create(params: CreateParams): Promise<CreateResult> {
         countryCode: 'US'
       }
     };
-
     await ebayFetch(`/sell/inventory/v1/location/${encodeURIComponent(key)}`, {
       method: 'PUT',
       body: JSON.stringify(payload)
     });
+
+    // 3) Verify creation
+    await ebayFetch(`/sell/inventory/v1/location/${encodeURIComponent(key)}`, { method: 'GET' });
   }
+
   // simple helper to normalize error text
     // simple on/off switch via env if you want (default true for now)
     const DEBUG_EBAY = true;
@@ -349,18 +362,10 @@ async function create(params: CreateParams): Promise<CreateResult> {
   const shippingZip = String(mpListing?.shipping_zip || '').trim();
   if (!shippingZip) throw new Error('Missing shipping ZIP for eBay offer (shipping_zip).');
 
-  // Ensure the eBay Inventory Location exists (create if needed)
+  // Ensure the eBay Inventory Location exists (create if needed & verify)
   await ensureLocation(merchantLocationKey, shippingZip);
-  // Ensure the Inventory Location key we'll reference actually exists.
-  // (We fail fast with a clear message rather than guessing address fields.)
+  // (No extra GET needed here; ensureLocation already verified.)
   
-  try {
-    await ebayFetch(`/sell/inventory/v1/location/${encodeURIComponent(merchantLocationKey)}`, { method: 'GET' });
-  } catch (e: any) {
-    throw new Error(
-      `eBay Inventory Location "${merchantLocationKey}" not found. Create it in the target environment (address with US + ZIP) and retry. Details: ${String(e?.message || e).slice(0,200)}`
-    );
-  }
    const offerBody: any = {
     sku,
     marketplaceId,
