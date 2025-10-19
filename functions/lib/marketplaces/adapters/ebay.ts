@@ -371,6 +371,12 @@ async function create(params: CreateParams): Promise<CreateResult> {
         },
         unit: 'INCH'
       }
+    },
+    availability: {
+      shipToLocationAvailability: {
+        // eBay validates publish against the Inventory Item’s availability.
+        quantity: Math.max(1, Number(item?.qty ?? 1))
+      }
     }
   };
    console.log('[ebay:inventory_item.put.body]', safeStringify(inventoryItemBody));
