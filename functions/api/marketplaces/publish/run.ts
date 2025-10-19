@@ -188,55 +188,61 @@ export async function onRequestPost(ctx: { env: Env, request: Request }) {
     const url = new URL(ctx.request.url);
     const specific = url.searchParams.get("job_id");
     const itemIdParam = url.searchParams.get("item_id");
-    
-    // If a specific job_id is provided, lock THAT job; otherwise pick the next queued one.
-    const [job] = specific
-      ? await sql/*sql*/`
-          UPDATE app.marketplace_publish_jobs j
-             SET status   = 'running',
-                 locked_at = now(),
-                 locked_by = 'api/marketplaces/publish/run'
-           WHERE j.job_id = ${specific}
-             AND j.status = 'queued'
-           RETURNING j.*
-    : itemIdParam
-      ? await sql/*sql*/`
-          WITH next AS (
-            SELECT job_id
-            FROM app.marketplace_publish_jobs
-            WHERE status  = 'queued'
-              AND item_id = ${Number(itemIdParam)}
-              AND run_at <= now()
-            ORDER BY run_at ASC
-            LIMIT 1
-            FOR UPDATE SKIP LOCKED
-          )
-          UPDATE app.marketplace_publish_jobs j
-             SET status   = 'running',
-                 locked_at = now(),
-                 locked_by = 'api/marketplaces/publish/run'
-           WHERE j.job_id IN (SELECT job_id FROM next)
-           RETURNING j.*
-             `
-      : await sql/*sql*/`
-          WITH next AS (
-            SELECT job_id
-            FROM app.marketplace_publish_jobs
-            WHERE status = 'queued'
-              AND run_at <= now()
-            ORDER BY run_at ASC
-            LIMIT 1
-            FOR UPDATE SKIP LOCKED
-          )
-          UPDATE app.marketplace_publish_jobs j
-             SET status = 'running',
-                 locked_at = now(),
-                 locked_by = 'api/marketplaces/publish/run'
-           WHERE j.job_id IN (SELECT job_id FROM next)
-           RETURNING j.*
-        `;
 
-    if (!job) return json({ ok: true, taken: 0 });
+    let job: any | undefined;
+
+    if (specific) {
+      [job] = await sql/*sql*/`
+        UPDATE app.marketplace_publish_jobs j
+           SET status   = 'running',
+               locked_at = now(),
+               locked_by = 'api/marketplaces/publish/run'
+         WHERE j.job_id = ${specific}
+           AND j.status = 'queued'
+         RETURNING j.*
+      `;
+    } else if (itemIdParam) {
+      [job] = await sql/*sql*/`
+        WITH next AS (
+          SELECT job_id
+          FROM app.marketplace_publish_jobs
+          WHERE status  = 'queued'
+            AND item_id = ${Number(itemIdParam)}
+            AND run_at <= now()
+          ORDER BY run_at ASC
+          LIMIT 1
+          FOR UPDATE SKIP LOCKED
+        )
+        UPDATE app.marketplace_publish_jobs j
+           SET status   = 'running',
+               locked_at = now(),
+               locked_by = 'api/marketplaces/publish/run'
+         WHERE j.job_id IN (SELECT job_id FROM next)
+         RETURNING j.*
+      `;
+    } else {
+      [job] = await sql/*sql*/`
+        WITH next AS (
+          SELECT job_id
+          FROM app.marketplace_publish_jobs
+          WHERE status = 'queued'
+            AND run_at <= now()
+          ORDER BY run_at ASC
+          LIMIT 1
+          FOR UPDATE SKIP LOCKED
+        )
+        UPDATE app.marketplace_publish_jobs j
+           SET status = 'running',
+               locked_at = now(),
+               locked_by = 'api/marketplaces/publish/run'
+         WHERE j.job_id IN (SELECT job_id FROM next)
+         RETURNING j.*
+      `;
+    }
+
+    if (!job) {
+      return json({ ok: true, taken: 0 });
+    }
 
     // job is already locked → execute it directly
     const res = await executeLockedJob(ctx.env, job);
