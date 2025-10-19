@@ -441,6 +441,7 @@ async function create(params: CreateParams): Promise<CreateResult> {
       paymentPolicyId:     mpListing?.payment_policy  || null,
       returnPolicyId:      mpListing?.return_policy   || null,
     },
+    ...(itemSpecifics.length ? { itemSpecifics } : {}),
     pricingSummary: isFixed
       ? { price: { currency: 'USD', value: priceValue || 0 } }
       : {
