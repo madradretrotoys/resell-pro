@@ -381,18 +381,20 @@ async function create(params: CreateParams): Promise<CreateResult> {
       // omit imageUrls for this test so we can isolate the 25001 cause
       ...(false ? { imageUrls } : {})
     },
-    packageWeightAndSize: {
-      packageWeight: {
-        unit: 'POUND',
-        // eBay publish validator rejects >3 decimal places. Round and enforce > 0.
-        value: (() => {
-          const lb = Number(profile?.weight_lb ?? 0);
-          const oz = Number(profile?.weight_oz ?? 0);
-          const pounds = lb + (oz / 16);
-          const rounded = Math.round(pounds * 1000) / 1000; // 3-decimal precision
-          return Math.max(0.001, rounded);
-        })()
-      },
+    packageWeight: {
+      unit: 'POUND',
+      // Publish validator for EBAY_US expects POUNDS with max 2 decimal places.
+      // Round to 2dp and enforce a positive minimum.
+      value: (() => {
+        const lb = Number(profile?.weight_lb ?? 0);
+        const oz = Number(profile?.weight_oz ?? 0);
+        const pounds = lb + (oz / 16);
+        const twoDp = Math.round(pounds * 100) / 100;      // 2-decimal precision
+        const safe = Math.max(0.01, twoDp);
+        // avoid serialization surprises like 2.3 -> 2.299999... by re-numbering toFixed
+        return Number(safe.toFixed(2));
+      })()
+    },
       packageSize: {
         dimensions: {
           height: Number(profile?.shipbx_height || 0),
