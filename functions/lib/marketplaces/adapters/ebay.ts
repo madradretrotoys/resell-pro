@@ -286,7 +286,16 @@ async function create(params: CreateParams): Promise<CreateResult> {
     (mpListing?.buy_it_now_price ?? item?.price ?? null) != null
       ? Number(mpListing?.buy_it_now_price ?? item?.price)
       : null;
-
+  // Ensure the Inventory Location key we'll reference actually exists.
+  // (We fail fast with a clear message rather than guessing address fields.)
+  const merchantLocationKey = 'store_001';
+  try {
+    await ebayFetch(`/sell/inventory/v1/location/${encodeURIComponent(merchantLocationKey)}`, { method: 'GET' });
+  } catch (e: any) {
+    throw new Error(
+      `eBay Inventory Location "${merchantLocationKey}" not found. Create it in the target environment (address with US + ZIP) and retry. Details: ${String(e?.message || e).slice(0,200)}`
+    );
+  }
   const offerBody: any = {
     sku,
     marketplaceId,
