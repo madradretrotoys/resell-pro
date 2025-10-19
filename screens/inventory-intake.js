@@ -441,30 +441,34 @@ export async function init() {
     });
   
       document.addEventListener("intake:item-saved", async (ev) => {
-        try {
-          const id = ev?.detail?.item_id;
-          const saveStatus = String(ev?.detail?.save_status || "").toLowerCase(); // "active" | "draft"
-          if (!id) return;
-          __currentItemId = id;
-      
-          // 1) Flush any pending uploads FIRST (if none, this is a fast no-op)
-          if (__pendingFiles.length > 0) {
-            const pending = __pendingFiles.splice(0, __pendingFiles.length);
-            for (const f of pending) {
-              await uploadAndAttach(f);
-            }
+      try {
+        const id         = ev?.detail?.item_id;
+        const saveStatus = String(ev?.detail?.save_status || "").toLowerCase(); // "active" | "draft"
+        const jobIds     = Array.isArray(ev?.detail?.job_ids) ? ev.detail.job_ids : [];
+        if (!id) return;
+        __currentItemId = id;
+    
+        // 1) Flush any pending uploads FIRST (fast no-op if none)
+        if (__pendingFiles.length > 0) {
+          const pending = __pendingFiles.splice(0, __pendingFiles.length);
+          for (const f of pending) {
+            await uploadAndAttach(f);
           }
-      
-          // 2) If it was an Active save, trigger publish now that images exist server-side
-          if (saveStatus === "active") {
-            fetch(`/api/marketplaces/publish/run?item_id=${encodeURIComponent(__currentItemId)}`, {
+        }
+    
+        // 2) If this was an Active save, trigger each enqueued job by job_id
+        if (saveStatus === "active" && jobIds.length > 0) {
+          for (const jid of jobIds) {
+            // fire-and-forget; run.ts already supports ?job_id=
+            fetch(`/api/marketplaces/publish/run?job_id=${encodeURIComponent(jid)}`, {
               method: "POST"
             }).catch(() => {});
           }
-        } catch (e) {
-          console.error("photos:flush:error", e);
         }
-      });
+      } catch (e) {
+        console.error("photos:flush:error", e);
+      }
+    });
   }
 
 
@@ -2047,8 +2051,12 @@ document.addEventListener("intake:item-changed", () => refreshDrafts({ force: tr
           try {
             document.dispatchEvent(
               new CustomEvent("intake:item-saved", {
-                // pass the current save mode so we know whether to publish
-                detail: { item_id: __currentItemId, save_status: mode } // "active" | "draft"
+                // pass save mode and the job_ids we got back from the server
+                detail: {
+                  item_id: __currentItemId,
+                  save_status: mode,                 // "active" | "draft"
+                  job_ids: Array.isArray(resp?.job_ids) ? resp.job_ids : [] // from intake POST response
+                }
               })
             );
           } catch {}
