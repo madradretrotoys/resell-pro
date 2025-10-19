@@ -225,9 +225,9 @@ async function create(params: CreateParams): Promise<CreateResult> {
       merchantLocationStatus: 'ENABLED',
       locationWebUrl: 'https://resellpros.com',
       locationAddress: {
-        addressLine1: 'Address Pending',
-        city: 'Unknown',
-        stateOrProvince: 'NA',
+        addressLine1: '5026 Kipling Street',
+        city: 'Wheat Ridge',
+        stateOrProvince: 'CO',
         postalCode: String(zip || '').trim(),
         countryCode: 'US'
       }
