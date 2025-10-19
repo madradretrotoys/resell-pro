@@ -55,7 +55,7 @@ async function create(params: CreateParams): Promise<CreateResult> {
       SELECT mcem.ebay_category_id
       FROM app.marketplace_category_ebay_map AS mcem
       JOIN app.marketplace_categories      AS mc
-        ON mc.category_key::text = mcem.category_key
+        ON mc.category_key = mcem.category_key_uuid
       JOIN app.marketplaces_available      AS ma
         ON ma.id = mcem.marketplace_id
       WHERE ma.slug = 'ebay'
