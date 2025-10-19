@@ -774,45 +774,10 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
         VALUES (${item_id}, ${tenant_id}, ${EBAY_MARKETPLACE_ID}, 'enqueue_failed', ${String(enqueueErr).slice(0,500)})
       `;
     }  
-    // 5) Immediately process the just-enqueued jobs (Option A: HTTP hop)
-    //    Instead of importing the processor (which caused bundling/runtime issues),
-    //    call the dedicated API endpoint for each queued job so we still block until done.
-    try {
-      // Find any queued jobs for this item created by the enqueue block above
-      const queued = await sql/*sql*/`
-        SELECT job_id, marketplace_id
-        FROM app.marketplace_publish_jobs
-        WHERE tenant_id = ${tenant_id}
-          AND item_id   = ${item_id}
-          AND status    = 'queued'
-        ORDER BY created_at ASC
-      `;
-
-      const results: any[] = [];
-      const runUrlBase = new URL("/api/marketplaces/publish/run", request.url);
-
-      for (const j of queued) {
-        console.log("[intake] inline.http_run", { job_id: j.job_id, marketplace_id: j.marketplace_id });
-        const runUrl = new URL(runUrlBase);
-        runUrl.searchParams.set("job_id", String(j.job_id));
-
-        const res = await fetch(runUrl.toString(), { method: "POST" });
-        const body = await res.json().catch(() => ({}));
-        results.push(body);
-      }
-
-      // If any failed, surface the first failure back to the client
-      const failed = results.find(r => !r?.ok);
-      if (failed) {
-        return json({ ok: false, error: 'publish_failed', detail: failed.error || null, item_id, sku }, 502);
-      }
-
-      return json({ ok: true, item_id, sku, status: 'active', published: true, jobs: results.map((r: any) => ({ job_id: r.job_id, status: r.status })), ms: Date.now() - t0 }, 200);
-    } catch (inlineErr: any) {
-      const msg = String(inlineErr?.message || inlineErr).slice(0, 500);
-      return json({ ok: false, error: 'publish_inline_error', message: msg, item_id, sku }, 500);
-    }
-
+    
+    // do NOT run publish inline. Return now so the client can upload images,
+    // then a runner (or a later manual trigger) will process the queued jobs.
+    return json({ ok: true, item_id, sku, status, published: false, ms: Date.now() - t0 }, 200);
 
   } catch (e: any) {
     // Try a friendlier error
