@@ -325,7 +325,7 @@ async function create(params: CreateParams): Promise<CreateResult> {
   await ensureLocation(merchantLocationKey, shippingZip);
   // Ensure the Inventory Location key we'll reference actually exists.
   // (We fail fast with a clear message rather than guessing address fields.)
-  const merchantLocationKey = 'store_001';
+  
   try {
     await ebayFetch(`/sell/inventory/v1/location/${encodeURIComponent(merchantLocationKey)}`, { method: 'GET' });
   } catch (e: any) {
