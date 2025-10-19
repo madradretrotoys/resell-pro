@@ -201,6 +201,7 @@ async function create(params: CreateParams): Promise<CreateResult> {
   // If it doesn't, create a minimal US location using the item's ZIP.
     // One-time helper to ensure a Merchant Inventory Location exists.
   // Deterministic: if initial GET is not 200, PUT to create, then GET to verify.
+  
   async function ensureLocation(key: string, zip: string) {
     // 0) Optional: list current keys for visibility in logs
     try {
@@ -211,6 +212,7 @@ async function create(params: CreateParams): Promise<CreateResult> {
     // 1) Try to read the location
     let exists = false;
     try {
+      
       await ebayFetch(`/sell/inventory/v1/location/${encodeURIComponent(key)}`, { method: 'GET' });
       exists = true;
     } catch {
@@ -218,23 +220,23 @@ async function create(params: CreateParams): Promise<CreateResult> {
     }
     if (exists) return;
 
-    // 2) Create minimal US location (using ZIP you already collect)
+    // 2) Create location (WAREHOUSE) with a valid US address; POST per eBay spec
     const payload = {
-      name: 'Primary Store',
-      locationType: 'STORE',
+      name: 'Primary Warehouse',
       merchantLocationStatus: 'ENABLED',
-      locationStatus: 'ENABLED',
-      locationWebUrl: 'https://resellpros.com',
-      locationAddress: {
-        addressLine1: '5030 Kipling Street',
-        city: 'Wheat Ridge',
-        stateOrProvince: 'CO',
-        postalCode: String(zip || '').trim(),
-        country: 'US'
+      locationTypes: ['WAREHOUSE'],
+      location: {
+        address: {
+          addressLine1: '5030 Kipling Street',
+          city: 'Wheat Ridge',
+          stateOrProvince: 'CO',
+          postalCode: (String(zip || '').trim() || '80033'),
+          country: 'US'
+        }
       }
     };
     await ebayFetch(`/sell/inventory/v1/location/${encodeURIComponent(key)}`, {
-      method: 'PUT',
+      method: 'POST',
       body: JSON.stringify(payload)
     });
 
