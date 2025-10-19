@@ -404,10 +404,13 @@ async function create(params: CreateParams): Promise<CreateResult> {
         unit: 'INCH'
       }
     },
+    // Compute inventory quantity without optional chaining/nullish coalescing
+    // to avoid Wrangler parser issues.
+    const computedQty = Math.max(1, Number((item && item.qty) != null ? item.qty : 1));
     availability: {
       shipToLocationAvailability: {
         // eBay validates publish against the Inventory Item’s availability.
-        quantity: Math.max(1, Number(item?.qty ?? 1))
+        quantity: computedQty
       }
     }
   };
