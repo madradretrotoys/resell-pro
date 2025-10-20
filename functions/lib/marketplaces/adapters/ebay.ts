@@ -384,19 +384,15 @@ async function create(params: CreateParams): Promise<CreateResult> {
     },
     // ✅ eBay expects BOTH weight & size inside packageWeightAndSize
     packageWeightAndSize: {
-      // Explicit package type to avoid "LETTER" defaults at publish
-      packageType: 'PACKAGE_THICK_ENVELOPE',
+      // No packageType for this run; keep POUND with 2 decimals
       packageWeight: {
         unit: 'POUND',
-        // Publish validator for EBAY_US expects POUNDS with max 2 decimal places.
-        // Round to 2dp and enforce a positive minimum.
         value: (() => {
           const lb = Number(profile?.weight_lb ?? 0);
           const oz = Number(profile?.weight_oz ?? 0);
           const pounds = lb + (oz / 16);
-          const twoDp = Math.round(pounds * 100) / 100;      // 2-decimal precision
+          const twoDp = Math.round(pounds * 100) / 100;
           const safe = Math.max(0.01, twoDp);
-          // avoid serialization surprises like 2.3 -> 2.299999... by re-numbering toFixed
           return Number(safe.toFixed(2));
         })()
       },
