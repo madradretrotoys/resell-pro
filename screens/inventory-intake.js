@@ -457,12 +457,12 @@ export async function init() {
           setEbayStatus("Publishing…", { tone: "info" });
     
           for (const jid of jobIds) {
-            // 1) Kick once with POST
+            // fire-and-forget execute
             fetch(`/api/marketplaces/publish/run?job_id=${encodeURIComponent(jid)}`, { method: "POST" })
               .catch(() => {});
-    
-            // 2) Poll with GET peek (read-only)
-            trackPublishJob(jid, { mode: "peek" });
+          
+            // poll this job id until done (POST-based poller)
+            trackPublishJob(jid);
           }
         }
       } catch (e) {
@@ -1216,42 +1216,51 @@ function setMarketplaceVisibility() {
     }
   }
 
-  async function trackPublishJob(jobId, { maxMs = 90000, intervalMs = 1500, mode = "peek" } = {}) {
-    const started = Date.now();
-  
-    async function pollOnce() {
-      try {
-        // Read-only peek to avoid re-executing the job
-        const url = `/api/marketplaces/publish/run?job_id=${encodeURIComponent(jobId)}&peek=1`;
-        const res = await fetch(url, { method: "GET" });
-        const body = await res.json().catch(() => ({}));
-  
-        // Accept either the new richer shape or the older minimal one
-        const state = String(body?.state || body?.status || "").toLowerCase();
-  
-        // Terminal: succeeded
-        if (state === "succeeded") {
-          const remote = body.remote || {};
-          const url = remote.remoteUrl || remote.remoteURL || null;
-          setEbayStatus("Listed", { tone: "ok", link: url || null });
-          return true;
+    async function trackPublishJob(jobId, { maxMs = 90000, intervalMs = 1500 } = {}) {
+        const started = Date.now();
+      
+        async function pollOnce() {
+          try {
+            // Poll the existing POST endpoint. Your server returns { ok, status, remote? } when terminal.
+            const res = await fetch(`/api/marketplaces/publish/run?job_id=${encodeURIComponent(jobId)}`, {
+              method: "POST",
+              headers: { "content-type": "application/json" },
+              body: JSON.stringify({ poll: true })
+            });
+            const body = await res.json().catch(() => ({}));
+      
+            const status = String(body?.status || body?.state || "").toLowerCase();
+      
+            if (status === "succeeded") {
+              const remote = body.remote || {};
+              const url = remote.remoteUrl || remote.remoteURL || null;
+              setEbayStatus("Listed", { tone: "ok", link: url || null });
+              return true;
+            }
+      
+            if (status === "failed" || status === "dead" || body?.error) {
+              const msg = String(body?.error || "Failed").slice(0, 160);
+              setEbayStatus(`Error${msg ? ` — ${msg}` : ""}`, { tone: "error" });
+              return true;
+            }
+      
+            // Non-terminal shapes your server returns while work is ongoing
+            // Examples you've seen: { ok: true, taken: 0 }
+            return false;
+          } catch {
+            // Network hiccup — keep polling until timeout
+            return false;
+          }
         }
-  
-        // Terminal: failed
-        if (state === "failed" || state === "dead" || body?.error) {
-          const msg = String(body?.error || "Failed").slice(0, 160);
-          setEbayStatus(`Error${msg ? ` — ${msg}` : ""}`, { tone: "error" });
-          return true;
+      
+        let done = await pollOnce();
+        while (!done && (Date.now() - started) < maxMs) {
+          await new Promise(r => setTimeout(r, intervalMs));
+          done = await pollOnce();
         }
-  
-        // Non-terminal: queued/running/unknown shapes (e.g., {ok:true,taken:0})
-        // Keep polling while time remains.
-        return false;
-      } catch {
-        // Network hiccup: keep trying until timeout
-        return false;
+      
+        if (!done) setEbayStatus("Unknown", { tone: "muted" });
       }
-    }
   
     let done = await pollOnce();
     while (!done && (Date.now() - started) < maxMs) {
