@@ -45,7 +45,22 @@ async function create(params: CreateParams): Promise<CreateResult> {
   if (!item?.sku) warnings.push('Missing SKU');
   if (!item?.product_short_title) warnings.push('Missing title');
   if (!images?.length) warnings.push('No images attached');
+  //begin temporary ebay debug code 
+  // ── TEMP: Debug path (read-only). If a listingId is provided, inspect & return.
+  const debugListingId =
+    (mpListing as any)?.debug_listing_id ||
+    (profile as any)?.debug_listing_id ||
+    (item as any)?.debug_listing_id ||
+    null;
 
+  if (debugListingId) {
+    const dbg = await debugInventoryByListingId(String(debugListingId));
+    console.log('[ebay:debug.summary]', dbg);
+    // Early-return: no listing created; just surface what eBay has.
+    return { remoteId: null, remoteUrl: null, warnings: [`debug-only: inspected listingId=${debugListingId} sku=${dbg?.sku ?? 'n/a'}`] };
+  }
+
+  //end temporary ebay debug code
     // Declare holders for resolved category + mapped specifics
   let ebayCategoryId: string | null = null;
   let mappedSpecifics: { type: string | null; model: string | null; franchise: string | null; sport: string | null } = {
@@ -335,7 +350,63 @@ async function create(params: CreateParams): Promise<CreateResult> {
       }
     }
 
+  //this is the begining of the temporary debug code
 
+  // ─────────────────────────────────────────────────────────────────────────────
+  // TEMP: Debug helper to inspect what eBay has for a given listingId
+  // Flow: listingId -> GET /offer?listingId=... -> extract sku -> GET /inventory_item/{sku}
+  // Logs: offer summary, resolved sku, inventoryItem.packageWeightAndSize (+ aspects)
+  // ─────────────────────────────────────────────────────────────────────────────
+  async function debugInventoryByListingId(listingId: string) {
+    // 1) Find the offer (to get the SKU Vendoo/eBay used)
+    const offerSearch = await ebayFetch(`/sell/inventory/v1/offer?listingId=${encodeURIComponent(listingId)}`, {
+      method: 'GET'
+    });
+    console.log('[ebay:debug.offerByListing]', typeof offerSearch === 'string' ? offerSearch.slice(0, 1000) : offerSearch);
+  
+    const offers = (offerSearch as any)?.offers || (Array.isArray(offerSearch) ? offerSearch : []);
+    const first = offers?.[0] || (offerSearch as any)?.offer || null;
+    const sku =
+      first?.sku ||
+      first?.inventoryItemSku ||
+      first?.inventoryItem?.sku ||
+      null;
+  
+    console.log('[ebay:debug.resolvedSku]', { listingId, sku });
+  
+    if (!sku) {
+      return { listingId, sku: null, inventoryItem: null, note: 'No SKU found for listingId.' };
+    }
+  
+    // 2) Read the persisted Inventory Item
+    const inv = await ebayFetch(`/sell/inventory/v1/inventory_item/${encodeURIComponent(String(sku))}`, {
+      method: 'GET'
+    });
+  
+    const pws =
+      (inv as any)?.packageWeightAndSize ||
+      ((inv as any)?.product && (inv as any).product.packageWeightAndSize) ||
+      null;
+  
+    const aspects =
+      (inv as any)?.product?.aspects ||
+      (inv as any)?.aspects ||
+      null;
+  
+    console.log('[ebay:debug.inventoryItem]', {
+      sku,
+      packageWeightAndSize: pws,
+      aspects,
+      raw: typeof inv === 'string' ? (inv as string).slice(0, 1200) : undefined
+    });
+  
+    return { listingId, sku, inventoryItem: inv };
+  }
+
+
+  //end the temporary debug code
+
+  
   // (1) PUT inventory item
   const sku = String(item?.sku || '').trim();
   if (!sku) throw new Error('Missing SKU');
