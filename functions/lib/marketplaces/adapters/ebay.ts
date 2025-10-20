@@ -47,6 +47,7 @@ async function create(params: CreateParams): Promise<CreateResult> {
   if (!images?.length) warnings.push('No images attached');
   //begin temporary ebay debug code 
   // ── TEMP: Debug path (read-only). If a listingId is provided, inspect & return.
+ const FORCE_DEBUG_LISTING_ID = '197788797166';
   const debugListingId =
     (mpListing as any)?.debug_listing_id ||
     (profile as any)?.debug_listing_id ||
