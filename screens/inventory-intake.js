@@ -1254,24 +1254,15 @@ function setMarketplaceVisibility() {
         }
       
         let done = await pollOnce();
-        while (!done && (Date.now() - started) < maxMs) {
-          await new Promise(r => setTimeout(r, intervalMs));
-          done = await pollOnce();
+          while (!done && (Date.now() - started) < maxMs) {
+            await new Promise(r => setTimeout(r, intervalMs));
+            done = await pollOnce();
+          }
+        
+          if (!done) setEbayStatus("Unknown", { tone: "muted" });
         }
-      
-        if (!done) setEbayStatus("Unknown", { tone: "muted" });
-      }
   
-    let done = await pollOnce();
-    while (!done && (Date.now() - started) < maxMs) {
-      await new Promise(r => setTimeout(r, intervalMs));
-      done = await pollOnce();
-    }
-  
-    if (!done) setEbayStatus("Unknown", { tone: "muted" });
-  }
-
-    
+       
   function computeValidity() {
     // BASIC — always required (explicit control list)
     const basicControls = getBasicRequiredControls();
@@ -1819,9 +1810,7 @@ document.addEventListener("intake:item-changed", () => refreshDrafts({ force: tr
     // Remember original actions-row HTML so we can restore the 3 CTAs after editing
     let __originalCtasHTML = null;
     
-    // Hold the current item id across edits so the next save updates, not creates 
-    let __currentItemId = null;
-    
+     
 
     /** Format a timestamp into a short local string */
     function fmtSaved(ts) {
