@@ -68,30 +68,55 @@ async function executeLockedJob(env: Env, job: any) {
   // Use a value that exists in app.listing_status (e.g., 'live' / 'active').
   await sql/*sql*/`
     UPDATE app.item_marketplace_listing
-       SET status='live',
-           mp_item_id = ${res.remoteId || null},
-           mp_item_url = ${res.remoteUrl || null},
+       SET status         = 'live',
+           mp_item_id     = ${res.remoteId || null},
+           mp_item_url    = ${res.remoteUrl || null},
+           mp_offer_id    = ${res.offerId || null},
+           mp_category_id = ${res.categoryId || null},
+           connection_id  = ${res.connectionId || null},
            last_synced_at = now(),
-           updated_at = now()
-     WHERE item_id = ${job.item_id}
-       AND tenant_id = ${job.tenant_id}
-       AND marketplace_id = ${job.marketplace_id}
+           published_at   = COALESCE(published_at, now()),
+           updated_at     = now()
+     WHERE item_id       = ${job.item_id}
+       AND tenant_id     = ${job.tenant_id}
+       AND marketplace_id= ${job.marketplace_id}
   `;
 
-  await sql/*sql*/`
-    INSERT INTO app.item_marketplace_events
-      (item_id, tenant_id, marketplace_id, kind, payload)
-    VALUES (${job.item_id}, ${job.tenant_id}, ${job.marketplace_id}, 'created', ${JSON.stringify(res).slice(0,500)})
-  `;
-
-  await sql/*sql*/`
-    UPDATE app.marketplace_publish_jobs
-       SET status='succeeded',
-           updated_at = now()
-     WHERE job_id = ${job.job_id}
-  `;
-
-  return { ok: true, job_id: job.job_id, status: 'succeeded', remote: res };
+    const liveSnapshot = {
+      mp_item_id:   res.remoteId || null,
+      mp_item_url:  res.remoteUrl || null,
+      mp_offer_id:  res.offerId || null,
+      mp_category_id: res.categoryId || null,
+      connection_id:  res.connectionId || null,
+      environment:    res.environment || null,
+      published_at:   new Date().toISOString(),
+      raw: {
+        offer:   res.rawOffer ?? null,
+        publish: res.rawPublish ?? null
+      },
+      warnings: res.warnings ?? []
+    };
+  
+    await sql/*sql*/`
+      INSERT INTO app.item_marketplace_events
+        (item_id, tenant_id, marketplace_id, kind, payload)
+      VALUES (
+        ${job.item_id},
+        ${job.tenant_id},
+        ${job.marketplace_id},
+        'live_snapshot',
+        ${JSON.stringify(liveSnapshot)}
+      )
+    `;
+  
+    await sql/*sql*/`
+      UPDATE app.marketplace_publish_jobs
+         SET status='succeeded',
+             updated_at = now()
+       WHERE job_id = ${job.job_id}
+    `;
+  
+    return { ok: true, job_id: job.job_id, status: 'succeeded', remote: res };
 }
 
 // Exported: process a specific queued job by id (used by intake.ts inline mode)
