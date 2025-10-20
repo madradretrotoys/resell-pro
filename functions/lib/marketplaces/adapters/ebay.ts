@@ -417,11 +417,26 @@ async function create(params: CreateParams): Promise<CreateResult> {
       }
     }
   };
-   console.log('[ebay:inventory_item.put.body]', safeStringify(inventoryItemBody));
+  console.log('[ebay:inventory_item.put.body]', safeStringify(inventoryItemBody));
   await ebayFetch(`/sell/inventory/v1/inventory_item/${encodeURIComponent(sku)}`, {
     method: 'PUT',
     body: JSON.stringify(inventoryItemBody)
   });
+
+  // ── Post-PUT verify (single read; removes publish-time ambiguity) ──
+  try {
+    const persisted = await ebayFetch(`/sell/inventory/v1/inventory_item/${encodeURIComponent(sku)}`, {
+      method: 'GET'
+    });
+    const pws =
+      (persisted && (persisted as any).packageWeightAndSize) ||
+      (persisted && (persisted as any).product && (persisted as any).product.packageWeightAndSize) ||
+      null;
+    console.log('[ebay:postput.verify]', { packageWeightAndSize: pws });
+  } catch (e) {
+    console.warn('[ebay:postput.verify:error]', e);
+    // Continue — offer/publish will still run; this is just visibility.
+  }
 
   // (2) POST offer
   const marketplaceId = 'EBAY_US'; // TODO: make dynamic if you will support other sites
@@ -492,10 +507,66 @@ async function create(params: CreateParams): Promise<CreateResult> {
   if (!offerId) throw new Error(`Offer creation succeeded but no offerId returned: ${JSON.stringify(offerRes).slice(0,200)}`);
 
   // (3) POST publish
-  const pubRes = await ebayFetch(`/sell/inventory/v1/offer/${encodeURIComponent(offerId)}/publish`, {
-    method: 'POST',
-    body: JSON.stringify({}) // empty body per API
-  });
+  // (3) POST publish (with targeted fallback for 25101 Invalid <ShippingPackage>)
+  let pubRes: any;
+  try {
+    pubRes = await ebayFetch(`/sell/inventory/v1/offer/${encodeURIComponent(offerId)}/publish`, {
+      method: 'POST',
+      body: JSON.stringify({})
+    });
+  } catch (err: any) {
+    const msg = String(err?.message || err || '');
+    console.warn('[ebay:publish.error]', msg);
+
+    // If eBay says ShippingPackage invalid (25101), retry without packageType
+    if (msg.includes('"errorId":25101') || msg.includes('Invalid <ShippingPackage>')) {
+      console.warn('[ebay:publish.retry] Retrying without packageType');
+
+      // Rebuild Inventory Item body omitting packageType (keep weight & size)
+      const inventoryItemBodyNoType: any = {
+        ...inventoryItemBody,
+        packageWeightAndSize: {
+          packageWeight: { ...inventoryItemBody.packageWeightAndSize.packageWeight },
+          packageSize:    { ...inventoryItemBody.packageWeightAndSize.packageSize }
+        }
+      };
+
+      // PUT again without packageType
+      console.log('[ebay:inventory_item.put.body#noType]', safeStringify(inventoryItemBodyNoType));
+      await ebayFetch(`/sell/inventory/v1/inventory_item/${encodeURIComponent(sku)}`, {
+        method: 'PUT',
+        body: JSON.stringify(inventoryItemBodyNoType)
+      });
+
+      // Quick GET verify of what eBay persisted
+      try {
+        const persisted2 = await ebayFetch(`/sell/inventory/v1/inventory_item/${encodeURIComponent(sku)}`, { method: 'GET' });
+        const pws2 =
+          (persisted2 && (persisted2 as any).packageWeightAndSize) ||
+          (persisted2 && (persisted2 as any).product && (persisted2 as any).product.packageWeightAndSize) ||
+          null;
+        console.log('[ebay:postput.verify#noType]', { packageWeightAndSize: pws2 });
+      } catch {}
+
+      // Create a fresh offer after updating the item (avoid stale-draft edge cases)
+      const offerRes2 = await ebayFetch(`/sell/inventory/v1/offer`, {
+        method: 'POST',
+        body: JSON.stringify(offerBody)
+      });
+      const newOfferId = (offerRes2 as any)?.offerId || (offerRes2 as any)?.id;
+      if (!newOfferId) {
+        throw new Error(`Offer creation failed during 25101 retry: ${JSON.stringify(offerRes2).slice(0,200)}`);
+      }
+
+      // Publish again
+      pubRes = await ebayFetch(`/sell/inventory/v1/offer/${encodeURIComponent(newOfferId)}/publish`, {
+        method: 'POST',
+        body: JSON.stringify({})
+      });
+    } else {
+      throw err; // Different error — bubble up unchanged
+    }
+  }
 
   const remoteId  = pubRes?.listingId || pubRes?.itemId || null;
   const remoteUrl = pubRes?.listing?.itemWebUrl || pubRes?.itemWebUrl || null;
