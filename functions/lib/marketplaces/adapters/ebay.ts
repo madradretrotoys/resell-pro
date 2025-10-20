@@ -470,7 +470,7 @@ async function create(params: CreateParams): Promise<CreateResult> {
     categoryId: ebayCategoryId || undefined,
     merchantLocationKey, // ← this satisfies Item.Country via the Inventory Location
     listingPolicies: {
-      //fulfillmentPolicyId: mpListing?.shipping_policy || null,
+      
       fulfillmentPolicyId: (mpListing?.shipping_policy_override ?? mpListing?.shipping_policy) || null,
       paymentPolicyId:     mpListing?.payment_policy  || null,
       returnPolicyId:      mpListing?.return_policy   || null,
