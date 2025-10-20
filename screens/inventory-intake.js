@@ -448,21 +448,25 @@ export async function init() {
         if (!id) return;
         __currentItemId = id;
     
-        // 1) Flush any pending uploads FIRST (fast no-op if none)
+        // Flush pending photos first (existing behavior)
         if (__pendingFiles.length > 0) {
           const pending = __pendingFiles.splice(0, __pendingFiles.length);
-          for (const f of pending) {
-            await uploadAndAttach(f);
-          }
+          for (const f of pending) await uploadAndAttach(f);
         }
     
-        // 2) If this was an Active save, trigger each enqueued job by job_id
+        // For Active saves: kick jobs + show/poll status
         if (saveStatus === "active" && jobIds.length > 0) {
+          // Immediately show "Publishing..." in the eBay card
+          setEbayStatus("Publishing…", { tone: "info" });
+    
+          // Kick each job and start a poller for it
           for (const jid of jobIds) {
-            // fire-and-forget; run.ts already supports ?job_id=
-            fetch(`/api/marketplaces/publish/run?job_id=${encodeURIComponent(jid)}`, {
-              method: "POST"
-            }).catch(() => {});
+            // fire-and-forget execute
+            fetch(`/api/marketplaces/publish/run?job_id=${encodeURIComponent(jid)}`, { method: "POST" })
+              .catch(() => {});
+    
+            // poll this job id until done
+            trackPublishJob(jid);
           }
         }
       } catch (e) {
@@ -1179,6 +1183,89 @@ function setMarketplaceVisibility() {
 
   // === END NEW ===
 
+  // ===== Marketplace Status UI helpers (eBay) =====
+  function getEbayStatusNodes() {
+    // Find the eBay card and its status span
+    const card = Array.from(document.querySelectorAll('#marketplaceCards .card'))
+      .find(c => /ebay/i.test((c.querySelector('.font-semibold')?.textContent || '')));
+    if (!card) return { textEl: null, wrap: null };
+  
+    const wrap = card.querySelector('[data-card-status]') || card;
+    const textEl = card.querySelector('[data-status-text]') || wrap.querySelector('.mono') || wrap;
+    return { textEl, wrap };
+  }
+  
+  function setEbayStatus(label, { link = null, tone = 'muted' } = {}) {
+    const { textEl, wrap } = getEbayStatusNodes();
+    if (!textEl) return;
+  
+    // Color cue via utility classes
+    const classes = ['text-gray-600','text-blue-700','text-green-700','text-red-700'];
+    wrap.classList.remove(...classes);
+    if (tone === 'info')  wrap.classList.add('text-blue-700');
+    if (tone === 'ok')    wrap.classList.add('text-green-700');
+    if (tone === 'error') wrap.classList.add('text-red-700');
+  
+    // Set text/anchor
+    if (link) {
+      textEl.innerHTML = ''; // clear
+      const a = document.createElement('a');
+      a.href = link;
+      a.target = '_blank';
+      a.rel = 'noopener';
+      a.textContent = label;
+      textEl.appendChild(a);
+    } else {
+      textEl.textContent = label;
+    }
+  }
+
+  async function trackPublishJob(jobId, { maxMs = 90000, intervalMs = 1500 } = {}) {
+    const started = Date.now();
+  
+    async function pollOnce() {
+      // We POST to the same endpoint; when a job is no longer queued/locked, it returns current state.
+      try {
+        const res = await fetch(`/api/marketplaces/publish/run?job_id=${encodeURIComponent(jobId)}`, { method: "POST" });
+        const body = await res.json().catch(() => ({}));
+  
+        // Fast-path: worker reports succeeded
+        if (body && body.ok === true && String(body.status || "").toLowerCase() === "succeeded") {
+          const remote = body.remote || {};
+          const url = remote.remoteUrl || remote.remoteURL || null;
+          setEbayStatus("Listed", { tone: "ok", link: url || null });
+          return true;
+        }
+  
+        // If known terminal failures bubble up
+        const st = String(body?.status || "").toLowerCase();
+        if (st === "failed" || st === "dead") {
+          const msg = String(body?.error || "Failed").slice(0, 160);
+          setEbayStatus(`Error${msg ? ` — ${msg}` : ""}`, { tone: "error" });
+          return true;
+        }
+  
+        // Not finished yet → keep polling
+        return false;
+      } catch (e) {
+        // Network hiccup: keep trying until timeout
+        return false;
+      }
+    }
+  
+    // initial ping
+    let done = await pollOnce();
+    while (!done && (Date.now() - started) < maxMs) {
+      await new Promise(r => setTimeout(r, intervalMs));
+      done = await pollOnce();
+    }
+  
+    // Timeout fallback: if we never saw a terminal state, show “Unknown”
+    if (!done) {
+      setEbayStatus("Unknown", { tone: "muted" });
+    }
+  }
+  
   function computeValidity() {
     // BASIC — always required (explicit control list)
     const basicControls = getBasicRequiredControls();
