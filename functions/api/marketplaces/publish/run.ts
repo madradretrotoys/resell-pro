@@ -46,6 +46,14 @@ async function executeLockedJob(env: Env, job: any) {
   const reg = getRegistry();
   const adapter = reg.byId(job.marketplace_id);
   if (!adapter) throw new Error(`No adapter for marketplace_id=${job.marketplace_id}`);
+  // Mark listing as publishing while we attempt the external publish
+  await sql/*sql*/`
+    UPDATE app.item_marketplace_listing
+       SET status='publishing',
+           updated_at = now()
+     WHERE item_id = ${job.item_id}
+       AND tenant_id = ${job.tenant_id}
+       AND marketplace_id = ${job.marketplace_id}
 
   // 4) perform op
   const res = await adapter.create({
