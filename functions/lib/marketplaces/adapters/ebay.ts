@@ -384,14 +384,15 @@ async function create(params: CreateParams): Promise<CreateResult> {
     },
     // ✅ eBay expects BOTH weight & size inside packageWeightAndSize
     packageWeightAndSize: {
-      // No packageType for this run; keep POUND with 2 decimals
+      // No packageType for this run; switch to KILOGRAM with 2 decimals
       packageWeight: {
-        unit: 'POUND',
+        unit: 'KILOGRAM',
         value: (() => {
           const lb = Number(profile?.weight_lb ?? 0);
           const oz = Number(profile?.weight_oz ?? 0);
           const pounds = lb + (oz / 16);
-          const twoDp = Math.round(pounds * 100) / 100;
+          const kg = pounds * 0.45359237;
+          const twoDp = Math.round(kg * 100) / 100;
           const safe = Math.max(0.01, twoDp);
           return Number(safe.toFixed(2));
         })()
