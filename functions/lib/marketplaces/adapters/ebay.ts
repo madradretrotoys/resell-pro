@@ -384,29 +384,24 @@ async function create(params: CreateParams): Promise<CreateResult> {
     },
     // ✅ eBay expects BOTH weight & size inside packageWeightAndSize
     packageWeightAndSize: {
-      // Explicit package type to avoid "LETTER" defaults at publish
-      packageType: 'MAILING_BOX',
-
-      Weight: {
+      // packageType is optional; keep or remove as needed
+      // packageType: 'PACKAGE_THICK_ENVELOPE',
+      weight: {
         unit: 'KILOGRAM',
-        // Publish validator for EBAY_US expects POUNDS with max 2 decimal places.
-        // Round to 2dp and enforce a positive minimum.
         value: (() => {
           const lb = Number(profile?.weight_lb ?? 0);
           const oz = Number(profile?.weight_oz ?? 0);
           const pounds = lb + (oz / 16);
-          const twoDp = Math.round(pounds * 100) / 100;      // 2-decimal precision
+          const kg = pounds * 0.45359237;
+          const twoDp = Math.round(kg * 100) / 100;
           const safe = Math.max(0.01, twoDp);
-          // avoid serialization surprises like 2.3 -> 2.299999... by re-numbering toFixed
           return Number(safe.toFixed(2));
         })()
       },
-      packageSize: {
-        dimensions: {
-          height: Number(profile?.shipbx_height || 0),
-          length: Number(profile?.shipbx_length || 0),
-          width:  Number(profile?.shipbx_width  || 0)
-        },
+      dimensions: {
+        height: Number(profile?.shipbx_height || 0),
+        length: Number(profile?.shipbx_length || 0),
+        width:  Number(profile?.shipbx_width  || 0),
         unit: 'INCH'
       }
     },
@@ -528,8 +523,9 @@ async function create(params: CreateParams): Promise<CreateResult> {
       const inventoryItemBodyNoType: any = {
         ...inventoryItemBody,
         packageWeightAndSize: {
-          packageWeight: { ...inventoryItemBody.packageWeightAndSize.packageWeight },
-          packageSize:    { ...inventoryItemBody.packageWeightAndSize.packageSize }
+          // omit packageType entirely
+          weight:     { ...inventoryItemBody.packageWeightAndSize.weight },
+          dimensions: { ...inventoryItemBody.packageWeightAndSize.dimensions }
         }
       };
 
