@@ -57,10 +57,10 @@ async function executeLockedJob(env: Env, job: any) {
     images: imgs
   });
 
-  // 5) success → update listing + event + job
+  // Use a value that exists in app.listing_status (e.g., 'live' / 'active').
   await sql/*sql*/`
     UPDATE app.item_marketplace_listing
-       SET status='listed',
+       SET status='live',
            mp_item_id = ${res.remoteId || null},
            mp_item_url = ${res.remoteUrl || null},
            last_synced_at = now(),
