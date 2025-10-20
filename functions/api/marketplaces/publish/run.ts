@@ -54,7 +54,7 @@ async function executeLockedJob(env: Env, job: any) {
      WHERE item_id = ${job.item_id}
        AND tenant_id = ${job.tenant_id}
        AND marketplace_id = ${job.marketplace_id}
-
+  `;
   // 4) perform op
   const res = await adapter.create({
     env,
