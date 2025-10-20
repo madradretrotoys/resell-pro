@@ -380,7 +380,7 @@ async function create(params: CreateParams): Promise<CreateResult> {
         ...(mappedSpecifics?.sport     ? { Sport:     [String(mappedSpecifics.sport)] }      : {}),
       },
       // omit imageUrls for this test so we can isolate the 25001 cause
-      ...(false ? { imageUrls } : {})
+      ...(imageUrls.length ? { imageUrls } : {})
     },
     // ✅ eBay expects BOTH weight & size inside packageWeightAndSize
     packageWeightAndSize: {
