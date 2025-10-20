@@ -387,7 +387,7 @@ async function create(params: CreateParams): Promise<CreateResult> {
       // Explicit package type to avoid "LETTER" defaults at publish
       
       Weight: {
-        unit: 'POUND',
+        unit: 'KILOGRAM',
         // Publish validator for EBAY_US expects POUNDS with max 2 decimal places.
         // Round to 2dp and enforce a positive minimum.
         value: (() => {
