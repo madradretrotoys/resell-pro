@@ -9,8 +9,14 @@ export type CreateParams = {
 };
 
 export type CreateResult = {
-  remoteId?: string | null;
-  remoteUrl?: string | null;
+  remoteId?: string | null;         // eBay listingId/itemId
+  remoteUrl?: string | null;        // eBay itemWebUrl
+  offerId?: string | null;          // eBay offerId used to publish
+  categoryId?: string | null;       // eBay category id we resolved
+  connectionId?: string | null;     // marketplace_connections.connection_id used
+  environment?: string | null;      // 'production' | 'sandbox'
+  rawOffer?: any;                   // raw offer response (for live_snapshot)
+  rawPublish?: any;                 // raw publish response (for live_snapshot)
   warnings?: string[];
 };
 
