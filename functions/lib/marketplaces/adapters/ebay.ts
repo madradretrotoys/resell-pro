@@ -99,7 +99,7 @@ async function create(params: CreateParams): Promise<CreateResult> {
   
   // 3) Load tenant connection (including token_expires_at) and DECRYPT the stored access_token
   const conn = await sql/*sql*/`
-    SELECT mc.access_token, mc.token_expires_at, mc.environment, mc.secrets_blob
+    SELECT mc.connection_id, mc.access_token, mc.token_expires_at, mc.environment, mc.secrets_blob
     FROM app.marketplace_connections mc
     JOIN app.marketplaces_available ma ON ma.id = mc.marketplace_id
     WHERE mc.tenant_id = ${tenant_id}
@@ -569,7 +569,22 @@ async function create(params: CreateParams): Promise<CreateResult> {
   const remoteId  = pubRes?.listingId || pubRes?.itemId || null;
   const remoteUrl = pubRes?.listing?.itemWebUrl || pubRes?.itemWebUrl || null;
 
-  return { remoteId, remoteUrl, warnings };
+  const offerIdOut = offerId || null;
+  const categoryIdOut = ebayCategoryId || null;
+  const connectionIdOut = String(conn?.[0]?.connection_id || '') || null;
+  const environmentOut = envStr || null;
+
+  return {
+    remoteId,
+    remoteUrl,
+    offerId: offerIdOut,
+    categoryId: categoryIdOut,
+    connectionId: connectionIdOut,
+    environment: environmentOut,
+    rawOffer: offerRes ?? null,
+    rawPublish: pubRes ?? null,
+    warnings
+  };
 } // <-- close async function create
 
 export const ebayAdapter: MarketplaceAdapter = { create };
