@@ -68,17 +68,17 @@ async function executeLockedJob(env: Env, job: any) {
   // Use a value that exists in app.listing_status (e.g., 'live' / 'active').
   await sql/*sql*/`
     UPDATE app.item_marketplace_listing
-       SET status         = 'live',
-           mp_item_id     = ${res.remoteId || null},
-           mp_item_url    = ${res.remoteUrl || null},
-           mp_offer_id    = ${res.offerId || null},
+       SET status='live',
+           mp_item_id = ${res.remoteId || null},
+           mp_item_url = ${res.remoteUrl || null},
+           mp_offer_id = ${res.offerId || null},
            mp_category_id = ${res.categoryId || null},
            connection_id  = ${res.connectionId || null},
            last_synced_at = now(),
-           published_at   = COALESCE(published_at, now()),
-           updated_at     = now()
-     WHERE item_id       = ${job.item_id}
-       AND tenant_id     = ${job.tenant_id}
+           published_at = COALESCE(published_at, now()),
+           updated_at = now()
+     WHERE item_id = ${job.item_id}
+       AND tenant_id = ${job.tenant_id}
        AND marketplace_id= ${job.marketplace_id}
   `;
 
