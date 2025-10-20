@@ -448,25 +448,21 @@ export async function init() {
         if (!id) return;
         __currentItemId = id;
     
-        // Flush pending photos first (existing behavior)
         if (__pendingFiles.length > 0) {
           const pending = __pendingFiles.splice(0, __pendingFiles.length);
           for (const f of pending) await uploadAndAttach(f);
         }
     
-        // For Active saves: kick jobs + show/poll status
         if (saveStatus === "active" && jobIds.length > 0) {
-          // Immediately show "Publishing..." in the eBay card
           setEbayStatus("Publishing…", { tone: "info" });
     
-          // Kick each job and start a poller for it
           for (const jid of jobIds) {
-            // fire-and-forget execute
+            // 1) Kick once with POST
             fetch(`/api/marketplaces/publish/run?job_id=${encodeURIComponent(jid)}`, { method: "POST" })
               .catch(() => {});
     
-            // poll this job id until done
-            trackPublishJob(jid);
+            // 2) Poll with GET peek (read-only)
+            trackPublishJob(jid, { mode: "peek" });
           }
         }
       } catch (e) {
@@ -1220,52 +1216,53 @@ function setMarketplaceVisibility() {
     }
   }
 
-  async function trackPublishJob(jobId, { maxMs = 90000, intervalMs = 1500 } = {}) {
+  async function trackPublishJob(jobId, { maxMs = 90000, intervalMs = 1500, mode = "peek" } = {}) {
     const started = Date.now();
   
     async function pollOnce() {
-      // We POST to the same endpoint; when a job is no longer queued/locked, it returns current state.
       try {
-        const res = await fetch(`/api/marketplaces/publish/run?job_id=${encodeURIComponent(jobId)}`, { method: "POST" });
+        // Read-only peek to avoid re-executing the job
+        const url = `/api/marketplaces/publish/run?job_id=${encodeURIComponent(jobId)}&peek=1`;
+        const res = await fetch(url, { method: "GET" });
         const body = await res.json().catch(() => ({}));
   
-        // Fast-path: worker reports succeeded
-        if (body && body.ok === true && String(body.status || "").toLowerCase() === "succeeded") {
+        // Accept either the new richer shape or the older minimal one
+        const state = String(body?.state || body?.status || "").toLowerCase();
+  
+        // Terminal: succeeded
+        if (state === "succeeded") {
           const remote = body.remote || {};
           const url = remote.remoteUrl || remote.remoteURL || null;
           setEbayStatus("Listed", { tone: "ok", link: url || null });
           return true;
         }
   
-        // If known terminal failures bubble up
-        const st = String(body?.status || "").toLowerCase();
-        if (st === "failed" || st === "dead") {
+        // Terminal: failed
+        if (state === "failed" || state === "dead" || body?.error) {
           const msg = String(body?.error || "Failed").slice(0, 160);
           setEbayStatus(`Error${msg ? ` — ${msg}` : ""}`, { tone: "error" });
           return true;
         }
   
-        // Not finished yet → keep polling
+        // Non-terminal: queued/running/unknown shapes (e.g., {ok:true,taken:0})
+        // Keep polling while time remains.
         return false;
-      } catch (e) {
+      } catch {
         // Network hiccup: keep trying until timeout
         return false;
       }
     }
   
-    // initial ping
     let done = await pollOnce();
     while (!done && (Date.now() - started) < maxMs) {
       await new Promise(r => setTimeout(r, intervalMs));
       done = await pollOnce();
     }
   
-    // Timeout fallback: if we never saw a terminal state, show “Unknown”
-    if (!done) {
-      setEbayStatus("Unknown", { tone: "muted" });
-    }
+    if (!done) setEbayStatus("Unknown", { tone: "muted" });
   }
-  
+
+    
   function computeValidity() {
     // BASIC — always required (explicit control list)
     const basicControls = getBasicRequiredControls();
