@@ -1,3 +1,4 @@
+//Begin router.ts copy
 import { ensureSession, waitForSession } from '/assets/js/auth.js';
 import { showToast } from '/assets/js/ui.js';
 import '/assets/js/api.js'; // ensure window.api is available to screens
@@ -5,10 +6,10 @@ import '/assets/js/api.js'; // ensure window.api is available to screens
 let __TYPING = false;
 let __LAST_NAV = 0;
 
-function isTextInput(el){
+function isTextInput(el: any){
   if(!el) return false;
   const tag = el.tagName;
-  if (tag === 'INPUT' || tag === 'TEXTAREA' || el.isContentEditable) return true;
+  if (tag === 'INPUT' || tag === 'TEXTAREA' || (el as any).isContentEditable) return true;
   return false;
 }
 
@@ -96,7 +97,7 @@ async function loadHTML(url){
   log('loadHTML:end', { bytes: text.length });
   return text;
 }
-export async function loadScreen(name){
+export async function loadScreen(name: string){
   // Absolute last-ditch guard
   if (__TYPING || isTextInput(document.activeElement) || keyboardLikelyOpen()){
     setTimeout(() => loadScreen(name), 200);
@@ -113,13 +114,8 @@ export async function loadScreen(name){
   // 1) Check session (handles tiny race right after login)
   let session = await ensureSession();
   if (!session?.user) session = await waitForSession(1500);
-  
-  if (!session?.user && (__TYPING || isTextInput(document.activeElement) || keyboardLikelyOpen())) {
-    setTimeout(() => loadScreen(name), 300);
-    window.__navLock = false;
-    return;
-  }
   if (!session?.user) {
+    log('auth:fail->redirect', { reason: session?.reason, status: session?.status, debug: session?.debug });
     location.href = '/index.html';
     window.__navLock = false;
     return;
@@ -159,9 +155,9 @@ window.__navLock = false;
 }
 
 
-async function goto(name){
+async function goto(name: string){
   // Prevent double navigation on touchend+click
-   if (window.__navLock) return;
+  if ((window as any).__navLock) return;
 
   // No-op if we're already on this screen
   if (current?.name === name) return;
@@ -172,7 +168,7 @@ async function goto(name){
     return;
   }
 
-  window.__navLock = true;
+  (window as any).__navLock = true;
 
   const u = new URL(location.href);
   u.searchParams.set('page', name);
@@ -180,12 +176,28 @@ async function goto(name){
 
   __LAST_NAV = Date.now();
   await safeLoadScreen(name);
-  window.__navLock = false;
+  (window as any).__navLock = false;
 }
 
+function isTextInput(el){
+  if(!el) return false;
+  const tag = el.tagName;
+  if (tag === 'INPUT' || tag === 'TEXTAREA' || el.isContentEditable) return true;
+  return false;
+}
 
+function keyboardLikelyOpen(){
+  try{
+    // On mobile, when the keyboard opens, visualViewport.height shrinks
+    if (window.visualViewport) {
+      const ratio = window.visualViewport.height / window.innerHeight;
+      return ratio < 0.85; // heuristic; adjust if needed
+    }
+  }catch{}
+  return false;
+}
 
-async function safeLoadScreen(name){
+async function safeLoadScreen(name: string){
   if (__TYPING || isTextInput(document.activeElement) || keyboardLikelyOpen()){
     setTimeout(() => safeLoadScreen(name), 250);
     return;
@@ -211,30 +223,7 @@ window.addEventListener('popstate', () => {
   safeLoadScreen(name);
 });
 
-document.addEventListener('focusin', (e) => {
-  const t = e.target;
-  if (t && t.tagName) {
-    console.log('[trace] focusin', t.tagName, performance.now());
-  }
-}, true);
-document.addEventListener('blur', (e) => {
-  const t = e.target;
-  if (t && t.tagName) {
-    console.log('[trace] blur', t.tagName, performance.now());
-  }
-}, true);
-
-
-(function(){
-  const ps = history.pushState.bind(history);
-  history.pushState = function(...args){
-    console.log('[trace] pushState', performance.now());
-    // @ts-ignore
-    return ps(...args);
-  };
-  window.addEventListener('popstate', () => console.log('[trace] popstate', performance.now()));
-})();
-
 log('boot');
 safeLoadScreen(qs('page') || 'dashboard');
 
+//end router.ts copy
