@@ -1,3 +1,5 @@
+//begin ui.js
+
 export function showToast(msg, ms=2500){
   const el = Object.assign(document.createElement('div'), { textContent: msg });
   Object.assign(el.style,{position:'fixed',bottom:'16px',left:'50%',transform:'translateX(-50%)',background:'#222',color:'#fff',padding:'8px 12px',borderRadius:'8px',zIndex:'9999'});
@@ -32,3 +34,4 @@ export function applyButtonGroupColors(root, options = {}){
 export function normalizeButtonGroups(root=document){
   root.querySelectorAll('.btn-group').forEach((g)=>applyButtonGroupColors(g));
 }
+//end ui.js
