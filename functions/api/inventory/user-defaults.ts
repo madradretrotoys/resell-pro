@@ -25,7 +25,7 @@ async function getMarketplaceId(sql: any, slug: string) {
   const rows = await sql/*sql*/`
     select id
     from app.marketplaces_available
-    where key = ${slug}
+    where slug = ${slug}
     limit 1
   `;
   return rows?.[0]?.id ?? null;
