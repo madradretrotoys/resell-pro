@@ -1,4 +1,3 @@
-
 // functions/api/inventory/intake.ts
 import { neon } from "@neondatabase/serverless";
 
