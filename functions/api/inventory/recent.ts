@@ -70,7 +70,7 @@ export const onRequestGet: PagesFunction = async ({ request, env }) => {
     const limitRaw = Number(url.searchParams.get("limit") || 50);
     const limit = Number.isFinite(limitRaw) ? Math.max(1, Math.min(100, limitRaw)) : 50;
 
-    // Query: latest Active items + primary image (if any)
+    // Query: latest Active items for this tenant + primary image (if any)
     const rows = await sql<{
       item_id: string;
       saved_at: string;
@@ -82,12 +82,15 @@ export const onRequestGet: PagesFunction = async ({ request, env }) => {
       image_url: string | null;
     }[]>`
       WITH imgs AS (
-        SELECT i.item_id,
-               im.cdn_url,
-               ROW_NUMBER() OVER (PARTITION BY im.item_id ORDER BY im.is_primary DESC, im.sort_order ASC, im.created_at ASC) AS rn
-        FROM app.inventory i
-        LEFT JOIN app.item_images im ON im.item_id = i.item_id
-        WHERE i.tenant_id = ${tenant_id}
+        SELECT
+          im.item_id,
+          im.cdn_url,
+          ROW_NUMBER() OVER (
+            PARTITION BY im.item_id
+            ORDER BY im.is_primary DESC, im.sort_order ASC, im.created_at ASC
+          ) AS rn
+        FROM app.item_images im
+        WHERE im.tenant_id = ${tenant_id}
       )
       SELECT
         i.item_id,
@@ -99,8 +102,9 @@ export const onRequestGet: PagesFunction = async ({ request, env }) => {
         i.category_nm,
         (SELECT cdn_url FROM imgs WHERE imgs.item_id = i.item_id AND rn = 1) AS image_url
       FROM app.inventory i
-      LEFT JOIN app.item_listing_profile lp
-        ON lp.item_id = i.item_id AND lp.tenant_id = ${tenant_id}
+      INNER JOIN app.item_listing_profile lp
+        ON lp.item_id = i.item_id
+       AND lp.tenant_id = ${tenant_id}
       WHERE i.item_status = 'active'
       ORDER BY i.updated_at DESC
       LIMIT ${limit};
