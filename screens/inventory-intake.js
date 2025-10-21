@@ -1491,7 +1491,34 @@ document.addEventListener("intake:item-changed", () => refreshInventory({ force:
     renderMarketplaceTiles(meta);
     // Render placeholder cards for any preselected tiles (from defaults)
     try { renderMarketplaceCards(__metaCache); } catch {}
-    
+    // === Hydrate per-user marketplace defaults (eBay) ===
+      async function hydrateUserDefaults() {
+        try {
+          const res = await api(`/api/inventory/user-defaults?marketplace=ebay`, { method: "GET" });
+          if (!res || res.ok === false || !res.defaults) return;
+          const d = res.defaults;
+      
+          const setSel = (id, v) => { const el = document.getElementById(id); if (el && v != null && v !== "") el.value = String(v); };
+          const setChk = (id, v) => { const el = document.getElementById(id); if (el && typeof v === "boolean") el.checked = v; };
+      
+          setSel("ebay_shippingPolicy", d.shipping_policy);
+          setSel("ebay_paymentPolicy",  d.payment_policy);
+          setSel("ebay_returnPolicy",   d.return_policy);
+          setSel("ebay_pricingFormat",  d.pricing_format);  // if your select is "ebay_formatSelect", set that instead
+          const zipEl = document.getElementById("ebay_shipZip");
+          if (zipEl && d.shipping_zip) zipEl.value = d.shipping_zip;
+          setChk("ebay_bestOffer", d.allow_best_offer);
+          setChk("ebay_promote",   d.promote);
+      
+          // Re-apply visibility rules after hydration
+          try {
+            (document.getElementById("ebay_pricingFormat") || document.getElementById("ebay_formatSelect"))?.dispatchEvent(new Event("change"));
+          } catch {}
+        } catch {}
+      }
+      
+      // Hydrate after cards exist
+      try { await hydrateUserDefaults(); } catch {}
     // Store + channel
     fillSelect($("storeLocationSelect"), meta.store_locations);
     fillSelect($("salesChannelSelect"), meta.sales_channels);
@@ -1818,6 +1845,25 @@ document.addEventListener("intake:item-changed", () => refreshInventory({ force:
           writeDefaults(Array.from(selectedMarketplaceIds.values()));
         } catch {}
 
+        // Persist per-user defaults to server (ACTIVE saves only; remember 7 fields, not auto/min amounts)
+        try {
+          if (mode !== "draft") {
+            const defaults = {
+              shipping_policy:  document.getElementById("ebay_shippingPolicy")?.value || null,
+              payment_policy:   document.getElementById("ebay_paymentPolicy")?.value  || null,
+              return_policy:    document.getElementById("ebay_returnPolicy")?.value   || null,
+              shipping_zip:     document.getElementById("ebay_shipZip")?.value        || null,
+              pricing_format:   (document.getElementById("ebay_pricingFormat") || document.getElementById("ebay_formatSelect"))?.value || null,
+              allow_best_offer: !!document.getElementById("ebay_bestOffer")?.checked,
+              promote:          !!document.getElementById("ebay_promote")?.checked,
+            };
+            await api(`/api/inventory/user-defaults?marketplace=ebay`, {
+              method: "PUT",
+              body: { defaults },
+            });
+          }
+        } catch {}
+       
         // Post-save UX: confirm, disable fields, and swap CTAs
         postSaveSuccess(res, mode);
         // Notify Drafts to reload now that an item changed (added/promoted/saved)
