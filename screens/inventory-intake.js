@@ -1491,34 +1491,56 @@ document.addEventListener("intake:item-changed", () => refreshInventory({ force:
     renderMarketplaceTiles(meta);
     // Render placeholder cards for any preselected tiles (from defaults)
     try { renderMarketplaceCards(__metaCache); } catch {}
-    // === Hydrate per-user marketplace defaults (eBay) ===
+      // === Hydrate per-user marketplace defaults (eBay) ===
       async function hydrateUserDefaults() {
         try {
           const res = await api(`/api/inventory/user-defaults?marketplace=ebay`, { method: "GET" });
           if (!res || res.ok === false || !res.defaults) return;
           const d = res.defaults;
-      
-          const setSel = (id, v) => { const el = document.getElementById(id); if (el && v != null && v !== "") el.value = String(v); };
-          const setChk = (id, v) => { const el = document.getElementById(id); if (el && typeof v === "boolean") el.checked = v; };
-      
-          setSel("ebay_shippingPolicy", d.shipping_policy);
-          setSel("ebay_paymentPolicy",  d.payment_policy);
-          setSel("ebay_returnPolicy",   d.return_policy);
-          setSel("ebay_pricingFormat",  d.pricing_format);  // if your select is "ebay_formatSelect", set that instead
+    
+          // 1) Stash policy ids so the async policy loader can re-apply after options arrive.
+          //    If options are already present, we apply immediately as well.
+          try {
+            window.__ebaySavedPolicies = {
+              shipping_policy: d.shipping_policy ?? "",
+              payment_policy:  d.payment_policy  ?? "",
+              return_policy:   d.return_policy   ?? "",
+            };
+            const tryApply = (id, val) => {
+              const el = document.getElementById(id);
+              if (!el) return;
+              // only set if the option list is populated
+              if (el.options && el.options.length > 0 && val) el.value = String(val);
+            };
+            tryApply("ebay_shippingPolicy", d.shipping_policy);
+            tryApply("ebay_paymentPolicy",  d.payment_policy);
+            tryApply("ebay_returnPolicy",   d.return_policy);
+          } catch {}
+    
+          // 2) Non-policy fields can be set directly.
           const zipEl = document.getElementById("ebay_shipZip");
           if (zipEl && d.shipping_zip) zipEl.value = d.shipping_zip;
-          setChk("ebay_bestOffer", d.allow_best_offer);
-          setChk("ebay_promote",   d.promote);
-      
-          // Re-apply visibility rules after hydration
+    
+          const fmtEl = document.getElementById("ebay_formatSelect");
+          if (fmtEl && d.pricing_format) fmtEl.value = String(d.pricing_format);
+    
+          const bestEl = document.getElementById("ebay_bestOffer");
+          if (bestEl && typeof d.allow_best_offer === "boolean") bestEl.checked = d.allow_best_offer;
+    
+          const promEl = document.getElementById("ebay_promote");
+          if (promEl && typeof d.promote === "boolean") promEl.checked = d.promote;
+    
+          // 3) Re-apply visibility rules and any dependent logic
           try {
-            (document.getElementById("ebay_pricingFormat") || document.getElementById("ebay_formatSelect"))?.dispatchEvent(new Event("change"));
+            document.getElementById("ebay_formatSelect")?.dispatchEvent(new Event("change"));
+            document.getElementById("ebay_bestOffer")?.dispatchEvent(new Event("change"));
+            document.getElementById("ebay_promote")?.dispatchEvent(new Event("change"));
           } catch {}
         } catch {}
       }
-      
-      // Hydrate after cards exist
-      try { await hydrateUserDefaults(); } catch {}
+    
+    // Hydrate after cards exist
+    try { await hydrateUserDefaults(); } catch {}
     // Store + channel
     fillSelect($("storeLocationSelect"), meta.store_locations);
     fillSelect($("salesChannelSelect"), meta.sales_channels);
