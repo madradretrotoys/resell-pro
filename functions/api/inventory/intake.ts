@@ -280,7 +280,7 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
                    ${e.promote}, ${e.promote_percent}, ${e.duration}, ${e.starting_bid}, ${e.reserve_price})
                 ON CONFLICT (item_id, marketplace_id)
                 DO UPDATE SET
-                  status = 'draft',
+                  status = COALESCE(item_marketplace_listing.status, EXCLUDED.status),
                   shipping_policy = EXCLUDED.shipping_policy,
                   payment_policy  = EXCLUDED.payment_policy,
                   return_policy   = EXCLUDED.return_policy,
@@ -455,7 +455,7 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
                        ${e.promote}, ${e.promote_percent}, ${e.duration}, ${e.starting_bid}, ${e.reserve_price})
                     ON CONFLICT (item_id, marketplace_id)
                     DO UPDATE SET
-                      status = 'draft',
+                      status = COALESCE(item_marketplace_listing.status, EXCLUDED.status),
                       shipping_policy = EXCLUDED.shipping_policy,
                       payment_policy  = EXCLUDED.payment_policy,
                       return_policy   = EXCLUDED.return_policy,
@@ -973,13 +973,14 @@ export const onRequestGet: PagesFunction = async ({ request, env }) => {
     if (EBAY_ID != null) {
       const rows = await sql<any[]>`
         SELECT
-          status,
-          shipping_policy, payment_policy, return_policy, shipping_zip, pricing_format,
-          buy_it_now_price, allow_best_offer, auto_accept_amount, minimum_offer_amount,
-          promote, promote_percent, duration, starting_bid, reserve_price
-        FROM app.item_marketplace_listing
-        WHERE item_id = ${item_id} AND tenant_id = ${tenant_id} AND marketplace_id = ${EBAY_ID}
-        LIMIT 1
+        status,
+        mp_offer_id, mp_item_url, published_at,
+        shipping_policy, payment_policy, return_policy, shipping_zip, pricing_format,
+        buy_it_now_price, allow_best_offer, auto_accept_amount, minimum_offer_amount,
+        promote, promote_percent, duration, starting_bid, reserve_price
+      FROM app.item_marketplace_listing
+      WHERE item_id = ${item_id} AND tenant_id = ${tenant_id} AND marketplace_id = ${EBAY_ID}
+      LIMIT 1
       `;
       if (rows.length) ebayListing = rows[0];
     }
