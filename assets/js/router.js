@@ -127,24 +127,6 @@ async function goto(name){
 }
 
 window.addEventListener('popstate', () => loadScreen(qs('page') || 'dashboard'));
-// Mobile: some browsers fire touchend without a subsequent click
-// Mobile: some browsers fire touchend without a subsequent click
-/* SPA interceptors disabled for stability:
-   Let anchors perform normal navigation (full reload),
-   which guarantees the menu overlay goes away on mobile
-   and prevents double-trigger flicker on desktop.
-*/
-// document.addEventListener('touchend', ...);
-// document.addEventListener('click', ...);
-
-// If the tab becomes visible again or the viewport changes, ensure menus are shut
-//document.addEventListener('visibilitychange', () => { if (!document.hidden) closeMenus(); });
-//window.addEventListener('resize', () => closeMenus());
-
-// Defensive: if a page is restored from bfcache/pageshow, close menus
-//window.addEventListener('pageshow', () => setTimeout(closeMenus, 0));
-
-
 
 
 log('boot');
