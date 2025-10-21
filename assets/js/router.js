@@ -1,6 +1,43 @@
 import { ensureSession, waitForSession } from '/assets/js/auth.js';
 import { showToast } from '/assets/js/ui.js';
 import '/assets/js/api.js'; // ensure window.api is available to screens
+// --- Focus / keyboard state ---
+let __TYPING = false;
+let __LAST_NAV = 0;
+
+function isTextInput(el: any){
+  if(!el) return false;
+  const tag = el.tagName;
+  if (tag === 'INPUT' || tag === 'TEXTAREA' || (el as any).isContentEditable) return true;
+  return false;
+}
+
+function keyboardLikelyOpen(){
+  try{
+    if (window.visualViewport) {
+      const ratio = window.visualViewport.height / window.innerHeight;
+      return ratio < 0.85; // heuristic
+    }
+  }catch{}
+  return false;
+}
+
+// Track when the user is actively editing
+document.addEventListener('focusin', (e) => {
+  if (isTextInput(e.target)) __TYPING = true;
+}, true);
+document.addEventListener('focusout', (e) => {
+  if (isTextInput(e.target)) __TYPING = false;
+}, true);
+
+// Swallow clicks that start on inputs so they don't bubble into any nav handlers
+document.addEventListener('click', (e) => {
+  if (isTextInput(e.target)) e.stopPropagation();
+}, true);
+
+// Avoid automatic scroll restore pop-causing layout jumps on iOS
+try { history.scrollRestoration = 'manual'; } catch {}
+
 const SCREENS = {
   dashboard: { html: '/screens/dashboard.html', js: '/screens/dashboard.js', title: 'Dashboard' },
   pos:       { html: '/screens/pos.html',       js: '/screens/pos.js',       title: 'POS' },
