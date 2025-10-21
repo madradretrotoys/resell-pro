@@ -1,3 +1,4 @@
+//Begin app.html code 
 <!doctype html>
 <html lang="en">
 <head>
@@ -226,17 +227,11 @@
     nav.classList.remove('open');
     burger.setAttribute('aria-expanded', 'false');
   });
-
-  // Never treat clicks that start on inputs as navigation
-  document.addEventListener('click', (e) => {
-    const t = e.target;
-    if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) {
-      e.stopPropagation();
-    }
-  }, true);
 </script>
 
   <!-- Load the small client router -->
   <script type="module" src="/assets/js/router.js"></script>
 </body>
 </html>
+
+//end app.html code
