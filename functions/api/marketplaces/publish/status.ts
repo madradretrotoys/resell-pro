@@ -1,48 +1,48 @@
-import { Hono } from 'hono';
-import { z } from 'zod';
-import { db } from '@/lib/db'; // adjust import to your db helper
-import { ensureSession } from '@/lib/auth'; // if you gate APIs
-import { json } from 'hono/utils/json'; // optional helper
+// functions/api/marketplaces/publish/status.ts
+import { neon } from "@neondatabase/serverless";
 
-const app = new Hono();
-
-const Q = z.object({
-  job_id: z.string().uuid()
-});
-
-app.get(async (c) => {
-  await ensureSession(c); // optional but recommended
-  const parse = Q.safeParse({ job_id: c.req.query('job_id') || '' });
-  if (!parse.success) return c.json({ ok: false, error: 'invalid_job_id' }, 400);
-  const { job_id } = parse.data;
-
-  // Read only — do NOT execute anything here.
-  const job = await db.oneOrNone(`
-    select job_id, tenant_id, item_id, marketplace_id, op, status, last_error,
-           payload_snapshot, updated_at
-      from app.marketplace_publish_jobs
-     where job_id = $1
-  `, [job_id]);
-
-  if (!job) return c.json({ ok: false, error: 'job_not_found' }, 404);
-
-  // Try to enrich with live URL/status if available
-  const listing = await db.oneOrNone(`
-    select mp_item_url, status, mp_offer_id, published_at
-      from app.item_marketplace_listing
-     where item_id = $1 and marketplace_id = $2
-     limit 1
-  `, [job.item_id, job.marketplace_id]);
-
-  return c.json({
-    ok: true,
-    status: String(job.status || '').toLowerCase(),
-    error: job.last_error || null,
-    remote: listing?.mp_item_url ? { remoteUrl: listing.mp_item_url } : null,
-    mp_item_url: listing?.mp_item_url || null,
-    listing_status: listing?.status || null,
-    published_at: listing?.published_at || null
+const json = (data: any, status = 200) =>
+  new Response(JSON.stringify(data), {
+    status,
+    headers: { "content-type": "application/json", "cache-control": "no-store" },
   });
-});
 
-export default app;
+export const onRequestGet: PagesFunction = async ({ request, env }) => {
+  try {
+    const url = new URL(request.url);
+    const job_id = url.searchParams.get("job_id");
+    if (!job_id) return json({ ok: false, error: "invalid_job_id" }, 400);
+
+    const sql = neon(String(env.DATABASE_URL));
+
+    const jobs = await sql/*sql*/`
+      SELECT job_id, item_id, marketplace_id, status, last_error
+      FROM app.marketplace_publish_jobs
+      WHERE job_id = ${job_id}
+      LIMIT 1
+    `;
+    if (jobs.length === 0) return json({ ok: false, error: "job_not_found" }, 404);
+
+    const j = jobs[0];
+
+    // Enrich with current listing status/url when available
+    const listing = await sql/*sql*/`
+      SELECT status, mp_offer_id, mp_item_url, published_at
+      FROM app.item_marketplace_listing
+      WHERE item_id = ${j.item_id} AND marketplace_id = ${j.marketplace_id}
+      LIMIT 1
+    `;
+
+    return json({
+      ok: true,
+      status: String(j.status || "").toLowerCase(),
+      error: j.last_error || null,
+      remote: listing[0]?.mp_item_url ? { remoteUrl: listing[0].mp_item_url } : null,
+      mp_item_url: listing[0]?.mp_item_url || null,
+      listing_status: listing[0]?.status || null,
+      published_at: listing[0]?.published_at || null
+    });
+  } catch (e) {
+    return json({ ok: false, error: "server_error" }, 500);
+  }
+};
