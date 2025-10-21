@@ -297,6 +297,26 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
                   reserve_price = EXCLUDED.reserve_price,
                   updated_at = now()
               `;
+              await sql/*sql*/`
+                INSERT INTO app.user_marketplace_defaults
+                  (tenant_id, user_id, marketplace_id,
+                   shipping_policy, payment_policy, return_policy, shipping_zip, pricing_format,
+                   allow_best_offer, promote)
+                VALUES
+                  (${tenant_id}, ${actor_user_id}, ${EBAY_MARKETPLACE_ID},
+                   ${e.shipping_policy}, ${e.payment_policy}, ${e.return_policy}, ${e.shipping_zip}, ${e.pricing_format},
+                   ${e.allow_best_offer}, ${e.promote})
+                ON CONFLICT (tenant_id, user_id, marketplace_id)
+                DO UPDATE SET
+                  shipping_policy = EXCLUDED.shipping_policy,
+                  payment_policy  = EXCLUDED.payment_policy,
+                  return_policy   = EXCLUDED.return_policy,
+                  shipping_zip    = EXCLUDED.shipping_zip,
+                  pricing_format  = EXCLUDED.pricing_format,
+                  allow_best_offer = EXCLUDED.allow_best_offer,
+                  promote          = EXCLUDED.promote,
+                  updated_at       = now()
+              `;
             }
           }
           
@@ -452,6 +472,26 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
                       reserve_price = EXCLUDED.reserve_price,
                       updated_at = now()
                   `;
+                  await sql/*sql*/`
+                INSERT INTO app.user_marketplace_defaults
+                  (tenant_id, user_id, marketplace_id,
+                   shipping_policy, payment_policy, return_policy, shipping_zip, pricing_format,
+                   allow_best_offer, promote)
+                VALUES
+                  (${tenant_id}, ${actor_user_id}, ${EBAY_MARKETPLACE_ID},
+                   ${e.shipping_policy}, ${e.payment_policy}, ${e.return_policy}, ${e.shipping_zip}, ${e.pricing_format},
+                   ${e.allow_best_offer}, ${e.promote})
+                ON CONFLICT (tenant_id, user_id, marketplace_id)
+                DO UPDATE SET
+                  shipping_policy = EXCLUDED.shipping_policy,
+                  payment_policy  = EXCLUDED.payment_policy,
+                  return_policy   = EXCLUDED.return_policy,
+                  shipping_zip    = EXCLUDED.shipping_zip,
+                  pricing_format  = EXCLUDED.pricing_format,
+                  allow_best_offer = EXCLUDED.allow_best_offer,
+                  promote          = EXCLUDED.promote,
+                  updated_at       = now()
+              `;
                 }
               }
             }
@@ -600,6 +640,27 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
               reserve_price = EXCLUDED.reserve_price,
               updated_at = now()
           `;
+
+          await sql/*sql*/`
+              INSERT INTO app.user_marketplace_defaults
+                (tenant_id, user_id, marketplace_id,
+                 shipping_policy, payment_policy, return_policy, shipping_zip, pricing_format,
+                 allow_best_offer, promote)
+              VALUES
+                (${tenant_id}, ${actor_user_id}, ${EBAY_MARKETPLACE_ID},
+                 ${e.shipping_policy}, ${e.payment_policy}, ${e.return_policy}, ${e.shipping_zip}, ${e.pricing_format},
+                 ${e.allow_best_offer}, ${e.promote})
+              ON CONFLICT (tenant_id, user_id, marketplace_id)
+              DO UPDATE SET
+                shipping_policy = EXCLUDED.shipping_policy,
+                payment_policy  = EXCLUDED.payment_policy,
+                return_policy   = EXCLUDED.return_policy,
+                shipping_zip    = EXCLUDED.shipping_zip,
+                pricing_format  = EXCLUDED.pricing_format,
+                allow_best_offer = EXCLUDED.allow_best_offer,
+                promote          = EXCLUDED.promote,
+                updated_at       = now()
+            `;
         }
       }
       
@@ -663,8 +724,6 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
           shipbx_width         = EXCLUDED.shipbx_width,
           shipbx_height        = EXCLUDED.shipbx_height
       `;
-    
-        // (Marketplace upserts for ACTIVE creates can be added here later if desired)
     }
 
     // Upsert eBay marketplace listing when present (active create)
@@ -701,6 +760,26 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
             reserve_price = EXCLUDED.reserve_price,
             updated_at = now()
         `;
+        await sql/*sql*/`
+        INSERT INTO app.user_marketplace_defaults
+          (tenant_id, user_id, marketplace_id,
+           shipping_policy, payment_policy, return_policy, shipping_zip, pricing_format,
+           allow_best_offer, promote)
+        VALUES
+          (${tenant_id}, ${actor_user_id}, ${EBAY_MARKETPLACE_ID},
+           ${e.shipping_policy}, ${e.payment_policy}, ${e.return_policy}, ${e.shipping_zip}, ${e.pricing_format},
+           ${e.allow_best_offer}, ${e.promote})
+        ON CONFLICT (tenant_id, user_id, marketplace_id)
+        DO UPDATE SET
+          shipping_policy = EXCLUDED.shipping_policy,
+          payment_policy  = EXCLUDED.payment_policy,
+          return_policy   = EXCLUDED.return_policy,
+          shipping_zip    = EXCLUDED.shipping_zip,
+          pricing_format  = EXCLUDED.pricing_format,
+          allow_best_offer = EXCLUDED.allow_best_offer,
+          promote          = EXCLUDED.promote,
+          updated_at       = now()
+      `;
       }
     }
 
