@@ -1,3 +1,4 @@
+//begin api.js
 let ACTIVE_TENANT_ID = null;
 
 // Optional: expose for other modules that need to switch tenants explicitly
@@ -50,3 +51,4 @@ export async function api(path, opts = {}) {
   return data;
 }
 
+//end api.js
