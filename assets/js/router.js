@@ -121,12 +121,6 @@ async function goto(name){
   u.searchParams.set('page', name);
   history.pushState({}, '', u);
 
-  
-
-  // Hint: on mobile, do a one-time hard refresh after the new screen paints
-  // to defeat stubborn menu/focus states in certain browsers.
-  //window.__forceMobileReloadOnce = /Mobi|Android/i.test(navigator.userAgent);
-
   await loadScreen(name);
 
   
@@ -144,11 +138,11 @@ window.addEventListener('popstate', () => loadScreen(qs('page') || 'dashboard'))
 // document.addEventListener('click', ...);
 
 // If the tab becomes visible again or the viewport changes, ensure menus are shut
-document.addEventListener('visibilitychange', () => { if (!document.hidden) closeMenus(); });
-window.addEventListener('resize', () => closeMenus());
+//document.addEventListener('visibilitychange', () => { if (!document.hidden) closeMenus(); });
+//window.addEventListener('resize', () => closeMenus());
 
 // Defensive: if a page is restored from bfcache/pageshow, close menus
-window.addEventListener('pageshow', () => setTimeout(closeMenus, 0));
+//window.addEventListener('pageshow', () => setTimeout(closeMenus, 0));
 
 
 
