@@ -224,8 +224,22 @@ export async function onRequestPost(ctx: { env: Env, request: Request }) {
     const specific = url.searchParams.get("job_id");
     const itemIdParam = url.searchParams.get("item_id");
 
-    let job: any | undefined;
+    // Strict no-op execute when poll=true (compat with older clients)
+    try {
+      const maybe = await ctx.request.clone().json().catch(() => null);
+      if (maybe && maybe.poll === true && specific) {
+        const [row] = await sql/*sql*/`
+          SELECT status, remote_url AS "remoteUrl", remote_url AS "remoteURL"
+          FROM app.marketplace_publish_jobs
+          WHERE job_id = ${specific}
+          LIMIT 1
+        `;
+        if (!row) return json({ ok: true, status: "unknown" });
+        return json({ ok: true, status: row.status, remote: { remoteUrl: row.remoteUrl, remoteURL: row.remoteURL } });
+      }
+    } catch { /* ignore */ }
 
+    let job: any | undefined;
     if (specific) {
       [job] = await sql/*sql*/`
         UPDATE app.marketplace_publish_jobs j
