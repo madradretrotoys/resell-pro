@@ -227,6 +227,26 @@ window.addEventListener('popstate', () => {
   safeLoadScreen(name);
 });
 
+document.addEventListener('focusin', (e) => {
+  if (e.target && (e.target as HTMLElement).tagName) {
+    console.log('[trace] focusin', (e.target as HTMLElement).tagName, performance.now());
+  }
+}, true);
+document.addEventListener('blur', (e) => {
+  if (e.target && (e.target as HTMLElement).tagName) {
+    console.log('[trace] blur', (e.target as HTMLElement).tagName, performance.now());
+  }
+}, true);
+(function(){
+  const ps = history.pushState.bind(history);
+  history.pushState = function(...args:any[]){
+    console.log('[trace] pushState', performance.now());
+    // @ts-ignore
+    return ps(...args);
+  };
+  window.addEventListener('popstate', () => console.log('[trace] popstate', performance.now()));
+})();
+
 log('boot');
 safeLoadScreen(qs('page') || 'dashboard');
 
