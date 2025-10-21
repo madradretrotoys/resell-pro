@@ -5,11 +5,11 @@ import '/assets/js/api.js'; // ensure window.api is available to screens
 let __TYPING = false;
 let __LAST_NAV = 0;
 
-function isTextInput(el: any){
+function isTextInput(el){
   if(!el) return false;
   const tag = el.tagName;
-  if (tag === 'INPUT' || tag === 'TEXTAREA' || (el as any).isContentEditable) return true;
-  return false;flet session = await ensureSession();
+  if (tag === 'INPUT' || tag === 'TEXTAREA' || el.isContentEditable) return true;
+  return false;
 }
 
 function keyboardLikelyOpen(){
@@ -96,7 +96,7 @@ async function loadHTML(url){
   log('loadHTML:end', { bytes: text.length });
   return text;
 }
-export async function loadScreen(name: string){
+export async function loadScreen(name){
   // Absolute last-ditch guard
   if (__TYPING || isTextInput(document.activeElement) || keyboardLikelyOpen()){
     setTimeout(() => loadScreen(name), 200);
@@ -159,7 +159,7 @@ window.__navLock = false;
 }
 
 
-async function goto(name: string){
+async function goto(name){
   // Prevent double navigation on touchend+click
   if ((window as any).__navLock) return;
 
@@ -183,25 +183,9 @@ async function goto(name: string){
   (window as any).__navLock = false;
 }
 
-function isTextInput(el){
-  if(!el) return false;
-  const tag = el.tagName;
-  if (tag === 'INPUT' || tag === 'TEXTAREA' || el.isContentEditable) return true;
-  return false;
-}
 
-function keyboardLikelyOpen(){
-  try{
-    // On mobile, when the keyboard opens, visualViewport.height shrinks
-    if (window.visualViewport) {
-      const ratio = window.visualViewport.height / window.innerHeight;
-      return ratio < 0.85; // heuristic; adjust if needed
-    }
-  }catch{}
-  return false;
-}
 
-async function safeLoadScreen(name: string){
+async function safeLoadScreen(name){
   if (__TYPING || isTextInput(document.activeElement) || keyboardLikelyOpen()){
     setTimeout(() => safeLoadScreen(name), 250);
     return;
@@ -239,7 +223,7 @@ document.addEventListener('blur', (e) => {
 }, true);
 (function(){
   const ps = history.pushState.bind(history);
-  history.pushState = function(...args:any[]){
+  history.pushState = function(...args){
     console.log('[trace] pushState', performance.now());
     // @ts-ignore
     return ps(...args);
