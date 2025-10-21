@@ -1239,7 +1239,7 @@ function setMarketplaceVisibility() {
             return true;
           }
     
-          return false; // still running/queued
+          return false;
         } catch {
           return false;
         }
