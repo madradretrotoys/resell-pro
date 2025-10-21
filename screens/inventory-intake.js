@@ -1328,7 +1328,37 @@ async function refreshDrafts({ force = false } = {}) {
 document.addEventListener("intake:item-changed", () => refreshDrafts({ force: true }));
 // --- end Drafts refresh bus ---
 
+// --- Inventory refresh bus + helpers (NEW) ---
+let __inventoryRefreshTimer = null;
 
+function isInventoryTabVisible() {
+  const pane = document.getElementById("paneInventory");
+  if (!pane) return true;
+  const hiddenByAttr = pane.getAttribute("hidden") != null;
+  const hiddenByClass = pane.classList.contains("hidden");
+  return !(hiddenByAttr || hiddenByClass);
+}
+
+async function refreshInventory({ force = false } = {}) {
+  if (!force && !isInventoryTabVisible()) return;
+  if (__inventoryRefreshTimer) window.clearTimeout(__inventoryRefreshTimer);
+  __inventoryRefreshTimer = window.setTimeout(async () => {
+    try {
+      const header = document.querySelector('#recentInventoryHeader, [data-recent-inventory-header]');
+      if (header) header.classList.add("loading");
+      const __callLoadInventory = (window && window.__loadInventory) || (typeof loadInventory === "function" ? loadInventory : null);
+      if (__callLoadInventory) { await __callLoadInventory(); }
+    } finally {
+      const header = document.querySelector('#recentInventoryHeader, [data-recent-inventory-header]');
+      if (header) header.classList.remove("loading");
+      __inventoryRefreshTimer = null;
+    }
+  }, 300);
+}
+
+// Refresh inventory after add/save/delete when the Inventory tab is open
+document.addEventListener("intake:item-changed", () => refreshInventory({ force: true }));
+// --- end Inventory refresh bus ---
   
   
   
@@ -1507,6 +1537,39 @@ document.addEventListener("intake:item-changed", () => refreshDrafts({ force: tr
     
     // Auto-load drafts into the Drafts tab on screen load (does not auto-switch the tab)
     await loadDrafts?.();
+    
+    // NEW: Tab wiring for Inventory (lazy-load on first open)
+    (function wireIntakeTabs() {
+      const tabBulk = document.getElementById("tabBulk");
+      const tabDrafts = document.getElementById("tabDrafts");
+      const tabInventory = document.getElementById("tabInventory");
+      const paneBulk = document.getElementById("paneBulk");
+      const paneDrafts = document.getElementById("paneDrafts");
+      const paneInventory = document.getElementById("paneInventory");
+    
+      function showPane(pane) {
+        [paneBulk, paneDrafts, paneInventory].forEach(el => {
+          if (!el) return;
+          if (el === pane) {
+            el.classList.remove("hidden");
+            el.removeAttribute("aria-hidden");
+          } else {
+            el.classList.add("hidden");
+            el.setAttribute("aria-hidden", "true");
+          }
+        });
+      }
+    
+      tabBulk?.addEventListener("click", () => showPane(paneBulk));
+      tabDrafts?.addEventListener("click", async () => {
+        showPane(paneDrafts);
+        await loadDrafts?.();
+      });
+      tabInventory?.addEventListener("click", async () => {
+        showPane(paneInventory);
+        await loadInventory?.();
+      });
+    })();
     
     // --- [NEW] Submission wiring: both buttons call POST /api/inventory/intake ---
     function valByIdOrLabel(id, label) {
@@ -2080,9 +2143,104 @@ document.addEventListener("intake:item-changed", () => refreshDrafts({ force: tr
     }
 
      // Make loadDrafts available to the refresh bus declared earlier
-    try { window.__loadDrafts = loadDrafts; } catch {}
-    
-    wireCtas();
+      try { window.__loadDrafts = loadDrafts; } catch {}
+      
+      /** Render a single inventory row (Active items) */
+      function renderInventoryRow(row) {
+        const tr = document.createElement("tr");
+        tr.className = "border-b";
+        const price = (row.price != null) ? `$${Number(row.price).toFixed(2)}` : "—";
+        const qty = (row.qty ?? "—");
+        const cat = row.category_nm || "—";
+        const title = row.product_short_title || "—";
+        const saved = fmtSaved(row.saved_at);
+      
+        const imgCell = `
+          <div class="w-10 h-10 rounded-lg overflow-hidden border" style="width:40px;height:40px">
+            ${row.image_url ? `<img src="${row.image_url}" alt="" style="width:40px;height:40px;object-fit:cover" loading="lazy">` : `<div class="w-10 h-10 bg-gray-100"></div>`}
+          </div>
+        `;
+      
+        tr.innerHTML = `
+          <td class="px-3 py-2 whitespace-nowrap">${saved}</td>
+          <td class="px-3 py-2">${imgCell}</td>
+          <td class="px-3 py-2 mono">${row.sku || "—"}</td>
+          <td class="px-3 py-2">${title}</td>
+          <td class="px-3 py-2">${price}</td>
+          <td class="px-3 py-2">${qty}</td>
+          <td class="px-3 py-2">${cat}</td>
+          <td class="px-3 py-2">
+            <div class="flex gap-2">
+              <button type="button" class="btn btn-primary btn-sm" data-action="load" data-item-id="${row.item_id}">Load</button>
+              <button type="button" class="btn btn-ghost btn-sm" data-action="delete" data-item-id="${row.item_id}">Delete</button>
+            </div>
+          </td>
+        `;
+        return tr;
+      }
+      
+      /** Click handler: Delete an inventory item from the list (Active) */
+      async function handleDeleteInventory(item_id, rowEl) {
+        try {
+          const sure = confirm("Delete this item? This cannot be undone.");
+          if (!sure) return;
+          const res = await api("/api/inventory/intake", {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ action: "delete", item_id })
+          });
+          if (!res || res.ok === false) throw new Error(res?.error || "delete_failed");
+          if (rowEl && rowEl.parentElement) rowEl.parentElement.removeChild(rowEl);
+          // also nudge the drafts/inventory panes to stay current
+          document.dispatchEvent(new CustomEvent("intake:item-changed"));
+        } catch (err) {
+          console.error("inventory:delete:error", err);
+          alert("Failed to delete item.");
+        }
+      }
+      
+      /** Load and render the most recent Active inventory (limit 50) */
+      async function loadInventory() {
+        try {
+          const tbody = document.getElementById("recentInventoryTbody");
+          if (!tbody) return;
+          const res = await api("/api/inventory/recent?limit=50", { method: "GET" });
+          if (!res || res.ok === false) throw new Error(res?.error || "inventory_failed");
+          const rows = Array.isArray(res.rows) ? res.rows : [];
+      
+          tbody.innerHTML = "";
+          if (rows.length === 0) {
+            const tr = document.createElement("tr");
+            tr.innerHTML = `<td class="px-3 py-2 text-gray-500" colspan="8">No inventory found.</td>`;
+            tbody.appendChild(tr);
+            return;
+          }
+      
+          for (const r of rows) {
+            const tr = renderInventoryRow(r);
+            tbody.appendChild(tr);
+          }
+      
+          // Wire row buttons
+          tbody.querySelectorAll("button[data-action]").forEach((btn) => {
+            const action = btn.getAttribute("data-action");
+            const id = btn.getAttribute("data-item-id");
+            if (action === "load") {
+              // reuse the existing loader; it hydrates photos + fields
+              btn.addEventListener("click", () => handleLoadDraft(id));
+            } else if (action === "delete") {
+              btn.addEventListener("click", () => handleDeleteInventory(id, btn.closest("tr")));
+            }
+          });
+        } catch (err) {
+          console.error("inventory:load:error", err);
+        }
+      }
+      
+      // Expose for refresh bus
+      try { window.__loadInventory = loadInventory; } catch {}
+      
+      wireCtas();
 
     // NEW: Photos bootstrap
     wirePhotoPickers();
