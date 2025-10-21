@@ -1848,39 +1848,39 @@ document.addEventListener("intake:item-changed", () => refreshInventory({ force:
          // NEW: also persist user defaults on the server for this marketplace
         try {
           // Only run if eBay controls exist on the page
-          const shipSel = document.getElementById("ebay_shipping_policy");
-          const paySel  = document.getElementById("ebay_payment_policy");
-          const retSel  = document.getElementById("ebay_return_policy");
-          const zipEl   = document.getElementById("ebay_zip");
-          const fmtSel  = document.getElementById("ebay_pricing_format");
-          const boChk   = document.getElementById("ebay_allow_best_offer");
+          const shipSel = document.getElementById("ebay_shippingPolicy");
+          const paySel  = document.getElementById("ebay_paymentPolicy");
+          const retSel  = document.getElementById("ebay_returnPolicy");
+          const zipEl   = document.getElementById("ebay_shipZip");
+          // Pricing format comes from the format select (fixed|auction)
+          const fmtSel  = document.getElementById("ebay_formatSelect");
+          const boChk   = document.getElementById("ebay_bestOffer");
           const prChk   = document.getElementById("ebay_promote");
-    
+        
           if (shipSel || paySel || retSel || zipEl || fmtSel || boChk || prChk) {
-            const clean = (v) => (v === undefined || v === null ? undefined : (typeof v === "string" ? v.trim() : v));
+            const clean = (v) => (v === undefined || v === null
+              ? undefined
+              : (typeof v === "string" ? v.trim() : v));
+        
             const defaults = {
               shipping_policy: clean(shipSel?.value || ""),
               payment_policy:  clean(paySel?.value  || ""),
               return_policy:   clean(retSel?.value  || ""),
               shipping_zip:    clean(zipEl?.value   || ""),
-              pricing_format:  clean(fmtSel?.value  || ""),
+              pricing_format:  clean((fmtSel?.value || "").toLowerCase()),
               allow_best_offer: boChk ? Boolean(boChk.checked) : undefined,
               promote:          prChk ? Boolean(prChk.checked) : undefined,
             };
-            // Drop empty-string fields so we only store real choices
-            Object.keys(defaults).forEach(k => {
-              if (defaults[k] === "" || defaults[k] === undefined) delete defaults[k];
+        
+            await api("/api/inventory/user-defaults?marketplace=ebay", {
+              method: "PUT",
+              headers: {
+                "content-type": "application/json"
+              },
+              body: JSON.stringify({ defaults }),
             });
-    
-            if (Object.keys(defaults).length > 0) {
-              await api("/api/inventory/user-defaults?marketplace=ebay", {
-                method: "PUT",
-                headers: { "content-type": "application/json" },
-                body: JSON.stringify({ defaults }),
-              });
-            }
           }
-        } catch {} 
+        } catch {}
        
         
         // Post-save UX: confirm, disable fields, and swap CTAs
