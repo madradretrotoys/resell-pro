@@ -35,8 +35,15 @@ async function getMarketplaceId(sql: any, slug: string) {
 // GET /api/inventory/user-defaults?marketplace=ebay
 export const onRequestGet: PagesFunction<Env> = async ({ request, env }) => {
   try {
-    const cookie = request.headers.get("cookie");
-    if (!cookie) return json({ ok: false, error: "no_cookie" }, 401);
+    const cookieHeader = request.headers.get("cookie") || "";
+    if (!cookieHeader) return json({ ok: false, error: "no_cookie" }, 401);
+
+    // Resolve actor from the same JWT pattern used by intake.ts
+    const token = readCookie(cookieHeader, "__Host-rp_session");
+    if (!token) return json({ ok: false, error: "no_cookie" }, 401);
+    const payload = await verifyJwt(token, String((env as any).JWT_SECRET));
+    const actor_user_id = String((payload as any).sub || "");
+    if (!actor_user_id) return json({ ok: false, error: "bad_token" }, 401);
 
     const tenantId = request.headers.get("x-tenant-id") || "";
     if (!tenantId) return json({ ok: false, error: "no_tenant" }, 400);
@@ -59,7 +66,7 @@ export const onRequestGet: PagesFunction<Env> = async ({ request, env }) => {
         promote
       from app.user_marketplace_defaults
       where tenant_id = ${tenantId}
-        and user_id = current_setting('app.user_id', true)::uuid
+        and user_id = ${actor_user_id}
         and marketplace_id = ${marketplaceId}
       limit 1
     `;
@@ -74,6 +81,7 @@ export const onRequestGet: PagesFunction<Env> = async ({ request, env }) => {
     return json({ ok: false, error: "server_error", message: e?.message || String(e) }, 500);
   }
 };
+
 
 // PUT /api/inventory/user-defaults?marketplace=ebay
 // Body: { defaults: { shipping_policy, payment_policy, return_policy, shipping_zip, pricing_format, allow_best_offer, promote } }
