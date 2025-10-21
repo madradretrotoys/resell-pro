@@ -117,17 +117,53 @@ async function goto(name){
   if (window.__navLock) return;
   window.__navLock = true;
 
+  // If typing, don't navigate yet — this would blur the field and close keyboard
+  if (isTextInput(document.activeElement) || keyboardLikelyOpen()){
+    setTimeout(() => { window.__navLock = false; goto(name); }, 250);
+    return;
+  }
+
   const u = new URL(location.href);
   u.searchParams.set('page', name);
   history.pushState({}, '', u);
 
-  await loadScreen(name);
-
-  
+  await safeLoadScreen(name);
 }
 
-window.addEventListener('popstate', () => loadScreen(qs('page') || 'dashboard'));
 
+function isTextInput(el){
+  if(!el) return false;
+  const tag = el.tagName;
+  if (tag === 'INPUT' || tag === 'TEXTAREA' || el.isContentEditable) return true;
+  return false;
+}
+
+function keyboardLikelyOpen(){
+  try{
+    // On mobile, when the keyboard opens, visualViewport.height shrinks
+    if (window.visualViewport) {
+      const ratio = window.visualViewport.height / window.innerHeight;
+      return ratio < 0.85; // heuristic; adjust if needed
+    }
+  }catch{}
+  return false;
+}
+
+async function safeLoadScreen(name){
+  // If user is typing, defer the navigation to avoid blurring/closing the keyboard
+  if (isTextInput(document.activeElement) || keyboardLikelyOpen()){
+    // Re-check shortly rather than forcing a blur
+    setTimeout(() => safeLoadScreen(name), 250);
+    return;
+  }
+  await loadScreen(name);
+}
+
+window.addEventListener('popstate', () => {
+  const name = qs('page') || 'dashboard';
+  safeLoadScreen(name);
+});
 
 log('boot');
-loadScreen(qs('page') || 'dashboard');
+safeLoadScreen(qs('page') || 'dashboard');
+
