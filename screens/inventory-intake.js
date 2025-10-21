@@ -443,7 +443,7 @@ export async function init() {
       document.addEventListener("intake:item-saved", async (ev) => {
       try {
         const id         = ev?.detail?.item_id;
-        const saveStatus = String(ev?.detail?.save_status || "").toLowerCase();
+        const saveStatus = String(ev?.detail?.save_status || "").toLowerCase(); // "active" | "draft"
         const jobIds     = Array.isArray(ev?.detail?.job_ids) ? ev.detail.job_ids : [];
         if (!id) return;
         __currentItemId = id;
@@ -455,17 +455,20 @@ export async function init() {
     
         if (saveStatus === "active" && jobIds.length > 0) {
           setEbayStatus("Publishing…", { tone: "info" });
-          // IMPORTANT: do not POST here; the server already queued/running the job.
-          // Only poll read-only status:
+    
           for (const jid of jobIds) {
-            trackPublishJob(jid); // now uses GET /status (see patch 1B)
+            // fire-and-forget execute
+            fetch(`/api/marketplaces/publish/run?job_id=${encodeURIComponent(jid)}`, { method: "POST" })
+              .catch(() => {});
+          
+            // poll this job id until done (POST-based poller)
+            trackPublishJob(jid);
           }
         }
       } catch (e) {
         console.error("photos:flush:error", e);
       }
     });
-
   }
 
 
@@ -1214,46 +1217,50 @@ function setMarketplaceVisibility() {
   }
 
     async function trackPublishJob(jobId, { maxMs = 90000, intervalMs = 1500 } = {}) {
-      const started = Date.now();
-    
-      async function pollOnce() {
-        try {
-          const res = await fetch(`/api/marketplaces/publish/status?job_id=${encodeURIComponent(jobId)}`, {
-            method: "GET",
-            headers: { "accept": "application/json" }
-          });
-          const body = await res.json().catch(() => ({}));
-    
-          const status = String(body?.status || body?.state || "").toLowerCase();
-    
-          if (status === "succeeded") {
-            const remote = body.remote || {};
-            const url = remote.remoteUrl || remote.remoteURL || body?.mp_item_url || null;
-            setEbayStatus("Listed", { tone: "ok", link: url || null });
-            return true;
+        const started = Date.now();
+      
+        async function pollOnce() {
+          try {
+            // Poll the existing POST endpoint. Your server returns { ok, status, remote? } when terminal.
+            const res = await fetch(`/api/marketplaces/publish/run?job_id=${encodeURIComponent(jobId)}`, {
+              method: "POST",
+              headers: { "content-type": "application/json" },
+              body: JSON.stringify({ poll: true })
+            });
+            const body = await res.json().catch(() => ({}));
+      
+            const status = String(body?.status || body?.state || "").toLowerCase();
+      
+            if (status === "succeeded") {
+              const remote = body.remote || {};
+              const url = remote.remoteUrl || remote.remoteURL || null;
+              setEbayStatus("Listed", { tone: "ok", link: url || null });
+              return true;
+            }
+      
+            if (status === "failed" || status === "dead" || body?.error) {
+              const msg = String(body?.error || "Failed").slice(0, 160);
+              setEbayStatus(`Error${msg ? ` — ${msg}` : ""}`, { tone: "error" });
+              return true;
+            }
+      
+            // Non-terminal shapes your server returns while work is ongoing
+            // Examples you've seen: { ok: true, taken: 0 }
+            return false;
+          } catch {
+            // Network hiccup — keep polling until timeout
+            return false;
           }
-    
-          if (status === "failed" || status === "dead" || body?.error) {
-            const msg = String(body?.error || "Failed").slice(0, 160);
-            setEbayStatus(`Error${msg ? ` — ${msg}` : ""}`, { tone: "error" });
-            return true;
-          }
-    
-          return false;
-        } catch {
-          return false;
         }
-      }
-    
-      let done = await pollOnce();
-      while (!done && (Date.now() - started) < maxMs) {
-        await new Promise(r => setTimeout(r, intervalMs));
-        done = await pollOnce();
-      }
-    
-      if (!done) setEbayStatus("Unknown", { tone: "muted" });
-    }
-
+      
+        let done = await pollOnce();
+          while (!done && (Date.now() - started) < maxMs) {
+            await new Promise(r => setTimeout(r, intervalMs));
+            done = await pollOnce();
+          }
+        
+          if (!done) setEbayStatus("Unknown", { tone: "muted" });
+        }
   
        
   function computeValidity() {
@@ -1693,84 +1700,69 @@ document.addEventListener("intake:item-changed", () => refreshInventory({ force:
                 // Hydrate the eBay card from saved data (called after tiles/cards are rendered)
         function hydrateEbayFromSaved(ebay, ebayMarketplaceId) {
           if (!ebay) return;
-          
-            // Stash saved policy ids globally so the policy-loader can re-apply AFTER options arrive
-            try {
-              window.__ebaySavedPolicies = {
-                shipping_policy: ebay.shipping_policy ?? "",
-                payment_policy:  ebay.payment_policy  ?? "",
-                return_policy:   ebay.return_policy   ?? ""
-              };
-            } catch {}
-  
-            // Ensure the eBay tile/card is visible and rendered
-            try {
-              if (ebayMarketplaceId && typeof ebayMarketplaceId === "number") {
-                selectedMarketplaceIds.add(Number(ebayMarketplaceId));
-              } else if (__metaCache?.marketplaces) {
-                const row = (__metaCache.marketplaces || []).find(m => String(m.slug || "").toLowerCase() === "ebay");
-                if (row && row.id != null) selectedMarketplaceIds.add(Number(row.id));
-              }
-              renderMarketplaceTiles(__metaCache);
-              renderMarketplaceCards(__metaCache);
-  
-              
-            } catch {}
-      
-            // Now set values inside the eBay card
-            const setVal = (sel, v) => { if (sel) sel.value = v ?? ""; };
-            const setNum = (id, v) => { const el = document.getElementById(id); if (el) el.value = (v ?? "") === "" ? "" : String(v); };
-            const setChk = (id, v) => { const el = document.getElementById(id); if (el) el.checked = !!v; };
-      
-            // Policies: attempt immediate set (may be overridden by async loader; Patch 1 will re-apply)
-            setVal(document.getElementById("ebay_shippingPolicy"), ebay.shipping_policy);
-            setVal(document.getElementById("ebay_paymentPolicy"),  ebay.payment_policy);
-            setVal(document.getElementById("ebay_returnPolicy"),   ebay.return_policy);
-  
-            setVal(document.getElementById("ebay_shipZip"),        ebay.shipping_zip);
-      
-            setVal(document.getElementById("ebay_formatSelect"),   ebay.pricing_format);
-            setVal(document.getElementById("ebay_duration"),       ebay.duration);
-      
-            setNum("ebay_bin",       ebay.buy_it_now_price);
-            setNum("ebay_start",     ebay.starting_bid);
-            setNum("ebay_reserve",   ebay.reserve_price);
-            setChk("ebay_bestOffer", ebay.allow_best_offer);
-      
-            setNum("ebay_autoAccept", ebay.auto_accept_amount);
-            setNum("ebay_minOffer",   ebay.minimum_offer_amount);
-      
-            setChk("ebay_promote",    ebay.promote);
-            setNum("ebay_promotePct", ebay.promote_percent);
-      
-            // Re-apply eBay visibility rules so hidden/required states match values
-            try {
-              const fmt = document.getElementById("ebay_formatSelect");
-              const bo  = document.getElementById("ebay_bestOffer");
-              const pr  = document.getElementById("ebay_promote");
-              fmt?.dispatchEvent(new Event("change"));
-              bo?.dispatchEvent(new Event("change"));
-              pr?.dispatchEvent(new Event("change"));
-            } catch {}
-      
-            // Also re-validate the whole form
-            try { computeValidity(); } catch {}
 
-            // NEW: reflect live state in the card on load
-            try {
-              const st = String(ebay.status || "").toLowerCase();
-              const url = ebay.mp_item_url || null;
-              if (st === "live" || st === "listed" || st === "active") {
-                setEbayStatus("Listed", { tone: "ok", link: url || null });
-              } else if (st === "draft" || st === "pending") {
-                setEbayStatus("Not Listed", { tone: "muted" });
-              } else if (st === "error" && ebay.last_error) {
-                setEbayStatus(`Error — ${ebay.last_error}`, { tone: "error" });
-              }
-            } catch {}
+          // Stash saved policy ids globally so the policy-loader can re-apply AFTER options arrive
+          try {
+            window.__ebaySavedPolicies = {
+              shipping_policy: ebay.shipping_policy ?? "",
+              payment_policy:  ebay.payment_policy  ?? "",
+              return_policy:   ebay.return_policy   ?? ""
+            };
+          } catch {}
+
+          // Ensure the eBay tile/card is visible and rendered
+          try {
+            if (ebayMarketplaceId && typeof ebayMarketplaceId === "number") {
+              selectedMarketplaceIds.add(Number(ebayMarketplaceId));
+            } else if (__metaCache?.marketplaces) {
+              const row = (__metaCache.marketplaces || []).find(m => String(m.slug || "").toLowerCase() === "ebay");
+              if (row && row.id != null) selectedMarketplaceIds.add(Number(row.id));
+            }
+            renderMarketplaceTiles(__metaCache);
+            renderMarketplaceCards(__metaCache);
+          } catch {}
+    
+          // Now set values inside the eBay card
+          const setVal = (sel, v) => { if (sel) sel.value = v ?? ""; };
+          const setNum = (id, v) => { const el = document.getElementById(id); if (el) el.value = (v ?? "") === "" ? "" : String(v); };
+          const setChk = (id, v) => { const el = document.getElementById(id); if (el) el.checked = !!v; };
+    
+          // Policies: attempt immediate set (may be overridden by async loader; Patch 1 will re-apply)
+          setVal(document.getElementById("ebay_shippingPolicy"), ebay.shipping_policy);
+          setVal(document.getElementById("ebay_paymentPolicy"),  ebay.payment_policy);
+          setVal(document.getElementById("ebay_returnPolicy"),   ebay.return_policy);
+
+          setVal(document.getElementById("ebay_shipZip"),        ebay.shipping_zip);
+    
+          setVal(document.getElementById("ebay_formatSelect"),   ebay.pricing_format);
+          setVal(document.getElementById("ebay_duration"),       ebay.duration);
+    
+          setNum("ebay_bin",       ebay.buy_it_now_price);
+          setNum("ebay_start",     ebay.starting_bid);
+          setNum("ebay_reserve",   ebay.reserve_price);
+          setChk("ebay_bestOffer", ebay.allow_best_offer);
+    
+          setNum("ebay_autoAccept", ebay.auto_accept_amount);
+          setNum("ebay_minOffer",   ebay.minimum_offer_amount);
+    
+          setChk("ebay_promote",    ebay.promote);
+          setNum("ebay_promotePct", ebay.promote_percent);
+    
+          // Re-apply eBay visibility rules so hidden/required states match values
+          try {
+            const fmt = document.getElementById("ebay_formatSelect");
+            const bo  = document.getElementById("ebay_bestOffer");
+            const pr  = document.getElementById("ebay_promote");
+            fmt?.dispatchEvent(new Event("change"));
+            bo?.dispatchEvent(new Event("change"));
+            pr?.dispatchEvent(new Event("change"));
+          } catch {}
+    
+          // Also re-validate the whole form
+          try { computeValidity(); } catch {}
         }
 
-          
+
     
        function buildPayload(isDraft = false) {
       // helper: drop empty strings/null/undefined
@@ -2538,4 +2530,3 @@ document.addEventListener("intake:item-changed", () => refreshInventory({ force:
 }
 
 // end intake js file. 
-
