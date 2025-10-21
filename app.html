@@ -226,6 +226,14 @@
     nav.classList.remove('open');
     burger.setAttribute('aria-expanded', 'false');
   });
+
+  // Never treat clicks that start on inputs as navigation
+  document.addEventListener('click', (e) => {
+    const t = e.target;
+    if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) {
+      e.stopPropagation();
+    }
+  }, true);
 </script>
 
   <!-- Load the small client router -->
