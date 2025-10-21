@@ -99,12 +99,13 @@ export const onRequestGet: PagesFunction = async ({ request, env }) => {
         i.category_nm,
         (SELECT cdn_url FROM imgs WHERE imgs.item_id = i.item_id AND rn = 1) AS image_url
       FROM app.inventory i
-      WHERE i.tenant_id = ${tenant_id}
-        AND i.item_status = 'active'
+      LEFT JOIN app.item_listing_profile lp
+        ON lp.item_id = i.item_id AND lp.tenant_id = ${tenant_id}
+      WHERE i.item_status = 'active'
       ORDER BY i.updated_at DESC
       LIMIT ${limit};
     `;
-
+     
     return json({ ok: true, rows }, 200);
   } catch (err: any) {
     console.error("[inventory/recent] error", err);
