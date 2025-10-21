@@ -108,19 +108,7 @@ window.__navLock = false;
 
   log('loadScreen:end', { name });
   
-  // Mobile-only fallback: if flagged, do a one-time hard reload after paint
-  //if (window.__forceMobileReloadOnce) {
-    // clear the flag to avoid loops
-    //window.__forceMobileReloadOnce = false;
-    // Allow the DOM to present the new screen, then replace to refresh
-    //requestAnimationFrame(() => {
-      //setTimeout(() => {
-        //try { closeMenus(); } catch {}
-        //location.replace(location.href);
-      //}, 0);
-    //});
-  //}
-  
+   
 }
 
 
@@ -137,7 +125,7 @@ async function goto(name){
 
   // Hint: on mobile, do a one-time hard refresh after the new screen paints
   // to defeat stubborn menu/focus states in certain browsers.
-  window.__forceMobileReloadOnce = /Mobi|Android/i.test(navigator.userAgent);
+  //window.__forceMobileReloadOnce = /Mobi|Android/i.test(navigator.userAgent);
 
   await loadScreen(name);
 
