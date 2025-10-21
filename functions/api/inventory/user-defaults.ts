@@ -1,4 +1,5 @@
-// Cloudflare Pages Function for per-user marketplace defaults.
+
+// Begin Cloudflare Pages Function for per-user marketplace defaults.
 // Matches your inventory API conventions: cookie presence, x-tenant-id header, Neon client.
 
 import { neon } from "@neondatabase/serverless";
@@ -154,3 +155,4 @@ export const onRequestPut: PagesFunction<Env> = async ({ request, env }) => {
     return json({ ok: false, error: "server_error", message: e?.message || String(e) }, 500);
   }
 };
+//end user-defauts.ts
