@@ -212,15 +212,19 @@ window.addEventListener('popstate', () => {
 });
 
 document.addEventListener('focusin', (e) => {
-  if (e.target && (e.target as HTMLElement).tagName) {
-    console.log('[trace] focusin', (e.target as HTMLElement).tagName, performance.now());
+  const t = e.target;
+  if (t && t.tagName) {
+    console.log('[trace] focusin', t.tagName, performance.now());
   }
 }, true);
 document.addEventListener('blur', (e) => {
-  if (e.target && (e.target as HTMLElement).tagName) {
-    console.log('[trace] blur', (e.target as HTMLElement).tagName, performance.now());
+  const t = e.target;
+  if (t && t.tagName) {
+    console.log('[trace] blur', t.tagName, performance.now());
   }
 }, true);
+
+
 (function(){
   const ps = history.pushState.bind(history);
   history.pushState = function(...args){
