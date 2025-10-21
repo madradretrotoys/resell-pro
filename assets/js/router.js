@@ -178,13 +178,37 @@ window.addEventListener('pageshow', () => setTimeout(closeMenus, 0));
 
 function closeMenus(){
   // 0) Clear :target-based menus and active focus that can keep overlays shown
+  // Helper: detect elements where the user might be typing
+  function isTextEntry(el){
+    if (!el) return false;
+    const tag = el.tagName?.toLowerCase();
+    const type = (el.getAttribute?.('type') || '').toLowerCase();
+    const editable = !!el.isContentEditable;
+
+    // Consider typical text-entry controls
+    const nonTextInputTypes = [
+      'button','submit','checkbox','radio','file','reset','image',
+      'range','color','date','time','month','week','datetime-local','number'
+    ];
+
+    if (editable) return true;
+    if (tag === 'textarea') return true;
+    if (tag === 'select') return true;
+    if (tag === 'input' && !nonTextInputTypes.includes(type)) return true;
+
+    return false;
+  }
+
+  // 0) Clear :target-based menus and active focus that can keep overlays shown
   try {
     if (location.hash) {
       const noHash = location.pathname + location.search;
       history.replaceState({}, '', noHash);
     }
-    if (document.activeElement && typeof document.activeElement.blur === 'function') {
-      document.activeElement.blur();
+    const ae = document.activeElement;
+    if (ae && typeof ae.blur === 'function' && !isTextEntry(ae)) {
+      // Only blur if it's NOT a text-entry control; preserves mobile keyboard focus
+      ae.blur();
     }
   } catch {}
 
