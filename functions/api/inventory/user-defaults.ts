@@ -144,7 +144,29 @@ export const onRequestPut: PagesFunction<Env> = async ({ request, env }) => {
     if (!raw || typeof raw !== "object") return json({ ok: false, error: "bad_payload" }, 400);
 
     // Whitelist only the 7 fields we remember …
-    const safe = { /* … existing mapping unchanged … */ };
+    const tidy = (v: any) => {
+      if (v === null || v === undefined) return null;
+      if (typeof v === "string") return v.trim();
+      return v;
+    };
+    const toBool = (v: any) => {
+      if (v === null || v === undefined) return null;
+      return Boolean(v);
+    };
+    const normFormat = (v: any) => {
+      const s = String(v || "").trim().toLowerCase();
+      return s === "fixed" || s === "auction" ? s : null;
+    };
+    
+    const safe = {
+      shipping_policy:  tidy(raw.shipping_policy),
+      payment_policy:   tidy(raw.payment_policy),
+      return_policy:    tidy(raw.return_policy),
+      shipping_zip:     tidy(raw.shipping_zip),
+      pricing_format:   normFormat(raw.pricing_format),
+      allow_best_offer: toBool(raw.allow_best_offer),
+      promote:          toBool(raw.promote),
+    };
 
     const sql = getSql(env);
     const marketplaceId = await getMarketplaceId(sql, marketplace);
