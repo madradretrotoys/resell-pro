@@ -60,6 +60,11 @@ async function loadHTML(url){
   return text;
 }
 export async function loadScreen(name){
+  // Last-ditch guard: if user is typing or keyboard is open, defer
+  if (isTextInput(document.activeElement) || keyboardLikelyOpen()){
+    setTimeout(() => loadScreen(name), 200);
+    return;
+  }
   const meta = SCREENS[name] || SCREENS.dashboard;
   // Defensive: pick the last #app-view in case multiple exist
   const candidates = Array.from(document.querySelectorAll('#app-view'));
@@ -115,6 +120,10 @@ window.__navLock = false;
 async function goto(name){
   // Prevent double navigation on touchend+click
   if (window.__navLock) return;
+
+  // No-op if we're already on this screen
+  if (current?.name === name) return;
+
   window.__navLock = true;
 
   // If typing, don't navigate yet — this would blur the field and close keyboard
@@ -129,7 +138,6 @@ async function goto(name){
 
   await safeLoadScreen(name);
 }
-
 
 function isTextInput(el){
   if(!el) return false;
@@ -161,6 +169,8 @@ async function safeLoadScreen(name){
 
 window.addEventListener('popstate', () => {
   const name = qs('page') || 'dashboard';
+  // Ignore if it’s the same screen (prevents needless DOM swaps while typing)
+  if (current?.name === name) return;
   safeLoadScreen(name);
 });
 
