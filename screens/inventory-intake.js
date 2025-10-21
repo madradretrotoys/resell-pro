@@ -1491,7 +1491,56 @@ document.addEventListener("intake:item-changed", () => refreshInventory({ force:
     renderMarketplaceTiles(meta);
     // Render placeholder cards for any preselected tiles (from defaults)
     try { renderMarketplaceCards(__metaCache); } catch {}
+      // === Hydrate per-user marketplace defaults (eBay) ===
+      async function hydrateUserDefaults() {
+        try {
+          const res = await api(`/api/inventory/user-defaults?marketplace=ebay`, { method: "GET" });
+          if (!res || res.ok === false || !res.defaults) return;
+          const d = res.defaults;
     
+          // 1) Stash policy ids so the async policy loader can re-apply after options arrive.
+          //    If options are already present, we apply immediately as well.
+          try {
+            window.__ebaySavedPolicies = {
+              shipping_policy: d.shipping_policy ?? "",
+              payment_policy:  d.payment_policy  ?? "",
+              return_policy:   d.return_policy   ?? "",
+            };
+            const tryApply = (id, val) => {
+              const el = document.getElementById(id);
+              if (!el) return;
+              // only set if the option list is populated
+              if (el.options && el.options.length > 0 && val) el.value = String(val);
+            };
+            tryApply("ebay_shippingPolicy", d.shipping_policy);
+            tryApply("ebay_paymentPolicy",  d.payment_policy);
+            tryApply("ebay_returnPolicy",   d.return_policy);
+          } catch {}
+    
+          // 2) Non-policy fields can be set directly.
+          const zipEl = document.getElementById("ebay_shipZip");
+          if (zipEl && d.shipping_zip) zipEl.value = d.shipping_zip;
+    
+          const fmtEl = document.getElementById("ebay_formatSelect");
+          if (fmtEl && d.pricing_format) fmtEl.value = String(d.pricing_format);
+    
+          const bestEl = document.getElementById("ebay_bestOffer");
+          if (bestEl && typeof d.allow_best_offer === "boolean") bestEl.checked = d.allow_best_offer;
+    
+          const promEl = document.getElementById("ebay_promote");
+          if (promEl && typeof d.promote === "boolean") promEl.checked = d.promote;
+    
+          // 3) Re-apply visibility rules and any dependent logic
+          try {
+            document.getElementById("ebay_formatSelect")?.dispatchEvent(new Event("change"));
+            document.getElementById("ebay_bestOffer")?.dispatchEvent(new Event("change"));
+            document.getElementById("ebay_promote")?.dispatchEvent(new Event("change"));
+          } catch {}
+        } catch {}
+      }
+    
+    // Hydrate after cards exist
+    try { await hydrateUserDefaults(); } catch {}
     // Store + channel
     fillSelect($("storeLocationSelect"), meta.store_locations);
     fillSelect($("salesChannelSelect"), meta.sales_channels);
@@ -1812,12 +1861,50 @@ document.addEventListener("intake:item-changed", () => refreshInventory({ force:
       if (!res || res.ok === false) {
           throw new Error(res?.error || "intake_failed");
         }
-
+        
         // Save defaults (local) on success so user gets the same picks next time
         try {
           writeDefaults(Array.from(selectedMarketplaceIds.values()));
         } catch {}
 
+         // NEW: also persist user defaults on the server for this marketplace
+        try {
+          // Only run if eBay controls exist on the page
+          const shipSel = document.getElementById("ebay_shippingPolicy");
+          const paySel  = document.getElementById("ebay_paymentPolicy");
+          const retSel  = document.getElementById("ebay_returnPolicy");
+          const zipEl   = document.getElementById("ebay_shipZip");
+          // Pricing format comes from the format select (fixed|auction)
+          const fmtSel  = document.getElementById("ebay_formatSelect");
+          const boChk   = document.getElementById("ebay_bestOffer");
+          const prChk   = document.getElementById("ebay_promote");
+        
+          if (shipSel || paySel || retSel || zipEl || fmtSel || boChk || prChk) {
+            const clean = (v) => (v === undefined || v === null
+              ? undefined
+              : (typeof v === "string" ? v.trim() : v));
+        
+            const defaults = {
+              shipping_policy: clean(shipSel?.value || ""),
+              payment_policy:  clean(paySel?.value  || ""),
+              return_policy:   clean(retSel?.value  || ""),
+              shipping_zip:    clean(zipEl?.value   || ""),
+              pricing_format:  clean((fmtSel?.value || "").toLowerCase()),
+              allow_best_offer: boChk ? Boolean(boChk.checked) : undefined,
+              promote:          prChk ? Boolean(prChk.checked) : undefined,
+            };
+        
+            await api("/api/inventory/user-defaults?marketplace=ebay", {
+              method: "PUT",
+              headers: {
+                "content-type": "application/json"
+              },
+              body: JSON.stringify({ defaults }),
+            });
+          }
+        } catch {}
+       
+        
         // Post-save UX: confirm, disable fields, and swap CTAs
         postSaveSuccess(res, mode);
         // Notify Drafts to reload now that an item changed (added/promoted/saved)
