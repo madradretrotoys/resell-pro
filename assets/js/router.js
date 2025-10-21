@@ -103,11 +103,11 @@ export async function loadScreen(name){
 setActiveLink(name);
 
 // Ensure menus are closed AFTER the new screen is painted and any CSS transitions settle
-requestAnimationFrame(() => {
-  closeMenus();
+//requestAnimationFrame(() => {
+//  closeMenus();
   // additional passes for slow mobile paints / transitions
-  setTimeout(closeMenus, 120);
-  setTimeout(closeMenus, 360);
+  //setTimeout(closeMenus, 120);
+  //setTimeout(closeMenus, 360);
 });
 
 // Release nav lock (see below)
