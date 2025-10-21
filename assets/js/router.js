@@ -102,13 +102,6 @@ export async function loadScreen(name){
   document.title = `Resell Pro — ${meta.title}`;
 setActiveLink(name);
 
-// Ensure menus are closed AFTER the new screen is painted and any CSS transitions settle
-//requestAnimationFrame(() => {
-//  closeMenus();
-  // additional passes for slow mobile paints / transitions
-  //setTimeout(closeMenus, 120);
-  //setTimeout(closeMenus, 360);
-});
 
 // Release nav lock (see below)
 window.__navLock = false;
@@ -152,10 +145,10 @@ async function goto(name){
   await loadScreen(name);
 
   // Extra pass after the screen init settles
-  requestAnimationFrame(() => {
-    closeMenus();
-    setTimeout(closeMenus, 120);
-  });
+  //requestAnimationFrame(() => {
+    //closeMenus();
+    //setTimeout(closeMenus, 120);
+  //});
 }
 
 window.addEventListener('popstate', () => loadScreen(qs('page') || 'dashboard'));
