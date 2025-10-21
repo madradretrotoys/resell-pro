@@ -1839,31 +1839,50 @@ document.addEventListener("intake:item-changed", () => refreshInventory({ force:
       if (!res || res.ok === false) {
           throw new Error(res?.error || "intake_failed");
         }
-
+        
         // Save defaults (local) on success so user gets the same picks next time
         try {
           writeDefaults(Array.from(selectedMarketplaceIds.values()));
         } catch {}
 
-        // Persist per-user defaults to server (ACTIVE saves only; remember 7 fields, not auto/min amounts)
+         // NEW: also persist user defaults on the server for this marketplace
         try {
-          if (mode !== "draft") {
+          // Only run if eBay controls exist on the page
+          const shipSel = document.getElementById("ebay_shipping_policy");
+          const paySel  = document.getElementById("ebay_payment_policy");
+          const retSel  = document.getElementById("ebay_return_policy");
+          const zipEl   = document.getElementById("ebay_zip");
+          const fmtSel  = document.getElementById("ebay_pricing_format");
+          const boChk   = document.getElementById("ebay_allow_best_offer");
+          const prChk   = document.getElementById("ebay_promote");
+    
+          if (shipSel || paySel || retSel || zipEl || fmtSel || boChk || prChk) {
+            const clean = (v) => (v === undefined || v === null ? undefined : (typeof v === "string" ? v.trim() : v));
             const defaults = {
-              shipping_policy:  document.getElementById("ebay_shippingPolicy")?.value || null,
-              payment_policy:   document.getElementById("ebay_paymentPolicy")?.value  || null,
-              return_policy:    document.getElementById("ebay_returnPolicy")?.value   || null,
-              shipping_zip:     document.getElementById("ebay_shipZip")?.value        || null,
-              pricing_format:   (document.getElementById("ebay_pricingFormat") || document.getElementById("ebay_formatSelect"))?.value || null,
-              allow_best_offer: !!document.getElementById("ebay_bestOffer")?.checked,
-              promote:          !!document.getElementById("ebay_promote")?.checked,
+              shipping_policy: clean(shipSel?.value || ""),
+              payment_policy:  clean(paySel?.value  || ""),
+              return_policy:   clean(retSel?.value  || ""),
+              shipping_zip:    clean(zipEl?.value   || ""),
+              pricing_format:  clean(fmtSel?.value  || ""),
+              allow_best_offer: boChk ? Boolean(boChk.checked) : undefined,
+              promote:          prChk ? Boolean(prChk.checked) : undefined,
             };
-            await api(`/api/inventory/user-defaults?marketplace=ebay`, {
-              method: "PUT",
-              body: { defaults },
+            // Drop empty-string fields so we only store real choices
+            Object.keys(defaults).forEach(k => {
+              if (defaults[k] === "" || defaults[k] === undefined) delete defaults[k];
             });
+    
+            if (Object.keys(defaults).length > 0) {
+              await api("/api/inventory/user-defaults?marketplace=ebay", {
+                method: "PUT",
+                headers: { "content-type": "application/json" },
+                body: JSON.stringify({ defaults }),
+              });
+            }
           }
-        } catch {}
+        } catch {} 
        
+        
         // Post-save UX: confirm, disable fields, and swap CTAs
         postSaveSuccess(res, mode);
         // Notify Drafts to reload now that an item changed (added/promoted/saved)
