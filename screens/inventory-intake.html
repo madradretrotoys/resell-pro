@@ -207,6 +207,7 @@
     <div class="tabs flex gap-2 mb-3" role="tablist" aria-label="Bulk & Draft lists">
       <button id="tabBulk"   class="tab btn btn-ghost btn-sm" role="tab" aria-controls="paneBulk">Bulk Entry</button>
       <button id="tabDrafts" class="tab btn btn-ghost btn-sm" role="tab" aria-controls="paneDrafts">Recent Drafts</button>
+      <button id="tabInventory" class="tab btn btn-ghost btn-sm" role="tab" aria-controls="paneInventory"> Active Inventory</button>
     </div>
 
     <div class="tabpanes border rounded-2xl p-3">
@@ -234,6 +235,33 @@
           </table>
         </div>
       </div>
+
+      <!-- NEW: Inventory pane -->
+      <div id="paneInventory" class="hidden" aria-hidden="true">
+        <div class="overflow-auto">
+          <table class="table w-full">
+            <thead>
+              <tr class="border-b">
+                <th class="text-left px-3 py-2">Saved</th>
+                <th class="text-left px-3 py-2">Image</th>
+                <th class="text-left px-3 py-2">SKU</th>
+                <th class="text-left px-3 py-2">Item Name / Description</th>
+                <th class="text-left px-3 py-2">Price</th>
+                <th class="text-left px-3 py-2">Qty</th>
+                <th class="text-left px-3 py-2">Category</th>
+                <th class="text-left px-3 py-2">Actions</th>
+              </tr>
+            </thead>
+            <tbody id="recentInventoryTbody">
+              <tr>
+                <td class="px-3 py-2 text-gray-500" colspan="8">No inventory found.</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+      
+      
     </div>
   </section>
 </div>
