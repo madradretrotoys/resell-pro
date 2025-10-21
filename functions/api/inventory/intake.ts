@@ -455,7 +455,7 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
                        ${e.promote}, ${e.promote_percent}, ${e.duration}, ${e.starting_bid}, ${e.reserve_price})
                     ON CONFLICT (item_id, marketplace_id)
                     DO UPDATE SET
-                      status = 'draft',
+                      status = 'active',
                       shipping_policy = EXCLUDED.shipping_policy,
                       payment_policy  = EXCLUDED.payment_policy,
                       return_policy   = EXCLUDED.return_policy,
@@ -743,7 +743,7 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
              ${e.promote}, ${e.promote_percent}, ${e.duration}, ${e.starting_bid}, ${e.reserve_price})
           ON CONFLICT (item_id, marketplace_id)
           DO UPDATE SET
-            status = 'draft',
+            status = 'active',
             shipping_policy = EXCLUDED.shipping_policy,
             payment_policy  = EXCLUDED.payment_policy,
             return_policy   = EXCLUDED.return_policy,
