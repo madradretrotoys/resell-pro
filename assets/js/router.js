@@ -134,9 +134,9 @@ async function goto(name){
   history.pushState({}, '', u);
 
   // Close immediately before loading
-  closeMenus();
+  //closeMenus();
   // small delay to catch CSS-driven drawers
-  setTimeout(closeMenus, 60);
+  //setTimeout(closeMenus, 60);
 
   // Hint: on mobile, do a one-time hard refresh after the new screen paints
   // to defeat stubborn menu/focus states in certain browsers.
@@ -144,11 +144,7 @@ async function goto(name){
 
   await loadScreen(name);
 
-  // Extra pass after the screen init settles
-  //requestAnimationFrame(() => {
-    //closeMenus();
-    //setTimeout(closeMenus, 120);
-  //});
+  
 }
 
 window.addEventListener('popstate', () => loadScreen(qs('page') || 'dashboard'));
