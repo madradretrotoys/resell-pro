@@ -2,43 +2,6 @@
 import { ensureSession, waitForSession } from '/assets/js/auth.js';
 import { showToast } from '/assets/js/ui.js';
 import '/assets/js/api.js'; // ensure window.api is available to screens
-// --- Focus / keyboard state ---
-let __TYPING = false;
-let __LAST_NAV = 0;
-
-function isTextInput(el: any){
-  if(!el) return false;
-  const tag = el.tagName;
-  if (tag === 'INPUT' || tag === 'TEXTAREA' || (el as any).isContentEditable) return true;
-  return false;
-}
-
-function keyboardLikelyOpen(){
-  try{
-    if (window.visualViewport) {
-      const ratio = window.visualViewport.height / window.innerHeight;
-      return ratio < 0.85; // heuristic
-    }
-  }catch{}
-  return false;
-}
-
-// Track when the user is actively editing
-document.addEventListener('focusin', (e) => {
-  if (isTextInput(e.target)) __TYPING = true;
-}, true);
-document.addEventListener('focusout', (e) => {
-  if (isTextInput(e.target)) __TYPING = false;
-}, true);
-
-// Swallow clicks that start on inputs so they don't bubble into any nav handlers
-document.addEventListener('click', (e) => {
-  if (isTextInput(e.target)) e.stopPropagation();
-}, true);
-
-// Avoid automatic scroll restore pop-causing layout jumps on iOS
-try { history.scrollRestoration = 'manual'; } catch {}
-
 const SCREENS = {
   dashboard: { html: '/screens/dashboard.html', js: '/screens/dashboard.js', title: 'Dashboard' },
   pos:       { html: '/screens/pos.html',       js: '/screens/pos.js',       title: 'POS' },
@@ -97,9 +60,9 @@ async function loadHTML(url){
   log('loadHTML:end', { bytes: text.length });
   return text;
 }
-export async function loadScreen(name: string){
-  // Absolute last-ditch guard
-  if (__TYPING || isTextInput(document.activeElement) || keyboardLikelyOpen()){
+export async function loadScreen(name){
+  // Last-ditch guard: if user is typing or keyboard is open, defer
+  if (isTextInput(document.activeElement) || keyboardLikelyOpen()){
     setTimeout(() => loadScreen(name), 200);
     return;
   }
@@ -155,28 +118,26 @@ window.__navLock = false;
 }
 
 
-async function goto(name: string){
+async function goto(name){
   // Prevent double navigation on touchend+click
-  if ((window as any).__navLock) return;
+  if (window.__navLock) return;
 
   // No-op if we're already on this screen
   if (current?.name === name) return;
 
-  // Hard block while typing / keyboard open
-  if (__TYPING || isTextInput(document.activeElement) || keyboardLikelyOpen()){
-    setTimeout(() => goto(name), 250);
+  window.__navLock = true;
+
+  // If typing, don't navigate yet — this would blur the field and close keyboard
+  if (isTextInput(document.activeElement) || keyboardLikelyOpen()){
+    setTimeout(() => { window.__navLock = false; goto(name); }, 250);
     return;
   }
-
-  (window as any).__navLock = true;
 
   const u = new URL(location.href);
   u.searchParams.set('page', name);
   history.pushState({}, '', u);
 
-  __LAST_NAV = Date.now();
   await safeLoadScreen(name);
-  (window as any).__navLock = false;
 }
 
 function isTextInput(el){
@@ -197,8 +158,10 @@ function keyboardLikelyOpen(){
   return false;
 }
 
-async function safeLoadScreen(name: string){
-  if (__TYPING || isTextInput(document.activeElement) || keyboardLikelyOpen()){
+async function safeLoadScreen(name){
+  // If user is typing, defer the navigation to avoid blurring/closing the keyboard
+  if (isTextInput(document.activeElement) || keyboardLikelyOpen()){
+    // Re-check shortly rather than forcing a blur
     setTimeout(() => safeLoadScreen(name), 250);
     return;
   }
@@ -207,19 +170,8 @@ async function safeLoadScreen(name: string){
 
 window.addEventListener('popstate', () => {
   const name = qs('page') || 'dashboard';
-
   // Ignore if it’s the same screen (prevents needless DOM swaps while typing)
   if (current?.name === name) return;
-
-  // Debounce very fast popstates (can happen around viewport changes on mobile)
-  if (Date.now() - __LAST_NAV < 500) return;
-
-  // Don’t react while typing / keyboard open
-  if (__TYPING || isTextInput(document.activeElement) || keyboardLikelyOpen()){
-    setTimeout(() => safeLoadScreen(name), 250);
-    return;
-  }
-
   safeLoadScreen(name);
 });
 
