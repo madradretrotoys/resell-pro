@@ -9,7 +9,7 @@ function isTextInput(el: any){
   if(!el) return false;
   const tag = el.tagName;
   if (tag === 'INPUT' || tag === 'TEXTAREA' || (el as any).isContentEditable) return true;
-  return false;
+  return false;flet session = await ensureSession();
 }
 
 function keyboardLikelyOpen(){
@@ -113,10 +113,15 @@ export async function loadScreen(name: string){
   // 1) Check session (handles tiny race right after login)
   let session = await ensureSession();
   if (!session?.user) session = await waitForSession(1500);
+  
+  if (!session?.user && (__TYPING || isTextInput(document.activeElement) || keyboardLikelyOpen())) {
+    setTimeout(() => loadScreen(name), 300);
+    (window as any).__navLock = false;
+    return;
+  }
   if (!session?.user) {
-    log('auth:fail->redirect', { reason: session?.reason, status: session?.status, debug: session?.debug });
     location.href = '/index.html';
-    window.__navLock = false;
+    (window as any).__navLock = false;
     return;
   }
   log('auth:ok', { user: session.user });
