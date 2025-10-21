@@ -116,12 +116,12 @@ export async function loadScreen(name){
   
   if (!session?.user && (__TYPING || isTextInput(document.activeElement) || keyboardLikelyOpen())) {
     setTimeout(() => loadScreen(name), 300);
-    (window as any).__navLock = false;
+    window.__navLock = false;
     return;
   }
   if (!session?.user) {
     location.href = '/index.html';
-    (window as any).__navLock = false;
+    window.__navLock = false;
     return;
   }
   log('auth:ok', { user: session.user });
@@ -161,7 +161,7 @@ window.__navLock = false;
 
 async function goto(name){
   // Prevent double navigation on touchend+click
-  if ((window as any).__navLock) return;
+   if (window.__navLock) return;
 
   // No-op if we're already on this screen
   if (current?.name === name) return;
@@ -172,7 +172,7 @@ async function goto(name){
     return;
   }
 
-  (window as any).__navLock = true;
+  window.__navLock = true;
 
   const u = new URL(location.href);
   u.searchParams.set('page', name);
@@ -180,7 +180,7 @@ async function goto(name){
 
   __LAST_NAV = Date.now();
   await safeLoadScreen(name);
-  (window as any).__navLock = false;
+  window.__navLock = false;
 }
 
 
