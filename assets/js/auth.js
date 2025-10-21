@@ -1,3 +1,4 @@
+//begin auth.js
 import { api, setActiveTenant } from '/assets/js/api.js';
 
 function log(...args){ try{ console.log('[auth]', ...args); }catch{} }
@@ -32,3 +33,4 @@ export async function waitForSession(timeoutMs = 1500) {
   log('waitForSession:end', { authenticated: !!session?.user, reason: session?.reason, debug: session?.debug });
   return session;
 }
+//end auth.js file
