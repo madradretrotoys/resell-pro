@@ -1,3 +1,4 @@
+//Begin meta.ts
 // /functions/api/inventory/meta.ts
 // Cloudflare Pages Functions style: onRequestGet
 // Uses @neondatabase/serverless (HTTP driver).
@@ -102,3 +103,4 @@ export const onRequestGet: PagesFunction = async ({ request, env }) => {
     return json({ ok: false, error: "server_error", message: e?.message || String(e) }, 500);
   }
 };
+//end meta.ts
