@@ -324,6 +324,14 @@ label{
 /* Hide inactive ARIA tabpanels to prevent stacking under the tab bar */
 #inventory-intake-screen [role="tabpanel"][aria-hidden="true"] { display: none !important; }
 
+/* Hide inactive ARIA tabpanels to prevent stacking under the tab bar */
+#inventory-intake-screen [role="tabpanel"][aria-hidden="true"] { display: none !important; }
+
+/* NEW: Default all tabpanels to hidden; show only the panel that is NOT aria-hidden.
+   This removes any paint window where both panes can appear during boot/restore. */
+#inventory-intake-screen [role="tabpanel"] { display: none !important; }
+#inventory-intake-screen [role="tabpanel"]:not([aria-hidden="true"]) { display: block !important; }
+
 /* NEW: intake-scoped checkbox row + compact 2-col subgrid for partner fields */
 #inventory-intake-screen .chkrow{
   display:flex;
