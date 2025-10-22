@@ -314,20 +314,31 @@ label{
 #inventory-intake-screen .muted{ color: #6b7280; font-size: 12px; }
 #inventory-intake-screen .mono{ font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace; }
 /* Tab row spacing and visual tie-in with content */
+/* Tabs container should stack bar + pane vertically (not side-by-side) */
 #inventory-intake-screen .tabs{
-  display: flex;
-  gap: 6px;
-  margin-top: 14px;           /* NEW: separation from Copy buttons */
-  margin-bottom: 10px;
+  display: block;             /* was flex */
+  margin-top: 14px;           /* separation from Copy buttons */
+  margin-bottom: 0;           /* pane below has its own spacing */
 }
 
-/* Bar that holds the individual <button role="tab"> elements */
+/* Full-width tab bar, padded to match the pane so edges line up */
 #inventory-intake-screen .tabBar{
+  display: flex;
+  gap: 8px;
+  width: 100%;
+  box-sizing: border-box;
   border: 1px solid #eee;
   border-bottom: none;
   background: #f9fafb;
-  padding: 6px;
+  padding: 8px 14px;          /* match pane padding */
   border-radius: 8px 8px 0 0;
+}
+
+/* Pane stays framed and matches the bar’s horizontal padding feel */
+#inventory-intake-screen [role="tabpanel"]{
+  border: 1px solid #eee;
+  border-radius: 0 12px 12px 12px;
+  padding: 14px;              /* aligns with tabBar 14px */
 }
 
 /* Legacy .tab styling (kept so older markup still looks fine) */
