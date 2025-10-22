@@ -1081,7 +1081,8 @@ export const onRequestGet: PagesFunction = async ({ request, env }) => {
       listing: listingOut,
       images: imgRows,
       marketplace_listing: { ebay: ebayListing, ebay_marketplace_id: EBAY_ID }
-    }), { status: 200, headers: { "content-type": "application/json", "cache-control": "no-store" }
+    }), { status: 200, headers: { "content-type": "application/json", "cache-control": "no-store" } });
+
 
     
   } catch (e: any) {
