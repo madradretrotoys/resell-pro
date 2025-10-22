@@ -17,10 +17,16 @@ export async function init() {
       document.getElementById("longDescriptionTextarea") ||
       findControlByLabel("Long Description");
     if (!el) return;
+  
     const val = String(el.value || "").trim();
-    if (!val || val === "Enter a detailed description…") {
-      el.value = BASE_DESCRIPTION;
-    }
+    // If user/server already filled it, leave it alone
+    if (val && val !== "Enter a detailed description…") return;
+  
+    // Pull Item Name / Description and prepend it above the base sentence
+    const titleEl = document.getElementById("titleInput") || findControlByLabel("Item Name / Description");
+    const title = String(titleEl?.value || "").trim();
+  
+    el.value = title ? `${title}\n\n${BASE_DESCRIPTION}` : BASE_DESCRIPTION;
   }
   
   // ====== Photos state & helpers (NEW) ======
@@ -2087,9 +2093,20 @@ document.addEventListener("intake:item-changed", () => refreshInventory({ force:
           const shipBox = document.getElementById("shippingBoxSelect") || findControlByLabel("Shipping Box");
           if (shipBox) shipBox.value = listing.shipping_box_key ?? "";
 
-          // Long Description (textarea)
-          const longDesc = document.getElementById("longDescriptionTextarea") || findControlByLabel("Long Description");
-          if (longDesc) longDesc.value = listing.product_description ?? "";
+         // Long Description (textarea)
+        const longDesc = document.getElementById("longDescriptionTextarea") || findControlByLabel("Long Description");
+        if (longDesc) {
+          const current = String(listing?.product_description ?? "").trim();
+          if (current) {
+            // If server already has a description, use it as-is
+            longDesc.value = current;
+          } else {
+            // Otherwise, compose: <Title> + blank line + base sentence
+            const titleEl = document.getElementById("titleInput") || findControlByLabel("Item Name / Description");
+            const title = String(titleEl?.value || inv?.product_short_title || "").trim();
+            longDesc.value = title ? `${title}\n\n${BASE_DESCRIPTION}` : BASE_DESCRIPTION;
+          }
+        }
           
     
 
