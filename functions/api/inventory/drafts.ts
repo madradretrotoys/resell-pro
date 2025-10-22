@@ -1,3 +1,4 @@
+//Begin draft.ts file
 import { neon } from "@neondatabase/serverless";
 
 type Role = "owner" | "admin" | "manager" | "clerk";
@@ -96,3 +97,4 @@ export const onRequestGet: PagesFunction = async ({ request, env }) => {
   }
 };
 
+//Begin draft.ts file
