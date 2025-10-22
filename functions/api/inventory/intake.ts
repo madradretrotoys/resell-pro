@@ -144,9 +144,11 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
       return `${safe}\n\n${footerLine}`;
     }
 
+    
     /**
      * Compose final product_description.
      * - Always inject BASE_SENTENCE once.
+     * - Prepend Item Name / Description (product_short_title) above the base sentence when present.
      * - For drafts: no footer (no SKU yet).
      * - For active: insert/replace a plain footer with current SKU/location/bin data.
      */
@@ -155,15 +157,32 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
       status: "draft" | "active",
       sku?: string | null,
       instore_loc?: string | null,
-      case_bin_shelf?: string | null
+      case_bin_shelf?: string | null,
+      product_short_title?: string | null
     }): string {
-      const { existing, status, sku = null, instore_loc = null, case_bin_shelf = null } = opts || {};
-      if (status === "draft") {
-        return ensureBaseOnce(existing || "");
+      const {
+        existing,
+        status,
+        sku = null,
+        instore_loc = null,
+        case_bin_shelf = null,
+        product_short_title = null
+      } = opts || {};
+
+      // Ensure the base sentence, then prepend the title if not already at top
+      let body = ensureBaseOnce(existing || "");
+      const title = (product_short_title || "").trim();
+      if (title && !body.startsWith(title)) {
+        body = `${title}\n\n${body}`;
       }
-      // active
-      return upsertFooter(existing || "", sku, instore_loc, case_bin_shelf);
-    }   
+
+      if (status === "draft") {
+        return body; // no footer for drafts
+      }
+
+      // Active: append fresh footer (upsertFooter will strip any existing footer)
+      return upsertFooter(body, sku, instore_loc, case_bin_shelf);
+    }
 
     
     // AuthZ (creation requires can_inventory_intake or elevated role)
@@ -286,6 +305,7 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
             const descDraft = composeLongDescription({
               existing: lst.product_description,
               status: "draft"
+              product_short_title: inv?.product_short_title ?? null
             });
             await sql/*sql*/`
             INSERT INTO app.item_listing_profile
@@ -460,6 +480,7 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
               sku: retSku,
               instore_loc: inv?.instore_loc ?? null,
               case_bin_shelf: inv?.case_bin_shelf ?? null
+              product_short_title: inv?.product_short_title ?? null
             });
             
             // Upsert listing profile for this item_id
@@ -642,6 +663,7 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
         const descDraft = composeLongDescription({
               existing: lst.product_description,
               status: "draft"
+              product_short_title: inv?.product_short_title ?? null
             });
         
         await sql/*sql*/`
@@ -772,6 +794,7 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
         sku: sku, // fix: use the allocated sku variable (lowercase)
         instore_loc: inv?.instore_loc ?? null,
         case_bin_shelf: inv?.case_bin_shelf ?? null
+        product_short_title: inv?.product_short_title ?? null
       });
       
       await sql/*sql*/`
