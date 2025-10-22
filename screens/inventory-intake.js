@@ -1002,6 +1002,14 @@ function setMarketplaceVisibility() {
     const host = document.getElementById(MP_CARDS_ID);
     if (!host) return;
     host.innerHTML = "";
+
+    // Install delegated listeners once so any field edit re-checks validity
+    if (!host.dataset.validHook) {
+      const safeRecheck = () => { try { computeValidity(); } catch {} };
+      host.addEventListener("input",  safeRecheck);
+      host.addEventListener("change", safeRecheck);
+      host.dataset.validHook = "1";
+    }
   
     // Build a lookup of marketplaces by id (id, slug, marketplace_name, is_connected etc.)
     const rows = (meta?.marketplaces || []).filter(m => m.is_active !== false);
@@ -1206,17 +1214,24 @@ function setMarketplaceVisibility() {
           bestOfferOnly().forEach(n => n.classList.toggle("hidden", !(isFixed && hasBO)));
           promoOnly().forEach(n => n.classList.toggle("hidden", !promo));
   
-          // When Best Offer is unchecked, clear and mark not required
+         // When Best Offer is unchecked, clear and mark not required
           const autoAcc = body.querySelector('#ebay_autoAccept');
           const minOff  = body.querySelector('#ebay_minOffer');
           if (autoAcc) autoAcc.required = isFixed && hasBO;
           if (minOff)  minOff.required  = isFixed && hasBO;
+
+          // Re-evaluate button enablement whenever fields become shown/hidden or required flips
+          try { computeValidity(); } catch {}
         }
-  
+
+        // Any change that can flip visibility/required should re-run validity
         formatSel?.addEventListener("change", applyEbayVisibility);
         bestOffer?.addEventListener("change", applyEbayVisibility);
         promoteChk?.addEventListener("change", applyEbayVisibility);
+
+        // First paint: align UI *and* button states to current values
         applyEbayVisibility();
+        try { computeValidity(); } catch {}
         
       } else {
         // Generic placeholder card for other marketplaces (no filler lists)
