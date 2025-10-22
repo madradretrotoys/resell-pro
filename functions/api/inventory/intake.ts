@@ -666,7 +666,29 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
               }
             }
           }
-          return json({ ok: true, item_id, sku: retSku, status, ms: Date.now() - t0 }, 200);
+          // Enqueue marketplace publish jobs (same behavior as Create Active)
+          await enqueuePublishJobs(tenant_id, item_id, body, status);
+
+          // Return any queued jobs so the client can trigger them by job_id
+          const enqueuedUpd = await sql/*sql*/`
+            SELECT job_id
+            FROM app.marketplace_publish_jobs
+            WHERE tenant_id = ${tenant_id}
+              AND item_id   = ${item_id}
+              AND status    = 'queued'
+            ORDER BY created_at ASC
+          `;
+          const job_ids_upd = Array.isArray(enqueuedUpd) ? enqueuedUpd.map((r: any) => String(r.job_id)) : [];
+
+          return json({
+            ok: true,
+            item_id,
+            sku: retSku,
+            status,
+            published: false,
+            job_ids: job_ids_upd,
+            ms: Date.now() - t0
+          }, 200);
         }
 
 
@@ -971,76 +993,8 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
       }
     }
 
-    
-    // 4) Enqueue marketplace publish jobs (non-blocking) with detailed logs
-    try {
-      const rawSel = Array.isArray(body?.marketplaces_selected) ? body.marketplaces_selected : [];
-      console.log("[intake] enqueue.start", { item_id, status, rawSel });
-    
-      // Accept slugs (strings) and numeric ids (numbers OR numeric strings)
-      const slugs = rawSel
-        .filter((v: any) => typeof v === "string" && isNaN(Number(v)) && v.trim() !== "")
-        .map((s: string) => s.toLowerCase());
-      const ids = rawSel
-        .map((v: any) => (typeof v === "number" && Number.isInteger(v)) ? v
-          : (typeof v === "string" && /^\d+$/.test(v) ? Number(v) : null))
-        .filter((n: number | null): n is number => n !== null);
-    
-      console.log("[intake] enqueue.parsed", { slugs, ids });
-    
-      if (slugs.length === 0 && ids.length === 0) {
-        console.log("[intake] enqueue.skip_no_selection");
-      } else {
-        // Resolve tenant-enabled marketplaces by either slug OR id
-        const rows = await sql/*sql*/`
-          SELECT ma.id, ma.slug
-          FROM app.marketplaces_available ma
-          JOIN app.tenant_marketplaces tm
-            ON tm.marketplace_id = ma.id
-           AND tm.tenant_id = ${tenant_id}
-           AND tm.enabled = true
-          WHERE (${slugs.length > 0} AND ma.slug = ANY(${slugs}))
-             OR (${ids.length > 0}   AND ma.id   = ANY(${ids}))
-        `;
-        console.log("[intake] enqueue.match_enabled", { count: rows.length, rows });
-    
-        for (const r of rows) {
-          console.log("[intake] enqueue.insert_job", { marketplace_id: r.id, slug: r.slug, item_id });
-          await sql/*sql*/`
-            INSERT INTO app.marketplace_publish_jobs
-              (tenant_id, item_id, marketplace_id, op, status)
-            SELECT ${tenant_id}, ${item_id}, ${r.id}, 'create', 'queued'
-            WHERE NOT EXISTS (
-              SELECT 1 FROM app.marketplace_publish_jobs j
-              WHERE j.tenant_id = ${tenant_id}
-                AND j.item_id = ${item_id}
-                AND j.marketplace_id = ${r.id}
-                AND j.op = 'create'
-                AND j.status IN ('queued','running')
-            )
-          `;
-    
-          console.log("[intake] enqueue.flip_iml_pending", { marketplace_id: r.id, item_id });
-          await sql/*sql*/`
-            UPDATE app.item_marketplace_listing
-               SET updated_at = now()
-             WHERE tenant_id = ${tenant_id}
-               AND item_id = ${item_id}
-               AND marketplace_id = ${r.id}
-               AND status IN ('draft')
-          `;
-        }
-      }
-    
-      console.log("[intake] enqueue.done", { item_id });
-    } catch (enqueueErr) {
-      console.error("[intake] enqueue.error", { item_id, error: String(enqueueErr) });
-      await sql/*sql*/`
-        INSERT INTO app.item_marketplace_events
-          (item_id, tenant_id, marketplace_id, kind, error_message)
-        VALUES (${item_id}, ${tenant_id}, ${EBAY_MARKETPLACE_ID}, 'enqueue_failed', ${String(enqueueErr).slice(0,500)})
-      `;
-    }  
+   //calling the enqueue process to prepare for the marketplace publish 
+   await enqueuePublishJobs(tenant_id, item_id, body, status);
     
     // Do NOT run publish inline.
     // Look up any jobs we just queued for this item so the client can trigger them by job_id.
