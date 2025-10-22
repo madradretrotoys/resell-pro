@@ -103,9 +103,63 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
       }
       if (!s.promote) s.promote_percent = null;
 
-      return s;
+        return s;
     };
 
+    // ===== Long Description Composer (hard-coded v1) =====
+    const BASE_SENTENCE =
+      "The photos are part of the description. Be sure to look them over for condition and details. This is sold as is, and it's ready for a new home.";
+
+    const FOOTER_START = "\n\n[⟦AUTO-FOOTER⟧]\n";
+    const FOOTER_END   = "\n[⟦/AUTO-FOOTER⟧]\n";
+
+    function ensureBaseOnce(text: string): string {
+      const t = String(text || "").trim();
+      if (!t) return BASE_SENTENCE;
+      // already present?
+      if (t.includes(BASE_SENTENCE)) return t;
+      // prepend (with a blank-line spacer if user text exists)
+      return `${BASE_SENTENCE}${t ? "\n\n" + t : ""}`;
+    }
+
+    function upsertFooter(text: string, sku: string | null, instore_loc?: string | null, case_bin_shelf?: string | null): string {
+      const safe = ensureBaseOnce(text);
+      if (!sku) return safe; // footer only when a SKU exists
+
+      const footerLine =
+        `SKU: ${sku} • Location: ${instore_loc?.trim() || "—"} • Case/Bin/Shelf: ${case_bin_shelf?.trim() || "—"}`;
+
+      // Replace if present; else append
+      const start = safe.indexOf(FOOTER_START);
+      const end   = safe.indexOf(FOOTER_END, start + FOOTER_START.length);
+      const block = `${FOOTER_START}${footerLine}${FOOTER_END}`;
+
+      if (start >= 0 && end >= 0) {
+        return safe.slice(0, start) + block + safe.slice(end + FOOTER_END.length);
+      }
+      return safe + block;
+    }
+
+    /**
+     * Compose final product_description.
+     * - Always inject BASE_SENTENCE once.
+     * - For drafts: no footer (no SKU yet).
+     * - For active: insert/replace marked footer with current SKU/location/bin data.
+     */
+    function composeLongDescription(opts: {
+      existing: string | null | undefined,
+      status: "draft" | "active",
+      sku?: string | null,
+      instore_loc?: string | null,
+      case_bin_shelf?: string | null
+    }): string {
+      const { existing, status, sku = null, instore_loc = null, case_bin_shelf = null } = opts || {};
+      if (status === "draft") {
+        return ensureBaseOnce(existing || "");
+      }
+      // active
+      return upsertFooter(existing || "", sku, instore_loc, case_bin_shelf);
+    }    
 
     
     // AuthZ (creation requires can_inventory_intake or elevated role)
@@ -225,6 +279,10 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
           const item_id = updInv[0].item_id;
         
           if (lst && Object.values(lst).some(v => v !== null && v !== undefined && String(v) !== "")) {
+            const descDraft = composeLongDescription({
+              existing: lst.product_description,
+              status: "draft"
+            });
             await sql/*sql*/`
             INSERT INTO app.item_listing_profile
               ( item_id, tenant_id,
@@ -239,7 +297,7 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
                 (SELECT brand_name      FROM app.marketplace_brands      WHERE brand_key     = ${lst.brand_key}),
                 (SELECT color_name      FROM app.marketplace_colors      WHERE color_key     = ${lst.color_key}),
                 (SELECT box_name        FROM app.shipping_boxes          WHERE box_key       = ${lst.shipping_box_key}),
-                ${lst.product_description}, ${lst.weight_lb}, ${lst.weight_oz},
+                ${descDraft}, ${lst.weight_lb}, ${lst.weight_oz},
                 ${lst.shipbx_length}, ${lst.shipbx_width}, ${lst.shipbx_height}
               )
             ON CONFLICT (item_id) DO UPDATE SET
@@ -324,6 +382,7 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
         }
 
 
+          
         // === ACTIVE UPDATE: if promoting to active and no SKU yet, allocate ===
         // Look up category_code only when needed for SKU allocation
         const catRows = await sql<{ category_code: string }[]>`
@@ -391,6 +450,14 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
           const isStoreOnly = String(inv?.instore_online || "").toLowerCase().includes("store only");
 
           if (!isStoreOnly) {
+            const descActive = composeLongDescription({
+              existing: lst.product_description,
+              status: "active",
+              sku: retSku,
+              instore_loc: inv?.instore_loc ?? null,
+              case_bin_shelf: inv?.case_bin_shelf ?? null
+            });
+            
             // Upsert listing profile for this item_id
             await sql/*sql*/`
               INSERT INTO app.item_listing_profile
@@ -406,7 +473,7 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
                   (SELECT brand_name      FROM app.marketplace_brands      WHERE brand_key     = ${lst.brand_key}),
                   (SELECT color_name      FROM app.marketplace_colors      WHERE color_key     = ${lst.color_key}),
                   (SELECT box_name        FROM app.shipping_boxes          WHERE box_key       = ${lst.shipping_box_key}),
-                  ${lst.product_description}, ${lst.weight_lb}, ${lst.weight_oz},
+                  ${descActive}, ${lst.weight_lb}, ${lst.weight_oz},
                   ${lst.shipbx_length}, ${lst.shipbx_width}, ${lst.shipbx_height}
                 )
             
@@ -568,6 +635,11 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
     
       // If the client provided any listing fields for the draft, persist them too
       if (lst && Object.values(lst).some(v => v !== null && v !== undefined && String(v) !== "")) {
+        const descDraft = composeLongDescription({
+              existing: lst.product_description,
+              status: "draft"
+            });
+        
         await sql/*sql*/`
           INSERT INTO app.item_listing_profile
             ( item_id, tenant_id,
@@ -582,7 +654,7 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
               (SELECT brand_name      FROM app.marketplace_brands      WHERE brand_key     = ${lst.brand_key}),
               (SELECT color_name      FROM app.marketplace_colors      WHERE color_key     = ${lst.color_key}),
               (SELECT box_name        FROM app.shipping_boxes          WHERE box_key       = ${lst.shipping_box_key}),
-              ${lst.product_description}, ${lst.weight_lb}, ${lst.weight_oz},
+              ${descDraft}, ${lst.weight_lb}, ${lst.weight_oz},
               ${lst.shipbx_length}, ${lst.shipbx_width}, ${lst.shipbx_height}
             )
         ON CONFLICT (item_id) DO UPDATE SET
@@ -667,6 +739,9 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
       return json({ ok: true, item_id, sku: null, status: 'draft', ms: Date.now() - t0 }, 200);
     }
 
+
+    
+  //Save as Active Code
    // 1) Allocate next SKU (already guarded earlier; keep as-is)
     // 2) Insert full inventory
     console.log("[intake] branch", { kind: "CREATE_ACTIVE" });
@@ -687,6 +762,14 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
 
     if (!isStoreOnly) {
       // 3) Insert listing profile (ACTIVE only)
+      const descActive = composeLongDescription({
+              existing: lst.product_description,
+              status: "active",
+              sku: Sku,
+              instore_loc: inv?.instore_loc ?? null,
+              case_bin_shelf: inv?.case_bin_shelf ?? null
+            });
+      
       await sql/*sql*/`
       INSERT INTO app.item_listing_profile
         ( item_id, tenant_id,
@@ -701,7 +784,7 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
           (SELECT brand_name      FROM app.marketplace_brands      WHERE brand_key     = ${lst.brand_key}),
           (SELECT color_name      FROM app.marketplace_colors      WHERE color_key     = ${lst.color_key}),
           (SELECT box_name        FROM app.shipping_boxes          WHERE box_key       = ${lst.shipping_box_key}),
-          ${lst.product_description}, ${lst.weight_lb}, ${lst.weight_oz},
+          ${descActive}, ${lst.weight_lb}, ${lst.weight_oz},
           ${lst.shipbx_length}, ${lst.shipbx_width}, ${lst.shipbx_height}
         )
         ON CONFLICT (item_id) DO UPDATE SET
