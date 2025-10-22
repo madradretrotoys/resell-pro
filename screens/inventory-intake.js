@@ -73,7 +73,11 @@ export async function init() {
   
     // Pending files (preview only)
     for (const f of __pendingFiles) {
-      host.appendChild(renderThumb({ cdn_url: URL.createObjectURL(f), is_primary: false }, { pending: true }));
+      // Reuse the persistent preview URL and carry a stable pending_id
+      const preview = f._previewUrl || URL.createObjectURL(f);
+      host.appendChild(
+        renderThumb({ cdn_url: preview, pending_id: f._rpId, is_primary: false }, { pending: true })
+      );
     }
   
     updatePhotosUIBasic();
@@ -141,11 +145,14 @@ export async function init() {
         await setPrimary(model.image_id);
       } else if (act === "delete") {
         if (pending) {
-          // remove from pending preview
-          const i = __pendingFiles.findIndex(f => model.cdn_url && model.cdn_url.startsWith("blob:"));
-          if (i >= 0) __pendingFiles.splice(i, 1);
+          // remove THE clicked pending file by its stable id
+          const idx = __pendingFiles.findIndex(f => f && f._rpId && f._rpId === model.pending_id);
+          if (idx >= 0) {
+            try { if (__pendingFiles[idx]._previewUrl) URL.revokeObjectURL(__pendingFiles[idx]._previewUrl); } catch {}
+            __pendingFiles.splice(idx, 1);
+          }
           renderPhotosGrid();
-          
+        
         } else if (persisted) {
           await deleteImage(model.image_id);
         }
@@ -219,6 +226,13 @@ export async function init() {
   // Upload + attach (requires item_id)
   async function uploadAndAttach(file, { cropOfImageId = null } = {}) {
     if (!__currentItemId) {
+      // Give each pending file a stable identity and a persistent preview URL.
+      if (!file._rpId) {
+        file._rpId = (crypto?.randomUUID ? crypto.randomUUID() : String(Date.now() + Math.random()));
+      }
+      if (!file._previewUrl) {
+        file._previewUrl = URL.createObjectURL(file);
+      }
       __pendingFiles.push(file);
       renderPhotosGrid();
       return;
@@ -304,8 +318,10 @@ export async function init() {
   
   // Replace
   async function replaceImage(oldModel, newFile) {
-    const ds = await downscaleToBlob(newFile);
-    await uploadAndAttach(ds, { cropOfImageId: oldModel.image_id });
+    const ds = await downscaleToBlob(f);
+    if (!ds._rpId) ds._rpId = (crypto?.randomUUID ? crypto.randomUUID() : String(Date.now() + Math.random()));
+    if (!ds._previewUrl) ds._previewUrl = URL.createObjectURL(ds);
+    await uploadAndAttach(ds);
   }
   
   // Minimal cropper: square crop with zoom+drag
