@@ -1,4 +1,4 @@
-// functions/api/settings/marketplaces/ebay/refresh.ts
+// begin functions/api/settings/marketplaces/ebay/refresh.ts
 // Refreshes the eBay access token using the stored refresh token and same scope family.
 
 export const onRequestPost: PagesFunction<Env> = async (context) => {
@@ -142,3 +142,4 @@ function b64d(s: string) { return Uint8Array.from(atob(s), c => c.charCodeAt(0))
 // DB stubs – replace with your shared Neon helper
 async function execSql(env: Env, sql: string, params: unknown[]) { /* see note */ }
 async function querySql(env: Env, sql: string, params: unknown[]) { /* see note */ return []; }
+// end functions/api/settings/marketplaces/ebay/refresh.ts

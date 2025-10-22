@@ -1,3 +1,4 @@
+//Begin router.ts copy
 import { ensureSession, waitForSession } from '/assets/js/auth.js';
 import { showToast } from '/assets/js/ui.js';
 import '/assets/js/api.js'; // ensure window.api is available to screens
@@ -60,6 +61,11 @@ async function loadHTML(url){
   return text;
 }
 export async function loadScreen(name){
+  // Last-ditch guard: if user is typing or keyboard is open, defer
+  if (isTextInput(document.activeElement) || keyboardLikelyOpen()){
+    setTimeout(() => loadScreen(name), 200);
+    return;
+  }
   const meta = SCREENS[name] || SCREENS.dashboard;
   // Defensive: pick the last #app-view in case multiple exist
   const candidates = Array.from(document.querySelectorAll('#app-view'));
@@ -102,131 +108,74 @@ export async function loadScreen(name){
   document.title = `Resell Pro — ${meta.title}`;
 setActiveLink(name);
 
-// Ensure menus are closed AFTER the new screen is painted and any CSS transitions settle
-requestAnimationFrame(() => {
-  closeMenus();
-  // additional passes for slow mobile paints / transitions
-  setTimeout(closeMenus, 120);
-  setTimeout(closeMenus, 360);
-});
 
 // Release nav lock (see below)
 window.__navLock = false;
 
   log('loadScreen:end', { name });
   
-  // Mobile-only fallback: if flagged, do a one-time hard reload after paint
-  if (window.__forceMobileReloadOnce) {
-    // clear the flag to avoid loops
-    window.__forceMobileReloadOnce = false;
-    // Allow the DOM to present the new screen, then replace to refresh
-    requestAnimationFrame(() => {
-      setTimeout(() => {
-        try { closeMenus(); } catch {}
-        location.replace(location.href);
-      }, 0);
-    });
-  }
-  
+   
 }
 
 
 async function goto(name){
   // Prevent double navigation on touchend+click
   if (window.__navLock) return;
+
+  // No-op if we're already on this screen
+  if (current?.name === name) return;
+
   window.__navLock = true;
+
+  // If typing, don't navigate yet — this would blur the field and close keyboard
+  if (isTextInput(document.activeElement) || keyboardLikelyOpen()){
+    setTimeout(() => { window.__navLock = false; goto(name); }, 250);
+    return;
+  }
 
   const u = new URL(location.href);
   u.searchParams.set('page', name);
   history.pushState({}, '', u);
 
-  // Close immediately before loading
-  closeMenus();
-  // small delay to catch CSS-driven drawers
-  setTimeout(closeMenus, 60);
+  await safeLoadScreen(name);
+}
 
-  // Hint: on mobile, do a one-time hard refresh after the new screen paints
-  // to defeat stubborn menu/focus states in certain browsers.
-  window.__forceMobileReloadOnce = /Mobi|Android/i.test(navigator.userAgent);
+function isTextInput(el){
+  if(!el) return false;
+  const tag = el.tagName;
+  if (tag === 'INPUT' || tag === 'TEXTAREA' || el.isContentEditable) return true;
+  return false;
+}
 
+function keyboardLikelyOpen(){
+  try{
+    // On mobile, when the keyboard opens, visualViewport.height shrinks
+    if (window.visualViewport) {
+      const ratio = window.visualViewport.height / window.innerHeight;
+      return ratio < 0.85; // heuristic; adjust if needed
+    }
+  }catch{}
+  return false;
+}
+
+async function safeLoadScreen(name){
+  // If user is typing, defer the navigation to avoid blurring/closing the keyboard
+  if (isTextInput(document.activeElement) || keyboardLikelyOpen()){
+    // Re-check shortly rather than forcing a blur
+    setTimeout(() => safeLoadScreen(name), 250);
+    return;
+  }
   await loadScreen(name);
-
-  // Extra pass after the screen init settles
-  requestAnimationFrame(() => {
-    closeMenus();
-    setTimeout(closeMenus, 120);
-  });
 }
 
-window.addEventListener('popstate', () => loadScreen(qs('page') || 'dashboard'));
-// Mobile: some browsers fire touchend without a subsequent click
-// Mobile: some browsers fire touchend without a subsequent click
-/* SPA interceptors disabled for stability:
-   Let anchors perform normal navigation (full reload),
-   which guarantees the menu overlay goes away on mobile
-   and prevents double-trigger flicker on desktop.
-*/
-// document.addEventListener('touchend', ...);
-// document.addEventListener('click', ...);
-
-// If the tab becomes visible again or the viewport changes, ensure menus are shut
-document.addEventListener('visibilitychange', () => { if (!document.hidden) closeMenus(); });
-window.addEventListener('resize', () => closeMenus());
-
-// Defensive: if a page is restored from bfcache/pageshow, close menus
-window.addEventListener('pageshow', () => setTimeout(closeMenus, 0));
-
-function closeMenus(){
-  // 0) Clear :target-based menus and active focus that can keep overlays shown
-  try {
-    if (location.hash) {
-      const noHash = location.pathname + location.search;
-      history.replaceState({}, '', noHash);
-    }
-    if (document.activeElement && typeof document.activeElement.blur === 'function') {
-      document.activeElement.blur();
-    }
-  } catch {}
-
-  // 1) Checkbox toggles (multiple, if any) — also dispatch 'change' so CSS/listeners react
-  const toggles = [
-    document.getElementById('navcheck'),
-    ...document.querySelectorAll('input[type="checkbox"][data-menu-toggle], input[type="checkbox"][id*="nav"]')
-  ].filter(Boolean);
-
-  toggles.forEach(cb => {
-    try {
-      if (cb.checked) cb.checked = false;
-      cb.blur?.();
-      cb.dispatchEvent?.(new Event('change', { bubbles: true }));
-    } catch {}
-  });
-
-  // 2) <details> patterns
-  document.querySelectorAll('details[open]').forEach(d => d.removeAttribute('open'));
-
-  // 3) aria-expanded patterns
-  document.querySelectorAll('[aria-expanded="true"]').forEach(el => el.setAttribute('aria-expanded', 'false'));
-
-  // 4) Common containers/classes
-  const containers = [
-    document.getElementById('app-menu'),
-    ...document.querySelectorAll('[data-menu], .menu, .mobile-nav, .nav-drawer, .drawer')
-  ];
-  containers.forEach(el => {
-    ['open','active','show','visible','is-open'].forEach(cls => el?.classList?.remove(cls));
-    // If inline styles were used to keep it open, clear them
-    if (el && el.style) {
-      el.style.pointerEvents = '';
-      el.style.display = '';
-      el.style.visibility = '';
-    }
-  });
-
-  // 5) Body state
-  document.body.classList.remove('menu-open');
-}
-
+window.addEventListener('popstate', () => {
+  const name = qs('page') || 'dashboard';
+  // Ignore if it’s the same screen (prevents needless DOM swaps while typing)
+  if (current?.name === name) return;
+  safeLoadScreen(name);
+});
 
 log('boot');
-loadScreen(qs('page') || 'dashboard');
+safeLoadScreen(qs('page') || 'dashboard');
+
+//end router.ts copy

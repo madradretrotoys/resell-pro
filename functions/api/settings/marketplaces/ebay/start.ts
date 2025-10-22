@@ -1,4 +1,4 @@
-// functions/api/settings/marketplaces/ebay/start.ts
+// Begin functions/api/settings/marketplaces/ebay/start.ts
 // POST: returns { redirect_url } to eBay's consent page, using Sandbox (default) or Production env.
 export const onRequestPost: PagesFunction = async (context) => {
   const { request, env } = context;
@@ -70,3 +70,4 @@ async function signState(env: any, payload: Record<string, unknown>) {
   return btoa(raw) + "." + b64(mac);
 }
 
+//end start.ts

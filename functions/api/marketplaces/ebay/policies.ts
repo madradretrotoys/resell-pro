@@ -1,3 +1,4 @@
+//begin policies.ts
 import { neon } from "@neondatabase/serverless";
 
 type Role = "owner" | "admin" | "manager" | "clerk";
@@ -275,3 +276,4 @@ export const onRequestGet: PagesFunction<Env> = async ({ request, env }) => {
     return json({ ok: false, error: "server_error", message: msg }, 500);
   }
 };
+//end policies.ts

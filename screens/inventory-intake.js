@@ -8,7 +8,27 @@ export async function init() {
 
   // ——— Local helpers (screen-scoped) ———
   const $ = (id) => document.getElementById(id);
-
+  // --- Default Long Description for new items ---
+  const BASE_DESCRIPTION =
+    "The photos are part of the description. Be sure to look them over for condition and details. This is sold as is, and it's ready for a new home.";
+  
+  function ensureDefaultLongDescription() {
+    const el =
+      document.getElementById("longDescriptionTextarea") ||
+      findControlByLabel("Long Description");
+    if (!el) return;
+  
+    const val = String(el.value || "").trim();
+    // If user/server already filled it, leave it alone
+    if (val && val !== "Enter a detailed description…") return;
+  
+    // Pull Item Name / Description and prepend it above the base sentence
+    const titleEl = document.getElementById("titleInput") || findControlByLabel("Item Name / Description");
+    const title = String(titleEl?.value || "").trim();
+  
+    el.value = title ? `${title}\n\n${BASE_DESCRIPTION}` : BASE_DESCRIPTION;
+  }
+  
   // ====== Photos state & helpers (NEW) ======
   const MAX_PHOTOS = 15;
   let __photos = [];              // [{image_id, cdn_url, is_primary, sort_order, r2_key, width, height, bytes, content_type}]
@@ -53,10 +73,16 @@ export async function init() {
   
     // Pending files (preview only)
     for (const f of __pendingFiles) {
-      host.appendChild(renderThumb({ cdn_url: URL.createObjectURL(f), is_primary: false }, { pending: true }));
+      // Reuse the persistent preview URL and carry a stable pending_id
+      const preview = f._previewUrl || URL.createObjectURL(f);
+      host.appendChild(
+        renderThumb({ cdn_url: preview, pending_id: f._rpId, is_primary: false }, { pending: true })
+      );
     }
   
     updatePhotosUIBasic();
+    // Nudge gating when photo count changes (add/replace/delete/reorder)
+    try { computeValidity(); } catch {}
   }
   
   // Thumb element
@@ -119,10 +145,14 @@ export async function init() {
         await setPrimary(model.image_id);
       } else if (act === "delete") {
         if (pending) {
-          // remove from pending preview
-          const i = __pendingFiles.findIndex(f => model.cdn_url && model.cdn_url.startsWith("blob:"));
-          if (i >= 0) __pendingFiles.splice(i, 1);
+          // remove THE clicked pending file by its stable id
+          const idx = __pendingFiles.findIndex(f => f && f._rpId && f._rpId === model.pending_id);
+          if (idx >= 0) {
+            try { if (__pendingFiles[idx]._previewUrl) URL.revokeObjectURL(__pendingFiles[idx]._previewUrl); } catch {}
+            __pendingFiles.splice(idx, 1);
+          }
           renderPhotosGrid();
+        
         } else if (persisted) {
           await deleteImage(model.image_id);
         }
@@ -196,6 +226,13 @@ export async function init() {
   // Upload + attach (requires item_id)
   async function uploadAndAttach(file, { cropOfImageId = null } = {}) {
     if (!__currentItemId) {
+      // Give each pending file a stable identity and a persistent preview URL.
+      if (!file._rpId) {
+        file._rpId = (crypto?.randomUUID ? crypto.randomUUID() : String(Date.now() + Math.random()));
+      }
+      if (!file._previewUrl) {
+        file._previewUrl = URL.createObjectURL(file);
+      }
       __pendingFiles.push(file);
       renderPhotosGrid();
       return;
@@ -250,6 +287,7 @@ export async function init() {
       width: up.width, height: up.height, bytes: up.bytes, content_type: up.content_type,
     });
     renderPhotosGrid();
+    try { computeValidity(); } catch {}
   }
   
   // Set primary
@@ -280,8 +318,10 @@ export async function init() {
   
   // Replace
   async function replaceImage(oldModel, newFile) {
-    const ds = await downscaleToBlob(newFile);
-    await uploadAndAttach(ds, { cropOfImageId: oldModel.image_id });
+    const ds = await downscaleToBlob(f);
+    if (!ds._rpId) ds._rpId = (crypto?.randomUUID ? crypto.randomUUID() : String(Date.now() + Math.random()));
+    if (!ds._previewUrl) ds._previewUrl = URL.createObjectURL(ds);
+    await uploadAndAttach(ds);
   }
   
   // Minimal cropper: square crop with zoom+drag
@@ -421,6 +461,7 @@ export async function init() {
         await uploadAndAttach(ds);
       }
       e.target.value = "";
+      try { computeValidity(); } catch {}
     });
   
     // Upload from gallery/files
@@ -432,6 +473,7 @@ export async function init() {
         await uploadAndAttach(ds);
       }
       e.target.value = "";
+      try { computeValidity(); } catch {}
     });
   
     $("photoReorderToggle")?.addEventListener("click", ()=>{
@@ -442,14 +484,28 @@ export async function init() {
   
       document.addEventListener("intake:item-saved", async (ev) => {
       try {
-        const id = ev?.detail?.item_id;
+        const id         = ev?.detail?.item_id;
+        const saveStatus = String(ev?.detail?.save_status || "").toLowerCase(); // "active" | "draft"
+        const jobIds     = Array.isArray(ev?.detail?.job_ids) ? ev.detail.job_ids : [];
         if (!id) return;
         __currentItemId = id;
     
-        if (__pendingFiles.length === 0) return;
-        const pending = __pendingFiles.splice(0, __pendingFiles.length);
-        for (const f of pending) {
-          await uploadAndAttach(f);
+        if (__pendingFiles.length > 0) {
+          const pending = __pendingFiles.splice(0, __pendingFiles.length);
+          for (const f of pending) await uploadAndAttach(f);
+        }
+    
+        if (saveStatus === "active" && jobIds.length > 0) {
+          setEbayStatus("Publishing…", { tone: "info" });
+    
+          for (const jid of jobIds) {
+            // fire-and-forget execute
+            fetch(`/api/marketplaces/publish/run?job_id=${encodeURIComponent(jid)}`, { method: "POST" })
+              .catch(() => {});
+          
+            // poll this job id until done (POST-based poller)
+            trackPublishJob(jid);
+          }
         }
       } catch (e) {
         console.error("photos:flush:error", e);
@@ -541,18 +597,30 @@ export async function init() {
   }
   
   // Helper: find a control by its label text (fallback when no ID exists)
-function findControlByLabel(labelText) {
-  const labels = Array.from(document.querySelectorAll("label"));
-  const lbl = labels.find(l => (l.textContent || "").trim().toLowerCase() === labelText.toLowerCase());
-  if (!lbl) return null;
-  if (lbl.htmlFor) return document.getElementById(lbl.htmlFor) || null;
-  // fallback: input/select/textarea right after the label
-  let n = lbl.nextElementSibling;
-  while (n && !(n instanceof HTMLInputElement || n instanceof HTMLSelectElement || n instanceof HTMLTextAreaElement)) {
-    n = n.nextElementSibling;
+  function findControlByLabel(labelText) {
+    // normalize: remove colons, asterisks and collapse whitespace
+    const norm = (s) => String(s || "")
+      .replace(/[:*]/g, "")
+      .replace(/\s+/g, " ")
+      .trim()
+      .toLowerCase();
+  
+    const want = norm(labelText);
+    const labels = Array.from(document.querySelectorAll("label"));
+    const lbl = labels.find(l => norm(l.textContent) === want);
+    if (!lbl) return null;
+  
+    if (lbl.htmlFor) {
+      const byId = document.getElementById(lbl.htmlFor);
+      if (byId) return byId;
+    }
+    // fallback: the first input/select/textarea after the label
+    let n = lbl.nextElementSibling;
+    while (n && !(n instanceof HTMLInputElement || n instanceof HTMLSelectElement || n instanceof HTMLTextAreaElement)) {
+      n = n.nextElementSibling;
+    }
+    return n || null;
   }
-  return n || null;
-}
 
 // Helper: hide/show a field container by its label text
 function hideShowFieldByLabel(labelText, hide) {
@@ -797,11 +865,46 @@ function setMarketplaceVisibility() {
       .filter(n => !n.disabled && n.type !== "hidden");
   }
   
-  function getMarketplaceRequiredControls() {
-    return MARKETPLACE_REQUIRED
+ function getMarketplaceRequiredControls() {
+    // Base marketplace + shipping fields (only when visible & enabled)
+    const base = MARKETPLACE_REQUIRED
       .map(({ id, label }) => resolveControl(id, label))
       .filter(Boolean)
-      .filter(n => !n.disabled && n.type !== "hidden");
+      .filter((n) => {
+        if (!n || n.disabled || n.type === "hidden") return false;
+        if (n.closest(".hidden")) return false;
+        if (n.offsetParent === null) return false;
+        return true;
+      });
+
+    // eBay card fields (when the eBay card is rendered and the fields are visible)
+    const ebaySelectors = [
+      "#ebay_shippingPolicy",
+      "#ebay_paymentPolicy",
+      "#ebay_returnPolicy",
+      "#ebay_shipZip",
+      "#ebay_formatSelect",
+      "#ebay_bin",
+
+      // These are conditionally shown; include only if visible
+      "#ebay_duration",
+      "#ebay_start",
+      "#ebay_autoAccept",
+      "#ebay_minOffer",
+      "#ebay_promotePct"
+    ];
+
+    const ebayNodes = ebaySelectors
+      .map(sel => document.querySelector(sel))
+      .filter(Boolean)
+      .filter((n) => {
+        if (!n || n.disabled || n.type === "hidden") return false;
+        if (n.closest(".hidden")) return false;       // hidden by class (format/best-offer/promote toggles)
+        if (n.offsetParent === null) return false;    // not in layout flow
+        return true;
+      });
+
+    return [...base, ...ebayNodes];
   }
   // === [END ADD] ===
   
@@ -933,6 +1036,14 @@ function setMarketplaceVisibility() {
     const host = document.getElementById(MP_CARDS_ID);
     if (!host) return;
     host.innerHTML = "";
+
+    // Install delegated listeners once so any field edit re-checks validity
+    if (!host.dataset.validHook) {
+      const safeRecheck = () => { try { computeValidity(); } catch {} };
+      host.addEventListener("input",  safeRecheck);
+      host.addEventListener("change", safeRecheck);
+      host.dataset.validHook = "1";
+    }
   
     // Build a lookup of marketplaces by id (id, slug, marketplace_name, is_connected etc.)
     const rows = (meta?.marketplaces || []).filter(m => m.is_active !== false);
@@ -1137,17 +1248,24 @@ function setMarketplaceVisibility() {
           bestOfferOnly().forEach(n => n.classList.toggle("hidden", !(isFixed && hasBO)));
           promoOnly().forEach(n => n.classList.toggle("hidden", !promo));
   
-          // When Best Offer is unchecked, clear and mark not required
+         // When Best Offer is unchecked, clear and mark not required
           const autoAcc = body.querySelector('#ebay_autoAccept');
           const minOff  = body.querySelector('#ebay_minOffer');
           if (autoAcc) autoAcc.required = isFixed && hasBO;
           if (minOff)  minOff.required  = isFixed && hasBO;
+
+          // Re-evaluate button enablement whenever fields become shown/hidden or required flips
+          try { computeValidity(); } catch {}
         }
-  
+
+        // Any change that can flip visibility/required should re-run validity
         formatSel?.addEventListener("change", applyEbayVisibility);
         bestOffer?.addEventListener("change", applyEbayVisibility);
         promoteChk?.addEventListener("change", applyEbayVisibility);
+
+        // First paint: align UI *and* button states to current values
         applyEbayVisibility();
+        try { computeValidity(); } catch {}
         
       } else {
         // Generic placeholder card for other marketplaces (no filler lists)
@@ -1165,18 +1283,132 @@ function setMarketplaceVisibility() {
 
   // === END NEW ===
 
+  // ===== Marketplace Status UI helpers (eBay) =====
+  function getEbayStatusNodes() {
+    // Find the eBay card and its status span
+    const card = Array.from(document.querySelectorAll('#marketplaceCards .card'))
+      .find(c => /ebay/i.test((c.querySelector('.font-semibold')?.textContent || '')));
+    if (!card) return { textEl: null, wrap: null };
+  
+    const wrap = card.querySelector('[data-card-status]') || card;
+    const textEl = card.querySelector('[data-status-text]') || wrap.querySelector('.mono') || wrap;
+    return { textEl, wrap };
+  }
+  
+  function setEbayStatus(label, { link = null, tone = 'muted' } = {}) {
+    const { textEl, wrap } = getEbayStatusNodes();
+    if (!textEl) return;
+  
+    // Color cue via utility classes
+    const classes = ['text-gray-600','text-blue-700','text-green-700','text-red-700'];
+    wrap.classList.remove(...classes);  
+    if (tone === 'info')  wrap.classList.add('text-blue-700');
+    if (tone === 'ok')    wrap.classList.add('text-green-700');
+    if (tone === 'error') wrap.classList.add('text-red-700');
+  
+    // Set text/anchor
+    if (link) {
+      textEl.innerHTML = ''; // clear
+      const a = document.createElement('a');
+      a.href = link;
+      a.target = '_blank';
+      a.rel = 'noopener';
+      a.textContent = label;
+      textEl.appendChild(a);
+    } else {
+      textEl.textContent = label;
+    }
+  }
+
+    async function trackPublishJob(jobId, { maxMs = 90000, intervalMs = 1500 } = {}) {
+        const started = Date.now();
+      
+        async function pollOnce() {
+          try {
+            // Poll the existing POST endpoint. Your server returns { ok, status, remote? } when terminal.
+            const res = await fetch(`/api/marketplaces/publish/run?job_id=${encodeURIComponent(jobId)}`, {
+              method: "POST",
+              headers: { "content-type": "application/json" },
+              body: JSON.stringify({ poll: true })
+            });
+            const body = await res.json().catch(() => ({}));
+      
+            const status = String(body?.status || body?.state || "").toLowerCase();
+      
+            if (status === "succeeded") {
+              const remote = body.remote || {};
+              const url = remote.remoteUrl || remote.remoteURL || null;
+              setEbayStatus("Listed", { tone: "ok", link: url || null });
+              return true;
+            }
+      
+            if (status === "failed" || status === "dead" || body?.error) {
+              const msg = String(body?.error || "Failed").slice(0, 160);
+              setEbayStatus(`Error${msg ? ` — ${msg}` : ""}`, { tone: "error" });
+              return true;
+            }
+      
+            // Non-terminal shapes your server returns while work is ongoing
+            // Examples you've seen: { ok: true, taken: 0 }
+            
+            // --- Fallback guard ---
+            // If the job API hasn't reported "succeeded" yet, check the persisted listing row.
+            // We already hydrate the screen with GET /api/inventory/intake when loading drafts;
+            // use the same contract here so we don't spin forever if the job ended but the
+            // job endpoint didn't deliver a terminal payload to this browser.
+            try {
+              if (__currentItemId) {
+                const snap = await api(`/api/inventory/intake?item_id=${encodeURIComponent(__currentItemId)}`, { method: "GET" });
+                const live = String(snap?.marketplace_listing?.ebay?.status || "").toLowerCase() === "live";
+                if (live) {
+                  const url = snap?.marketplace_listing?.ebay?.mp_item_url || null;
+                  setEbayStatus("Listed", { tone: "ok", link: url || null });
+                  return true; // break the loop
+                }
+              }
+            } catch { /* ignore and keep polling until timeout */ }
+            
+            return false;
+          } catch {
+            // Network hiccup — keep polling until timeout
+            return false;
+          }
+        }
+      
+        let done = await pollOnce();
+          while (!done && (Date.now() - started) < maxMs) {
+            await new Promise(r => setTimeout(r, intervalMs));
+            done = await pollOnce();
+          }
+        
+          if (!done) setEbayStatus("Unknown", { tone: "muted" });
+        }
+  
+       
   function computeValidity() {
     // BASIC — always required (explicit control list)
     const basicControls = getBasicRequiredControls();
     const basicOk = markBatchValidity(basicControls, hasValue);
-  
+
+    // PHOTOS — must have at least one (persisted or pending)
+    const photoCount = (__photos?.length || 0) + (__pendingFiles?.length || 0);
+    const photosOk = photoCount >= 1;
+    // Light accessibility cue on the Photos card/header when missing
+    (function markPhotos(ok) {
+      const host = document.getElementById("photosCard")
+               || document.getElementById("photosGrid")
+               || document.getElementById("photosCount");
+      if (host) host.setAttribute("aria-invalid", ok ? "false" : "true");
+    })(photosOk);
+
+    
     // MARKETPLACE — required only when active
     let marketOk = true;
     if (marketplaceActive()) {
       const marketControls = getMarketplaceRequiredControls();
       marketOk = markBatchValidity(marketControls, hasValue);
 
-      // NEW: also require ≥1 marketplace tile selected
+      // Require ≥1 selected marketplace tile when marketplace flow is active
       if (marketOk) {
         const hasAny = selectedMarketplaceIds.size >= 1;
         marketOk = marketOk && hasAny;
@@ -1189,8 +1421,9 @@ function setMarketplaceVisibility() {
       getMarketplaceRequiredControls().forEach(n => n.setAttribute("aria-invalid", "false"));
       showMarketplaceTilesError(false);
     }
-  
-    const allOk = basicOk && marketOk;
+
+    // ⬅️ photos are part of the gate
+    const allOk = basicOk && photosOk && marketOk;
     setCtasEnabled(allOk);
     document.dispatchEvent(new CustomEvent("intake:validity-changed", { detail: { valid: allOk } }));
     return allOk;
@@ -1230,7 +1463,37 @@ async function refreshDrafts({ force = false } = {}) {
 document.addEventListener("intake:item-changed", () => refreshDrafts({ force: true }));
 // --- end Drafts refresh bus ---
 
+// --- Inventory refresh bus + helpers (NEW) ---
+let __inventoryRefreshTimer = null;
 
+function isInventoryTabVisible() {
+  const pane = document.getElementById("paneInventory");
+  if (!pane) return true;
+  const hiddenByAttr = pane.getAttribute("hidden") != null;
+  const hiddenByClass = pane.classList.contains("hidden");
+  return !(hiddenByAttr || hiddenByClass);
+}
+
+async function refreshInventory({ force = false } = {}) {
+  if (!force && !isInventoryTabVisible()) return;
+  if (__inventoryRefreshTimer) window.clearTimeout(__inventoryRefreshTimer);
+  __inventoryRefreshTimer = window.setTimeout(async () => {
+    try {
+      const header = document.querySelector('#recentInventoryHeader, [data-recent-inventory-header]');
+      if (header) header.classList.add("loading");
+      const __callLoadInventory = (window && window.__loadInventory) || (typeof loadInventory === "function" ? loadInventory : null);
+      if (__callLoadInventory) { await __callLoadInventory(); }
+    } finally {
+      const header = document.querySelector('#recentInventoryHeader, [data-recent-inventory-header]');
+      if (header) header.classList.remove("loading");
+      __inventoryRefreshTimer = null;
+    }
+  }, 300);
+}
+
+// Refresh inventory after add/save/delete when the Inventory tab is open
+document.addEventListener("intake:item-changed", () => refreshInventory({ force: true }));
+// --- end Inventory refresh bus ---
   
   
   
@@ -1363,7 +1626,56 @@ document.addEventListener("intake:item-changed", () => refreshDrafts({ force: tr
     renderMarketplaceTiles(meta);
     // Render placeholder cards for any preselected tiles (from defaults)
     try { renderMarketplaceCards(__metaCache); } catch {}
+      // === Hydrate per-user marketplace defaults (eBay) ===
+      async function hydrateUserDefaults() {
+        try {
+          const res = await api(`/api/inventory/user-defaults?marketplace=ebay`, { method: "GET" });
+          if (!res || res.ok === false || !res.defaults) return;
+          const d = res.defaults;
     
+          // 1) Stash policy ids so the async policy loader can re-apply after options arrive.
+          //    If options are already present, we apply immediately as well.
+          try {
+            window.__ebaySavedPolicies = {
+              shipping_policy: d.shipping_policy ?? "",
+              payment_policy:  d.payment_policy  ?? "",
+              return_policy:   d.return_policy   ?? "",
+            };
+            const tryApply = (id, val) => {
+              const el = document.getElementById(id);
+              if (!el) return;
+              // only set if the option list is populated
+              if (el.options && el.options.length > 0 && val) el.value = String(val);
+            };
+            tryApply("ebay_shippingPolicy", d.shipping_policy);
+            tryApply("ebay_paymentPolicy",  d.payment_policy);
+            tryApply("ebay_returnPolicy",   d.return_policy);
+          } catch {}
+    
+          // 2) Non-policy fields can be set directly.
+          const zipEl = document.getElementById("ebay_shipZip");
+          if (zipEl && d.shipping_zip) zipEl.value = d.shipping_zip;
+    
+          const fmtEl = document.getElementById("ebay_formatSelect");
+          if (fmtEl && d.pricing_format) fmtEl.value = String(d.pricing_format);
+    
+          const bestEl = document.getElementById("ebay_bestOffer");
+          if (bestEl && typeof d.allow_best_offer === "boolean") bestEl.checked = d.allow_best_offer;
+    
+          const promEl = document.getElementById("ebay_promote");
+          if (promEl && typeof d.promote === "boolean") promEl.checked = d.promote;
+    
+          // 3) Re-apply visibility rules and any dependent logic
+          try {
+            document.getElementById("ebay_formatSelect")?.dispatchEvent(new Event("change"));
+            document.getElementById("ebay_bestOffer")?.dispatchEvent(new Event("change"));
+            document.getElementById("ebay_promote")?.dispatchEvent(new Event("change"));
+          } catch {}
+        } catch {}
+      }
+    
+    // Hydrate after cards exist
+    try { await hydrateUserDefaults(); } catch {}
     // Store + channel
     fillSelect($("storeLocationSelect"), meta.store_locations);
     fillSelect($("salesChannelSelect"), meta.sales_channels);
@@ -1403,12 +1715,98 @@ document.addEventListener("intake:item-changed", () => refreshDrafts({ force: tr
     ensurePlaceholder($("storeLocationSelect"));
     ensurePlaceholder($("salesChannelSelect"));
 
+    // Pre-fill the Long Description field if empty
+    ensureDefaultLongDescription();
+    
     // Wire and run initial validation
     wireValidation();
     computeValidity();
     
     // Auto-load drafts into the Drafts tab on screen load (does not auto-switch the tab)
     await loadDrafts?.();
+    
+    // True tab wiring (ARIA tabs + lazy-load for Inventory)
+    (function wireIntakeTabs() {
+      const tabBulk       = document.getElementById("tabBulk");
+      const tabDrafts     = document.getElementById("tabDrafts");
+      const tabInventory  = document.getElementById("tabInventory");
+      const paneBulk      = document.getElementById("paneBulk");
+      const paneDrafts    = document.getElementById("paneDrafts");
+      const paneInventory = document.getElementById("paneInventory");
+
+      const tabs  = [tabDrafts, tabInventory, tabBulk].filter(Boolean);
+      const panes = [paneDrafts, paneInventory, paneBulk].filter(Boolean);
+
+      function setSelected(tabEl, isSelected) {
+        if (!tabEl) return;
+        tabEl.setAttribute("aria-selected", String(isSelected));
+        tabEl.tabIndex = isSelected ? 0 : -1;
+
+        // Visual affordance: make the selected tab look active/primary
+        tabEl.classList.toggle("btn-primary", isSelected);
+        tabEl.classList.toggle("btn-ghost", !isSelected);
+      }
+
+      function showPane(paneEl) {
+        panes.forEach((p) => {
+          if (!p) return;
+          const active = p === paneEl;
+          // Native hide
+          p.hidden = !active;
+          // Utility class (kept for visual parity with existing CSS)
+          p.classList.toggle("hidden", !active);
+          // ARIA state for assistive tech
+          if (active) p.removeAttribute("aria-hidden");
+          else p.setAttribute("aria-hidden", "true");
+        });
+      }
+
+      function activate(tabEl, paneEl) {
+        tabs.forEach((t) => setSelected(t, t === tabEl));
+        showPane(paneEl);
+        if (tabEl) tabEl.focus();
+      }
+
+      // Click behavior
+      tabDrafts?.addEventListener("click", async () => {
+        activate(tabDrafts, paneDrafts);
+        // Ensure drafts render whenever the Drafts tab is shown
+        await (typeof loadDrafts === "function" ? loadDrafts() : Promise.resolve());
+      });
+
+      tabInventory?.addEventListener("click", async () => {
+        activate(tabInventory, paneInventory);
+        // Lazy-load inventory on demand
+        await (typeof loadInventory === "function" ? loadInventory() : Promise.resolve());
+      });
+
+      // Bulk is disabled/placeholder for now
+      tabBulk?.addEventListener("click", () => {
+        activate(tabBulk, paneBulk);
+      });
+
+      // Keyboard behavior (Left/Right/Home/End) for accessibility
+      const KEY = { LEFT: 37, RIGHT: 39, HOME: 36, END: 35 };
+      document.getElementById("intakeTabBar")?.addEventListener("keydown", (e) => {
+        const current = document.activeElement;
+        if (!tabs.includes(current)) return;
+
+        let idx = tabs.indexOf(current);
+        if (e.keyCode === KEY.LEFT)  { idx = (idx - 1 + tabs.length) % tabs.length; }
+        if (e.keyCode === KEY.RIGHT) { idx = (idx + 1) % tabs.length; }
+        if (e.keyCode === KEY.HOME)  { idx = 0; }
+        if (e.keyCode === KEY.END)   { idx = tabs.length - 1; }
+
+        if (idx !== -1 && tabs[idx]) {
+          e.preventDefault();
+          tabs[idx].click();
+        }
+      });
+
+      // Default: Drafts selected, Inventory hidden
+      activate(tabDrafts, paneDrafts);
+    })();
+
     
     // --- [NEW] Submission wiring: both buttons call POST /api/inventory/intake ---
     function valByIdOrLabel(id, label) {
@@ -1487,10 +1885,10 @@ document.addEventListener("intake:item-changed", () => refreshDrafts({ force: tr
               return prune({ ...base, ...auctionExtras });
         }
     
-                // Hydrate the eBay card from saved data (called after tiles/cards are rendered)
+        // Hydrate the eBay card from saved data (called after tiles/cards are rendered)
         function hydrateEbayFromSaved(ebay, ebayMarketplaceId) {
           if (!ebay) return;
-
+        
           // Stash saved policy ids globally so the policy-loader can re-apply AFTER options arrive
           try {
             window.__ebaySavedPolicies = {
@@ -1499,7 +1897,24 @@ document.addEventListener("intake:item-changed", () => refreshDrafts({ force: tr
               return_policy:   ebay.return_policy   ?? ""
             };
           } catch {}
-
+        
+          // Reflect persisted listing status on the card
+          // app.item_marketplace_listing(status, mp_item_url) -> ebay.status, ebay.mp_item_url
+          // Map: live -> "Listed" (green, linkable); publishing -> "Publishing…"; error -> "Error"; else -> "Not Listed"
+          try {
+            const raw = String(ebay.status || "").toLowerCase();
+            const url = ebay.mp_item_url || null;
+            if (raw === "live") {
+              setEbayStatus("Listed", { tone: "ok", link: url || null });
+            } else if (raw === "publishing" || raw === "processing") {
+              setEbayStatus("Publishing…", { tone: "info" });
+            } else if (raw === "error" || raw === "failed" || raw === "dead") {
+              setEbayStatus("Error", { tone: "error" });
+            } else {
+              setEbayStatus("Not Listed", { tone: "muted" });
+            }
+          } catch {}
+        
           // Ensure the eBay tile/card is visible and rendered
           try {
             if (ebayMarketplaceId && typeof ebayMarketplaceId === "number") {
@@ -1651,12 +2066,50 @@ document.addEventListener("intake:item-changed", () => refreshDrafts({ force: tr
       if (!res || res.ok === false) {
           throw new Error(res?.error || "intake_failed");
         }
-
+        
         // Save defaults (local) on success so user gets the same picks next time
         try {
           writeDefaults(Array.from(selectedMarketplaceIds.values()));
         } catch {}
 
+         // NEW: also persist user defaults on the server for this marketplace
+        try {
+          // Only run if eBay controls exist on the page
+          const shipSel = document.getElementById("ebay_shippingPolicy");
+          const paySel  = document.getElementById("ebay_paymentPolicy");
+          const retSel  = document.getElementById("ebay_returnPolicy");
+          const zipEl   = document.getElementById("ebay_shipZip");
+          // Pricing format comes from the format select (fixed|auction)
+          const fmtSel  = document.getElementById("ebay_formatSelect");
+          const boChk   = document.getElementById("ebay_bestOffer");
+          const prChk   = document.getElementById("ebay_promote");
+        
+          if (shipSel || paySel || retSel || zipEl || fmtSel || boChk || prChk) {
+            const clean = (v) => (v === undefined || v === null
+              ? undefined
+              : (typeof v === "string" ? v.trim() : v));
+        
+            const defaults = {
+              shipping_policy: clean(shipSel?.value || ""),
+              payment_policy:  clean(paySel?.value  || ""),
+              return_policy:   clean(retSel?.value  || ""),
+              shipping_zip:    clean(zipEl?.value   || ""),
+              pricing_format:  clean((fmtSel?.value || "").toLowerCase()),
+              allow_best_offer: boChk ? Boolean(boChk.checked) : undefined,
+              promote:          prChk ? Boolean(prChk.checked) : undefined,
+            };
+        
+            await api("/api/inventory/user-defaults?marketplace=ebay", {
+              method: "PUT",
+              headers: {
+                "content-type": "application/json"
+              },
+              body: JSON.stringify({ defaults }),
+            });
+          }
+        } catch {}
+       
+        
         // Post-save UX: confirm, disable fields, and swap CTAs
         postSaveSuccess(res, mode);
         // Notify Drafts to reload now that an item changed (added/promoted/saved)
@@ -1712,9 +2165,7 @@ document.addEventListener("intake:item-changed", () => refreshDrafts({ force: tr
     // Remember original actions-row HTML so we can restore the 3 CTAs after editing
     let __originalCtasHTML = null;
     
-    // Hold the current item id across edits so the next save updates, not creates 
-    let __currentItemId = null;
-    
+     
 
     /** Format a timestamp into a short local string */
     function fmtSaved(ts) {
@@ -1789,9 +2240,20 @@ document.addEventListener("intake:item-changed", () => refreshDrafts({ force: tr
           const shipBox = document.getElementById("shippingBoxSelect") || findControlByLabel("Shipping Box");
           if (shipBox) shipBox.value = listing.shipping_box_key ?? "";
 
-          // Long Description (textarea)
-          const longDesc = document.getElementById("longDescriptionTextarea") || findControlByLabel("Long Description");
-          if (longDesc) longDesc.value = listing.product_description ?? "";
+         // Long Description (textarea)
+        const longDesc = document.getElementById("longDescriptionTextarea") || findControlByLabel("Long Description");
+        if (longDesc) {
+          const current = String(listing?.product_description ?? "").trim();
+          if (current) {
+            // If server already has a description, use it as-is
+            longDesc.value = current;
+          } else {
+            // Otherwise, compose: <Title> + blank line + base sentence
+            const titleEl = document.getElementById("titleInput") || findControlByLabel("Item Name / Description");
+            const title = String(titleEl?.value || inv?.product_short_title || "").trim();
+            longDesc.value = title ? `${title}\n\n${BASE_DESCRIPTION}` : BASE_DESCRIPTION;
+          }
+        }
           
     
 
@@ -1984,9 +2446,104 @@ document.addEventListener("intake:item-changed", () => refreshDrafts({ force: tr
     }
 
      // Make loadDrafts available to the refresh bus declared earlier
-    try { window.__loadDrafts = loadDrafts; } catch {}
-    
-    wireCtas();
+      try { window.__loadDrafts = loadDrafts; } catch {}
+      
+      /** Render a single inventory row (Active items) */
+      function renderInventoryRow(row) {
+        const tr = document.createElement("tr");
+        tr.className = "border-b";
+        const price = (row.price != null) ? `$${Number(row.price).toFixed(2)}` : "—";
+        const qty = (row.qty ?? "—");
+        const cat = row.category_nm || "—";
+        const title = row.product_short_title || "—";
+        const saved = fmtSaved(row.saved_at);
+      
+        const imgCell = `
+          <div class="w-10 h-10 rounded-lg overflow-hidden border" style="width:40px;height:40px">
+            ${row.image_url ? `<img src="${row.image_url}" alt="" style="width:40px;height:40px;object-fit:cover" loading="lazy">` : `<div class="w-10 h-10 bg-gray-100"></div>`}
+          </div>
+        `;
+      
+        tr.innerHTML = `
+          <td class="px-3 py-2 whitespace-nowrap">${saved}</td>
+          <td class="px-3 py-2">${imgCell}</td>
+          <td class="px-3 py-2 mono">${row.sku || "—"}</td>
+          <td class="px-3 py-2">${title}</td>
+          <td class="px-3 py-2">${price}</td>
+          <td class="px-3 py-2">${qty}</td>
+          <td class="px-3 py-2">${cat}</td>
+          <td class="px-3 py-2">
+            <div class="flex gap-2">
+              <button type="button" class="btn btn-primary btn-sm" data-action="load" data-item-id="${row.item_id}">Load</button>
+              <button type="button" class="btn btn-ghost btn-sm" data-action="delete" data-item-id="${row.item_id}">Delete</button>
+            </div>
+          </td>
+        `;
+        return tr;
+      }
+      
+      /** Click handler: Delete an inventory item from the list (Active) */
+      async function handleDeleteInventory(item_id, rowEl) {
+        try {
+          const sure = confirm("Delete this item? This cannot be undone.");
+          if (!sure) return;
+          const res = await api("/api/inventory/intake", {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ action: "delete", item_id })
+          });
+          if (!res || res.ok === false) throw new Error(res?.error || "delete_failed");
+          if (rowEl && rowEl.parentElement) rowEl.parentElement.removeChild(rowEl);
+          // also nudge the drafts/inventory panes to stay current
+          document.dispatchEvent(new CustomEvent("intake:item-changed"));
+        } catch (err) {
+          console.error("inventory:delete:error", err);
+          alert("Failed to delete item.");
+        }
+      }
+      
+      /** Load and render the most recent Active inventory (limit 50) */
+      async function loadInventory() {
+        try {
+          const tbody = document.getElementById("recentInventoryTbody");
+          if (!tbody) return;
+          const res = await api("/api/inventory/recent?limit=50", { method: "GET" });
+          if (!res || res.ok === false) throw new Error(res?.error || "inventory_failed");
+          const rows = Array.isArray(res.rows) ? res.rows : [];
+      
+          tbody.innerHTML = "";
+          if (rows.length === 0) {
+            const tr = document.createElement("tr");
+            tr.innerHTML = `<td class="px-3 py-2 text-gray-500" colspan="8">No inventory found.</td>`;
+            tbody.appendChild(tr);
+            return;
+          }
+      
+          for (const r of rows) {
+            const tr = renderInventoryRow(r);
+            tbody.appendChild(tr);
+          }
+      
+          // Wire row buttons
+          tbody.querySelectorAll("button[data-action]").forEach((btn) => {
+            const action = btn.getAttribute("data-action");
+            const id = btn.getAttribute("data-item-id");
+            if (action === "load") {
+              // reuse the existing loader; it hydrates photos + fields
+              btn.addEventListener("click", () => handleLoadDraft(id));
+            } else if (action === "delete") {
+              btn.addEventListener("click", () => handleDeleteInventory(id, btn.closest("tr")));
+            }
+          });
+        } catch (err) {
+          console.error("inventory:load:error", err);
+        }
+      }
+      
+      // Expose for refresh bus
+      try { window.__loadInventory = loadInventory; } catch {}
+      
+      wireCtas();
 
     // NEW: Photos bootstrap
     wirePhotoPickers();
@@ -2033,9 +2590,19 @@ document.addEventListener("intake:item-changed", () => refreshDrafts({ force: tr
             if (form && __currentItemId) form.dataset.itemId = __currentItemId;
           } catch (e) {}
 
-          // NEW: notify photos module so it can flush any pending uploads
+          // notify photos module to flush any pending uploads
+            
           try {
-            document.dispatchEvent(new CustomEvent("intake:item-saved", { detail: { item_id: __currentItemId } }));
+            document.dispatchEvent(
+              new CustomEvent("intake:item-saved", {
+                // pass save mode and the job_ids we got back from the server
+                detail: {
+                  item_id: __currentItemId,
+                  save_status: mode,                 // "active" | "draft"
+                  job_ids: Array.isArray(res?.job_ids) ? res.job_ids : [] // use the real response variable
+                }
+              })
+            );
           } catch {}
           
         } catch {}

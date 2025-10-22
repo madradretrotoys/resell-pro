@@ -1,4 +1,5 @@
-//Begin draft.ts file
+//Begin recent.ts file
+// functions/api/inventory/recent.ts
 import { neon } from "@neondatabase/serverless";
 
 type Role = "owner" | "admin" | "manager" | "clerk";
@@ -17,6 +18,7 @@ function readCookie(header: string, name: string): string | null {
   return null;
 }
 
+// Minimal HS256 verify (same as intake.ts)
 async function verifyJwt(token: string, secret: string): Promise<any> {
   const enc = new TextEncoder();
   const [h, p, s] = token.split(".");
@@ -52,7 +54,7 @@ export const onRequestGet: PagesFunction = async ({ request, env }) => {
 
     const sql = neon(String(env.DATABASE_URL));
 
-    // AuthZ: same policy as intake create/edit
+    // AuthZ — same rule as intake
     const actor = await sql<{ role: Role; active: boolean; can_inventory_intake: boolean | null }[]>`
       SELECT m.role, m.active, COALESCE(p.can_inventory_intake, false) AS can_inventory_intake
       FROM app.memberships m
@@ -64,37 +66,55 @@ export const onRequestGet: PagesFunction = async ({ request, env }) => {
     const allow = ["owner", "admin", "manager"].includes(actor[0].role) || !!actor[0].can_inventory_intake;
     if (!allow) return json({ ok: false, error: "forbidden" }, 403);
 
-    // List drafts; inventory table does not carry tenant_id, so we select drafts globally,
-    // but we also compute whether this tenant has a listing profile for the item.
+    // Params
+    const url = new URL(request.url);
+    const limitRaw = Number(url.searchParams.get("limit") || 50);
+    const limit = Number.isFinite(limitRaw) ? Math.max(1, Math.min(100, limitRaw)) : 50;
+
+    // Query: latest Active items for this tenant + primary image (if any)
     const rows = await sql<{
       item_id: string;
       saved_at: string;
+      sku: string | null;
       product_short_title: string | null;
-      price: string | number | null;
+      price: number | null;
       qty: number | null;
       category_nm: string | null;
-      has_listing_profile: boolean;
+      image_url: string | null;
     }[]>`
+      WITH imgs AS (
+        SELECT
+          im.item_id,
+          im.cdn_url,
+          ROW_NUMBER() OVER (
+            PARTITION BY im.item_id
+            ORDER BY im.is_primary DESC, im.sort_order ASC, im.created_at ASC
+          ) AS rn
+        FROM app.item_images im
+        WHERE im.tenant_id = ${tenant_id}
+      )
       SELECT
         i.item_id,
         i.updated_at AS saved_at,
+        i.sku,
         i.product_short_title,
         i.price,
         i.qty,
         i.category_nm,
-        (lp.item_id IS NOT NULL) AS has_listing_profile
+        (SELECT cdn_url FROM imgs WHERE imgs.item_id = i.item_id AND rn = 1) AS image_url
       FROM app.inventory i
-      LEFT JOIN app.item_listing_profile lp
-        ON lp.item_id = i.item_id AND lp.tenant_id = ${tenant_id}
-      WHERE i.item_status = 'draft'
+      INNER JOIN app.item_listing_profile lp
+        ON lp.item_id = i.item_id
+       AND lp.tenant_id = ${tenant_id}
+      WHERE i.item_status = 'active'
       ORDER BY i.updated_at DESC
-      LIMIT 50
+      LIMIT ${limit};
     `;
-
+     
     return json({ ok: true, rows }, 200);
-  } catch (e: any) {
-    return json({ ok: false, error: "server_error", message: String(e?.message || e) }, 500);
+  } catch (err: any) {
+    console.error("[inventory/recent] error", err);
+    return json({ ok: false, error: "server_error" }, 500);
   }
 };
-
-//Begin draft.ts file
+//end recent.ts file

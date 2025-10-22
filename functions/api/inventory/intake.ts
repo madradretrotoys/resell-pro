@@ -1,6 +1,7 @@
 // functions/api/inventory/intake.ts
 import { neon } from "@neondatabase/serverless";
 
+
 type Role = "owner" | "admin" | "manager" | "clerk";
 const json = (data: any, status = 200) =>
   new Response(JSON.stringify(data), {
@@ -57,6 +58,12 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
     // Resolve eBay marketplace id once per request
     const ebayRow = await sql<{ id: number }[]>`SELECT id FROM app.marketplaces_available WHERE slug = 'ebay' LIMIT 1`;
     const EBAY_MARKETPLACE_ID = ebayRow[0]?.id ?? null;
+    console.log("[intake] ctx", {
+      tenant_id,
+      actor_user_id,
+      EBAY_MARKETPLACE_ID,
+      request_ms: Date.now() - t0
+    });
 
     // Normalize/null-out eBay fields according to pricing_format & toggles
     const normalizeEbay = (src: any) => {
@@ -96,10 +103,165 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
       }
       if (!s.promote) s.promote_percent = null;
 
-      return s;
+        return s;
     };
 
+     // ===== Long Description Composer (hard-coded v1) =====
+    const BASE_SENTENCE =
+      "The photos are part of the description. Be sure to look them over for condition and details. This is sold as is, and it's ready for a new home.";
 
+    // We no longer emit visible markers. Keep regex to strip old marker blocks during save.
+    const LEGACY_BLOCK_RE = /\n*\[⟦AUTO-FOOTER⟧][\s\S]*?\[⟦\/AUTO-FOOTER⟧]\s*$/m;
+    // Also strip any previous plain footer line at the end (SKU … • Location … • Case/Bin/Shelf …)
+    const PLAIN_FOOTER_RE = /\n*\s*SKU:\s*[^\n]*?•\s*Location:\s*[^\n]*?•\s*Case\/Bin\/Shelf:\s*[^\n]*\s*$/m;
+
+    function ensureBaseOnce(text: string): string {
+      const t = String(text || "").trim();
+      if (!t) return BASE_SENTENCE;
+      if (t.includes(BASE_SENTENCE)) return t;
+      return `${BASE_SENTENCE}${t ? "\n\n" + t : ""}`;
+    }
+
+    function stripAnyFooter(text: string): string {
+      let out = text.replace(LEGACY_BLOCK_RE, "");
+      out = out.replace(PLAIN_FOOTER_RE, "");
+      return out;
+    }
+
+    function upsertFooter(text: string, sku: string | null, instore_loc?: string | null, case_bin_shelf?: string | null): string {
+      // Always ensure base sentence first
+      let safe = ensureBaseOnce(text);
+
+      // Remove any prior footer (legacy block or existing plain line)
+      safe = stripAnyFooter(safe);
+
+      if (!sku) return safe; // Only append footer when a SKU exists
+
+      const footerLine =
+        `SKU: ${sku} • Location: ${instore_loc?.trim() || "—"} • Case/Bin/Shelf: ${case_bin_shelf?.trim() || "—"}`;
+
+      // Append a clean plain-text footer (no markers)
+      return `${safe}\n\n${footerLine}`;
+    }
+
+    
+    /**
+     * Compose final product_description.
+     * - Always inject BASE_SENTENCE once.
+     * - Prepend Item Name / Description (product_short_title) above the base sentence when present.
+     * - For drafts: no footer (no SKU yet).
+     * - For active: insert/replace a plain footer with current SKU/location/bin data.
+     */
+    function composeLongDescription(opts: {
+      existing: string | null | undefined,
+      status: "draft" | "active",
+      sku?: string | null,
+      instore_loc?: string | null,
+      case_bin_shelf?: string | null,
+      product_short_title?: string | null
+    }): string {
+      const {
+        existing,
+        status,
+        sku = null,
+        instore_loc = null,
+        case_bin_shelf = null,
+        product_short_title = null
+      } = opts || {};
+
+      // Ensure the base sentence, then prepend the title if not already at top
+      let body = ensureBaseOnce(existing || "");
+      const title = (product_short_title || "").trim();
+      if (title && !body.startsWith(title)) {
+        body = `${title}\n\n${body}`;
+      }
+
+      if (status === "draft") {
+        return body; // no footer for drafts
+      }
+
+      // Active: append fresh footer (upsertFooter will strip any existing footer)
+      return upsertFooter(body, sku, instore_loc, case_bin_shelf);
+    }
+
+    // === Helper: enqueue marketplace publish jobs (idempotent; same logic as Create Active) ===
+    async function enqueuePublishJobs(
+      tenant_id: string,
+      item_id: string,
+      body: any,
+      status: "draft" | "active"
+    ): Promise<void> {
+      try {
+        const rawSel = Array.isArray(body?.marketplaces_selected) ? body.marketplaces_selected : [];
+        console.log("[intake] enqueue.start", { item_id, status, rawSel });
+
+        // Accept slugs (strings) and numeric ids (numbers OR numeric strings)
+        const slugs = rawSel
+          .filter((v: any) => typeof v === "string" && isNaN(Number(v)) && v.trim() !== "")
+          .map((s: string) => s.toLowerCase());
+        const ids = rawSel
+          .map((v: any) => (typeof v === "number" && Number.isInteger(v)) ? v
+            : (typeof v === "string" && /^\d+$/.test(v) ? Number(v) : null))
+          .filter((n: number | null): n is number => n !== null);
+
+        console.log("[intake] enqueue.parsed", { slugs, ids });
+
+        if (slugs.length === 0 && ids.length === 0) {
+          console.log("[intake] enqueue.skip_no_selection");
+          return;
+        }
+
+        // Resolve tenant-enabled marketplaces by either slug OR id
+        const rows = await sql/*sql*/`
+          SELECT ma.id, ma.slug
+          FROM app.marketplaces_available ma
+          JOIN app.tenant_marketplaces tm
+            ON tm.marketplace_id = ma.id
+           AND tm.tenant_id = ${tenant_id}
+           AND tm.enabled = true
+          WHERE (${slugs.length > 0} AND ma.slug = ANY(${slugs}))
+             OR (${ids.length > 0}   AND ma.id   = ANY(${ids}))
+        `;
+        console.log("[intake] enqueue.match_enabled", { count: rows.length, rows });
+
+        for (const r of rows) {
+          console.log("[intake] enqueue.insert_job", { marketplace_id: r.id, slug: r.slug, item_id });
+          await sql/*sql*/`
+            INSERT INTO app.marketplace_publish_jobs
+              (tenant_id, item_id, marketplace_id, op, status)
+            SELECT ${tenant_id}, ${item_id}, ${r.id}, 'create', 'queued'
+            WHERE NOT EXISTS (
+              SELECT 1 FROM app.marketplace_publish_jobs j
+              WHERE j.tenant_id = ${tenant_id}
+                AND j.item_id = ${item_id}
+                AND j.marketplace_id = ${r.id}
+                AND j.op = 'create'
+                AND j.status IN ('queued','running')
+            )
+          `;
+
+          console.log("[intake] enqueue.flip_iml_pending", { marketplace_id: r.id, item_id });
+          await sql/*sql*/`
+            UPDATE app.item_marketplace_listing
+               SET updated_at = now()
+             WHERE tenant_id = ${tenant_id}
+               AND item_id = ${item_id}
+               AND marketplace_id = ${r.id}
+               AND status IN ('draft')
+          `;
+        }
+
+        console.log("[intake] enqueue.done", { item_id });
+      } catch (enqueueErr) {
+        console.error("[intake] enqueue.error", { item_id, error: String(enqueueErr) });
+        // Best-effort event log (reuse EBAY_MARKETPLACE_ID for now; same as original)
+        await sql/*sql*/`
+          INSERT INTO app.item_marketplace_events
+            (item_id, tenant_id, marketplace_id, kind, error_message)
+          VALUES (${item_id}, ${tenant_id}, ${EBAY_MARKETPLACE_ID}, 'enqueue_failed', ${String(enqueueErr).slice(0,500)})
+        `;
+      }
+    }
     
     // AuthZ (creation requires can_inventory_intake or elevated role)
     const actor = await sql<{ role: Role; active: boolean; can_inventory_intake: boolean | null }[]>`
@@ -125,9 +287,20 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
     const rawStatus = (body?.status || inv?.item_status || "active");
     const status = String(rawStatus).toLowerCase() === "draft" ? "draft" : "active";
     const isDraft = status === "draft";
-
+    
     // Optional: if present, we update instead of insert
     const item_id_in: string | null = body?.item_id ? String(body.item_id) : null;
+    
+    // === DEBUG: show payload routing decisions ===
+    console.log("[intake] payload", {
+      status,
+      isDraft,
+      item_id_in,
+      marketplaces_selected: body?.marketplaces_selected ?? null,
+      has_ebay_block: !!ebay,
+      listing_keys_present: !!lst && Object.values(lst).some(v => v !== null && v !== undefined && String(v) !== "")
+    });
+
 
     // If the client requested a delete, do it now (and exit)
     if (body?.action === "delete") {
@@ -172,6 +345,7 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
     
        // If item_id was provided, UPDATE existing rows instead of INSERT
         if (item_id_in) {
+          console.log("[intake] branch", { kind: isDraft ? "UPDATE_DRAFT" : "UPDATE_ACTIVE", item_id_in });
         // Load existing inventory row
         const existing = await sql<{ item_id: string; sku: string | null; item_status: string | null }[]>`
           SELECT item_id, sku, item_status
@@ -206,6 +380,11 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
           const item_id = updInv[0].item_id;
         
           if (lst && Object.values(lst).some(v => v !== null && v !== undefined && String(v) !== "")) {
+            const descDraft = composeLongDescription({
+              existing: lst.product_description,
+              status: "draft",
+              product_short_title: inv?.product_short_title ?? null
+            });
             await sql/*sql*/`
             INSERT INTO app.item_listing_profile
               ( item_id, tenant_id,
@@ -220,7 +399,7 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
                 (SELECT brand_name      FROM app.marketplace_brands      WHERE brand_key     = ${lst.brand_key}),
                 (SELECT color_name      FROM app.marketplace_colors      WHERE color_key     = ${lst.color_key}),
                 (SELECT box_name        FROM app.shipping_boxes          WHERE box_key       = ${lst.shipping_box_key}),
-                ${lst.product_description}, ${lst.weight_lb}, ${lst.weight_oz},
+                ${descDraft}, ${lst.weight_lb}, ${lst.weight_oz},
                 ${lst.shipbx_length}, ${lst.shipbx_width}, ${lst.shipbx_height}
               )
             ON CONFLICT (item_id) DO UPDATE SET
@@ -278,6 +457,26 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
                   reserve_price = EXCLUDED.reserve_price,
                   updated_at = now()
               `;
+              await sql/*sql*/`
+                INSERT INTO app.user_marketplace_defaults
+                  (tenant_id, user_id, marketplace_id,
+                   shipping_policy, payment_policy, return_policy, shipping_zip, pricing_format,
+                   allow_best_offer, promote)
+                VALUES
+                  (${tenant_id}, ${actor_user_id}, ${EBAY_MARKETPLACE_ID},
+                   ${e.shipping_policy}, ${e.payment_policy}, ${e.return_policy}, ${e.shipping_zip}, ${e.pricing_format},
+                   ${e.allow_best_offer}, ${e.promote})
+                ON CONFLICT (tenant_id, user_id, marketplace_id)
+                DO UPDATE SET
+                  shipping_policy = EXCLUDED.shipping_policy,
+                  payment_policy  = EXCLUDED.payment_policy,
+                  return_policy   = EXCLUDED.return_policy,
+                  shipping_zip    = EXCLUDED.shipping_zip,
+                  pricing_format  = EXCLUDED.pricing_format,
+                  allow_best_offer = EXCLUDED.allow_best_offer,
+                  promote          = EXCLUDED.promote,
+                  updated_at       = now()
+              `;
             }
           }
           
@@ -285,6 +484,7 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
         }
 
 
+          
         // === ACTIVE UPDATE: if promoting to active and no SKU yet, allocate ===
         // Look up category_code only when needed for SKU allocation
         const catRows = await sql<{ category_code: string }[]>`
@@ -352,6 +552,15 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
           const isStoreOnly = String(inv?.instore_online || "").toLowerCase().includes("store only");
 
           if (!isStoreOnly) {
+            const descActive = composeLongDescription({
+              existing: lst.product_description,
+              status: "active",
+              sku: retSku,
+              instore_loc: inv?.instore_loc ?? null,
+              case_bin_shelf: inv?.case_bin_shelf ?? null,
+              product_short_title: inv?.product_short_title ?? null
+            });
+            
             // Upsert listing profile for this item_id
             await sql/*sql*/`
               INSERT INTO app.item_listing_profile
@@ -367,7 +576,7 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
                   (SELECT brand_name      FROM app.marketplace_brands      WHERE brand_key     = ${lst.brand_key}),
                   (SELECT color_name      FROM app.marketplace_colors      WHERE color_key     = ${lst.color_key}),
                   (SELECT box_name        FROM app.shipping_boxes          WHERE box_key       = ${lst.shipping_box_key}),
-                  ${lst.product_description}, ${lst.weight_lb}, ${lst.weight_oz},
+                  ${descActive}, ${lst.weight_lb}, ${lst.weight_oz},
                   ${lst.shipbx_length}, ${lst.shipbx_width}, ${lst.shipbx_height}
                 )
             
@@ -433,11 +642,53 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
                       reserve_price = EXCLUDED.reserve_price,
                       updated_at = now()
                   `;
+                  await sql/*sql*/`
+                INSERT INTO app.user_marketplace_defaults
+                  (tenant_id, user_id, marketplace_id,
+                   shipping_policy, payment_policy, return_policy, shipping_zip, pricing_format,
+                   allow_best_offer, promote)
+                VALUES
+                  (${tenant_id}, ${actor_user_id}, ${EBAY_MARKETPLACE_ID},
+                   ${e.shipping_policy}, ${e.payment_policy}, ${e.return_policy}, ${e.shipping_zip}, ${e.pricing_format},
+                   ${e.allow_best_offer}, ${e.promote})
+                ON CONFLICT (tenant_id, user_id, marketplace_id)
+                DO UPDATE SET
+                  shipping_policy = EXCLUDED.shipping_policy,
+                  payment_policy  = EXCLUDED.payment_policy,
+                  return_policy   = EXCLUDED.return_policy,
+                  shipping_zip    = EXCLUDED.shipping_zip,
+                  pricing_format  = EXCLUDED.pricing_format,
+                  allow_best_offer = EXCLUDED.allow_best_offer,
+                  promote          = EXCLUDED.promote,
+                  updated_at       = now()
+              `;
                 }
               }
             }
           }
-          return json({ ok: true, item_id, sku: retSku, status, ms: Date.now() - t0 }, 200);
+          // Enqueue marketplace publish jobs (same behavior as Create Active)
+          await enqueuePublishJobs(tenant_id, item_id, body, status);
+
+          // Return any queued jobs so the client can trigger them by job_id
+          const enqueuedUpd = await sql/*sql*/`
+            SELECT job_id
+            FROM app.marketplace_publish_jobs
+            WHERE tenant_id = ${tenant_id}
+              AND item_id   = ${item_id}
+              AND status    = 'queued'
+            ORDER BY created_at ASC
+          `;
+          const job_ids_upd = Array.isArray(enqueuedUpd) ? enqueuedUpd.map((r: any) => String(r.job_id)) : [];
+
+          return json({
+            ok: true,
+            item_id,
+            sku: retSku,
+            status,
+            published: false,
+            job_ids: job_ids_upd,
+            ms: Date.now() - t0
+          }, 200);
         }
 
 
@@ -493,6 +744,7 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
     // 2) Insert into inventory (drafts carry NULL sku; active allocates)
     // === CREATE DRAFT: store any provided inventory fields; also upsert listing if sent ===
     if (isDraft) {
+      console.log("[intake] branch", { kind: "CREATE_DRAFT" });
       const invRows = await sql<{ item_id: string }[]>`
         WITH s AS (
           SELECT set_config('app.actor_user_id', ${actor_user_id}, true)
@@ -508,6 +760,12 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
     
       // If the client provided any listing fields for the draft, persist them too
       if (lst && Object.values(lst).some(v => v !== null && v !== undefined && String(v) !== "")) {
+        const descDraft = composeLongDescription({
+              existing: lst.product_description,
+              status: "draft",
+              product_short_title: inv?.product_short_title ?? null
+            });
+        
         await sql/*sql*/`
           INSERT INTO app.item_listing_profile
             ( item_id, tenant_id,
@@ -522,7 +780,7 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
               (SELECT brand_name      FROM app.marketplace_brands      WHERE brand_key     = ${lst.brand_key}),
               (SELECT color_name      FROM app.marketplace_colors      WHERE color_key     = ${lst.color_key}),
               (SELECT box_name        FROM app.shipping_boxes          WHERE box_key       = ${lst.shipping_box_key}),
-              ${lst.product_description}, ${lst.weight_lb}, ${lst.weight_oz},
+              ${descDraft}, ${lst.weight_lb}, ${lst.weight_oz},
               ${lst.shipbx_length}, ${lst.shipbx_width}, ${lst.shipbx_height}
             )
         ON CONFLICT (item_id) DO UPDATE SET
@@ -580,14 +838,39 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
               reserve_price = EXCLUDED.reserve_price,
               updated_at = now()
           `;
+
+          await sql/*sql*/`
+              INSERT INTO app.user_marketplace_defaults
+                (tenant_id, user_id, marketplace_id,
+                 shipping_policy, payment_policy, return_policy, shipping_zip, pricing_format,
+                 allow_best_offer, promote)
+              VALUES
+                (${tenant_id}, ${actor_user_id}, ${EBAY_MARKETPLACE_ID},
+                 ${e.shipping_policy}, ${e.payment_policy}, ${e.return_policy}, ${e.shipping_zip}, ${e.pricing_format},
+                 ${e.allow_best_offer}, ${e.promote})
+              ON CONFLICT (tenant_id, user_id, marketplace_id)
+              DO UPDATE SET
+                shipping_policy = EXCLUDED.shipping_policy,
+                payment_policy  = EXCLUDED.payment_policy,
+                return_policy   = EXCLUDED.return_policy,
+                shipping_zip    = EXCLUDED.shipping_zip,
+                pricing_format  = EXCLUDED.pricing_format,
+                allow_best_offer = EXCLUDED.allow_best_offer,
+                promote          = EXCLUDED.promote,
+                updated_at       = now()
+            `;
         }
       }
       
       return json({ ok: true, item_id, sku: null, status: 'draft', ms: Date.now() - t0 }, 200);
     }
 
+
+    
+  //Save as Active Code
    // 1) Allocate next SKU (already guarded earlier; keep as-is)
     // 2) Insert full inventory
+    console.log("[intake] branch", { kind: "CREATE_ACTIVE" });
     const invRows = await sql<{ item_id: string }[]>`
       WITH s AS (
         SELECT set_config('app.actor_user_id', ${actor_user_id}, true)
@@ -604,7 +887,16 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
     const isStoreOnly = String(inv?.instore_online || "").toLowerCase().includes("store only");
 
     if (!isStoreOnly) {
-      // 3) Insert listing profile (ACTIVE only)
+      // 3) Insert listing profile (ACTIVE — ALWAYS)
+      const descActive = composeLongDescription({
+        existing: lst.product_description,
+        status: "active",
+        sku: sku, // fix: use the allocated sku variable (lowercase)
+        instore_loc: inv?.instore_loc ?? null,
+        case_bin_shelf: inv?.case_bin_shelf ?? null,
+        product_short_title: inv?.product_short_title ?? null
+      });
+      
       await sql/*sql*/`
       INSERT INTO app.item_listing_profile
         ( item_id, tenant_id,
@@ -619,7 +911,7 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
           (SELECT brand_name      FROM app.marketplace_brands      WHERE brand_key     = ${lst.brand_key}),
           (SELECT color_name      FROM app.marketplace_colors      WHERE color_key     = ${lst.color_key}),
           (SELECT box_name        FROM app.shipping_boxes          WHERE box_key       = ${lst.shipping_box_key}),
-          ${lst.product_description}, ${lst.weight_lb}, ${lst.weight_oz},
+          ${descActive}, ${lst.weight_lb}, ${lst.weight_oz},
           ${lst.shipbx_length}, ${lst.shipbx_width}, ${lst.shipbx_height}
         )
         ON CONFLICT (item_id) DO UPDATE SET
@@ -642,8 +934,6 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
           shipbx_width         = EXCLUDED.shipbx_width,
           shipbx_height        = EXCLUDED.shipbx_height
       `;
-    
-        // (Marketplace upserts for ACTIVE creates can be added here later if desired)
     }
 
     // Upsert eBay marketplace listing when present (active create)
@@ -680,13 +970,54 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
             reserve_price = EXCLUDED.reserve_price,
             updated_at = now()
         `;
+        await sql/*sql*/`
+        INSERT INTO app.user_marketplace_defaults
+          (tenant_id, user_id, marketplace_id,
+           shipping_policy, payment_policy, return_policy, shipping_zip, pricing_format,
+           allow_best_offer, promote)
+        VALUES
+          (${tenant_id}, ${actor_user_id}, ${EBAY_MARKETPLACE_ID},
+           ${e.shipping_policy}, ${e.payment_policy}, ${e.return_policy}, ${e.shipping_zip}, ${e.pricing_format},
+           ${e.allow_best_offer}, ${e.promote})
+        ON CONFLICT (tenant_id, user_id, marketplace_id)
+        DO UPDATE SET
+          shipping_policy = EXCLUDED.shipping_policy,
+          payment_policy  = EXCLUDED.payment_policy,
+          return_policy   = EXCLUDED.return_policy,
+          shipping_zip    = EXCLUDED.shipping_zip,
+          pricing_format  = EXCLUDED.pricing_format,
+          allow_best_offer = EXCLUDED.allow_best_offer,
+          promote          = EXCLUDED.promote,
+          updated_at       = now()
+      `;
       }
     }
 
+   //calling the enqueue process to prepare for the marketplace publish 
+   await enqueuePublishJobs(tenant_id, item_id, body, status);
     
-    // 4) Return success
-    return json({ ok: true, item_id, sku, status: 'active', ms: Date.now() - t0 }, 200);
+    // Do NOT run publish inline.
+    // Look up any jobs we just queued for this item so the client can trigger them by job_id.
+    const enqueued = await sql/*sql*/`
+      SELECT job_id
+      FROM app.marketplace_publish_jobs
+      WHERE tenant_id = ${tenant_id}
+        AND item_id   = ${item_id}
+        AND status    = 'queued'
+      ORDER BY created_at ASC
+    `;
 
+    const job_ids = Array.isArray(enqueued) ? enqueued.map((r: any) => String(r.job_id)) : [];
+
+    return json({
+      ok: true,
+      item_id,
+      sku,
+      status,
+      published: false,
+      job_ids,
+      ms: Date.now() - t0
+    }, 200);
 
   } catch (e: any) {
     // Try a friendlier error
@@ -795,11 +1126,18 @@ export const onRequestGet: PagesFunction = async ({ request, env }) => {
       if (rows.length) ebayListing = rows[0];
     }
 
-    
+    // ---- Long Description default (GET fallback so UI shows something helpful) ----
+    const BASE_SENTENCE_GET =
+      "The photos are part of the description. Be sure to look them over for condition and details. This is sold as is, and it's ready for a new home.";
+    let listingOut: any = lstRows[0] || null;
+    if (!listingOut || !String(listingOut.product_description || "").trim()) {
+      listingOut = { ...(listingOut || {}), product_description: BASE_SENTENCE_GET };
+    }
+
     return new Response(JSON.stringify({
       ok: true,
       inventory: invRows[0],
-      listing: lstRows[0] || null,
+      listing: listingOut,
       images: imgRows,
       marketplace_listing: { ebay: ebayListing, ebay_marketplace_id: EBAY_ID }
     }), { status: 200, headers: { "content-type": "application/json", "cache-control": "no-store" } });
