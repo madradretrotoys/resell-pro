@@ -835,7 +835,13 @@ function setMarketplaceVisibility() {
     return MARKETPLACE_REQUIRED
       .map(({ id, label }) => resolveControl(id, label))
       .filter(Boolean)
-      .filter(n => !n.disabled && n.type !== "hidden");
+      .filter((n) => {
+        if (!n || n.disabled || n.type === "hidden") return false;
+        // Exclude controls hidden by CSS/class or not in the layout flow
+        if (n.closest(".hidden")) return false;
+        if (n.offsetParent === null) return false;
+        return true;
+      });
   }
   // === [END ADD] ===
   
@@ -1305,7 +1311,19 @@ function setMarketplaceVisibility() {
     // BASIC — always required (explicit control list)
     const basicControls = getBasicRequiredControls();
     const basicOk = markBatchValidity(basicControls, hasValue);
-  
+
+    // PHOTOS — must have at least one (persisted or pending)
+    const photoCount = (__photos?.length || 0) + (__pendingFiles?.length || 0);
+    const photosOk = photoCount >= 1;
+    // Light accessibility cue on the Photos card/header when missing
+    (function markPhotos(ok) {
+      const host = document.getElementById("photosCard")
+               || document.getElementById("photosGrid")
+               || document.getElementById("photosCount");
+      if (host) host.setAttribute("aria-invalid", ok ? "false" : "true");
+    })(photosOk);
+
+    
     // MARKETPLACE — required only when active
     let marketOk = true;
     if (marketplaceActive()) {
