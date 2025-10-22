@@ -1654,7 +1654,11 @@ document.addEventListener("intake:item-changed", () => refreshInventory({ force:
         panes.forEach((p) => {
           if (!p) return;
           const active = p === paneEl;
+          // Native hide
+          p.hidden = !active;
+          // Utility class (kept for visual parity with existing CSS)
           p.classList.toggle("hidden", !active);
+          // ARIA state for assistive tech
           if (active) p.removeAttribute("aria-hidden");
           else p.setAttribute("aria-hidden", "true");
         });
