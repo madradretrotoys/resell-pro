@@ -77,6 +77,8 @@ export async function init() {
     }
   
     updatePhotosUIBasic();
+    // Nudge gating when photo count changes (add/replace/delete/reorder)
+    try { computeValidity(); } catch {}
   }
   
   // Thumb element
@@ -143,6 +145,7 @@ export async function init() {
           const i = __pendingFiles.findIndex(f => model.cdn_url && model.cdn_url.startsWith("blob:"));
           if (i >= 0) __pendingFiles.splice(i, 1);
           renderPhotosGrid();
+          
         } else if (persisted) {
           await deleteImage(model.image_id);
         }
@@ -270,6 +273,7 @@ export async function init() {
       width: up.width, height: up.height, bytes: up.bytes, content_type: up.content_type,
     });
     renderPhotosGrid();
+    try { computeValidity(); } catch {}
   }
   
   // Set primary
@@ -441,6 +445,7 @@ export async function init() {
         await uploadAndAttach(ds);
       }
       e.target.value = "";
+      try { computeValidity(); } catch {}
     });
   
     // Upload from gallery/files
@@ -452,6 +457,7 @@ export async function init() {
         await uploadAndAttach(ds);
       }
       e.target.value = "";
+      try { computeValidity(); } catch {}
     });
   
     $("photoReorderToggle")?.addEventListener("click", ()=>{
@@ -575,18 +581,30 @@ export async function init() {
   }
   
   // Helper: find a control by its label text (fallback when no ID exists)
-function findControlByLabel(labelText) {
-  const labels = Array.from(document.querySelectorAll("label"));
-  const lbl = labels.find(l => (l.textContent || "").trim().toLowerCase() === labelText.toLowerCase());
-  if (!lbl) return null;
-  if (lbl.htmlFor) return document.getElementById(lbl.htmlFor) || null;
-  // fallback: input/select/textarea right after the label
-  let n = lbl.nextElementSibling;
-  while (n && !(n instanceof HTMLInputElement || n instanceof HTMLSelectElement || n instanceof HTMLTextAreaElement)) {
-    n = n.nextElementSibling;
+  function findControlByLabel(labelText) {
+    // normalize: remove colons, asterisks and collapse whitespace
+    const norm = (s) => String(s || "")
+      .replace(/[:*]/g, "")
+      .replace(/\s+/g, " ")
+      .trim()
+      .toLowerCase();
+  
+    const want = norm(labelText);
+    const labels = Array.from(document.querySelectorAll("label"));
+    const lbl = labels.find(l => norm(l.textContent) === want);
+    if (!lbl) return null;
+  
+    if (lbl.htmlFor) {
+      const byId = document.getElementById(lbl.htmlFor);
+      if (byId) return byId;
+    }
+    // fallback: the first input/select/textarea after the label
+    let n = lbl.nextElementSibling;
+    while (n && !(n instanceof HTMLInputElement || n instanceof HTMLSelectElement || n instanceof HTMLTextAreaElement)) {
+      n = n.nextElementSibling;
+    }
+    return n || null;
   }
-  return n || null;
-}
 
 // Helper: hide/show a field container by its label text
 function hideShowFieldByLabel(labelText, hide) {
