@@ -313,10 +313,67 @@ label{
 #inventory-intake-screen .btn.btn-sm{ padding: 6px 10px; font-size: 13px; }
 #inventory-intake-screen .muted{ color: #6b7280; font-size: 12px; }
 #inventory-intake-screen .mono{ font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace; }
-#inventory-intake-screen .tabs{ display: flex; gap: 6px; margin-bottom: 10px; }
-#inventory-intake-screen .tab{ background: #fff; border: 1px solid #ddd; border-bottom: none; border-radius: 8px 8px 0 0; padding: 6px 10px; cursor: pointer; }
-#inventory-intake-screen .tab.active{ background: #0ea5e9; color: #fff; border-color: #0ea5e9; }
-#inventory-intake-screen .tabpanes{ border: 1px solid #eee; border-radius: 0 12px 12px 12px; padding: 14px; }
+/* Tab row spacing and visual tie-in with content */
+#inventory-intake-screen .tabs{
+  display: flex;
+  gap: 6px;
+  margin-top: 14px;           /* NEW: separation from Copy buttons */
+  margin-bottom: 10px;
+}
+
+/* Bar that holds the individual <button role="tab"> elements */
+#inventory-intake-screen .tabBar{
+  border: 1px solid #eee;
+  border-bottom: none;
+  background: #f9fafb;
+  padding: 6px;
+  border-radius: 8px 8px 0 0;
+}
+
+/* Legacy .tab styling (kept so older markup still looks fine) */
+#inventory-intake-screen .tab{
+  background: #fff;
+  border: 1px solid #ddd;
+  border-bottom: none;
+  border-radius: 8px 8px 0 0;
+  padding: 6px 10px; cursor: pointer;
+}
+#inventory-intake-screen .tab.active{
+  background: #0ea5e9; color: #fff; border-color: #0ea5e9;
+}
+
+/* Give each tabpanel a light frame so the bar feels attached to the content */
+#inventory-intake-screen [role="tabpanel"]{
+  border: 1px solid #eee;
+  border-radius: 0 12px 12px 12px;
+  padding: 14px;
+}
+
+/* Hide inactive ARIA tabpanels to prevent any stacking */
+#inventory-intake-screen [role="tabpanel"][aria-hidden="true"]{ display: none !important; }
+#inventory-intake-screen [role="tabpanel"]{ display: none !important; }
+#inventory-intake-screen [role="tabpanel"]:not([aria-hidden="true"]){ display: block !important; }
+
+/* Use the global .table look for intake lists (we’ll add the class in HTML) */
+#inventory-intake-screen .table th, 
+#inventory-intake-screen .table td{ padding: 10px 12px; }
+
+/* Numeric alignment without changing JS: column-targeted per pane */
+#paneDrafts table th:nth-child(3),
+#paneDrafts table td:nth-child(3),   /* Price */
+#paneDrafts table th:nth-child(4),
+#paneDrafts table td:nth-child(4){   /* Quantity */
+  text-align: right;
+}
+#paneInventory table th:nth-child(5),
+#paneInventory table td:nth-child(5), /* Price */
+#paneInventory table th:nth-child(6),
+#paneInventory table td:nth-child(6){ /* QTY */
+  text-align: right;
+}
+
+
+
 #inventory-intake-screen .right{ text-align: right; }
 #inventory-intake-screen .hidden{ display: none !important; }
 #inventory-intake-screen .hidden{ display: none !important; }
