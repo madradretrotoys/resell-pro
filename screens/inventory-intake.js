@@ -1628,38 +1628,84 @@ document.addEventListener("intake:item-changed", () => refreshInventory({ force:
     // Auto-load drafts into the Drafts tab on screen load (does not auto-switch the tab)
     await loadDrafts?.();
     
-    // NEW: Tab wiring for Inventory (lazy-load on first open)
+    // True tab wiring (ARIA tabs + lazy-load for Inventory)
     (function wireIntakeTabs() {
-      const tabBulk = document.getElementById("tabBulk");
-      const tabDrafts = document.getElementById("tabDrafts");
-      const tabInventory = document.getElementById("tabInventory");
-      const paneBulk = document.getElementById("paneBulk");
-      const paneDrafts = document.getElementById("paneDrafts");
+      const tabBulk       = document.getElementById("tabBulk");
+      const tabDrafts     = document.getElementById("tabDrafts");
+      const tabInventory  = document.getElementById("tabInventory");
+      const paneBulk      = document.getElementById("paneBulk");
+      const paneDrafts    = document.getElementById("paneDrafts");
       const paneInventory = document.getElementById("paneInventory");
-    
-      function showPane(pane) {
-        [paneBulk, paneDrafts, paneInventory].forEach(el => {
-          if (!el) return;
-          if (el === pane) {
-            el.classList.remove("hidden");
-            el.removeAttribute("aria-hidden");
-          } else {
-            el.classList.add("hidden");
-            el.setAttribute("aria-hidden", "true");
-          }
+
+      const tabs  = [tabDrafts, tabInventory, tabBulk].filter(Boolean);
+      const panes = [paneDrafts, paneInventory, paneBulk].filter(Boolean);
+
+      function setSelected(tabEl, isSelected) {
+        if (!tabEl) return;
+        tabEl.setAttribute("aria-selected", String(isSelected));
+        tabEl.tabIndex = isSelected ? 0 : -1;
+
+        // Visual affordance: make the selected tab look active/primary
+        tabEl.classList.toggle("btn-primary", isSelected);
+        tabEl.classList.toggle("btn-ghost", !isSelected);
+      }
+
+      function showPane(paneEl) {
+        panes.forEach((p) => {
+          if (!p) return;
+          const active = p === paneEl;
+          p.classList.toggle("hidden", !active);
+          if (active) p.removeAttribute("aria-hidden");
+          else p.setAttribute("aria-hidden", "true");
         });
       }
-    
-      tabBulk?.addEventListener("click", () => showPane(paneBulk));
+
+      function activate(tabEl, paneEl) {
+        tabs.forEach((t) => setSelected(t, t === tabEl));
+        showPane(paneEl);
+        if (tabEl) tabEl.focus();
+      }
+
+      // Click behavior
       tabDrafts?.addEventListener("click", async () => {
-        showPane(paneDrafts);
-        await loadDrafts?.();
+        activate(tabDrafts, paneDrafts);
+        // Ensure drafts render whenever the Drafts tab is shown
+        await (typeof loadDrafts === "function" ? loadDrafts() : Promise.resolve());
       });
+
       tabInventory?.addEventListener("click", async () => {
-        showPane(paneInventory);
-        await loadInventory?.();
+        activate(tabInventory, paneInventory);
+        // Lazy-load inventory on demand
+        await (typeof loadInventory === "function" ? loadInventory() : Promise.resolve());
       });
+
+      // Bulk is disabled/placeholder for now
+      tabBulk?.addEventListener("click", () => {
+        activate(tabBulk, paneBulk);
+      });
+
+      // Keyboard behavior (Left/Right/Home/End) for accessibility
+      const KEY = { LEFT: 37, RIGHT: 39, HOME: 36, END: 35 };
+      document.getElementById("intakeTabBar")?.addEventListener("keydown", (e) => {
+        const current = document.activeElement;
+        if (!tabs.includes(current)) return;
+
+        let idx = tabs.indexOf(current);
+        if (e.keyCode === KEY.LEFT)  { idx = (idx - 1 + tabs.length) % tabs.length; }
+        if (e.keyCode === KEY.RIGHT) { idx = (idx + 1) % tabs.length; }
+        if (e.keyCode === KEY.HOME)  { idx = 0; }
+        if (e.keyCode === KEY.END)   { idx = tabs.length - 1; }
+
+        if (idx !== -1 && tabs[idx]) {
+          e.preventDefault();
+          tabs[idx].click();
+        }
+      });
+
+      // Default: Drafts selected, Inventory hidden
+      activate(tabDrafts, paneDrafts);
     })();
+
     
     // --- [NEW] Submission wiring: both buttons call POST /api/inventory/intake ---
     function valByIdOrLabel(id, label) {
