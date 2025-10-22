@@ -304,7 +304,7 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
           if (lst && Object.values(lst).some(v => v !== null && v !== undefined && String(v) !== "")) {
             const descDraft = composeLongDescription({
               existing: lst.product_description,
-              status: "draft"
+              status: "draft",
               product_short_title: inv?.product_short_title ?? null
             });
             await sql/*sql*/`
@@ -479,7 +479,7 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
               status: "active",
               sku: retSku,
               instore_loc: inv?.instore_loc ?? null,
-              case_bin_shelf: inv?.case_bin_shelf ?? null
+              case_bin_shelf: inv?.case_bin_shelf ?? null,
               product_short_title: inv?.product_short_title ?? null
             });
             
@@ -662,7 +662,7 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
       if (lst && Object.values(lst).some(v => v !== null && v !== undefined && String(v) !== "")) {
         const descDraft = composeLongDescription({
               existing: lst.product_description,
-              status: "draft"
+              status: "draft",
               product_short_title: inv?.product_short_title ?? null
             });
         
@@ -793,7 +793,7 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
         status: "active",
         sku: sku, // fix: use the allocated sku variable (lowercase)
         instore_loc: inv?.instore_loc ?? null,
-        case_bin_shelf: inv?.case_bin_shelf ?? null
+        case_bin_shelf: inv?.case_bin_shelf ?? null,
         product_short_title: inv?.product_short_title ?? null
       });
       
