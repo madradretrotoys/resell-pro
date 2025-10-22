@@ -1197,7 +1197,7 @@ function setMarketplaceVisibility() {
   
     // Color cue via utility classes
     const classes = ['text-gray-600','text-blue-700','text-green-700','text-red-700'];
-    wrap.classList.remove(...classes);
+    wrap.classList.remove(...classes);  
     if (tone === 'info')  wrap.classList.add('text-blue-700');
     if (tone === 'ok')    wrap.classList.add('text-green-700');
     if (tone === 'error') wrap.classList.add('text-red-700');
@@ -1246,6 +1246,24 @@ function setMarketplaceVisibility() {
       
             // Non-terminal shapes your server returns while work is ongoing
             // Examples you've seen: { ok: true, taken: 0 }
+            
+            // --- Fallback guard ---
+            // If the job API hasn't reported "succeeded" yet, check the persisted listing row.
+            // We already hydrate the screen with GET /api/inventory/intake when loading drafts;
+            // use the same contract here so we don't spin forever if the job ended but the
+            // job endpoint didn't deliver a terminal payload to this browser.
+            try {
+              if (__currentItemId) {
+                const snap = await api(`/api/inventory/intake?item_id=${encodeURIComponent(__currentItemId)}`, { method: "GET" });
+                const live = String(snap?.marketplace_listing?.ebay?.status || "").toLowerCase() === "live";
+                if (live) {
+                  const url = snap?.marketplace_listing?.ebay?.mp_item_url || null;
+                  setEbayStatus("Listed", { tone: "ok", link: url || null });
+                  return true; // break the loop
+                }
+              }
+            } catch { /* ignore and keep polling until timeout */ }
+            
             return false;
           } catch {
             // Network hiccup — keep polling until timeout
@@ -1697,10 +1715,10 @@ document.addEventListener("intake:item-changed", () => refreshInventory({ force:
               return prune({ ...base, ...auctionExtras });
         }
     
-                // Hydrate the eBay card from saved data (called after tiles/cards are rendered)
+        // Hydrate the eBay card from saved data (called after tiles/cards are rendered)
         function hydrateEbayFromSaved(ebay, ebayMarketplaceId) {
           if (!ebay) return;
-
+        
           // Stash saved policy ids globally so the policy-loader can re-apply AFTER options arrive
           try {
             window.__ebaySavedPolicies = {
@@ -1709,7 +1727,24 @@ document.addEventListener("intake:item-changed", () => refreshInventory({ force:
               return_policy:   ebay.return_policy   ?? ""
             };
           } catch {}
-
+        
+          // Reflect persisted listing status on the card
+          // app.item_marketplace_listing(status, mp_item_url) -> ebay.status, ebay.mp_item_url
+          // Map: live -> "Listed" (green, linkable); publishing -> "Publishing…"; error -> "Error"; else -> "Not Listed"
+          try {
+            const raw = String(ebay.status || "").toLowerCase();
+            const url = ebay.mp_item_url || null;
+            if (raw === "live") {
+              setEbayStatus("Listed", { tone: "ok", link: url || null });
+            } else if (raw === "publishing" || raw === "processing") {
+              setEbayStatus("Publishing…", { tone: "info" });
+            } else if (raw === "error" || raw === "failed" || raw === "dead") {
+              setEbayStatus("Error", { tone: "error" });
+            } else {
+              setEbayStatus("Not Listed", { tone: "muted" });
+            }
+          } catch {}
+        
           // Ensure the eBay tile/card is visible and rendered
           try {
             if (ebayMarketplaceId && typeof ebayMarketplaceId === "number") {
