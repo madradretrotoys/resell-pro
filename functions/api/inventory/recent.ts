@@ -1,3 +1,4 @@
+//Begin recent.ts file
 // functions/api/inventory/recent.ts
 import { neon } from "@neondatabase/serverless";
 
@@ -116,3 +117,4 @@ export const onRequestGet: PagesFunction = async ({ request, env }) => {
     return json({ ok: false, error: "server_error" }, 500);
   }
 };
+//end recent.ts file
