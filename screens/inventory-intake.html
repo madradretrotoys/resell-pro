@@ -202,51 +202,117 @@
     </form>
   </section>
 
-  <!-- Bottom tabs (shell for Phase 1; -->
-  <div class="tabs">
-    <div class="tabBar flex gap-2 mb-2">
-      <button id="tabBulk" class="btn btn-ghost btn-sm">Bulk Entry</button>
-      <button id="tabDrafts" class="btn btn-ghost btn-sm">Recent Drafts</button>
-      <!-- NEW: Active Inventory tab goes next to Recent Drafts (circled area) -->
-      <button id="tabInventory" class="btn btn-ghost btn-sm">Active Inventory</button>
-    </div>
-  
-    <div id="paneBulk">…</div>
-  
-    <div id="paneDrafts" class="hidden" aria-hidden="true">
-      …
-    </div>
-  
-    <!-- NEW: Active Inventory pane -->
-    <div id="paneInventory" class="hidden" aria-hidden="true">
-      <div class="overflow-auto">
-        <table class="table w-full">
-          <thead>
-            <tr class="border-b">
-              <th class="text-left px-3 py-2">Saved</th>
-              <th class="text-left px-3 py-2">Image</th>
-              <th class="text-left px-3 py-2">SKU</th>
-              <th class="text-left px-3 py-2">Item Name / Description</th>
-              <th class="text-left px-3 py-2">Price</th>
-              <th class="text-left px-3 py-2">Qty</th>
-              <th class="text-left px-3 py-2">Category</th>
-              <th class="text-left px-3 py-2">Actions</th>
-            </tr>
-          </thead>
-          <tbody id="recentInventoryTbody">
-            <tr>
-              <td class="px-3 py-2 text-gray-500" colspan="8">No active inventory yet.</td>
-            </tr>
-          </tbody>
-        </table>
+  <!-- Bottom tabs (true tabs) -->
+      <div class="tabs">
+        <div
+          id="intakeTabBar"
+          class="tabBar flex gap-2 mb-2"
+          role="tablist"
+          aria-label="Recent activity tabs"
+        >
+          <button
+            id="tabDrafts"
+            class="btn btn-ghost btn-sm"
+            role="tab"
+            aria-selected="true"
+            aria-controls="paneDrafts"
+            tabindex="0"
+          >
+            Recent Drafts
+          </button>
+
+          <button
+            id="tabInventory"
+            class="btn btn-ghost btn-sm"
+            role="tab"
+            aria-selected="false"
+            aria-controls="paneInventory"
+            tabindex="-1"
+          >
+            Active Inventory
+          </button>
+
+          <button
+            id="tabBulk"
+            class="btn btn-ghost btn-sm"
+            role="tab"
+            aria-selected="false"
+            aria-controls="paneBulk"
+            tabindex="-1"
+            disabled
+            title="Bulk Entry is coming soon"
+          >
+            Bulk Entry
+          </button>
+        </div>
+
+        <!-- Drafts pane (default visible) -->
+        <section
+          id="paneDrafts"
+          role="tabpanel"
+          aria-labelledby="tabDrafts"
+        >
+          <div id="recentDraftsHeader" data-recent-drafts-header class="flex items-center justify-between mb-2">
+            <h3 class="sectionTitle m-0">Recent Drafts</h3>
+          </div>
+
+          <table class="w-full text-sm">
+            <thead>
+              <tr>
+                <th class="px-3 py-2 text-left">Saved</th>
+                <th class="px-3 py-2 text-left">SKU</th>
+                <th class="px-3 py-2 text-left">Item</th>
+                <th class="px-3 py-2 text-left">Price</th>
+                <th class="px-3 py-2 text-left">Qty</th>
+                <th class="px-3 py-2 text-left">Store</th>
+                <th class="px-3 py-2 text-left">Channel</th>
+                <th class="px-3 py-2 text-left">Actions</th>
+              </tr>
+            </thead>
+            <tbody id="recentDraftsTbody"></tbody>
+          </table>
+        </section>
+
+        <!-- Inventory pane (hidden by default; lazy-loaded) -->
+        <section
+          id="paneInventory"
+          role="tabpanel"
+          aria-labelledby="tabInventory"
+          class="hidden"
+          aria-hidden="true"
+        >
+          <div id="recentInventoryHeader" data-recent-inventory-header class="flex items-center justify-between mb-2">
+            <h3 class="sectionTitle m-0">Active Inventory</h3>
+          </div>
+
+          <table class="w-full text-sm">
+            <thead>
+              <tr>
+                <th class="px-3 py-2 text-left">Added</th>
+                <th class="px-3 py-2 text-left">SKU</th>
+                <th class="px-3 py-2 text-left">Item</th>
+                <th class="px-3 py-2 text-left">Price</th>
+                <th class="px-3 py-2 text-left">Qty</th>
+                <th class="px-3 py-2 text-left">Store</th>
+                <th class="px-3 py-2 text-left">Channel</th>
+                <th class="px-3 py-2 text-left">Actions</th>
+              </tr>
+            </thead>
+            <tbody id="recentInventoryTbody"></tbody>
+          </table>
+        </section>
+
+        <!-- Bulk Entry pane (placeholder) -->
+        <section
+          id="paneBulk"
+          role="tabpanel"
+          aria-labelledby="tabBulk"
+          class="hidden"
+          aria-hidden="true"
+        >
+          <div class="text-gray-500 text-sm">Bulk Entry is coming soon.</div>
+        </section>
       </div>
-    </div>
-  </div>
-      
-      
-    </div>
-  </section>
-</div>
 
 <!-- Crop Modal -->
 <dialog id="cropDialog" class="rounded-2xl p-0">
