@@ -106,45 +106,49 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
         return s;
     };
 
-    // ===== Long Description Composer (hard-coded v1) =====
+     // ===== Long Description Composer (hard-coded v1) =====
     const BASE_SENTENCE =
       "The photos are part of the description. Be sure to look them over for condition and details. This is sold as is, and it's ready for a new home.";
 
-    const FOOTER_START = "\n\n[⟦AUTO-FOOTER⟧]\n";
-    const FOOTER_END   = "\n[⟦/AUTO-FOOTER⟧]\n";
+    // We no longer emit visible markers. Keep regex to strip old marker blocks during save.
+    const LEGACY_BLOCK_RE = /\n*\[⟦AUTO-FOOTER⟧][\s\S]*?\[⟦\/AUTO-FOOTER⟧]\s*$/m;
+    // Also strip any previous plain footer line at the end (SKU … • Location … • Case/Bin/Shelf …)
+    const PLAIN_FOOTER_RE = /\n*\s*SKU:\s*[^\n]*?•\s*Location:\s*[^\n]*?•\s*Case\/Bin\/Shelf:\s*[^\n]*\s*$/m;
 
     function ensureBaseOnce(text: string): string {
       const t = String(text || "").trim();
       if (!t) return BASE_SENTENCE;
-      // already present?
       if (t.includes(BASE_SENTENCE)) return t;
-      // prepend (with a blank-line spacer if user text exists)
       return `${BASE_SENTENCE}${t ? "\n\n" + t : ""}`;
     }
 
+    function stripAnyFooter(text: string): string {
+      let out = text.replace(LEGACY_BLOCK_RE, "");
+      out = out.replace(PLAIN_FOOTER_RE, "");
+      return out;
+    }
+
     function upsertFooter(text: string, sku: string | null, instore_loc?: string | null, case_bin_shelf?: string | null): string {
-      const safe = ensureBaseOnce(text);
-      if (!sku) return safe; // footer only when a SKU exists
+      // Always ensure base sentence first
+      let safe = ensureBaseOnce(text);
+
+      // Remove any prior footer (legacy block or existing plain line)
+      safe = stripAnyFooter(safe);
+
+      if (!sku) return safe; // Only append footer when a SKU exists
 
       const footerLine =
         `SKU: ${sku} • Location: ${instore_loc?.trim() || "—"} • Case/Bin/Shelf: ${case_bin_shelf?.trim() || "—"}`;
 
-      // Replace if present; else append
-      const start = safe.indexOf(FOOTER_START);
-      const end   = safe.indexOf(FOOTER_END, start + FOOTER_START.length);
-      const block = `${FOOTER_START}${footerLine}${FOOTER_END}`;
-
-      if (start >= 0 && end >= 0) {
-        return safe.slice(0, start) + block + safe.slice(end + FOOTER_END.length);
-      }
-      return safe + block;
+      // Append a clean plain-text footer (no markers)
+      return `${safe}\n\n${footerLine}`;
     }
 
     /**
      * Compose final product_description.
      * - Always inject BASE_SENTENCE once.
      * - For drafts: no footer (no SKU yet).
-     * - For active: insert/replace marked footer with current SKU/location/bin data.
+     * - For active: insert/replace a plain footer with current SKU/location/bin data.
      */
     function composeLongDescription(opts: {
       existing: string | null | undefined,
@@ -159,7 +163,7 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
       }
       // active
       return upsertFooter(existing || "", sku, instore_loc, case_bin_shelf);
-    }    
+    }   
 
     
     // AuthZ (creation requires can_inventory_intake or elevated role)
