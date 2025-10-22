@@ -8,7 +8,21 @@ export async function init() {
 
   // ——— Local helpers (screen-scoped) ———
   const $ = (id) => document.getElementById(id);
-
+  // --- Default Long Description for new items ---
+  const BASE_DESCRIPTION =
+    "The photos are part of the description. Be sure to look them over for condition and details. This is sold as is, and it's ready for a new home.";
+  
+  function ensureDefaultLongDescription() {
+    const el =
+      document.getElementById("longDescriptionTextarea") ||
+      findControlByLabel("Long Description");
+    if (!el) return;
+    const val = String(el.value || "").trim();
+    if (!val || val === "Enter a detailed description…") {
+      el.value = BASE_DESCRIPTION;
+    }
+  }
+  
   // ====== Photos state & helpers (NEW) ======
   const MAX_PHOTOS = 15;
   let __photos = [];              // [{image_id, cdn_url, is_primary, sort_order, r2_key, width, height, bytes, content_type}]
@@ -1598,6 +1612,9 @@ document.addEventListener("intake:item-changed", () => refreshInventory({ force:
     ensurePlaceholder($("storeLocationSelect"));
     ensurePlaceholder($("salesChannelSelect"));
 
+    // Pre-fill the Long Description field if empty
+    ensureDefaultLongDescription();
+    
     // Wire and run initial validation
     wireValidation();
     computeValidity();
