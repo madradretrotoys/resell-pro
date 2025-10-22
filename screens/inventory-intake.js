@@ -831,17 +831,46 @@ function setMarketplaceVisibility() {
       .filter(n => !n.disabled && n.type !== "hidden");
   }
   
-  function getMarketplaceRequiredControls() {
-    return MARKETPLACE_REQUIRED
+ function getMarketplaceRequiredControls() {
+    // Base marketplace + shipping fields (only when visible & enabled)
+    const base = MARKETPLACE_REQUIRED
       .map(({ id, label }) => resolveControl(id, label))
       .filter(Boolean)
       .filter((n) => {
         if (!n || n.disabled || n.type === "hidden") return false;
-        // Exclude controls hidden by CSS/class or not in the layout flow
         if (n.closest(".hidden")) return false;
         if (n.offsetParent === null) return false;
         return true;
       });
+
+    // eBay card fields (when the eBay card is rendered and the fields are visible)
+    const ebaySelectors = [
+      "#ebay_shippingPolicy",
+      "#ebay_paymentPolicy",
+      "#ebay_returnPolicy",
+      "#ebay_shipZip",
+      "#ebay_formatSelect",
+      "#ebay_bin",
+
+      // These are conditionally shown; include only if visible
+      "#ebay_duration",
+      "#ebay_start",
+      "#ebay_autoAccept",
+      "#ebay_minOffer",
+      "#ebay_promotePct"
+    ];
+
+    const ebayNodes = ebaySelectors
+      .map(sel => document.querySelector(sel))
+      .filter(Boolean)
+      .filter((n) => {
+        if (!n || n.disabled || n.type === "hidden") return false;
+        if (n.closest(".hidden")) return false;       // hidden by class (format/best-offer/promote toggles)
+        if (n.offsetParent === null) return false;    // not in layout flow
+        return true;
+      });
+
+    return [...base, ...ebayNodes];
   }
   // === [END ADD] ===
   
@@ -1330,7 +1359,7 @@ function setMarketplaceVisibility() {
       const marketControls = getMarketplaceRequiredControls();
       marketOk = markBatchValidity(marketControls, hasValue);
 
-      // NEW: also require ≥1 marketplace tile selected
+      // Require ≥1 selected marketplace tile when marketplace flow is active
       if (marketOk) {
         const hasAny = selectedMarketplaceIds.size >= 1;
         marketOk = marketOk && hasAny;
@@ -1343,8 +1372,9 @@ function setMarketplaceVisibility() {
       getMarketplaceRequiredControls().forEach(n => n.setAttribute("aria-invalid", "false"));
       showMarketplaceTilesError(false);
     }
-  
-    const allOk = basicOk && marketOk;
+
+    // ⬅️ photos are part of the gate
+    const allOk = basicOk && photosOk && marketOk;
     setCtasEnabled(allOk);
     document.dispatchEvent(new CustomEvent("intake:validity-changed", { detail: { valid: allOk } }));
     return allOk;
