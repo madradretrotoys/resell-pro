@@ -761,14 +761,14 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
     const isStoreOnly = String(inv?.instore_online || "").toLowerCase().includes("store only");
 
     if (!isStoreOnly) {
-      // 3) Insert listing profile (ACTIVE only)
+      // 3) Insert listing profile (ACTIVE — ALWAYS)
       const descActive = composeLongDescription({
-              existing: lst.product_description,
-              status: "active",
-              sku: Sku,
-              instore_loc: inv?.instore_loc ?? null,
-              case_bin_shelf: inv?.case_bin_shelf ?? null
-            });
+        existing: lst.product_description,
+        status: "active",
+        sku: sku, // fix: use the allocated sku variable (lowercase)
+        instore_loc: inv?.instore_loc ?? null,
+        case_bin_shelf: inv?.case_bin_shelf ?? null
+      });
       
       await sql/*sql*/`
       INSERT INTO app.item_listing_profile
@@ -1067,15 +1067,21 @@ export const onRequestGet: PagesFunction = async ({ request, env }) => {
       if (rows.length) ebayListing = rows[0];
     }
 
-    
+    // ---- Long Description default (GET fallback so UI shows something helpful) ----
+    const BASE_SENTENCE_GET =
+      "The photos are part of the description. Be sure to look them over for condition and details. This is sold as is, and it's ready for a new home.";
+    let listingOut: any = lstRows[0] || null;
+    if (!listingOut || !String(listingOut.product_description || "").trim()) {
+      listingOut = { ...(listingOut || {}), product_description: BASE_SENTENCE_GET };
+    }
+
     return new Response(JSON.stringify({
       ok: true,
       inventory: invRows[0],
-      listing: lstRows[0] || null,
+      listing: listingOut,
       images: imgRows,
       marketplace_listing: { ebay: ebayListing, ebay_marketplace_id: EBAY_ID }
-    }), { status: 200, headers: { "content-type": "application/json", "cache-control": "no-store" } });
-
+    }), { status: 200, headers: { "content-type": "application/json", "cache-control": "no-store" }
 
     
   } catch (e: any) {
