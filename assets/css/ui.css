@@ -321,6 +321,9 @@ label{
 #inventory-intake-screen .hidden{ display: none !important; }
 #inventory-intake-screen .hidden{ display: none !important; }
 
+/* Hide inactive ARIA tabpanels to prevent stacking under the tab bar */
+#inventory-intake-screen [role="tabpanel"][aria-hidden="true"] { display: none !important; }
+
 /* NEW: intake-scoped checkbox row + compact 2-col subgrid for partner fields */
 #inventory-intake-screen .chkrow{
   display:flex;
