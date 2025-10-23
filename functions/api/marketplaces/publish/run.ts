@@ -56,54 +56,61 @@ async function executeLockedJob(env: Env, job: any) {
        AND tenant_id = ${job.tenant_id}
        AND marketplace_id = ${job.marketplace_id}
   `;
-  // 4) perform op
-  const op = String(job.op || 'create').toLowerCase(); // 'create' | 'update'
-  const res = op === 'update' && typeof (adapter as any).update === 'function'
-  ? await (adapter as any).update({
-    env,
-    tenant_id: job.tenant_id,
-    item: inv,
-    profile: prof,
-    mpListing: imlRows?.[0] || null,
-    images: imgs
-  });
-
-  // Use a value that exists in app.listing_status (e.g., 'live' / 'active').
-  await sql/*sql*/`
-    UPDATE app.item_marketplace_listing
-    
-       SET status='live',
-           mp_item_id = ${res.remoteId || null},
-           mp_item_url = ${res.remoteUrl || null},
-           mp_offer_id = ${res.offerId || null},
-           mp_category_id = ${res.categoryId || null},
-           connection_id  = ${res.connectionId || null},
-           campaign_id    = ${res.campaignId || null}, 
-           last_synced_at = now(),
-           published_at = COALESCE(published_at, now()),
-           updated_at = now()
-     WHERE item_id = ${job.item_id}
-       AND tenant_id = ${job.tenant_id}
-       AND marketplace_id= ${job.marketplace_id}
-  `;
-
+  
+    // 4) perform op
+    const op = String(job.op || 'create').toLowerCase(); // 'create' | 'update'
+    const res = op === 'update' && typeof (adapter as any).update === 'function'
+      ? await (adapter as any).update({
+          env,
+          tenant_id: job.tenant_id,
+          item: inv,
+          profile: prof,
+          mpListing: imlRows?.[0] || null,
+          images: imgs
+        })
+      : await adapter.create({
+          env,
+          tenant_id: job.tenant_id,
+          item: inv,
+          profile: prof,
+          mpListing: imlRows?.[0] || null,
+          images: imgs
+        });
+  
+    // Use a value that exists in app.listing_status (e.g., 'live' / 'active').
+    await sql/*sql*/`
+      UPDATE app.item_marketplace_listing
+         SET status='live',
+             mp_item_id     = ${res.remoteId || null},
+             mp_item_url    = ${res.remoteUrl || null},
+             mp_offer_id    = ${res.offerId || null},
+             mp_category_id = ${res.categoryId || null},
+             connection_id  = ${res.connectionId || null},
+             campaign_id    = ${res.campaignId || null},
+             last_synced_at = now(),
+             published_at   = COALESCE(published_at, now()),
+             updated_at     = now()
+       WHERE item_id = ${job.item_id}
+         AND tenant_id = ${job.tenant_id}
+         AND marketplace_id= ${job.marketplace_id}
+    `;
+  
     const liveSnapshot = {
-      mp_item_id:   res.remoteId || null,
-      mp_item_url:  res.remoteUrl || null,
-      mp_offer_id:  res.offerId || null,
+      mp_item_id:     res.remoteId || null,
+      mp_item_url:    res.remoteUrl || null,
+      mp_offer_id:    res.offerId || null,
       mp_category_id: res.categoryId || null,
       connection_id:  res.connectionId || null,
       environment:    res.environment || null,
       published_at:   new Date().toISOString(),
       raw: {
         offer:   res.rawOffer ?? null,
-        publish: res.rawPublish ?? null
+        publish: res.rawPublish ?? null,
         update:  (res as any).rawUpdate ?? null
       },
       warnings: res.warnings ?? []
     };
-
-    
+  
     // Always log a live snapshot
     await sql/*sql*/`
       INSERT INTO app.item_marketplace_events
@@ -131,14 +138,13 @@ async function executeLockedJob(env: Env, job: any) {
         )
       `;
     }
-
+  
     await sql/*sql*/`
       UPDATE app.marketplace_publish_jobs
          SET status='succeeded',
              updated_at = now()
        WHERE job_id = ${job.job_id}
-    `;
-  
+    `;  
     return { ok: true, job_id: job.job_id, status: 'succeeded', remote: res };
 }
 
