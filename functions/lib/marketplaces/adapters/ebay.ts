@@ -335,6 +335,40 @@ async function create(params: CreateParams): Promise<CreateResult> {
       }
     }
 
+    // ── NEW: Minimal Marketing scaffold (no-ops in Sandbox; logs in Prod) ────────
+    async function promoteIfRequested(params: {
+      envStr: EbayEnv,
+      listingId: string | null,
+      promote: boolean,
+      promotePercent: number | null | undefined
+    }) {
+      const { envStr, listingId, promote, promotePercent } = params;
+  
+      if (!promote || !listingId || promotePercent == null || Number(promotePercent) <= 0) {
+        console.log('[ebay:marketing.promote]', { skipped: true, reason: 'not_requested_or_missing_inputs', listingId, promote, promotePercent });
+        return { promoted: false, reason: 'not_requested_or_missing_inputs' };
+      }
+  
+      if (envStr !== 'production') {
+        console.log('[ebay:marketing.promote]', { skipped: true, reason: 'sandbox_not_supported', listingId, promotePercent });
+        return { promoted: false, reason: 'sandbox' };
+      }
+  
+      // At this point we’re in Production and have inputs. Log intent clearly.
+      console.log('[ebay:marketing.promote.intent]', {
+        listingId,
+        promotePercent: Number(promotePercent),
+        strategy: 'STANDARD (pending endpoint wiring)',
+        note: 'Next patch will attach listing to a Standard campaign at fixed ad rate.'
+      });
+  
+      // TODO: Implement:
+      //  1) Find-or-create Standard campaign (or use a configured one)
+      //  2) Add listing at fixed rate = promotePercent
+      //  3) Persist campaign_id/ad_rate_applied/promoted_at to DB
+  
+      return { promoted: false, reason: 'stub_logged_only' };
+    }
     
   // (1) PUT inventory item
   const sku = String(item?.sku || '').trim();
