@@ -639,11 +639,27 @@ async function create(params: CreateParams): Promise<CreateResult> {
   const remoteId  = pubRes?.listingId || pubRes?.itemId || null;
   const remoteUrl = pubRes?.listing?.itemWebUrl || pubRes?.itemWebUrl || null;
 
+  // ── NEW: Promotion (scaffold) ────────────────────────────────────────────────
+  try {
+    await promoteIfRequested({
+      envStr,
+      listingId: remoteId,
+      promote: !!mpListing?.promote,
+      promotePercent: mpListing?.promote_percent
+    });
+  } catch (e) {
+    console.warn('[ebay:marketing.promote:error]', String(e || ''));
+  }
+
   const offerIdOut = offerId || null;
   const categoryIdOut = ebayCategoryId || null;
   const connectionIdOut = String(conn?.[0]?.connection_id || '') || null;
   const environmentOut = envStr || null;
 
+  if (mpListing?.promote && envStr !== 'production') {
+    warnings.push('Promotion requested but skipped in Sandbox');
+  }  
+  
   return {
     remoteId,
     remoteUrl,
