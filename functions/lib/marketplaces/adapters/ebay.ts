@@ -364,7 +364,7 @@ async function create(params: CreateParams): Promise<CreateResult> {
         '?' + Object.entries(o).map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`).join('&');
     
       async function findCampaignByName(name: string) {
-        const filteredPath = `/sell/marketing/v1/ad_campaign${qs({ campaign_name: name, funding_strategy: 'CPS', limit: '20' })}`;
+        const filteredPath = `/sell/marketing/v1/ad_campaign${qs({ campaign_name: name, funding_strategy: 'COST_PER_SALE', limit: '20' })}`;
       
         // Attempt 1 — filtered GET
         try {
@@ -394,7 +394,7 @@ async function create(params: CreateParams): Promise<CreateResult> {
           const resp3 = await ebayFetch(`/sell/marketing/v1/ad_campaign${qs({ limit: '200' })}`, { method: 'GET' });
           const list = Array.isArray((resp3 as any)?.campaigns) ? (resp3 as any).campaigns : [];
           const hit3 = list.find((c: any) =>
-            c?.campaignName === name && String(c?.fundingStrategy?.fundingModel || '').toUpperCase() === 'CPS'
+            c?.campaignName === name && String(c?.fundingStrategy?.fundingModel || '').toUpperCase() === 'COST_PER_SALE'
           ) || null;
           if (hit3) return hit3;
         } catch (e3: any) {
@@ -410,7 +410,7 @@ async function create(params: CreateParams): Promise<CreateResult> {
           startDate: new Date().toISOString(),
           marketplaceId: 'EBAY_US',
           fundingStrategy: {
-            fundingModel: 'CPS',
+            fundingModel: 'COST_PER_SALE',
             adRateStrategy: 'FIXED',
             bidPercentage: String(defaultBidPct)
           }
