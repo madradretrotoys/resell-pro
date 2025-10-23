@@ -364,17 +364,47 @@ async function create(params: CreateParams): Promise<CreateResult> {
         '?' + Object.entries(o).map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`).join('&');
     
       async function findCampaignByName(name: string) {
-        // Filter: name + CPS funding model
-        const resp = await ebayFetch(
-          `/sell/marketing/v1/ad_campaign${qs({ campaign_name: name, funding_strategy: 'CPS', limit: '20' })}`,
-          { method: 'GET' }
-        );
-        const arr = Array.isArray((resp as any)?.campaigns) ? (resp as any).campaigns : [];
-        return arr.find((c: any) => c?.campaignName === name) || null;
+        const filteredPath = `/sell/marketing/v1/ad_campaign${qs({ campaign_name: name, funding_strategy: 'CPS', limit: '20' })}`;
+      
+        // Attempt 1 — filtered GET
+        try {
+          const resp = await ebayFetch(filteredPath, { method: 'GET' });
+          const arr = Array.isArray((resp as any)?.campaigns) ? (resp as any).campaigns : [];
+          const hit = arr.find((c: any) => c?.campaignName === name) || null;
+          if (hit) return hit;
+        } catch (e: any) {
+          const msg = String(e?.message || e || '');
+          console.warn('[ebay:marketing.findCampaign.fail#1]', msg);
+          // single short backoff on transient 500s
+          if (msg.includes(' 500 ') || msg.includes('"httpStatusCode":500')) {
+            await new Promise(r => setTimeout(r, 600));
+            try {
+              const resp2 = await ebayFetch(filteredPath, { method: 'GET' });
+              const arr2 = Array.isArray((resp2 as any)?.campaigns) ? (resp2 as any).campaigns : [];
+              const hit2 = arr2.find((c: any) => c?.campaignName === name) || null;
+              if (hit2) return hit2;
+            } catch (e2: any) {
+              console.warn('[ebay:marketing.findCampaign.fail#retry]', String(e2?.message || e2 || ''));
+            }
+          }
+        }
+      
+        // Fallback — unfiltered list + local filter (funding model CPS + name)
+        try {
+          const resp3 = await ebayFetch(`/sell/marketing/v1/ad_campaign${qs({ limit: '200' })}`, { method: 'GET' });
+          const list = Array.isArray((resp3 as any)?.campaigns) ? (resp3 as any).campaigns : [];
+          const hit3 = list.find((c: any) =>
+            c?.campaignName === name && String(c?.fundingStrategy?.fundingModel || '').toUpperCase() === 'CPS'
+          ) || null;
+          if (hit3) return hit3;
+        } catch (e3: any) {
+          console.warn('[ebay:marketing.findCampaign.unfiltered.fail]', String(e3?.message || e3 || ''));
+        }
+      
+        return null; // let caller decide to create
       }
     
       async function createCampaign(name: string, defaultBidPct: number) {
-        // Start “now”, CPS, fixed ad rate (default = your UI percent)
         const body = {
           campaignName: name,
           startDate: new Date().toISOString(),
@@ -382,30 +412,42 @@ async function create(params: CreateParams): Promise<CreateResult> {
           fundingStrategy: {
             fundingModel: 'CPS',
             adRateStrategy: 'FIXED',
-            bidPercentage: String(defaultBidPct) // must be string per eBay spec
+            bidPercentage: String(defaultBidPct)
           }
         };
         console.log('[ebay:marketing.createCampaign.body]', body);
-        // createCampaign returns 201 with Location header; since ebayFetch returns body only,
-        // we’ll refetch by name to get the campaign_id.
+      
         await ebayFetch(`/sell/marketing/v1/ad_campaign`, {
           method: 'POST',
           body: JSON.stringify(body)
         });
-        return findCampaignByName(name);
+      
+        // Always re-find using the resilient finder
+        return await findCampaignByName(name);
       }
     
       async function addListingToCampaign(campaignId: string, listingId: string, bidPct: number) {
         const adBody = {
           listingId: String(listingId),
-          bidPercentage: String(bidPct) // string, min 2.0, max 100.0
+          bidPercentage: String(bidPct)
         };
         console.log('[ebay:marketing.createAd.body]', { campaignId, ...adBody });
-        // 201 Created with Location header; no JSON payload
-        await ebayFetch(`/sell/marketing/v1/ad_campaign/${encodeURIComponent(campaignId)}/ad`, {
-          method: 'POST',
-          body: JSON.stringify(adBody)
-        });
+      
+        try {
+          await ebayFetch(`/sell/marketing/v1/ad_campaign/${encodeURIComponent(campaignId)}/ad`, {
+            method: 'POST',
+            body: JSON.stringify(adBody)
+          });
+        } catch (e: any) {
+          const msg = String(e?.message || e || '');
+          // If the ad already exists for this listing, eBay responds with a 409/business error.
+          // Treat it as success so promotion “sticks” without failing the run.
+          if (msg.includes(' 409 ') || msg.includes('"httpStatusCode":409') || msg.toLowerCase().includes('already exists')) {
+            console.warn('[ebay:marketing.createAd.alreadyExists]', { campaignId, listingId });
+            return;
+          }
+          throw e;
+        }
       }
     
       try {
@@ -724,9 +766,10 @@ async function create(params: CreateParams): Promise<CreateResult> {
   const remoteId  = pubRes?.listingId || pubRes?.itemId || null;
   const remoteUrl = pubRes?.listing?.itemWebUrl || pubRes?.itemWebUrl || null;
 
-  // ── NEW: Promotion (scaffold) ────────────────────────────────────────────────
+  // ── Promotion (resilient) ────────────────────────────────────────────────────
+  let promoteResult: any = null;
   try {
-    await promoteIfRequested({
+    promoteResult = await promoteIfRequested({
       envStr,
       listingId: remoteId,
       promote: !!mpListing?.promote,
@@ -735,7 +778,21 @@ async function create(params: CreateParams): Promise<CreateResult> {
   } catch (e) {
     console.warn('[ebay:marketing.promote:error]', String(e || ''));
   }
-
+  
+  // Surface a concise warning if promotion didn’t complete
+  if (promoteResult && promoteResult.promoted === false) {
+    const r = String(promoteResult.reason || '');
+    if (r === 'api_error') {
+      warnings.push('Promotion attempt failed due to an eBay API error. Listing is live; promotion will need a retry.');
+    } else if (r === 'access_denied') {
+      warnings.push('Promotion failed: eBay Marketing permission missing or seller not opted-in.');
+    } else if (r === 'not_requested_or_missing_inputs') {
+      // no-op
+    } else {
+      warnings.push('Promotion did not complete; see logs for details.');
+    }
+  }
+  
   const offerIdOut = offerId || null;
   const categoryIdOut = ebayCategoryId || null;
   const connectionIdOut = String(conn?.[0]?.connection_id || '') || null;
