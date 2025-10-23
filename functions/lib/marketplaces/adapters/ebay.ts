@@ -885,6 +885,12 @@ async function create(params: CreateParams): Promise<CreateResult> {
     warnings.push('Promotion requested but skipped in Sandbox');
   }  
   
+  // capture applied campaign id if promotion succeeded
+  const campaignIdApplied =
+    promoteResult && promoteResult.promoted === true && promoteResult.campaignId
+      ? String(promoteResult.campaignId)
+      : null;
+
   return {
     remoteId,
     remoteUrl,
@@ -892,11 +898,12 @@ async function create(params: CreateParams): Promise<CreateResult> {
     categoryId: categoryIdOut,
     connectionId: connectionIdOut,
     environment: environmentOut,
+    campaignId: campaignIdApplied, // <-- NEW: pass campaign id up
     rawOffer: offerRes ?? null,
     rawPublish: pubRes ?? null,
     warnings
   };
-} // <-- close async function create
+} // <-
 
 export const ebayAdapter: MarketplaceAdapter = { create };
 // end ebay.ts file
