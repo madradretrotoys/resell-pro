@@ -905,5 +905,170 @@ async function create(params: CreateParams): Promise<CreateResult> {
   };
 } // <-
 
+// ───────────────────────────────────────────────────────────────────────────────
+// UPDATE / REVISE existing eBay listing via mp_offer_id (price/qty + inventory data)
+// ───────────────────────────────────────────────────────────────────────────────
+async function update(params: CreateParams): Promise<CreateResult> {
+  const { env, tenant_id, item, profile, mpListing, images } = params;
+  const sql = getSql(env);
+  const warnings: string[] = [];
+
+  // 0) Guard: require an existing offer id on the listing row
+  const offerId = String(mpListing?.mp_offer_id || '').trim();
+  if (!offerId) {
+    throw new Error('update_requires_offer_id: mp_offer_id was not found on item_marketplace_listing');
+  }
+
+  // 1) Load + decrypt access token and resolve environment (mirrors create)
+  const conn = await sql/*sql*/`
+    SELECT mc.connection_id, mc.access_token, mc.token_expires_at, mc.environment, mc.secrets_blob
+    FROM app.marketplace_connections mc
+    JOIN app.marketplaces_available ma ON ma.id = mc.marketplace_id
+    WHERE mc.tenant_id = ${tenant_id}
+      AND ma.slug = 'ebay'
+      AND mc.status = 'connected'
+    ORDER BY mc.updated_at DESC
+    LIMIT 1
+  `;
+  if (!conn?.length) throw new Error('Tenant not connected to eBay');
+
+  const encKey = env.RP_ENCRYPTION_KEY || "";
+  const encAccess = String(conn[0].access_token || "");
+  if (!encAccess) throw new Error('No access_token stored');
+
+  const accessObj = await decryptJson(encKey, encAccess);
+  const accessToken = String(accessObj?.v || "").trim();
+  if (!accessToken) throw new Error('Decrypted access_token is empty');
+
+  // Environment
+  let envStr = String(conn[0].environment || "").trim().toLowerCase() as EbayEnv | "";
+  if (envStr !== "production" && envStr !== "sandbox") {
+    try {
+      const secrets = await decryptJson(encKey, String(conn[0].secrets_blob || ""));
+      const e = String(secrets?.environment || "").trim().toLowerCase();
+      if (e === "production" || e === "sandbox") envStr = e as EbayEnv;
+    } catch {}
+  }
+  if (envStr !== "production" && envStr !== "sandbox") envStr = "sandbox";
+  const base = ebayBase(envStr);
+
+  // Small helpers local to update
+  function safeStringify(obj: any) { try { return JSON.stringify(obj, null, 2); } catch { return String(obj); } }
+  async function ebayFetch(path: string, init: RequestInit) {
+    const headers = {
+      ...(init.headers || {}),
+      'authorization': `Bearer ${accessToken}`,
+      'content-type': 'application/json',
+      'content-language': 'en-US'
+    };
+    const url = `${base}${path}`;
+    const r = await fetch(url, { ...init, headers });
+    const txt = await r.text().catch(() => '');
+    if (!r.ok) throw new Error(`${r.status} ${r.statusText} :: ${txt}`.slice(0, 1000));
+    try {
+      return txt && (r.headers.get('content-type') || '').includes('application/json') ? JSON.parse(txt) : txt;
+    } catch { return txt; }
+  }
+
+  // 2) Rebuild inventory item with the same mapping used in create (title, desc, aspects, weight/size, qty)
+  const { cdnUrls } = (() => {
+    const urls: string[] = [];
+    const sorted = Array.isArray(images) ? [...images].sort((a, b) => (b.is_primary ? 1 : 0) - (a.is_primary ? 1 : 0) || a.sort_order - b.sort_order) : [];
+    for (const i of sorted) if (i?.cdn_url) urls.push(i.cdn_url);
+    return { cdnUrls: urls };
+  })();
+
+  const rawCond = String(profile?.item_condition || '').trim().toLowerCase();
+  const isNew = rawCond.startsWith('new') || rawCond === '';
+  const conditionEnum = isNew ? 'NEW' : 'USED';
+  const conditionDescription = !isNew && profile?.product_description
+    ? String(profile.product_description).slice(0, 1000)
+    : undefined;
+
+  const computedQty = Math.max(1, Number((item && item.qty) != null ? item.qty : 1));
+  const sku = String(item?.sku || '').trim();
+  if (!sku) throw new Error('Missing SKU');
+
+  const inventoryItemBody: any = {
+    condition: conditionEnum,
+    ...(conditionDescription ? { conditionDescription } : {}),
+    product: {
+      title:       item?.product_short_title || '',
+      description: profile?.product_description || '',
+      aspects: {
+        brand: profile?.brand_name ? [String(profile.brand_name)] : undefined,
+        color: profile?.primary_color ? [String(profile.primary_color)] : undefined
+      },
+      ...(cdnUrls.length ? { imageUrls: cdnUrls } : {})
+    },
+    packageWeightAndSize: {
+      weight: {
+        unit: 'KILOGRAM',
+        value: (() => {
+          const lb = Number(profile?.weight_lb ?? 0);
+          const oz = Number(profile?.weight_oz ?? 0);
+          const pounds = lb + (oz / 16);
+          const kg = pounds * 0.45359237;
+          const twoDp = Math.round(kg * 100) / 100;
+          const safe = Math.max(0.01, twoDp);
+          return Number(safe.toFixed(2));
+        })()
+      },
+      dimensions: {
+        height: Number(profile?.shipbx_height || 0),
+        length: Number(profile?.shipbx_length || 0),
+        width:  Number(profile?.shipbx_width  || 0),
+        unit: 'INCH'
+      }
+    },
+    availability: {
+      shipToLocationAvailability: { quantity: computedQty }
+    }
+  };
+
+  // PUT inventory item with latest title/description/aspects/weight/size/qty
+  await ebayFetch(`/sell/inventory/v1/inventory_item/${encodeURIComponent(sku)}`, {
+    method: 'PUT',
+    body: JSON.stringify(inventoryItemBody)
+  });
+
+  // 3) Price/quantity updates via Offer API (applies to live listing without re-publish)
+  const pricingFormat = String(mpListing?.pricing_format || 'fixed');
+  const priceValue =
+    (mpListing?.buy_it_now_price ?? item?.price ?? null) != null
+      ? Number(mpListing?.buy_it_now_price ?? item?.price)
+      : null;
+
+  const pqBody: any = {
+    price: priceValue != null ? { currency: 'USD', value: priceValue } : undefined,
+    quantity: computedQty
+  };
+  // scrub undefineds
+  Object.keys(pqBody).forEach(k => pqBody[k] == null && delete pqBody[k]);
+
+  const updRes = await ebayFetch(`/sell/inventory/v1/offer/${encodeURIComponent(offerId)}/update_price_quantity`, {
+    method: 'POST',
+    body: JSON.stringify(pqBody)
+  });
+
+  // 4) Read back offer to return listing identifiers/URL
+  const offerEcho = await ebayFetch(`/sell/inventory/v1/offer/${encodeURIComponent(offerId)}`, { method: 'GET' });
+  const remoteId  = (offerEcho as any)?.listing?.listingId || (offerEcho as any)?.listingId || null;
+  const remoteUrl = (offerEcho as any)?.listing?.itemWebUrl || (offerEcho as any)?.itemWebUrl || null;
+
+  return {
+    remoteId,
+    remoteUrl,
+    offerId,
+    categoryId: null,
+    connectionId: String(conn?.[0]?.connection_id || '') || null,
+    environment: envStr,
+    campaignId: null,
+    rawOffer: offerEcho ?? null,
+    rawPublish: null,
+    warnings
+  };
+}
+
 export const ebayAdapter: MarketplaceAdapter = { create };
 // end ebay.ts file
