@@ -76,6 +76,7 @@ async function executeLockedJob(env: Env, job: any) {
            mp_offer_id = ${res.offerId || null},
            mp_category_id = ${res.categoryId || null},
            connection_id  = ${res.connectionId || null},
+           campaign_id    = ${res.campaignId || null}, 
            last_synced_at = now(),
            published_at = COALESCE(published_at, now()),
            updated_at = now()

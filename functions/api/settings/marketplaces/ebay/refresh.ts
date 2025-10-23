@@ -37,6 +37,7 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
     "https://api.ebay.com/oauth/api_scope/sell.inventory",
     "https://api.ebay.com/oauth/api_scope/sell.account",
     "https://api.ebay.com/oauth/api_scope/sell.fulfillment",
+    "https://api.ebay.com/oauth/api_scope/sell.marketing",
   ];
 
   const form = new URLSearchParams({

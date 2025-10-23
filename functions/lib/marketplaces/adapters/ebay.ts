@@ -290,6 +290,9 @@ async function create(params: CreateParams): Promise<CreateResult> {
   // simple helper to normalize error text
     // simple on/off switch via env if you want (default true for now)
     const DEBUG_EBAY = true;
+    // Temporary enforcement toggles
+    const ENFORCE_BEST_OFFER_ON = true;
+    const ENFORCE_PROMOTE_ON_PROD = false; // blocks publish in production if Promote was requested (until Marketing API is wired)
   
     function safeStringify(obj: any) {
       try { return JSON.stringify(obj, null, 2); } catch { return String(obj); }
@@ -335,6 +338,225 @@ async function create(params: CreateParams): Promise<CreateResult> {
       }
     }
 
+    // ── Marketing: Promoted Listings Standard (CPS, fixed ad rate) ───────────────
+    async function promoteIfRequested(params: {
+      envStr: EbayEnv,
+      listingId: string | null,
+      promote: boolean,
+      promotePercent: number | null | undefined,
+      sku?: string | null
+    }) {
+      const { envStr, listingId, promote, promotePercent, sku } = params;
+      // 0) Basic guards
+      const pct = promotePercent != null ? Number(promotePercent) : NaN;
+      if (!promote || !Number.isFinite(pct) || pct <= 0) {
+        console.log('[ebay:marketing.promote]', {
+          skipped: true, reason: 'not_requested_or_missing_inputs', listingId, sku, promote, promotePercent
+        });
+        return { promoted: false, reason: 'not_requested_or_missing_inputs' };
+      }
+    
+      // 1) Prepare a deterministic campaign name (per tenant/environment)
+      const campaignName = `ResellPro – ${envStr.toUpperCase()} – Default CPS`;
+    
+      // Small helpers to call Marketing API (re-use ebayFetch)
+      const qs = (o: Record<string, string>) =>
+        '?' + Object.entries(o).map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`).join('&');
+    
+      async function findCampaignByName(name: string) {
+        const filteredPath = `/sell/marketing/v1/ad_campaign${qs({ campaign_name: name, funding_strategy: 'COST_PER_SALE', limit: '20' })}`;
+      
+        // Attempt 1 — filtered GET
+        try {
+          const resp = await ebayFetch(filteredPath, { method: 'GET' });
+          const arr = Array.isArray((resp as any)?.campaigns) ? (resp as any).campaigns : [];
+          const hit = arr.find((c: any) => c?.campaignName === name) || null;
+          if (hit) return hit;
+        } catch (e: any) {
+          const msg = String(e?.message || e || '');
+          console.warn('[ebay:marketing.findCampaign.fail#1]', msg);
+          // single short backoff on transient 500s
+          if (msg.includes(' 500 ') || msg.includes('"httpStatusCode":500')) {
+            await new Promise(r => setTimeout(r, 600));
+            try {
+              const resp2 = await ebayFetch(filteredPath, { method: 'GET' });
+              const arr2 = Array.isArray((resp2 as any)?.campaigns) ? (resp2 as any).campaigns : [];
+              const hit2 = arr2.find((c: any) => c?.campaignName === name) || null;
+              if (hit2) return hit2;
+            } catch (e2: any) {
+              console.warn('[ebay:marketing.findCampaign.fail#retry]', String(e2?.message || e2 || ''));
+            }
+          }
+        }
+      
+        // Fallback — unfiltered list + local filter (funding model CPS + name)
+        try {
+          const resp3 = await ebayFetch(`/sell/marketing/v1/ad_campaign${qs({ limit: '200' })}`, { method: 'GET' });
+          const list = Array.isArray((resp3 as any)?.campaigns) ? (resp3 as any).campaigns : [];
+          const hit3 = list.find((c: any) =>
+            c?.campaignName === name && String(c?.fundingStrategy?.fundingModel || '').toUpperCase() === 'COST_PER_SALE'
+          ) || null;
+          if (hit3) return hit3;
+        } catch (e3: any) {
+          console.warn('[ebay:marketing.findCampaign.unfiltered.fail]', String(e3?.message || e3 || ''));
+        }
+      
+        return null; // let caller decide to create
+      }
+    
+      async function createCampaign(name: string, defaultBidPct: number) {
+        const body = {
+          campaignName: name,
+          startDate: new Date().toISOString(),
+          marketplaceId: 'EBAY_US',
+          fundingStrategy: {
+            fundingModel: 'COST_PER_SALE',
+            adRateStrategy: 'FIXED',
+            bidPercentage: String(defaultBidPct)
+          }
+        };
+        console.log('[ebay:marketing.createCampaign.body]', body);
+      
+        await ebayFetch(`/sell/marketing/v1/ad_campaign`, {
+          method: 'POST',
+          body: JSON.stringify(body)
+        });
+      
+        // Always re-find using the resilient finder
+        return await findCampaignByName(name);
+      }
+    
+      async function addListingToCampaign(campaignId: string, listingId: string, bidPct: number) {
+        const adBody = {
+          listingId: String(listingId),
+          bidPercentage: String(bidPct)
+        };
+        const path = `/sell/marketing/v1/ad_campaign/${encodeURIComponent(campaignId)}/ad`;
+        console.log('[ebay:marketing.createAd.body]', { campaignId, ...adBody });
+      
+        const backoffSeconds = [5, 10, 20, 30];
+        for (let attempt = 0; attempt <= backoffSeconds.length; attempt++) {
+          try {
+            await ebayFetch(path, { method: 'POST', body: JSON.stringify(adBody) });
+            if (attempt > 0) console.log('[ebay:marketing.createAd.retry.success]', { attempt });
+            return;
+          } catch (e: any) {
+            const msg = String(e?.message || e || '');
+      
+            if (msg.includes(' 409 ') || msg.includes('"httpStatusCode":409') || msg.toLowerCase().includes('already exists')) {
+              console.warn('[ebay:marketing.createAd.alreadyExists]', { campaignId, listingId });
+              return;
+            }
+      
+            const is404 = msg.includes(' 404 ') || msg.includes('"httpStatusCode":404');
+            const is35048 = msg.includes('"errorId":35048') || /invalid or has ended/i.test(msg);
+            if ((is404 || is35048) && attempt < backoffSeconds.length) {
+              const waitSec = backoffSeconds[attempt];
+              console.warn('[ebay:marketing.createAd.retry]', {
+                attempt: attempt + 1,
+                waitSec,
+                reason: '35048/listing_not_yet_visible',
+                campaignId,
+                listingId
+              });
+              await new Promise(r => setTimeout(r, waitSec * 1000));
+              continue;
+            }
+      
+            if (is404 || is35048) {
+              console.error('[ebay:marketing.createAd.retry.exhausted]', { attempts: attempt + 1, campaignId, listingId });
+            }
+            throw e;
+          }
+        }
+      }
+      
+      // NEW: Create ad by Inventory Reference (SKU) — avoids fresh-listing visibility lag
+      async function addInventoryRefToCampaign(campaignId: string, sku: string, bidPct: number) {
+        const adBody = {
+          inventoryReferenceId: String(sku),
+          inventoryReferenceType: 'INVENTORY_ITEM',
+          bidPercentage: String(bidPct)
+        };
+        const path = `/sell/marketing/v1/ad_campaign/${encodeURIComponent(campaignId)}/create_ads_by_inventory_reference`;
+        console.log('[ebay:marketing.createAdByInventoryRef.body]', { campaignId, ...adBody });
+      
+        try {
+          await ebayFetch(path, { method: 'POST', body: JSON.stringify(adBody) });
+        } catch (e: any) {
+          const msg = String(e?.message || e || '');
+          // If an ad already exists for this inventory ref in the campaign, treat as success
+          if (msg.includes(' 409 ') || msg.includes('"httpStatusCode":409') || msg.toLowerCase().includes('already exists')) {
+            console.warn('[ebay:marketing.createAdByInventoryRef.alreadyExists]', { campaignId, sku });
+            return;
+          }
+          throw e;
+        }
+      }
+
+    
+      try {
+        // 2) Ensure campaign exists (find or create)
+        let campaign = await findCampaignByName(campaignName);
+        if (!campaign) {
+          console.log('[ebay:marketing.promote]', { creatingCampaign: campaignName, defaultBidPercentage: pct });
+          campaign = await createCampaign(campaignName, pct);
+        }
+    
+        const campaignId = String(campaign?.campaignId || '');
+        if (!campaignId) throw new Error(`campaign_not_found_or_create_failed: ${campaignName}`);
+    
+        // 3) Prefer Inventory Reference (SKU) first to avoid fresh-listing propagation lag
+        let adOk = false;
+        if (sku) {
+          try {
+            await addInventoryRefToCampaign(campaignId, String(sku), pct);
+            adOk = true;
+            console.log('[ebay:marketing.promote.success]', {
+              path: 'inventoryReference',
+              sku,
+              campaignName,
+              campaignId,
+              bidPercentage: pct
+            });
+          } catch (e:any) {
+            console.warn('[ebay:marketing.createAdByInventoryRef.fail]', String(e?.message || e));
+          }
+        }
+        
+        // Fallback to listingId path if needed
+        if (!adOk && listingId) {
+          await addListingToCampaign(campaignId, String(listingId), pct);
+          adOk = true;
+          console.log('[ebay:marketing.promote.success]', {
+            path: 'listingId',
+            listingId,
+            campaignName,
+            campaignId,
+            bidPercentage: pct
+          });
+        }
+        
+        if (!adOk) throw new Error('create_ad_failed: both inventoryReference and listingId paths failed');
+
+    
+        // TODO (optional): persist campaign_id, ad_rate_applied, promoted_at in DB
+        return { promoted: true, campaignId, bidPercentage: pct };
+        } catch (err: any) {
+          const msg = String(err?.message || err || '');
+          console.warn('[ebay:marketing.promote.fail]', msg);
+        
+          // Hint if we likely exhausted 35048 retries
+          const exhausted = msg.includes('retry.exhausted') || msg.includes('"errorId":35048') || /invalid or has ended/i.test(msg);
+          return {
+            promoted: false,
+            reason: exhausted ? 'api_error' : 'api_error',
+            error: exhausted
+              ? 'Promotion could not be applied yet (eBay not ready for the new listing). Will need a retry shortly.'
+              : msg
+          };
+        }
+    }
     
   // (1) PUT inventory item
   const sku = String(item?.sku || '').trim();
@@ -469,7 +691,19 @@ async function create(params: CreateParams): Promise<CreateResult> {
     categoryId: ebayCategoryId || undefined,
     merchantLocationKey, // ← this satisfies Item.Country via the Inventory Location
     listingPolicies: {
-      
+      // NEW: Best Offer must live inside listingPolicies.bestOfferTerms
+      ...(isFixed && mpListing?.allow_best_offer ? {
+        bestOfferTerms: {
+          bestOfferEnabled: true,
+          ...(mpListing?.auto_accept_amount != null && mpListing.auto_accept_amount !== ''
+            ? { autoAcceptPrice:  { currency: 'USD', value: Number(mpListing.auto_accept_amount) } }
+            : {}),
+          // eBay expects autoDeclinePrice (not "minimumPrice")
+          ...(mpListing?.minimum_offer_amount != null && mpListing.minimum_offer_amount !== ''
+            ? { autoDeclinePrice: { currency: 'USD', value: Number(mpListing.minimum_offer_amount) } }
+            : {})
+        }
+      } : {}),
       fulfillmentPolicyId: (mpListing?.shipping_policy_override ?? mpListing?.shipping_policy) || null,
       paymentPolicyId:     mpListing?.payment_policy  || null,
       returnPolicyId:      mpListing?.return_policy   || null,
@@ -482,6 +716,14 @@ async function create(params: CreateParams): Promise<CreateResult> {
           auctionStartPrice:   mpListing?.starting_bid  != null ? { currency: 'USD', value: Number(mpListing.starting_bid) }  : undefined
         }
   };
+
+  // NEW: Log what the user requested and what we’re about to send in listingPolicies.bestOfferTerms
+  console.log('[ebay:bestOffer.requested]', {
+    allow_best_offer: !!mpListing?.allow_best_offer,
+    auto_accept_amount: mpListing?.auto_accept_amount ?? null,
+    minimum_offer_amount: mpListing?.minimum_offer_amount ?? null,
+    isFixed
+  });
 
   // clean nulls so eBay doesn’t choke
   function stripNulls(obj: any) {
@@ -500,9 +742,46 @@ async function create(params: CreateParams): Promise<CreateResult> {
     body: JSON.stringify(offerBody)
   });
 
-  const offerId = offerRes?.offerId || offerRes?.id;
+   const offerId = offerRes?.offerId || offerRes?.id;
   if (!offerId) throw new Error(`Offer creation succeeded but no offerId returned: ${JSON.stringify(offerRes).slice(0,200)}`);
 
+  // Verify Best Offer persisted and enforce if selected
+  try {
+    const offerEcho = await ebayFetch(`/sell/inventory/v1/offer/${encodeURIComponent(offerId)}`, { method: 'GET' });
+    // In the real response, Best Offer lives under listingPolicies.bestOfferTerms
+    const lp  = (offerEcho as any)?.listingPolicies ?? null;
+    const bot = lp?.bestOfferTerms ?? null;
+    console.log('[ebay:offer.verify.bestOffer]', { listingPolicies: !!lp, bestOfferTerms: bot || null });
+
+    const requestedBO = !!mpListing?.allow_best_offer;
+    const gotBO = !!(bot && bot.bestOfferEnabled === true);
+
+    if (requestedBO && !gotBO) {
+      console.error('[ebay:enforce.bestOffer]', {
+        requested: requestedBO,
+        got: gotBO,
+        reason: 'bestOfferTerms missing or disabled on offer'
+      });
+      throw new Error('ENFORCE_STOP: Best Offer was requested but not present on the created offer—publish aborted.');
+    }
+  } catch (e) {
+    // If we can’t verify, stop as well to avoid silent regressions
+    throw new Error(`ENFORCE_STOP: Failed to verify Best Offer on offer ${offerId}. ${(e as Error)?.message || e}`);
+  }
+
+  // Temporary pre-publish checks/enforcement
+  console.log('[ebay:promote.requested]', {
+    promote: !!mpListing?.promote,
+    promote_percent: mpListing?.promote_percent ?? null,
+    environment: envStr
+  });
+
+  if (ENFORCE_PROMOTE_ON_PROD && envStr === 'production' && mpListing?.promote) {
+    // We haven’t yet attached the listing to a campaign at a fixed rate.
+    // To avoid going live without promotion (which the user explicitly requested), stop here.
+    throw new Error('ENFORCE_STOP: Promote was requested in Production but Marketing API isn’t wired yet. Aborting publish to avoid a non-promoted live listing.');
+  }
+  
   // (3) POST publish
   // (3) POST publish (with targeted fallback for 25101 Invalid <ShippingPackage>)
   let pubRes: any;
@@ -569,10 +848,48 @@ async function create(params: CreateParams): Promise<CreateResult> {
   const remoteId  = pubRes?.listingId || pubRes?.itemId || null;
   const remoteUrl = pubRes?.listing?.itemWebUrl || pubRes?.itemWebUrl || null;
 
+  // ── Promotion (resilient) ────────────────────────────────────────────────────
+  let promoteResult: any = null;
+  try {
+    promoteResult = await promoteIfRequested({
+      envStr,
+      listingId: remoteId,
+      promote: !!mpListing?.promote,
+      promotePercent: mpListing?.promote_percent,
+      sku // pass the SKU so we can create the ad by Inventory Reference first
+    });
+  } catch (e) {
+    console.warn('[ebay:marketing.promote:error]', String(e || ''));
+  }
+  
+  // Surface a concise warning if promotion didn’t complete
+  if (promoteResult && promoteResult.promoted === false) {
+    const r = String(promoteResult.reason || '');
+    if (r === 'api_error') {
+      warnings.push('Promotion attempt failed due to an eBay API error. Listing is live; promotion will need a retry.');
+    } else if (r === 'access_denied') {
+      warnings.push('Promotion failed: eBay Marketing permission missing or seller not opted-in.');
+    } else if (r === 'not_requested_or_missing_inputs') {
+      // no-op
+    } else {
+      warnings.push('Promotion did not complete; see logs for details.');
+    }
+  }
+  
   const offerIdOut = offerId || null;
   const categoryIdOut = ebayCategoryId || null;
   const connectionIdOut = String(conn?.[0]?.connection_id || '') || null;
   const environmentOut = envStr || null;
+
+  if (mpListing?.promote && envStr !== 'production') {
+    warnings.push('Promotion requested but skipped in Sandbox');
+  }  
+  
+  // capture applied campaign id if promotion succeeded
+  const campaignIdApplied =
+    promoteResult && promoteResult.promoted === true && promoteResult.campaignId
+      ? String(promoteResult.campaignId)
+      : null;
 
   return {
     remoteId,
@@ -581,11 +898,12 @@ async function create(params: CreateParams): Promise<CreateResult> {
     categoryId: categoryIdOut,
     connectionId: connectionIdOut,
     environment: environmentOut,
+    campaignId: campaignIdApplied, // <-- NEW: pass campaign id up
     rawOffer: offerRes ?? null,
     rawPublish: pubRes ?? null,
     warnings
   };
-} // <-- close async function create
+} // <-
 
 export const ebayAdapter: MarketplaceAdapter = { create };
 // end ebay.ts file
