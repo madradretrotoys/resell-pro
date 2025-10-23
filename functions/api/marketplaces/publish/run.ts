@@ -57,7 +57,9 @@ async function executeLockedJob(env: Env, job: any) {
        AND marketplace_id = ${job.marketplace_id}
   `;
   // 4) perform op
-  const res = await adapter.create({
+  const op = String(job.op || 'create').toLowerCase(); // 'create' | 'update'
+  const res = op === 'update' && typeof (adapter as any).update === 'function'
+  ? await (adapter as any).update({
     env,
     tenant_id: job.tenant_id,
     item: inv,
@@ -96,10 +98,13 @@ async function executeLockedJob(env: Env, job: any) {
       raw: {
         offer:   res.rawOffer ?? null,
         publish: res.rawPublish ?? null
+        update:  (res as any).rawUpdate ?? null
       },
       warnings: res.warnings ?? []
     };
-  
+
+    
+    // Always log a live snapshot
     await sql/*sql*/`
       INSERT INTO app.item_marketplace_events
         (item_id, tenant_id, marketplace_id, kind, payload)
@@ -112,6 +117,21 @@ async function executeLockedJob(env: Env, job: any) {
       )
     `;
   
+    // For true edits, also add a concise 'updated' event
+    if (op === 'update') {
+      await sql/*sql*/`
+        INSERT INTO app.item_marketplace_events
+          (item_id, tenant_id, marketplace_id, kind, payload)
+        VALUES (
+          ${job.item_id},
+          ${job.tenant_id},
+          ${job.marketplace_id},
+          'updated',
+          ${JSON.stringify({ at: new Date().toISOString(), offerId: res.offerId || null })}
+        )
+      `;
+    }
+
     await sql/*sql*/`
       UPDATE app.marketplace_publish_jobs
          SET status='succeeded',
@@ -203,10 +223,11 @@ export async function processJobById(env: Env, jobId: string) {
          AND marketplace_id = ${job.marketplace_id}
     `;
 
+    const failKind = String(job.op || '').toLowerCase() === 'update' ? 'update_failed' : 'create_failed';
     await sql/*sql*/`
       INSERT INTO app.item_marketplace_events
         (item_id, tenant_id, marketplace_id, kind, error_message)
-      VALUES (${job.item_id}, ${job.tenant_id}, ${job.marketplace_id}, 'create_failed', ${msg})
+      VALUES (${job.item_id}, ${job.tenant_id}, ${job.marketplace_id}, ${failKind}, ${msg})
     `;
 
     return { ok: false, job_id: job.job_id, error: msg };
