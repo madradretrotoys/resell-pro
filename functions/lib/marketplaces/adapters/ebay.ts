@@ -431,22 +431,51 @@ async function create(params: CreateParams): Promise<CreateResult> {
           listingId: String(listingId),
           bidPercentage: String(bidPct)
         };
+        const path = `/sell/marketing/v1/ad_campaign/${encodeURIComponent(campaignId)}/ad`;
         console.log('[ebay:marketing.createAd.body]', { campaignId, ...adBody });
       
-        try {
-          await ebayFetch(`/sell/marketing/v1/ad_campaign/${encodeURIComponent(campaignId)}/ad`, {
-            method: 'POST',
-            body: JSON.stringify(adBody)
-          });
-        } catch (e: any) {
-          const msg = String(e?.message || e || '');
-          // If the ad already exists for this listing, eBay responds with a 409/business error.
-          // Treat it as success so promotion “sticks” without failing the run.
-          if (msg.includes(' 409 ') || msg.includes('"httpStatusCode":409') || msg.toLowerCase().includes('already exists')) {
-            console.warn('[ebay:marketing.createAd.alreadyExists]', { campaignId, listingId });
+        // eBay Marketing can lag immediately after publish.
+        // For 404/35048 ("listing invalid or ended"), back off and retry a few times.
+        const backoffSeconds = [5, 10, 20, 30]; // total up to ~65s
+        for (let attempt = 0; attempt <= backoffSeconds.length; attempt++) {
+          try {
+            await ebayFetch(path, { method: 'POST', body: JSON.stringify(adBody) });
+            // Success
+            if (attempt > 0) {
+              console.log('[ebay:marketing.createAd.retry.success]', { attempt });
+            }
             return;
+          } catch (e: any) {
+            const msg = String(e?.message || e || '');
+      
+            // 409 = ad already exists (treat as success)
+            if (msg.includes(' 409 ') || msg.includes('"httpStatusCode":409') || msg.toLowerCase().includes('already exists')) {
+              console.warn('[ebay:marketing.createAd.alreadyExists]', { campaignId, listingId });
+              return;
+            }
+      
+            // 404 / 35048 = listing not yet visible to Marketing; retry with backoff
+            const is404 = msg.includes(' 404 ') || msg.includes('"httpStatusCode":404');
+            const is35048 = msg.includes('"errorId":35048') || /invalid or has ended/i.test(msg);
+            if ((is404 || is35048) && attempt < backoffSeconds.length) {
+              const waitSec = backoffSeconds[attempt];
+              console.warn('[ebay:marketing.createAd.retry]', {
+                attempt: attempt + 1,
+                waitSec,
+                reason: '35048/listing_not_yet_visible',
+                campaignId,
+                listingId
+              });
+              await new Promise(r => setTimeout(r, waitSec * 1000));
+              continue; // retry
+            }
+      
+            // Exhausted retries or different error — rethrow for outer handler
+            if (is404 || is35048) {
+              console.error('[ebay:marketing.createAd.retry.exhausted]', { attempts: attempt + 1, campaignId, listingId });
+            }
+            throw e;
           }
-          throw e;
         }
       }
     
@@ -470,10 +499,20 @@ async function create(params: CreateParams): Promise<CreateResult> {
     
         // TODO (optional): persist campaign_id, ad_rate_applied, promoted_at in DB
         return { promoted: true, campaignId, bidPercentage: pct };
-      } catch (err: any) {
-        console.warn('[ebay:marketing.promote.fail]', String(err?.message || err));
-        return { promoted: false, reason: 'api_error', error: String(err?.message || err) };
-      }
+        } catch (err: any) {
+          const msg = String(err?.message || err || '');
+          console.warn('[ebay:marketing.promote.fail]', msg);
+        
+          // Hint if we likely exhausted 35048 retries
+          const exhausted = msg.includes('retry.exhausted') || msg.includes('"errorId":35048') || /invalid or has ended/i.test(msg);
+          return {
+            promoted: false,
+            reason: exhausted ? 'api_error' : 'api_error',
+            error: exhausted
+              ? 'Promotion could not be applied yet (eBay not ready for the new listing). Will need a retry shortly.'
+              : msg
+          };
+        }
     }
     
   // (1) PUT inventory item
