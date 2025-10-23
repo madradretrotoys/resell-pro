@@ -527,8 +527,17 @@ async function create(params: CreateParams): Promise<CreateResult> {
     body: JSON.stringify(offerBody)
   });
 
-  const offerId = offerRes?.offerId || offerRes?.id;
+   const offerId = offerRes?.offerId || offerRes?.id;
   if (!offerId) throw new Error(`Offer creation succeeded but no offerId returned: ${JSON.stringify(offerRes).slice(0,200)}`);
+
+  // ── NEW: Verify Best Offer persisted on the server representation (logs only)
+  try {
+    const offerEcho = await ebayFetch(`/sell/inventory/v1/offer/${encodeURIComponent(offerId)}`, { method: 'GET' });
+    const bo = (offerEcho as any)?.bestOfferTerms ?? null;
+    console.log('[ebay:offer.verify.bestOffer]', bo);
+  } catch (e) {
+    console.warn('[ebay:offer.verify.bestOffer:error]', String(e || ''));
+  }
 
   // (3) POST publish
   // (3) POST publish (with targeted fallback for 25101 Invalid <ShippingPackage>)
