@@ -338,7 +338,7 @@ async function create(params: CreateParams): Promise<CreateResult> {
       }
     }
 
-    // ── NEW: Minimal Marketing scaffold (no-ops in Sandbox; logs in Prod) ────────
+    // ── Marketing: Promoted Listings Standard (CPS, fixed ad rate) ───────────────
     async function promoteIfRequested(params: {
       envStr: EbayEnv,
       listingId: string | null,
@@ -346,31 +346,92 @@ async function create(params: CreateParams): Promise<CreateResult> {
       promotePercent: number | null | undefined
     }) {
       const { envStr, listingId, promote, promotePercent } = params;
-  
-      if (!promote || !listingId || promotePercent == null || Number(promotePercent) <= 0) {
-        console.log('[ebay:marketing.promote]', { skipped: true, reason: 'not_requested_or_missing_inputs', listingId, promote, promotePercent });
+    
+      // 0) Basic guards
+      const pct = promotePercent != null ? Number(promotePercent) : NaN;
+      if (!promote || !listingId || !Number.isFinite(pct) || pct <= 0) {
+        console.log('[ebay:marketing.promote]', {
+          skipped: true, reason: 'not_requested_or_missing_inputs', listingId, promote, promotePercent
+        });
         return { promoted: false, reason: 'not_requested_or_missing_inputs' };
       }
-  
-      if (envStr !== 'production') {
-        console.log('[ebay:marketing.promote]', { skipped: true, reason: 'sandbox_not_supported', listingId, promotePercent });
-        return { promoted: false, reason: 'sandbox' };
+    
+      // 1) Prepare a deterministic campaign name (per tenant/environment)
+      const campaignName = `ResellPro – ${envStr.toUpperCase()} – Default CPS`;
+    
+      // Small helpers to call Marketing API (re-use ebayFetch)
+      const qs = (o: Record<string, string>) =>
+        '?' + Object.entries(o).map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`).join('&');
+    
+      async function findCampaignByName(name: string) {
+        // Filter: name + CPS funding model
+        const resp = await ebayFetch(
+          `/sell/marketing/v1/ad_campaign${qs({ campaign_name: name, funding_strategy: 'CPS', limit: '20' })}`,
+          { method: 'GET' }
+        );
+        const arr = Array.isArray((resp as any)?.campaigns) ? (resp as any).campaigns : [];
+        return arr.find((c: any) => c?.campaignName === name) || null;
       }
-  
-      // At this point we’re in Production and have inputs. Log intent clearly.
-      console.log('[ebay:marketing.promote.intent]', {
-        listingId,
-        promotePercent: Number(promotePercent),
-        strategy: 'STANDARD (pending endpoint wiring)',
-        note: 'Next patch will attach listing to a Standard campaign at fixed ad rate.'
-      });
-  
-      // TODO: Implement:
-      //  1) Find-or-create Standard campaign (or use a configured one)
-      //  2) Add listing at fixed rate = promotePercent
-      //  3) Persist campaign_id/ad_rate_applied/promoted_at to DB
-  
-      return { promoted: false, reason: 'stub_logged_only' };
+    
+      async function createCampaign(name: string, defaultBidPct: number) {
+        // Start “now”, CPS, fixed ad rate (default = your UI percent)
+        const body = {
+          campaignName: name,
+          startDate: new Date().toISOString(),
+          marketplaceId: 'EBAY_US',
+          fundingStrategy: {
+            fundingModel: 'CPS',
+            adRateStrategy: 'FIXED',
+            bidPercentage: String(defaultBidPct) // must be string per eBay spec
+          }
+        };
+        console.log('[ebay:marketing.createCampaign.body]', body);
+        // createCampaign returns 201 with Location header; since ebayFetch returns body only,
+        // we’ll refetch by name to get the campaign_id.
+        await ebayFetch(`/sell/marketing/v1/ad_campaign`, {
+          method: 'POST',
+          body: JSON.stringify(body)
+        });
+        return findCampaignByName(name);
+      }
+    
+      async function addListingToCampaign(campaignId: string, listingId: string, bidPct: number) {
+        const adBody = {
+          listingId: String(listingId),
+          bidPercentage: String(bidPct) // string, min 2.0, max 100.0
+        };
+        console.log('[ebay:marketing.createAd.body]', { campaignId, ...adBody });
+        // 201 Created with Location header; no JSON payload
+        await ebayFetch(`/sell/marketing/v1/ad_campaign/${encodeURIComponent(campaignId)}/ad`, {
+          method: 'POST',
+          body: JSON.stringify(adBody)
+        });
+      }
+    
+      try {
+        // 2) Ensure campaign exists (find or create)
+        let campaign = await findCampaignByName(campaignName);
+        if (!campaign) {
+          console.log('[ebay:marketing.promote]', { creatingCampaign: campaignName, defaultBidPercentage: pct });
+          campaign = await createCampaign(campaignName, pct);
+        }
+    
+        const campaignId = String(campaign?.campaignId || '');
+        if (!campaignId) throw new Error(`campaign_not_found_or_create_failed: ${campaignName}`);
+    
+        // 3) Create Ad by listingId at requested percent
+        await addListingToCampaign(campaignId, String(listingId), pct);
+    
+        console.log('[ebay:marketing.promote.success]', {
+          listingId, campaignName, campaignId, bidPercentage: pct
+        });
+    
+        // TODO (optional): persist campaign_id, ad_rate_applied, promoted_at in DB
+        return { promoted: true, campaignId, bidPercentage: pct };
+      } catch (err: any) {
+        console.warn('[ebay:marketing.promote.fail]', String(err?.message || err));
+        return { promoted: false, reason: 'api_error', error: String(err?.message || err) };
+      }
     }
     
   // (1) PUT inventory item
