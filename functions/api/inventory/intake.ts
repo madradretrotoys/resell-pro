@@ -184,7 +184,7 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
       return upsertFooter(body, sku, instore_loc, case_bin_shelf);
     }
 
-    // === Helper: enqueue marketplace publish jobs (idempotent; same logic as Create Active) ===
+        // === Helper: enqueue marketplace publish jobs (create vs update + no-change short-circuit) ===
     async function enqueuePublishJobs(
       tenant_id: string,
       item_id: string,
@@ -204,8 +204,6 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
             : (typeof v === "string" && /^\d+$/.test(v) ? Number(v) : null))
           .filter((n: number | null): n is number => n !== null);
 
-        console.log("[intake] enqueue.parsed", { slugs, ids });
-
         if (slugs.length === 0 && ids.length === 0) {
           console.log("[intake] enqueue.skip_no_selection");
           return;
@@ -224,37 +222,125 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
         `;
         console.log("[intake] enqueue.match_enabled", { count: rows.length, rows });
 
+        // Load canonical fields we map to marketplaces (schema-backed)
+        const inv = await sql/*sql*/`
+          SELECT product_short_title
+          FROM app.inventory
+          WHERE item_id = ${item_id}
+          LIMIT 1
+        `;
+        const lst = await sql/*sql*/`
+          SELECT
+            listing_category_key, condition_key, brand_key, color_key, shipping_box_key,
+            listing_category, item_condition, brand_name, primary_color, shipping_box,
+            product_description, weight_lb, weight_oz, shipbx_length, shipbx_width, shipbx_height
+          FROM app.item_listing_profile
+          WHERE item_id = ${item_id} AND tenant_id = ${tenant_id}
+          LIMIT 1
+        `;
+        // For each marketplace, we may also include its listing row (eBay has the richest set today)
+        const imlRows = await sql/*sql*/`
+          SELECT marketplace_id, status, mp_offer_id,
+                 shipping_policy, payment_policy, return_policy, shipping_zip, pricing_format,
+                 buy_it_now_price, allow_best_offer, auto_accept_amount, minimum_offer_amount,
+                 promote, promote_percent, duration, starting_bid, reserve_price
+          FROM app.item_marketplace_listing
+          WHERE item_id = ${item_id} AND tenant_id = ${tenant_id}
+        `;
+
+        // Stable JSON stringify (keys sorted) for hashing
+        const stableStringify = (obj: any) => {
+          const seen = new WeakSet();
+          const sorter = (v: any) => {
+            if (v && typeof v === "object" && !Array.isArray(v)) {
+              if (seen.has(v)) return v;
+              seen.add(v);
+              return Object.keys(v).sort().reduce((acc, k) => { acc[k] = sorter(v[k]); return acc; }, {} as any);
+            }
+            if (Array.isArray(v)) return v.map(sorter);
+            return v;
+          };
+          return JSON.stringify(sorter(obj));
+        };
+        const sha256Hex = async (s: string) => {
+          const data = new TextEncoder().encode(s);
+          const hash = await crypto.subtle.digest("SHA-256", data);
+          return Array.from(new Uint8Array(hash)).map(b => b.toString(16).padStart(2,"0")).join("");
+        };
+
         for (const r of rows) {
-          console.log("[intake] enqueue.insert_job", { marketplace_id: r.id, slug: r.slug, item_id });
+          // Pull the marketplace row (if present) to know current identifiers/status
+          const iml = Array.isArray(imlRows) ? imlRows.find((x:any) => x.marketplace_id === r.id) : null;
+
+          // Build canonical snapshot for this marketplace
+          const snapshot = {
+            item_id,
+            tenant_id,
+            marketplace_id: r.id,
+            product_short_title: inv?.[0]?.product_short_title ?? null,
+            listing_profile: lst?.[0] ?? null,
+            marketplace_listing: iml ?? null
+          };
+          const snapshotStr = stableStringify(snapshot);
+          const hash = await sha256Hex(snapshotStr);
+          const payload_snapshot = { ...snapshot, _hash: hash };
+
+          // Determine desired op
+          const hasActiveOffer = !!(iml?.mp_offer_id) && String(iml?.status||"").toLowerCase() === "active";
+          const op = hasActiveOffer ? "update" : "create";
+
+          // Compare vs most recent snapshot (any op) to short-circuit no-ops
+          const last = await sql/*sql*/`
+            SELECT payload_snapshot
+            FROM app.marketplace_publish_jobs
+            WHERE tenant_id = ${tenant_id}
+              AND item_id = ${item_id}
+              AND marketplace_id = ${r.id}
+              AND status IN ('queued','running','done')
+            ORDER BY created_at DESC
+            LIMIT 1
+          `;
+          const lastHash = String(last?.[0]?.payload_snapshot?._hash || "");
+          if (lastHash && lastHash === hash) {
+            // Log an event and skip
+            await sql/*sql*/`
+              INSERT INTO app.item_marketplace_events
+                (item_id, tenant_id, marketplace_id, kind)
+              VALUES (${item_id}, ${tenant_id}, ${r.id}, 'skipped_no_change')
+            `;
+            console.log("[intake] enqueue.skip_no_change", { item_id, marketplace_id: r.id });
+            continue;
+          }
+
+          console.log("[intake] enqueue.insert_job", { marketplace_id: r.id, slug: r.slug, item_id, op });
           await sql/*sql*/`
             INSERT INTO app.marketplace_publish_jobs
-              (tenant_id, item_id, marketplace_id, op, status)
-            SELECT ${tenant_id}, ${item_id}, ${r.id}, 'create', 'queued'
+              (tenant_id, item_id, marketplace_id, op, status, payload_snapshot)
+            SELECT ${tenant_id}, ${item_id}, ${r.id}, ${op}, 'queued', ${payload_snapshot}
             WHERE NOT EXISTS (
               SELECT 1 FROM app.marketplace_publish_jobs j
               WHERE j.tenant_id = ${tenant_id}
                 AND j.item_id = ${item_id}
                 AND j.marketplace_id = ${r.id}
-                AND j.op = 'create'
+                AND j.op = ${op}
                 AND j.status IN ('queued','running')
             )
           `;
 
-          console.log("[intake] enqueue.flip_iml_pending", { marketplace_id: r.id, item_id });
+          // Touch listing row (useful for dashboards; do not flip status here)
           await sql/*sql*/`
             UPDATE app.item_marketplace_listing
                SET updated_at = now()
              WHERE tenant_id = ${tenant_id}
                AND item_id = ${item_id}
                AND marketplace_id = ${r.id}
-               AND status IN ('draft')
           `;
         }
 
         console.log("[intake] enqueue.done", { item_id });
       } catch (enqueueErr) {
         console.error("[intake] enqueue.error", { item_id, error: String(enqueueErr) });
-        // Best-effort event log (reuse EBAY_MARKETPLACE_ID for now; same as original)
+        // Best-effort event log
         await sql/*sql*/`
           INSERT INTO app.item_marketplace_events
             (item_id, tenant_id, marketplace_id, kind, error_message)
@@ -355,6 +441,11 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
         `;
         if (existing.length === 0) {
           return json({ ok: false, error: "not_found" }, 404);
+        }
+
+        // Phase 0: disallow Active → Draft (server-side guard to match UI)
+        if (isDraft && String(existing[0].item_status || "").toLowerCase() === "active") {
+          return json({ ok: false, error: "cannot_downgrade_active_to_draft" }, 400);
         }
 
         // === DRAFT UPDATE: update any inventory fields; also upsert listing if sent ===
