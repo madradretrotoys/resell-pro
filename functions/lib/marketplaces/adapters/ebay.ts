@@ -290,6 +290,9 @@ async function create(params: CreateParams): Promise<CreateResult> {
   // simple helper to normalize error text
     // simple on/off switch via env if you want (default true for now)
     const DEBUG_EBAY = true;
+    // Temporary enforcement toggles
+    const ENFORCE_BEST_OFFER_ON = true;
+    const ENFORCE_PROMOTE_ON_PROD = true; // blocks publish in production if Promote was requested (until Marketing API is wired)
   
     function safeStringify(obj: any) {
       try { return JSON.stringify(obj, null, 2); } catch { return String(obj); }
@@ -503,7 +506,19 @@ async function create(params: CreateParams): Promise<CreateResult> {
     categoryId: ebayCategoryId || undefined,
     merchantLocationKey, // ← this satisfies Item.Country via the Inventory Location
     listingPolicies: {
-      
+      // NEW: Best Offer must live inside listingPolicies.bestOfferTerms
+      ...(isFixed && mpListing?.allow_best_offer ? {
+        bestOfferTerms: {
+          bestOfferEnabled: true,
+          ...(mpListing?.auto_accept_amount != null && mpListing.auto_accept_amount !== ''
+            ? { autoAcceptPrice:  { currency: 'USD', value: Number(mpListing.auto_accept_amount) } }
+            : {}),
+          // eBay expects autoDeclinePrice (not "minimumPrice")
+          ...(mpListing?.minimum_offer_amount != null && mpListing.minimum_offer_amount !== ''
+            ? { autoDeclinePrice: { currency: 'USD', value: Number(mpListing.minimum_offer_amount) } }
+            : {})
+        }
+      } : {}),
       fulfillmentPolicyId: (mpListing?.shipping_policy_override ?? mpListing?.shipping_policy) || null,
       paymentPolicyId:     mpListing?.payment_policy  || null,
       returnPolicyId:      mpListing?.return_policy   || null,
@@ -517,32 +532,13 @@ async function create(params: CreateParams): Promise<CreateResult> {
         }
   };
 
-  // ── NEW: Best Offer (FIXED_PRICE only) ─────────────────────────────────────────
-  if (isFixed && mpListing?.allow_best_offer) {
-    // eBay expects money objects where provided; omit fields when not set.
-    const autoAccept =
-      mpListing?.auto_accept_amount != null && mpListing.auto_accept_amount !== ''
-        ? { currency: 'USD', value: Number(mpListing.auto_accept_amount) }
-        : undefined;
-
-    const minimumOffer =
-      mpListing?.minimum_offer_amount != null && mpListing.minimum_offer_amount !== ''
-        ? { currency: 'USD', value: Number(mpListing.minimum_offer_amount) }
-        : undefined;
-
-    // Inventory API "offer" supports Best Offer via bestOfferTerms
-    (offerBody as any).bestOfferTerms = {
-      bestOfferEnabled: true,
-      ...(autoAccept ? { autoAcceptPrice: autoAccept } : {}),
-      ...(minimumOffer ? { minimumPrice: minimumOffer } : {})
-    };
-
-    console.log('[ebay:offer.bestOffer]', {
-      enabled: true,
-      autoAccept: autoAccept ?? null,
-      minimumOffer: minimumOffer ?? null
-    });
-  }
+  // NEW: Log what the user requested and what we’re about to send in listingPolicies.bestOfferTerms
+  console.log('[ebay:bestOffer.requested]', {
+    allow_best_offer: !!mpListing?.allow_best_offer,
+    auto_accept_amount: mpListing?.auto_accept_amount ?? null,
+    minimum_offer_amount: mpListing?.minimum_offer_amount ?? null,
+    isFixed
+  });
 
   // clean nulls so eBay doesn’t choke
   function stripNulls(obj: any) {
@@ -564,15 +560,43 @@ async function create(params: CreateParams): Promise<CreateResult> {
    const offerId = offerRes?.offerId || offerRes?.id;
   if (!offerId) throw new Error(`Offer creation succeeded but no offerId returned: ${JSON.stringify(offerRes).slice(0,200)}`);
 
-  // ── NEW: Verify Best Offer persisted on the server representation (logs only)
+  // Verify Best Offer persisted and enforce if selected
   try {
     const offerEcho = await ebayFetch(`/sell/inventory/v1/offer/${encodeURIComponent(offerId)}`, { method: 'GET' });
-    const bo = (offerEcho as any)?.bestOfferTerms ?? null;
-    console.log('[ebay:offer.verify.bestOffer]', bo);
+    // In the real response, Best Offer lives under listingPolicies.bestOfferTerms
+    const lp  = (offerEcho as any)?.listingPolicies ?? null;
+    const bot = lp?.bestOfferTerms ?? null;
+    console.log('[ebay:offer.verify.bestOffer]', { listingPolicies: !!lp, bestOfferTerms: bot || null });
+
+    const requestedBO = !!mpListing?.allow_best_offer;
+    const gotBO = !!(bot && bot.bestOfferEnabled === true);
+
+    if (requestedBO && !gotBO) {
+      console.error('[ebay:enforce.bestOffer]', {
+        requested: requestedBO,
+        got: gotBO,
+        reason: 'bestOfferTerms missing or disabled on offer'
+      });
+      throw new Error('ENFORCE_STOP: Best Offer was requested but not present on the created offer—publish aborted.');
+    }
   } catch (e) {
-    console.warn('[ebay:offer.verify.bestOffer:error]', String(e || ''));
+    // If we can’t verify, stop as well to avoid silent regressions
+    throw new Error(`ENFORCE_STOP: Failed to verify Best Offer on offer ${offerId}. ${(e as Error)?.message || e}`);
   }
 
+  // Temporary pre-publish checks/enforcement
+  console.log('[ebay:promote.requested]', {
+    promote: !!mpListing?.promote,
+    promote_percent: mpListing?.promote_percent ?? null,
+    environment: envStr
+  });
+
+  if (ENFORCE_PROMOTE_ON_PROD && envStr === 'production' && mpListing?.promote) {
+    // We haven’t yet attached the listing to a campaign at a fixed rate.
+    // To avoid going live without promotion (which the user explicitly requested), stop here.
+    throw new Error('ENFORCE_STOP: Promote was requested in Production but Marketing API isn’t wired yet. Aborting publish to avoid a non-promoted live listing.');
+  }
+  
   // (3) POST publish
   // (3) POST publish (with targeted fallback for 25101 Invalid <ShippingPackage>)
   let pubRes: any;
