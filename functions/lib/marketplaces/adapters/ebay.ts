@@ -292,7 +292,7 @@ async function create(params: CreateParams): Promise<CreateResult> {
     const DEBUG_EBAY = true;
     // Temporary enforcement toggles
     const ENFORCE_BEST_OFFER_ON = true;
-    const ENFORCE_PROMOTE_ON_PROD = true; // blocks publish in production if Promote was requested (until Marketing API is wired)
+    const ENFORCE_PROMOTE_ON_PROD = false; // blocks publish in production if Promote was requested (until Marketing API is wired)
   
     function safeStringify(obj: any) {
       try { return JSON.stringify(obj, null, 2); } catch { return String(obj); }
