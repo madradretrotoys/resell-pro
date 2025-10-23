@@ -483,6 +483,33 @@ async function create(params: CreateParams): Promise<CreateResult> {
         }
   };
 
+  // ── NEW: Best Offer (FIXED_PRICE only) ─────────────────────────────────────────
+  if (isFixed && mpListing?.allow_best_offer) {
+    // eBay expects money objects where provided; omit fields when not set.
+    const autoAccept =
+      mpListing?.auto_accept_amount != null && mpListing.auto_accept_amount !== ''
+        ? { currency: 'USD', value: Number(mpListing.auto_accept_amount) }
+        : undefined;
+
+    const minimumOffer =
+      mpListing?.minimum_offer_amount != null && mpListing.minimum_offer_amount !== ''
+        ? { currency: 'USD', value: Number(mpListing.minimum_offer_amount) }
+        : undefined;
+
+    // Inventory API "offer" supports Best Offer via bestOfferTerms
+    (offerBody as any).bestOfferTerms = {
+      bestOfferEnabled: true,
+      ...(autoAccept ? { autoAcceptPrice: autoAccept } : {}),
+      ...(minimumOffer ? { minimumPrice: minimumOffer } : {})
+    };
+
+    console.log('[ebay:offer.bestOffer]', {
+      enabled: true,
+      autoAccept: autoAccept ?? null,
+      minimumOffer: minimumOffer ?? null
+    });
+  }
+
   // clean nulls so eBay doesn’t choke
   function stripNulls(obj: any) {
     if (obj && typeof obj === 'object') {
