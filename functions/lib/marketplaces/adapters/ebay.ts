@@ -343,15 +343,15 @@ async function create(params: CreateParams): Promise<CreateResult> {
       envStr: EbayEnv,
       listingId: string | null,
       promote: boolean,
-      promotePercent: number | null | undefined
+      promotePercent: number | null | undefined,
+      sku?: string | null
     }) {
-      const { envStr, listingId, promote, promotePercent } = params;
-    
+      const { envStr, listingId, promote, promotePercent, sku } = params;
       // 0) Basic guards
       const pct = promotePercent != null ? Number(promotePercent) : NaN;
-      if (!promote || !listingId || !Number.isFinite(pct) || pct <= 0) {
+      if (!promote || !Number.isFinite(pct) || pct <= 0) {
         console.log('[ebay:marketing.promote]', {
-          skipped: true, reason: 'not_requested_or_missing_inputs', listingId, promote, promotePercent
+          skipped: true, reason: 'not_requested_or_missing_inputs', listingId, sku, promote, promotePercent
         });
         return { promoted: false, reason: 'not_requested_or_missing_inputs' };
       }
@@ -434,27 +434,20 @@ async function create(params: CreateParams): Promise<CreateResult> {
         const path = `/sell/marketing/v1/ad_campaign/${encodeURIComponent(campaignId)}/ad`;
         console.log('[ebay:marketing.createAd.body]', { campaignId, ...adBody });
       
-        // eBay Marketing can lag immediately after publish.
-        // For 404/35048 ("listing invalid or ended"), back off and retry a few times.
-        const backoffSeconds = [5, 10, 20, 30]; // total up to ~65s
+        const backoffSeconds = [5, 10, 20, 30];
         for (let attempt = 0; attempt <= backoffSeconds.length; attempt++) {
           try {
             await ebayFetch(path, { method: 'POST', body: JSON.stringify(adBody) });
-            // Success
-            if (attempt > 0) {
-              console.log('[ebay:marketing.createAd.retry.success]', { attempt });
-            }
+            if (attempt > 0) console.log('[ebay:marketing.createAd.retry.success]', { attempt });
             return;
           } catch (e: any) {
             const msg = String(e?.message || e || '');
       
-            // 409 = ad already exists (treat as success)
             if (msg.includes(' 409 ') || msg.includes('"httpStatusCode":409') || msg.toLowerCase().includes('already exists')) {
               console.warn('[ebay:marketing.createAd.alreadyExists]', { campaignId, listingId });
               return;
             }
       
-            // 404 / 35048 = listing not yet visible to Marketing; retry with backoff
             const is404 = msg.includes(' 404 ') || msg.includes('"httpStatusCode":404');
             const is35048 = msg.includes('"errorId":35048') || /invalid or has ended/i.test(msg);
             if ((is404 || is35048) && attempt < backoffSeconds.length) {
@@ -467,10 +460,9 @@ async function create(params: CreateParams): Promise<CreateResult> {
                 listingId
               });
               await new Promise(r => setTimeout(r, waitSec * 1000));
-              continue; // retry
+              continue;
             }
       
-            // Exhausted retries or different error — rethrow for outer handler
             if (is404 || is35048) {
               console.error('[ebay:marketing.createAd.retry.exhausted]', { attempts: attempt + 1, campaignId, listingId });
             }
@@ -478,6 +470,30 @@ async function create(params: CreateParams): Promise<CreateResult> {
           }
         }
       }
+      
+      // NEW: Create ad by Inventory Reference (SKU) — avoids fresh-listing visibility lag
+      async function addInventoryRefToCampaign(campaignId: string, sku: string, bidPct: number) {
+        const adBody = {
+          inventoryReferenceId: String(sku),
+          inventoryReferenceType: 'INVENTORY_ITEM',
+          bidPercentage: String(bidPct)
+        };
+        const path = `/sell/marketing/v1/ad_campaign/${encodeURIComponent(campaignId)}/create_ads_by_inventory_reference`;
+        console.log('[ebay:marketing.createAdByInventoryRef.body]', { campaignId, ...adBody });
+      
+        try {
+          await ebayFetch(path, { method: 'POST', body: JSON.stringify(adBody) });
+        } catch (e: any) {
+          const msg = String(e?.message || e || '');
+          // If an ad already exists for this inventory ref in the campaign, treat as success
+          if (msg.includes(' 409 ') || msg.includes('"httpStatusCode":409') || msg.toLowerCase().includes('already exists')) {
+            console.warn('[ebay:marketing.createAdByInventoryRef.alreadyExists]', { campaignId, sku });
+            return;
+          }
+          throw e;
+        }
+      }
+
     
       try {
         // 2) Ensure campaign exists (find or create)
@@ -490,12 +506,39 @@ async function create(params: CreateParams): Promise<CreateResult> {
         const campaignId = String(campaign?.campaignId || '');
         if (!campaignId) throw new Error(`campaign_not_found_or_create_failed: ${campaignName}`);
     
-        // 3) Create Ad by listingId at requested percent
-        await addListingToCampaign(campaignId, String(listingId), pct);
-    
-        console.log('[ebay:marketing.promote.success]', {
-          listingId, campaignName, campaignId, bidPercentage: pct
-        });
+        // 3) Prefer Inventory Reference (SKU) first to avoid fresh-listing propagation lag
+        let adOk = false;
+        if (sku) {
+          try {
+            await addInventoryRefToCampaign(campaignId, String(sku), pct);
+            adOk = true;
+            console.log('[ebay:marketing.promote.success]', {
+              path: 'inventoryReference',
+              sku,
+              campaignName,
+              campaignId,
+              bidPercentage: pct
+            });
+          } catch (e:any) {
+            console.warn('[ebay:marketing.createAdByInventoryRef.fail]', String(e?.message || e));
+          }
+        }
+        
+        // Fallback to listingId path if needed
+        if (!adOk && listingId) {
+          await addListingToCampaign(campaignId, String(listingId), pct);
+          adOk = true;
+          console.log('[ebay:marketing.promote.success]', {
+            path: 'listingId',
+            listingId,
+            campaignName,
+            campaignId,
+            bidPercentage: pct
+          });
+        }
+        
+        if (!adOk) throw new Error('create_ad_failed: both inventoryReference and listingId paths failed');
+
     
         // TODO (optional): persist campaign_id, ad_rate_applied, promoted_at in DB
         return { promoted: true, campaignId, bidPercentage: pct };
@@ -812,7 +855,8 @@ async function create(params: CreateParams): Promise<CreateResult> {
       envStr,
       listingId: remoteId,
       promote: !!mpListing?.promote,
-      promotePercent: mpListing?.promote_percent
+      promotePercent: mpListing?.promote_percent,
+      sku // pass the SKU so we can create the ad by Inventory Reference first
     });
   } catch (e) {
     console.warn('[ebay:marketing.promote:error]', String(e || ''));
