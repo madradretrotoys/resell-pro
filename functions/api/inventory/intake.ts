@@ -395,42 +395,66 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
     // If the client requested a delete, do it now (and exit)
     if (body?.action === "delete") {
       if (!item_id_in) return json({ ok: false, error: "missing_item_id" }, 400);
-
-      // 1) Gather all images for this item (need r2_key for deletion)
-      const imgRows = await sql<{ image_id: string; r2_key: string | null }[]>`
-        SELECT image_id, r2_key
-        FROM app.item_images
-        WHERE item_id = ${item_id_in}
-      `;
     
-      // 2) Best-effort delete each object from R2
-      for (const r of imgRows) {
-        if (!r?.r2_key) continue;
-        try {
-          // R2 binding name matches your upload handler (R2_IMAGES)
-          // @ts-ignore
-          await env.R2_IMAGES.delete(r.r2_key);
-        } catch (e) {
-          // log but don't fail whole operation
-          console.warn("r2.delete failed", r.r2_key, e);
-        }
+      // A) Queue marketplace delete jobs FIRST (one per marketplace with a remote id)
+      const iml = await sql/*sql*/`
+        SELECT marketplace_id, mp_offer_id, mp_item_id
+          FROM app.item_marketplace_listing
+         WHERE item_id    = ${item_id_in}
+           AND tenant_id  = ${tenant_id}
+           AND (mp_offer_id IS NOT NULL OR mp_item_id IS NOT NULL)
+      `;
+      const job_ids: string[] = [];
+      for (const r of iml as any[]) {
+        const [job] = await sql/*sql*/`
+          INSERT INTO app.marketplace_publish_jobs
+            (tenant_id, item_id, marketplace_id, op, status, payload_snapshot)
+          VALUES
+            (${tenant_id}, ${item_id_in}, ${r.marketplace_id}, 'delete', 'queued',
+             ${{
+               item_id: item_id_in,
+               tenant_id,
+               marketplace_id: r.marketplace_id,
+               marketplace_listing: { mp_offer_id: r.mp_offer_id, mp_item_id: r.mp_item_id }
+             }})
+          RETURNING job_id
+        `;
+        if (job?.job_id) job_ids.push(String(job.job_id));
+        // Optional: reflect pending state on the listing row
+        await sql/*sql*/`
+          UPDATE app.item_marketplace_listing
+             SET status='delete_pending', updated_at=now()
+           WHERE item_id=${item_id_in} AND tenant_id=${tenant_id} AND marketplace_id=${r.marketplace_id}
+        `;
       }
     
-      // 3) Remove image rows for this item
-      await sql/*sql*/`
-        DELETE FROM app.item_images
-        WHERE item_id = ${item_id_in}
+      // B) Best-effort delete R2 images and rows (existing logic)
+      const imgRows = await sql<{ image_id: string; r2_key: string | null }[]>`
+        SELECT image_id, r2_key
+          FROM app.item_images
+         WHERE item_id = ${item_id_in}
       `;
-      
-      // inventory → item_listing_profile cascades ON DELETE
+      for (const r of imgRows) {
+        if (!r?.r2_key) continue;
+        try { /* @ts-ignore */ await env.R2_IMAGES.delete(r.r2_key); } catch (e) { console.warn("r2.delete failed", r.r2_key, e); }
+      }
+      await sql/*sql*/`DELETE FROM app.item_images WHERE item_id = ${item_id_in}`;
+    
+      // C) Explicitly remove the item's listing profile (don’t rely on cascade)
       await sql/*sql*/`
-        WITH s AS (
-          SELECT set_config('app.actor_user_id', ${actor_user_id}, true)
-        )
+        DELETE FROM app.item_listing_profile
+         WHERE item_id = ${item_id_in} AND tenant_id = ${tenant_id}
+      `;
+    
+      // D) Remove inventory row last
+      await sql/*sql*/`
+        WITH s AS (SELECT set_config('app.actor_user_id', ${actor_user_id}, true))
         DELETE FROM app.inventory
-        WHERE item_id = ${item_id_in};
+         WHERE item_id = ${item_id_in}
       `;
-      return json({ ok: true, deleted: true, item_id: item_id_in }, 200);
+    
+      // E) Return job_ids so the client can trigger/poll the runner
+      return json({ ok: true, deleted: true, item_id: item_id_in, job_ids }, 200);
     }
     
        // If item_id was provided, UPDATE existing rows instead of INSERT
