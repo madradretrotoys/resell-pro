@@ -176,7 +176,7 @@ async function executeLockedJob(env: Env, job: any) {
       `;
     }
 
-    -- NEW: persist live identifiers and status on the listing row
+    // NEW: persist live identifiers and status on the listing row
     await sql/*sql*/`
       UPDATE app.item_marketplace_listing
          SET status        = 'live',
