@@ -1070,5 +1070,6 @@ async function update(params: CreateParams): Promise<CreateResult> {
   };
 }
 
-export const ebayAdapter: MarketplaceAdapter = { create };
+export const ebayAdapter: MarketplaceAdapter = { create, update };
+
 // end ebay.ts file
