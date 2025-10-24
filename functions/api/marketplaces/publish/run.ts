@@ -283,7 +283,33 @@ export async function processJobById(env: Env, jobId: string) {
 }
 
 
+// Read-only polling endpoint for clients that GET /run?job_id=...
+export async function onRequestGet(ctx: { env: Env, request: Request }) {
+  try {
+    const sql = getSql(ctx.env);
+    const url = new URL(ctx.request.url);
+    const specific = (url.searchParams.get("job_id") || "").trim();
 
+    if (!specific) {
+      // No job_id → nothing to report for read-only poll
+      return json({ ok: false, status: "unknown" });
+    }
+
+    const [row] = await sql/*sql*/`
+      SELECT job_id, status
+      FROM app.marketplace_publish_jobs
+      WHERE job_id = ${specific}
+      LIMIT 1
+    `;
+
+    if (!row) return json({ ok: false, status: "unknown", job_id: specific });
+    return json({ ok: true, job_id: row.job_id, status: row.status });
+  } catch (e: any) {
+    const msg = String(e?.message || e);
+    console.error("[runner:get] unhandled", msg);
+    return json({ ok: false, error: "runner_get_crash", message: msg }, 500);
+  }
+}
 
 // Public endpoint remains: process the next queued job
 export async function onRequestPost(ctx: { env: Env, request: Request }) {
