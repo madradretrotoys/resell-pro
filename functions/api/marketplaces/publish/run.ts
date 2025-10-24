@@ -20,9 +20,10 @@ async function executeLockedJob(env: Env, job: any) {
   
     const adapter = reg.byId(job.marketplace_id);
     if (!adapter) throw new Error(`No adapter for marketplace_id=${job.marketplace_id}`);
-    
-    const op = String(job.op || 'create').toLowerCase(); // 'create' | 'update' | 'delete'
-    
+    const opDb = String(job.op || 'create').toLowerCase();
+    const opPayload = String((job?.payload_snapshot && job.payload_snapshot.op) || '').toLowerCase();
+    const op = opPayload === 'delete' ? 'delete' : opDb; // 'create' | 'update' | 'delete
+  
     // For delete: we only need the listing row (ids) and tenant context
     if (op === 'delete') {
       const [iml] = await sql/*sql*/`
