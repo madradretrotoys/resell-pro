@@ -1,5 +1,5 @@
 // begin ebay.ts file
-import type { MarketplaceAdapter, CreateParams, CreateResult } from '../types';
+import type { MarketplaceAdapter, CreateParams, CreateResult, DeleteParams, DeleteResult } from '../types';
 import { getSql } from '../../../_shared/db';
 
 type EbayEnv = 'production' | 'sandbox';
@@ -1049,6 +1049,143 @@ async function update(params: CreateParams): Promise<CreateResult> {
   return created;
 }
 
+
+// ───────────────────────────────────────────────────────────────────────────────
+// DELETE path (standalone): withdraw → delete offer (idempotent), no recreate
+// ───────────────────────────────────────────────────────────────────────────────
+async function del(params: DeleteParams): Promise<DeleteResult> {
+  const { env, tenant_id, mpListing } = params;
+  const sql = getSql(env);
+  const warnings: string[] = [];
+
+  const oldOfferId = String(mpListing?.mp_offer_id || '').trim() || null;
+  const desiredConnId = String((mpListing as any)?.connection_id || '').trim();
+
+  // Load connection (prefer the one used by the listing)
+  let conn = desiredConnId
+    ? await sql/*sql*/`
+        SELECT mc.connection_id, mc.access_token, mc.token_expires_at, mc.environment, mc.secrets_blob
+        FROM app.marketplace_connections mc
+        JOIN app.marketplaces_available ma ON ma.id = mc.marketplace_id
+        WHERE mc.tenant_id = ${tenant_id}
+          AND ma.slug = 'ebay'
+          AND mc.status = 'connected'
+          AND mc.connection_id = ${desiredConnId}
+        LIMIT 1
+      `
+    : [];
+
+  if (!conn?.length) {
+    conn = await sql/*sql*/`
+      SELECT mc.connection_id, mc.access_token, mc.token_expires_at, mc.environment, mc.secrets_blob
+      FROM app.marketplace_connections mc
+      JOIN app.marketplaces_available ma ON ma.id = mc.marketplace_id
+      WHERE mc.tenant_id = ${tenant_id}
+        AND ma.slug = 'ebay'
+        AND mc.status = 'connected'
+      ORDER BY mc.updated_at DESC
+      LIMIT 1
+    `;
+  }
+  if (!conn?.length) {
+    warnings.push('Tenant not connected to eBay (no matching connection)');
+    return { success: false, offerId: oldOfferId, remoteId: null, connectionId: null, environment: null, warnings };
+  }
+
+  const encKey = env.RP_ENCRYPTION_KEY || "";
+  const encAccess = String(conn[0].access_token || "");
+  if (!encAccess) return { success: false, offerId: oldOfferId, remoteId: null, connectionId: String(conn?.[0]?.connection_id || '') || null, environment: null, warnings: ['No access_token stored'] };
+
+  // Decrypt token
+  function b64d(s: string) { return Uint8Array.from(atob(s), c => c.charCodeAt(0)); }
+  async function decryptJson(base64Key: string, blob: string): Promise<any> {
+    if (!blob) return null;
+    const [ivB64, ctB64] = blob.split(".");
+    const iv = b64d(ivB64);
+    const ct = b64d(ctB64);
+    if (!base64Key) return JSON.parse(new TextDecoder().decode(ct));
+    const key = await crypto.subtle.importKey("raw", b64d(base64Key), { name: "AES-GCM" }, false, ["decrypt"]);
+    const pt = new Uint8Array(await crypto.subtle.decrypt({ name: "AES-GCM", iv }, key, ct));
+    return JSON.parse(new TextDecoder().decode(pt));
+  }
+  const accessObj = await decryptJson(encKey, encAccess);
+  const accessToken = String(accessObj?.v || "").trim();
+  if (!accessToken) return { success: false, offerId: oldOfferId, remoteId: null, connectionId: String(conn?.[0]?.connection_id || '') || null, environment: null, warnings: ['Decrypted access_token is empty'] };
+
+  // Resolve environment
+  type EbayEnv = 'production' | 'sandbox';
+  const baseEnv = ((): EbayEnv => {
+    let envStr = String(conn[0].environment || "").trim().toLowerCase();
+    if (envStr !== "production" && envStr !== "sandbox") {
+      try {
+        const secrets = JSON.parse(new TextDecoder().decode(b64d(String(conn[0].secrets_blob || "").split(".")[1] || "")));
+        const e = String(secrets?.environment || "").trim().toLowerCase();
+        if (e === "production" || e === "sandbox") envStr = e;
+      } catch {}
+    }
+    return (envStr === 'production' ? 'production' : 'sandbox') as EbayEnv;
+  })();
+  const base = baseEnv === 'production' ? 'https://api.ebay.com' : 'https://api.sandbox.ebay.com';
+
+  // Minimal fetch wrapper (mirrors update())
+  async function ebayFetch(path: string, init: RequestInit) {
+    const url = `${base}${path}`;
+    const headers = {
+      ...(init.headers || {}),
+      'authorization': `Bearer ${accessToken}`,
+      'content-type': 'application/json',
+      'content-language': 'en-US'
+    };
+    const r = await fetch(url, { ...init, headers });
+    const txt = await r.text().catch(() => '');
+    if (!r.ok) throw new Error(`${r.status} ${r.statusText} :: ${txt}`.slice(0, 1000));
+    try {
+      return txt && (r.headers.get('content-type') || '').includes('application/json') ? JSON.parse(txt) : txt;
+    } catch { return txt; }
+  }
+
+  // If we have an offer id, attempt withdraw then delete (idempotent on 404)
+  if (oldOfferId) {
+    try {
+      await ebayFetch(`/sell/inventory/v1/offer/${encodeURIComponent(oldOfferId)}/withdraw`, { method: 'POST', body: '{}' });
+    } catch (e: any) {
+      const m = String(e?.message || e || '');
+      // Non-fatal: treat 404/invalid-state as already withdrawn
+      if (!(m.includes(' 404 ') || /not\s*found/i.test(m) || /invalid|already/i.test(m))) {
+        warnings.push(`withdraw_warn: ${m.slice(0, 300)}`);
+      }
+    }
+
+    try {
+      await ebayFetch(`/sell/inventory/v1/offer/${encodeURIComponent(oldOfferId)}`, { method: 'DELETE', body: '' });
+    } catch (e: any) {
+      const m = String(e?.message || e || '');
+      if (m.includes(' 404 ') || /not\s*found/i.test(m)) {
+        // already gone — OK
+      } else {
+        return {
+          success: false,
+          offerId: oldOfferId,
+          remoteId: null,
+          connectionId: String(conn?.[0]?.connection_id || '') || null,
+          environment: baseEnv,
+          warnings: [...warnings, `delete_error: ${m.slice(0, 300)}`]
+        };
+      }
+    }
+  } else {
+    warnings.push('No mp_offer_id present; skipped eBay offer deletion.');
+  }
+
+  return {
+    success: true,
+    offerId: oldOfferId,
+    remoteId: null,
+    connectionId: String(conn?.[0]?.connection_id || '') || null,
+    environment: baseEnv,
+    warnings
+  };
+}
 
 export const ebayAdapter: MarketplaceAdapter = { create, update };
 
