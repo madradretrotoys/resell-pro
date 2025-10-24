@@ -175,13 +175,30 @@ async function executeLockedJob(env: Env, job: any) {
         )
       `;
     }
-  
+
+    -- NEW: persist live identifiers and status on the listing row
+    await sql/*sql*/`
+      UPDATE app.item_marketplace_listing
+         SET status        = 'live',
+             mp_offer_id   = ${res.offerId || null},
+             mp_item_id    = ${res.remoteId || null},
+             mp_item_url   = ${res.remoteUrl || null},
+             connection_id = ${res.connectionId || null},
+             campaign_id   = ${res.campaignId || null},
+             last_synced_at= now(),
+             published_at  = COALESCE(published_at, now()),
+             updated_at    = now()
+       WHERE item_id = ${job.item_id}
+         AND tenant_id = ${job.tenant_id}
+         AND marketplace_id = ${job.marketplace_id}
+    `;
+
     await sql/*sql*/`
       UPDATE app.marketplace_publish_jobs
          SET status='succeeded',
              updated_at = now()
        WHERE job_id = ${job.job_id}
-    `;  
+    `;
     return { ok: true, job_id: job.job_id, status: 'succeeded', remote: res };
 }
 
