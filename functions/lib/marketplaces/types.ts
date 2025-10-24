@@ -20,8 +20,25 @@ export type CreateResult = {
   warnings?: string[];
 };
 
+// NEW: Delete operation plumbing
+export type DeleteParams = {
+  env: any;
+  tenant_id: string;
+  mpListing: any; // expects mp_offer_id and optional connection_id/campaign_id
+};
+
+export type DeleteResult = {
+  success: boolean;
+  offerId?: string | null;
+  remoteId?: string | null;
+  connectionId?: string | null;
+  environment?: 'production' | 'sandbox' | null;
+  warnings?: string[];
+};
+
 export interface MarketplaceAdapter {
   create(params: CreateParams): Promise<CreateResult>;
-  // future: update(), end()
+  update?(params: CreateParams): Promise<CreateResult>;
+  delete?(params: DeleteParams): Promise<DeleteResult>;
 }
 // end types.ts file
