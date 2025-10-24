@@ -1187,6 +1187,6 @@ async function del(params: DeleteParams): Promise<DeleteResult> {
   };
 }
 
-export const ebayAdapter: MarketplaceAdapter = { create, update };
+export const ebayAdapter: MarketplaceAdapter = { create, update, delete: del };
 
 // end ebay.ts file
