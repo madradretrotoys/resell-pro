@@ -914,7 +914,7 @@ async function update(params: CreateParams): Promise<CreateResult> {
   const warnings: string[] = [];
 
   // 0) Guard: require an existing offer id on the listing row
-  const offerId = String(mpListing?.mp_offer_id || '').trim();
+  let offerId = String(mpListing?.mp_offer_id || '').trim();
   if (!offerId) {
     throw new Error('update_requires_offer_id: mp_offer_id was not found on item_marketplace_listing');
   }
