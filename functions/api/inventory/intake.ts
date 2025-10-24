@@ -397,6 +397,7 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
       if (!item_id_in) return json({ ok: false, error: "missing_item_id" }, 400);
     
       // A) Queue marketplace delete jobs FIRST (one per marketplace with a remote id)
+      // NOTE: Use op='update' for DB compatibility and carry the real intent in payload_snapshot.op='delete'
       const iml = await sql/*sql*/`
         SELECT marketplace_id, mp_offer_id, mp_item_id
           FROM app.item_marketplace_listing
@@ -410,8 +411,9 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
           INSERT INTO app.marketplace_publish_jobs
             (tenant_id, item_id, marketplace_id, op, status, payload_snapshot)
           VALUES
-            (${tenant_id}, ${item_id_in}, ${r.marketplace_id}, 'delete', 'queued',
+            (${tenant_id}, ${item_id_in}, ${r.marketplace_id}, 'update', 'queued',
              ${{
+               op: 'delete',  // <-- runner will honor this and execute the delete branch
                item_id: item_id_in,
                tenant_id,
                marketplace_id: r.marketplace_id,
