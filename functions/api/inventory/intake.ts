@@ -286,7 +286,10 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
           const payload_snapshot = { ...snapshot, _hash: hash };
 
           // Determine desired op
-          const hasActiveOffer = !!(iml?.mp_offer_id) && String(iml?.status||"").toLowerCase() === "active";
+          // Option A: treat 'live' the same as 'active' so edits enqueue 'update' after first publish
+          const statusNorm = String(iml?.status || "").toLowerCase();
+          const isLiveLike = statusNorm === "active" || statusNorm === "live";
+          const hasActiveOffer = !!(iml?.mp_offer_id) && isLiveLike;
           const op = hasActiveOffer ? "update" : "create";
 
           // Compare vs most recent snapshot (any op) to short-circuit no-ops
@@ -328,6 +331,7 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
           `;
 
           // Touch listing row (useful for dashboards; do not flip status here)
+          // NOTE: status normalization happens in enqueue decision (active|live => update)
           await sql/*sql*/`
             UPDATE app.item_marketplace_listing
                SET updated_at = now()
