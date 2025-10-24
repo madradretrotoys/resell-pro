@@ -13,38 +13,11 @@ import type { Env } from '../../../_shared/types';
 async function executeLockedJob(env: Env, job: any) {
   const sql = getSql(env);
 
-  // 2) load inputs for the adapter
-  const [inv] = await sql/*sql*/`
-    SELECT i.item_id, i.sku, i.product_short_title, i.price, i.qty
-    FROM app.inventory i
-    WHERE i.item_id = ${job.item_id} AND i.item_id IS NOT NULL
-    LIMIT 1
-  `;
+  // (inputs are loaded conditionally below; delete op does not need full item/profile/images)
 
-  const [prof] = await sql/*sql*/`
-    SELECT *
-    FROM app.item_listing_profile
-    WHERE item_id = ${job.item_id} AND tenant_id = ${job.tenant_id}
-    LIMIT 1
-  `;
-
-  const imlRows = await sql/*sql*/`
-    SELECT *
-    FROM app.item_marketplace_listing
-    WHERE item_id = ${job.item_id} AND tenant_id = ${job.tenant_id}
-      AND marketplace_id = ${job.marketplace_id}
-    LIMIT 1
-  `;
-
-  const imgs = await sql/*sql*/`
-    SELECT cdn_url, is_primary, sort_order
-    FROM app.item_images
-    WHERE item_id = ${job.item_id} AND tenant_id = ${job.tenant_id}
-    ORDER BY is_primary DESC, sort_order ASC
-  `;
+  // 3) resolve adapter
+  const reg = getRegistry();
   
-    // 3) resolve adapter
-    const reg = getRegistry();
     const adapter = reg.byId(job.marketplace_id);
     if (!adapter) throw new Error(`No adapter for marketplace_id=${job.marketplace_id}`);
     
@@ -293,7 +266,12 @@ export async function processJobById(env: Env, jobId: string) {
          AND marketplace_id = ${job.marketplace_id}
     `;
 
-    const failKind = String(job.op || '').toLowerCase() === 'update' ? 'update_failed' : 'create_failed';
+    const opKind = String(job.op || '').toLowerCase();
+    const failKind =
+      opKind === 'delete' ? 'delete_failed' :
+      opKind === 'update' ? 'update_failed' :
+      'create_failed';
+
     await sql/*sql*/`
       INSERT INTO app.item_marketplace_events
         (item_id, tenant_id, marketplace_id, kind, error_message)
