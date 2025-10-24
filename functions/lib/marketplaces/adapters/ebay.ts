@@ -919,19 +919,39 @@ async function update(params: CreateParams): Promise<CreateResult> {
     throw new Error('update_requires_offer_id: mp_offer_id was not found on item_marketplace_listing');
   }
 
-  // 1) Load + decrypt access token and resolve environment (mirrors create)
-  const conn = await sql/*sql*/`
-    SELECT mc.connection_id, mc.access_token, mc.token_expires_at, mc.environment, mc.secrets_blob
-    FROM app.marketplace_connections mc
-    JOIN app.marketplaces_available ma ON ma.id = mc.marketplace_id
-    WHERE mc.tenant_id = ${tenant_id}
-      AND ma.slug = 'ebay'
-      AND mc.status = 'connected'
-    ORDER BY mc.updated_at DESC
-    LIMIT 1
-  `;
-  if (!conn?.length) throw new Error('Tenant not connected to eBay');
+   // 1) Load + decrypt access token and resolve environment (mirror create, but prefer the same connection used to create this offer)
+  const desiredConnId = String((mpListing as any)?.connection_id || '').trim();
 
+  // First try: exact connection used by this listing (prevents env/account drift → 404s)
+  let conn = desiredConnId
+    ? await sql/*sql*/`
+        SELECT mc.connection_id, mc.access_token, mc.token_expires_at, mc.environment, mc.secrets_blob
+        FROM app.marketplace_connections mc
+        JOIN app.marketplaces_available ma ON ma.id = mc.marketplace_id
+        WHERE mc.tenant_id = ${tenant_id}
+          AND ma.slug = 'ebay'
+          AND mc.status = 'connected'
+          AND mc.connection_id = ${desiredConnId}
+        LIMIT 1
+      `
+    : [];
+
+  // Fallback: latest connected (only if listing had no connection_id persisted)
+  if (!conn?.length) {
+    conn = await sql/*sql*/`
+      SELECT mc.connection_id, mc.access_token, mc.token_expires_at, mc.environment, mc.secrets_blob
+      FROM app.marketplace_connections mc
+      JOIN app.marketplaces_available ma ON ma.id = mc.marketplace_id
+      WHERE mc.tenant_id = ${tenant_id}
+        AND ma.slug = 'ebay'
+        AND mc.status = 'connected'
+      ORDER BY mc.updated_at DESC
+      LIMIT 1
+    `;
+  }
+
+  if (!conn?.length) throw new Error('Tenant not connected to eBay (no matching connection)');
+  
   const encKey = env.RP_ENCRYPTION_KEY || "";
   const encAccess = String(conn[0].access_token || "");
   if (!encAccess) throw new Error('No access_token stored');
@@ -940,7 +960,7 @@ async function update(params: CreateParams): Promise<CreateResult> {
   const accessToken = String(accessObj?.v || "").trim();
   if (!accessToken) throw new Error('Decrypted access_token is empty');
 
-  // Environment
+  // Environment (derive strictly from the selected connection; avoid silent sandbox fallback when a connection exists)
   let envStr = String(conn[0].environment || "").trim().toLowerCase() as EbayEnv | "";
   if (envStr !== "production" && envStr !== "sandbox") {
     try {
@@ -949,8 +969,20 @@ async function update(params: CreateParams): Promise<CreateResult> {
       if (e === "production" || e === "sandbox") envStr = e as EbayEnv;
     } catch {}
   }
-  if (envStr !== "production" && envStr !== "sandbox") envStr = "sandbox";
+
+  // If we still can't resolve, fail loudly in update (prevents cross-env 404 on offerId)
+  if (envStr !== "production" && envStr !== "sandbox") {
+    throw new Error('update_env_unresolved: could not resolve ebay environment from selected connection');
+  }
+
   const base = ebayBase(envStr);
+
+  // 🔎 Single debug log to make env/base visible in logs before touching the offer
+  console.log('[ebay:update.env]', {
+    connection_id: String(conn?.[0]?.connection_id || ''),
+    environment: envStr,
+    base
+  });
 
   // Small helpers local to update
   function safeStringify(obj: any) { try { return JSON.stringify(obj, null, 2); } catch { return String(obj); } }
