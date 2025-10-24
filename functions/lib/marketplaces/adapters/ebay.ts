@@ -1177,51 +1177,58 @@ async function update(params: CreateParams): Promise<CreateResult> {
         warnings.push('Offer missing required "Type" but mapping table returned no value; draft revise skipped.');
       }
     } else {
-      // PUBLISHED (or any non-DRAFT): withdraw → PUT same offerId with itemSpecifics → publish
+      // PUBLISHED (or any non-DRAFT): withdraw → recreate → publish
       console.log('[ebay:update.offer.withdraw]', { offerId });
-      await ebayFetch(`/sell/inventory/v1/offer/${encodeURIComponent(offerId)}/withdraw`, {
-        method: 'POST',
-        body: '{}'
-      });
+      await ebayFetch(`/sell/inventory/v1/offer/${encodeURIComponent(offerId)}/withdraw`, { method: 'POST', body: '{}' });
 
-      // Build a revise body for THIS offerId (keep core fields, add missing specifics)
+      // Build a fresh offer body (reuse your create() structure as closely as possible)
       const qty = Math.max(1, Number((item && item.qty) != null ? item.qty : 1));
       const priceValue =
         (mpListing?.buy_it_now_price ?? item?.price ?? null) != null
           ? Number(mpListing?.buy_it_now_price ?? item?.price)
           : null;
 
-      const reviseBody: any = {
-        sku:                 String(item?.sku || offerEcho0?.sku || ''),
-        marketplaceId:       String(offerEcho0?.marketplaceId || 'EBAY_US'),
-        format:              String(offerEcho0?.format || 'FIXED_PRICE'),
-        availableQuantity:   qty,
-        listingDescription:  String(profile?.product_description ?? offerEcho0?.listingDescription ?? ''),
-        categoryId:          offerEcho0?.categoryId || undefined,
-        merchantLocationKey: offerEcho0?.merchantLocationKey || undefined,
-        listingPolicies:     offerEcho0?.listingPolicies || {
-          paymentPolicyId:        mpListing?.payment_policy  || undefined,
-          returnPolicyId:         mpListing?.return_policy   || undefined,
-          fulfillmentPolicyId:    (mpListing?.shipping_policy_override ?? mpListing?.shipping_policy) || undefined
-        },
-        pricingSummary:      priceValue != null ? { price: { currency: 'USD', value: priceValue } } : undefined,
+      // Carry forward location/policies from the existing offer when present
+      const marketplaceId = String(offerEcho0?.marketplaceId || 'EBAY_US');
+      const merchantLocationKey = offerEcho0?.merchantLocationKey || undefined;
+      const listingPolicies = offerEcho0?.listingPolicies || {
+        paymentPolicyId: mpListing?.payment_policy || undefined,
+        returnPolicyId:  mpListing?.return_policy  || undefined,
+        fulfillmentPolicyId: mpListing?.shipping_policy || undefined
+      };
+
+      const newOfferBody: any = {
+        sku: String(item?.sku || offerEcho0?.sku || ''),
+        marketplaceId,
+        format: 'FIXED_PRICE',
+        availableQuantity: qty,
+        listingDescription: String(profile?.product_description || ''),
+        categoryId: offerEcho0?.categoryId || undefined,
+        merchantLocationKey,
+        listingPolicies,
+        pricingSummary: priceValue != null ? { price: { currency: 'USD', value: priceValue } } : undefined,
         itemSpecifics
       };
-      (function stripNulls(obj: any){ if(obj && typeof obj==='object'){ for(const k of Object.keys(obj)){ if(obj[k]&&typeof obj[k]==='object') stripNulls(obj[k]); if(obj[k]==null) delete obj[k]; } } return obj; })(reviseBody);
+      (function stripNulls(obj: any){ if(obj && typeof obj==='object'){ for(const k of Object.keys(obj)){ if(obj[k]&&typeof obj[k]==='object') stripNulls(obj[k]); if(obj[k]==null) delete obj[k]; } } return obj; })(newOfferBody);
 
-      console.log('[ebay:update.offer.put.body#published]', safeStringify(reviseBody));
-      await ebayFetch(`/sell/inventory/v1/offer/${encodeURIComponent(offerId)}`, {
-        method: 'PUT',
-        body: JSON.stringify(reviseBody)
+      console.log('[ebay:update.offer.create.body]', safeStringify(newOfferBody));
+      const crt = await ebayFetch(`/sell/inventory/v1/offer`, {
+        method: 'POST',
+        body: JSON.stringify(newOfferBody)
       });
+      const newOfferId = String((crt as any)?.offerId || '');
 
-      console.log('[ebay:update.offer.publish#sameId]', { offerId });
-      const pub = await ebayFetch(`/sell/inventory/v1/offer/${encodeURIComponent(offerId)}/publish`, {
+      if (!newOfferId) {
+        throw new Error('recreate_offer_failed: POST /offer returned no offerId');
+      }
+
+      console.log('[ebay:update.offer.publish]', { newOfferId });
+      const pub = await ebayFetch(`/sell/inventory/v1/offer/${encodeURIComponent(newOfferId)}/publish`, {
         method: 'POST',
         body: '{}'
       });
 
-      // Log an 'updated' event (no new offerId created)
+      // Persist new offerId for downstream (run.ts will also write it, but we log an event here)
       try {
         await sql/*sql*/`
           INSERT INTO app.item_marketplace_events
@@ -1230,17 +1237,19 @@ async function update(params: CreateParams): Promise<CreateResult> {
             ${String((item as any)?.item_id || '')},
             ${tenant_id},
             ${Number(mpListing?.marketplace_id || 1)},
-            'updated',
-            ${JSON.stringify({ offerId, publish: pub ?? null })}
+            'recreated',
+            ${JSON.stringify({ fromOfferId: offerId, toOfferId: newOfferId, publish: pub ?? null })}
           )
         `;
       } catch (e) {
-        console.warn('[ebay:update.event.updated.warn]', String((e as Error)?.message || e || ''));
+        console.warn('[ebay:update.event.recreated.warn]', String((e as Error)?.message || e || ''));
       }
 
-      // Keep offerId unchanged (we revised/published the same one)
-      offerEcho0 = null;
+      // Switch context to the newly created offer for the remainder of update()
+      offerId = newOfferId;
+      offerEcho0 = null; // force later GET to read fresh if needed
     }
+  }
 
   // 4) Price/quantity updates via Offer API (applies to live listing without re-publish)
   const pricingFormat = String(mpListing?.pricing_format || 'fixed');
