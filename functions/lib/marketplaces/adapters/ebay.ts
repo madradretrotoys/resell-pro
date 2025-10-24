@@ -989,18 +989,57 @@ async function update(params: CreateParams): Promise<CreateResult> {
   const sku = String(item?.sku || '').trim();
   if (!sku) throw new Error('Missing SKU');
 
-  const inventoryItemBody: any = {
-    condition: conditionEnum,
-    ...(conditionDescription ? { conditionDescription } : {}),
-    product: {
-      title:       item?.product_short_title || '',
-      description: profile?.product_description || '',
-      aspects: {
-        brand: profile?.brand_name ? [String(profile.brand_name)] : undefined,
-        color: profile?.primary_color ? [String(profile.primary_color)] : undefined
+    // ── Resolve mapped specifics (same as create): category + Type/Model/Franchise/Sport ──
+    let mappedSpecifics: { type: string | null; model: string | null; franchise: string | null; sport: string | null } = {
+      type: null, model: null, franchise: null, sport: null
+    };
+    try {
+      const rows = await sql/*sql*/`
+        SELECT
+          mcem.type_value,
+          mcem.model_value,
+          mcem.franchise_value,
+          mcem.sport_value
+        FROM app.marketplace_category_ebay_map AS mcem
+        JOIN app.marketplace_categories      AS mc
+          ON mc.category_key = mcem.category_key_uuid
+        JOIN app.marketplaces_available      AS ma
+          ON ma.id = mcem.marketplace_id
+        WHERE ma.slug = 'ebay'
+          AND mc.category_key = ${profile.listing_category_key}::uuid
+        ORDER BY mcem.updated_at DESC NULLS LAST
+        LIMIT 1
+      `;
+      const row = rows?.[0] || null;
+      mappedSpecifics = {
+        type:       row?.type_value       ?? null,
+        model:      row?.model_value      ?? null,
+        franchise:  row?.franchise_value  ?? null,
+        sport:      row?.sport_value      ?? null
+      };
+    } catch (err) {
+      console.warn('[ebay:update.category.map:warn]', String((err as Error)?.message || err || ''));
+    }
+  
+    const inventoryItemBody: any = {
+      condition: conditionEnum,
+      ...(conditionDescription ? { conditionDescription } : {}),
+      product: {
+        title:       item?.product_short_title || '',
+        description: profile?.product_description || '',
+        aspects: {
+          brand: profile?.brand_name ? [String(profile.brand_name)] : undefined,
+          color: profile?.primary_color ? [String(profile.primary_color)] : undefined,
+  
+          // ── Inject mapped specifics when present (align with create()) ──
+          ...(mappedSpecifics?.type      ? { Type:      [String(mappedSpecifics.type)] }       : {}),
+          ...(mappedSpecifics?.model     ? { Model:     [String(mappedSpecifics.model)] }      : {}),
+          ...(mappedSpecifics?.franchise ? { Franchise: [String(mappedSpecifics.franchise)] }  : {}),
+          ...(mappedSpecifics?.sport     ? { Sport:     [String(mappedSpecifics.sport)] }      : {})
+        },
+        ...(cdnUrls.length ? { imageUrls: cdnUrls } : {})
       },
-      ...(cdnUrls.length ? { imageUrls: cdnUrls } : {})
-    },
+  
     packageWeightAndSize: {
       weight: {
         unit: 'KILOGRAM',
@@ -1032,7 +1071,69 @@ async function update(params: CreateParams): Promise<CreateResult> {
     body: JSON.stringify(inventoryItemBody)
   });
 
-  // 3) Price/quantity updates via Offer API (applies to live listing without re-publish)
+
+  // 3) Ensure the live offer contains required itemSpecifics (e.g., Type) before price/qty update
+  let offerEcho0: any = null;
+  try {
+    offerEcho0 = await ebayFetch(`/sell/inventory/v1/offer/${encodeURIComponent(offerId)}`, { method: 'GET' });
+  } catch (e) {
+    console.warn('[ebay:update.offer.get.warn]', String((e as Error)?.message || e || ''));
+  }
+
+  function hasTypeSpecific(offer: any): boolean {
+    try {
+      const arr = Array.isArray(offer?.itemSpecifics) ? offer.itemSpecifics : [];
+      return !!arr.find((sp: any) =>
+        String(sp?.name || '').toLowerCase() === 'type' &&
+        Array.isArray(sp?.values) &&
+        String(sp.values[0] || '').trim() !== ''
+      );
+    } catch { return false; }
+  }
+
+  // If Type is missing on the offer, rebuild itemSpecifics from our mapped values and revise the offer first
+  if (offerEcho0 && !hasTypeSpecific(offerEcho0)) {
+    // Build itemSpecifics from mappedSpecifics (same mapping used above & in create())
+    const itemSpecifics: Array<{ name: string; values: string[] }> = [];
+    const pushIf = (name: string, val: unknown) => {
+      const s = String(val ?? '').trim();
+      if (s) itemSpecifics.push({ name, values: [s] });
+    };
+    pushIf('Type',      mappedSpecifics.type);
+    pushIf('Model',     mappedSpecifics.model);
+    pushIf('Franchise', mappedSpecifics.franchise);
+    pushIf('Sport',     mappedSpecifics.sport);
+
+    if (itemSpecifics.length) {
+      // Build a minimal revise body by merging current offer with our specifics (preserve existing fields)
+      const reviseBody: any = {
+        // carry forward immutable identifiers
+        sku:            String(item?.sku || offerEcho0?.sku || ''),
+        marketplaceId:  String(offerEcho0?.marketplaceId || 'EBAY_US'),
+        format:         String(offerEcho0?.format || 'FIXED_PRICE'),
+        availableQuantity: Number(item?.qty ?? offerEcho0?.availableQuantity ?? 1),
+        listingDescription: String(profile?.product_description ?? offerEcho0?.listingDescription ?? ''),
+        categoryId:     offerEcho0?.categoryId || undefined,
+        merchantLocationKey: offerEcho0?.merchantLocationKey || undefined,
+        listingPolicies: offerEcho0?.listingPolicies || undefined,
+        pricingSummary:  offerEcho0?.pricingSummary || undefined,
+        itemSpecifics
+      };
+
+      // strip undefined to avoid eBay validation noise
+      (function stripNulls(obj: any){ if(obj && typeof obj==='object'){ for(const k of Object.keys(obj)){ if(obj[k]&&typeof obj[k]==='object') stripNulls(obj[k]); if(obj[k]==null) delete obj[k]; } } return obj; })(reviseBody);
+
+      console.log('[ebay:update.offer.put.body]', safeStringify(reviseBody));
+      await ebayFetch(`/sell/inventory/v1/offer/${encodeURIComponent(offerId)}`, {
+        method: 'PUT',
+        body: JSON.stringify(reviseBody)
+      });
+    } else {
+      warnings.push('Offer missing required item specific "Type", but mapping table returned no value. Edit failed may persist until Type is provided.');
+    }
+  }
+
+  // 4) Price/quantity updates via Offer API (applies to live listing without re-publish)
   const pricingFormat = String(mpListing?.pricing_format || 'fixed');
   const priceValue =
     (mpListing?.buy_it_now_price ?? item?.price ?? null) != null
