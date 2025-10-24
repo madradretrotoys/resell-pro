@@ -486,11 +486,13 @@ export async function init() {
       document.addEventListener("intake:item-saved", async (ev) => {
       try {
         const id         = ev?.detail?.item_id;
-        const saveStatus = String(ev?.detail?.save_status || "").toLowerCase(); // "active" | "draft"
+        const saveStatus = String(ev?.detail?.save_status || "").toLowerCase(); // "active" | "draft" | "delete"
+        const action     = String(ev?.detail?.action || (saveStatus === "delete" ? "delete" : "save")).toLowerCase();
         const jobIds     = Array.isArray(ev?.detail?.job_ids) ? ev.detail.job_ids : [];
         if (!id) return;
         __currentItemId = id;
 
+        
         // Phase 0: once Active, permanently lock Draft action for this listing (UI)
         if (saveStatus === "active") {
           __lockDraft = true;
@@ -508,8 +510,10 @@ export async function init() {
           for (const f of pending) await uploadAndAttach(f);
         }
     
-        if (saveStatus === "active" && jobIds.length > 0) {
-          setEbayStatus("Publishing…", { tone: "info" });
+       // If server returned marketplace job_ids, kick the runner regardless of action
+      if (jobIds.length > 0) {
+        const isDelete = action === "delete" || saveStatus === "delete";
+        setEbayStatus(isDelete ? "Deleting…" : "Publishing…", { tone: "info" });
     
           for (const jid of jobIds) {
             // fire-and-forget execute
