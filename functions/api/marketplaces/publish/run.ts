@@ -42,58 +42,122 @@ async function executeLockedJob(env: Env, job: any) {
     WHERE item_id = ${job.item_id} AND tenant_id = ${job.tenant_id}
     ORDER BY is_primary DESC, sort_order ASC
   `;
-
-  // 3) resolve adapter
-  const reg = getRegistry();
-  const adapter = reg.byId(job.marketplace_id);
-  if (!adapter) throw new Error(`No adapter for marketplace_id=${job.marketplace_id}`);
-  // Mark listing as publishing while we attempt the external publish
-  await sql/*sql*/`
-    UPDATE app.item_marketplace_listing
-       SET status='publishing',
-           updated_at = now()
-     WHERE item_id = ${job.item_id}
-       AND tenant_id = ${job.tenant_id}
-       AND marketplace_id = ${job.marketplace_id}
-  `;
   
-    // 4) perform op
-    const op = String(job.op || 'create').toLowerCase(); // 'create' | 'update'
-    const res = op === 'update' && typeof (adapter as any).update === 'function'
-      ? await (adapter as any).update({
-          env,
-          tenant_id: job.tenant_id,
-          item: inv,
-          profile: prof,
-          mpListing: imlRows?.[0] || null,
-          images: imgs
-        })
-      : await adapter.create({
-          env,
-          tenant_id: job.tenant_id,
-          item: inv,
-          profile: prof,
-          mpListing: imlRows?.[0] || null,
-          images: imgs
-        });
-  
-    // Use a value that exists in app.listing_status (e.g., 'live' / 'active').
+    // 3) resolve adapter
+    const reg = getRegistry();
+    const adapter = reg.byId(job.marketplace_id);
+    if (!adapter) throw new Error(`No adapter for marketplace_id=${job.marketplace_id}`);
+    
+    const op = String(job.op || 'create').toLowerCase(); // 'create' | 'update' | 'delete'
+    
+    // For delete: we only need the listing row (ids) and tenant context
+    if (op === 'delete') {
+      const [iml] = await sql/*sql*/`
+        SELECT *
+          FROM app.item_marketplace_listing
+         WHERE item_id = ${job.item_id}
+           AND tenant_id = ${job.tenant_id}
+           AND marketplace_id = ${job.marketplace_id}
+         LIMIT 1
+      `;
+    
+      // Soft status while attempting delete
+      await sql/*sql*/`
+        UPDATE app.item_marketplace_listing
+           SET status='deleting',
+               updated_at = now()
+         WHERE item_id = ${job.item_id}
+           AND tenant_id = ${job.tenant_id}
+           AND marketplace_id = ${job.marketplace_id}
+      `;
+    
+      // Call adapter.delete when available; tolerate idempotent 404s
+      if (typeof (adapter as any).delete !== "function") {
+        throw new Error("adapter_missing_delete");
+      }
+      const res = await (adapter as any).delete({
+        env,
+        tenant_id: job.tenant_id,
+        mpListing: iml || null
+      });
+    
+      // Mark listing deleted and clear remote identifiers (or keep for audit if you prefer)
+      await sql/*sql*/`
+        UPDATE app.item_marketplace_listing
+           SET status='deleted',
+               mp_item_id   = NULL,
+               mp_item_url  = NULL,
+               mp_offer_id  = NULL,
+               campaign_id  = NULL,
+               last_error   = NULL,
+               last_synced_at = now(),
+               updated_at     = now()
+         WHERE item_id = ${job.item_id}
+           AND tenant_id = ${job.tenant_id}
+           AND marketplace_id = ${job.marketplace_id}
+      `;
+    
+      await sql/*sql*/`
+        INSERT INTO app.item_marketplace_events
+          (item_id, tenant_id, marketplace_id, kind, payload)
+        VALUES (
+          ${job.item_id},
+          ${job.tenant_id},
+          ${job.marketplace_id},
+          'deleted',
+          ${JSON.stringify({ at: new Date().toISOString(), remote: { offerId: res?.offerId || null, itemId: res?.remoteId || null } })}
+        )
+      `;
+    
+      await sql/*sql*/`
+        UPDATE app.marketplace_publish_jobs
+           SET status='succeeded',
+               updated_at = now()
+         WHERE job_id = ${job.job_id}
+      `;
+      return { ok: true, job_id: job.job_id, status: 'succeeded', remote: undefined };
+    }
+    
+    // Non-delete flow (create/update) stays the same:
     await sql/*sql*/`
       UPDATE app.item_marketplace_listing
-         SET status='live',
-             mp_item_id     = ${res.remoteId || null},
-             mp_item_url    = ${res.remoteUrl || null},
-             mp_offer_id    = ${res.offerId || null},
-             mp_category_id = ${res.categoryId || null},
-             connection_id  = ${res.connectionId || null},
-             campaign_id    = ${res.campaignId || null},
-             last_synced_at = now(),
-             published_at   = COALESCE(published_at, now()),
-             updated_at     = now()
+         SET status='publishing',
+             updated_at = now()
        WHERE item_id = ${job.item_id}
          AND tenant_id = ${job.tenant_id}
-         AND marketplace_id= ${job.marketplace_id}
+         AND marketplace_id = ${job.marketplace_id}
     `;
+    const [inv] = await sql/*sql*/`
+      SELECT i.item_id, i.sku, i.product_short_title, i.price, i.qty
+      FROM app.inventory i
+      WHERE i.item_id = ${job.item_id} AND i.item_id IS NOT NULL
+      LIMIT 1
+    `;
+    const [prof] = await sql/*sql*/`
+      SELECT *
+      FROM app.item_listing_profile
+      WHERE item_id = ${job.item_id} AND tenant_id = ${job.tenant_id}
+      LIMIT 1
+    `;
+    const imlRows = await sql/*sql*/`
+      SELECT *
+      FROM app.item_marketplace_listing
+      WHERE item_id = ${job.item_id} AND tenant_id = ${job.tenant_id}
+        AND marketplace_id = ${job.marketplace_id}
+      LIMIT 1
+    `;
+    const imgs = await sql/*sql*/`
+      SELECT cdn_url, is_primary, sort_order
+      FROM app.item_images
+      WHERE item_id = ${job.item_id} AND tenant_id = ${job.tenant_id}
+      ORDER BY is_primary DESC, sort_order ASC
+    `;
+    
+    // 4) perform op
+    const res = op === 'update' && typeof (adapter as any).update === 'function'
+      ? await (adapter as any).update({ env, tenant_id: job.tenant_id, item: inv, profile: prof, mpListing: imlRows?.[0] || null, images: imgs })
+      : await adapter.create({ env, tenant_id: job.tenant_id, item: inv, profile: prof, mpListing: imlRows?.[0] || null, images: imgs });
+
   
     const liveSnapshot = {
       mp_item_id:     res.remoteId || null,
