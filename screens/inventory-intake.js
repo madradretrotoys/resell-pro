@@ -516,11 +516,12 @@ export async function init() {
         setEbayStatus(isDelete ? "Deleting…" : "Publishing…", { tone: "info" });
     
           for (const jid of jobIds) {
-            // fire-and-forget execute
-            fetch(`/api/marketplaces/publish/run?job_id=${encodeURIComponent(jid)}`, { method: "POST" })
-              .catch(() => {});
-          
-            // poll this job id until done (POST-based poller)
+            try {
+              console.log("[intake.js] kick job", { job_id: jid });
+              fetch(`/api/marketplaces/publish/run?job_id=${encodeURIComponent(jid)}`, { method: "POST" })
+                .then((r) => r.ok ? null : r.text().then(t => console.warn("[intake.js] job kick non-200", { job_id: jid, status: r.status, body: t })))
+                .catch((e) => console.warn("[intake.js] job kick error", { job_id: jid, error: String(e) }));
+            } catch {}
             trackPublishJob(jid);
           }
         }
@@ -2085,9 +2086,22 @@ document.addEventListener("intake:item-changed", () => refreshInventory({ force:
         body: JSON.stringify(payload),
         headers: { "content-type": "application/json" },
       });
+      // Log non-OK responses with full context before throwing
       if (!res || res.ok === false) {
-          throw new Error(res?.error || "intake_failed");
+        try {
+          console.groupCollapsed("[intake.js] POST /api/inventory/intake failed");
+          console.log("payload.sent", payload);                               // what we sent
+          console.log("response.raw", res);                                   // what server returned
+          console.log("surface_error", res?.error || "intake_failed");
+          // If the server started returning more detail (e.g., constraint), show it
+          if (res?.message) console.log("message", res.message);
+          if (res?.constraint) console.log("constraint", res.constraint);
+          if (res?.code) console.log("pg.code", res.code);
+        } finally {
+          console.groupEnd?.();
         }
+        throw new Error(res?.error || "intake_failed");
+      }
         
         // Save defaults (local) on success so user gets the same picks next time
         try {
