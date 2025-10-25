@@ -480,7 +480,12 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
       `;
     
       // E) Return job_ids so the client can trigger/poll the runner
-      return json({ ok: true, deleted: true, item_id: item_id_in, job_ids }, 200);
+      return json({
+        ok: true,
+        item_id,
+        save_status: "delete",
+        job_ids: Array.isArray(jobIds) ? jobIds : [],
+      });
     }
     
        // If item_id was provided, UPDATE existing rows instead of INSERT
