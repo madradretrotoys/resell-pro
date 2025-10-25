@@ -1138,9 +1138,29 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
       ms: Date.now() - t0
     }, 200);
 
-  } catch (e: any) {
-    // Try a friendlier error
-    const msg = String(e?.message || e);
+  } catch (err: any) {
+    // —— High-signal server-side logging to surface the true root cause ——
+    // Neon/Postgres errors often include:
+    //   code, detail, hint, schema, table, column, constraint, routine, severity, position
+    try {
+      console.error("[intake] fatal", {
+        took_ms: Date.now() - t0,
+        message: String(err?.message || err),
+        name: err?.name || null,
+        code: err?.code || null,
+        detail: err?.detail || null,
+        hint: err?.hint || null,
+        schema: err?.schema || null,
+        table: err?.table || null,
+        column: err?.column || null,
+        constraint: err?.constraint || null,
+        severity: err?.severity || null,
+        routine: err?.routine || null,
+      });
+    } catch {}
+
+    // Preserve current API contract
+    const msg = String(err?.message || err);
     if (/unique|duplicate/i.test(msg)) return json({ ok: false, error: "duplicate_sku" }, 409);
     return json({ ok: false, error: "server_error", message: msg }, 500);
   }
