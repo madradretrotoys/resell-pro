@@ -2378,6 +2378,20 @@ document.addEventListener("intake:item-changed", () => refreshInventory({ force:
                 body: JSON.stringify({ action: "delete", item_id: __currentItemId }),
               });
               if (!resDel || resDel.ok === false) throw new Error(resDel?.error || "delete_failed");
+
+              // NEW: mirror the Active/Edit path — tell the runner to start with any job_ids
+              try {
+                const jobIds = Array.isArray(resDel?.job_ids) ? resDel.job_ids : [];
+                document.dispatchEvent(new CustomEvent("intake:item-saved", {
+                  detail: {
+                    action: "delete",
+                    save_status: "delete",
+                    item_id: __currentItemId,
+                    job_ids: jobIds,
+                  }
+                }));
+              } catch {}
+              
               alert("Item deleted.");
               // Also refresh Drafts immediately (useful when the page is not fully reloaded yet)
               document.dispatchEvent(new CustomEvent("intake:item-changed"));
