@@ -396,37 +396,63 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
     if (body?.action === "delete") {
       if (!item_id_in) return json({ ok: false, error: "missing_item_id" }, 400);
     
-      // A) Queue marketplace delete jobs FIRST (one per marketplace with a remote id)
-      const iml = await sql/*sql*/`
-        SELECT marketplace_id, mp_offer_id, mp_item_id
-          FROM app.item_marketplace_listing
-         WHERE item_id    = ${item_id_in}
-           AND tenant_id  = ${tenant_id}
-           AND (mp_offer_id IS NOT NULL OR mp_item_id IS NOT NULL)
-      `;
-      const job_ids: string[] = [];
-      for (const r of iml as any[]) {
-        const [job] = await sql/*sql*/`
-          INSERT INTO app.marketplace_publish_jobs
-            (tenant_id, item_id, marketplace_id, op, status, payload_snapshot)
-          VALUES
-            (${tenant_id}, ${item_id_in}, ${r.marketplace_id}, 'delete', 'queued',
-             ${{
-               item_id: item_id_in,
-               tenant_id,
-               marketplace_id: r.marketplace_id,
-               marketplace_listing: { mp_offer_id: r.mp_offer_id, mp_item_id: r.mp_item_id }
-             }})
-          RETURNING job_id
+        // A) Queue marketplace delete jobs FIRST (one per marketplace with a remote id)
+        const iml = await sql/*sql*/`
+          SELECT marketplace_id, mp_offer_id, mp_item_id
+            FROM app.item_marketplace_listing
+           WHERE item_id    = ${item_id_in}
+             AND tenant_id  = ${tenant_id}
+             AND (mp_offer_id IS NOT NULL OR mp_item_id IS NOT NULL)
         `;
-        if (job?.job_id) job_ids.push(String(job.job_id));
-        // Optional: reflect pending state on the listing row
-        await sql/*sql*/`
-          UPDATE app.item_marketplace_listing
-             SET status='delete_pending', updated_at=now()
-           WHERE item_id=${item_id_in} AND tenant_id=${tenant_id} AND marketplace_id=${r.marketplace_id}
-        `;
-      }
+        const job_ids: string[] = [];
+        for (const r of iml as any[]) {
+          // Try to insert a 'delete' job only if no in-flight job exists
+          const inserted = await sql/*sql*/`
+            WITH ins AS (
+              INSERT INTO app.marketplace_publish_jobs
+                (tenant_id, item_id, marketplace_id, op, status, payload_snapshot)
+              SELECT
+                ${tenant_id}, ${item_id_in}, ${r.marketplace_id}, 'delete', 'queued',
+                ${{
+                  item_id: item_id_in,
+                  tenant_id,
+                  marketplace_id: r.marketplace_id,
+                  marketplace_listing: { mp_offer_id: r.mp_offer_id, mp_item_id: r.mp_item_id }
+                }}
+              WHERE NOT EXISTS (
+                SELECT 1
+                  FROM app.marketplace_publish_jobs j
+                 WHERE j.tenant_id      = ${tenant_id}
+                   AND j.item_id        = ${item_id_in}
+                   AND j.marketplace_id = ${r.marketplace_id}
+                   AND j.op             = 'delete'
+                   AND j.status IN ('queued','running')
+              )
+              RETURNING job_id
+            )
+            SELECT job_id FROM ins
+            UNION ALL
+            -- If nothing inserted (duplicate in-flight), return the existing in-flight job_id
+            SELECT j.job_id
+              FROM app.marketplace_publish_jobs j
+             WHERE j.tenant_id      = ${tenant_id}
+               AND j.item_id        = ${item_id_in}
+               AND j.marketplace_id = ${r.marketplace_id}
+               AND j.op             = 'delete'
+               AND j.status IN ('queued','running')
+             LIMIT 1
+          `;
+          const got = Array.isArray(inserted) && inserted[0]?.job_id ? String(inserted[0].job_id) : null;
+          if (got) job_ids.push(got);
+  
+          // Reflect pending state on the listing row (status now exists in enum)
+          await sql/*sql*/`
+            UPDATE app.item_marketplace_listing
+               SET status='delete_pending', updated_at=now()
+             WHERE item_id=${item_id_in} AND tenant_id=${tenant_id} AND marketplace_id=${r.marketplace_id}
+          `;
+        }
+
     
       // B) Best-effort delete R2 images and rows (existing logic)
       const imgRows = await sql<{ image_id: string; r2_key: string | null }[]>`
