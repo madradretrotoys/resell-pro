@@ -1,7 +1,7 @@
 // POS Screen (Cloudflare + Neon)
 import { ensureSession } from "../assets/js/auth.js";
 import { api } from "../assets/js/api.js";
-import { $, $$, fmtCurrency } from "../assets/js/ui.js";
+import { showToast, applyButtonGroupColors } from "../assets/js/ui.js"; // ui.js exports
 
 /**
  * Router entry point
