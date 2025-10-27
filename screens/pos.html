@@ -1,0 +1,126 @@
+<!-- POS Screen (Cloudflare + Neon) -->
+<div class="page">
+
+  <!-- Standard screen chrome -->
+  <div id="screen-banner" class="mb-3 hidden"></div>
+  <div id="screen-access-denied" class="hidden">
+    <div class="card p-3">Access denied</div>
+  </div>
+  <div id="screen-loading" class="card p-3">
+    Loading POS…
+  </div>
+
+  <div id="screen-content" class="hidden">
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+
+      <!-- LEFT: Search / Results -->
+      <div class="card p-3">
+        <div class="flex items-center gap-2 mb-2">
+          <input id="pos-search" class="input w-full" placeholder="+ Misc — or — type to search" />
+          <button id="pos-search-btn" class="btn btn-primary">Search</button>
+          <button id="pos-search-clear" class="btn btn-ghost">Clear</button>
+        </div>
+
+        <div id="pos-quick-row" class="flex items-center gap-2 mb-3">
+          <button id="pos-quick-misc" class="btn btn-sm">+ Misc</button>
+          <span class="text-sm text-muted">— or —</span>
+          <span class="text-xs text-muted">Use the search box to find inventory</span>
+        </div>
+
+        <div id="pos-results" class="space-y-2 max-h-[60vh] overflow-auto">
+          <!-- search results with “Add” buttons go here -->
+        </div>
+      </div>
+
+      <!-- RIGHT: Ticket -->
+      <div class="card p-3">
+        <div class="flex items-center justify-between">
+          <div class="font-semibold">Ticket</div>
+          <div class="flex items-center gap-2">
+            <button id="pos-ticket-empty" class="btn btn-ghost btn-sm">Empty</button>
+          </div>
+        </div>
+
+        <!-- Cart items -->
+        <div id="pos-cart" class="divide-y my-2">
+          <!-- rows injected -->
+        </div>
+
+        <!-- Discount row -->
+        <div class="grid grid-cols-[auto_auto_1fr_auto] items-center gap-2 my-2">
+          <label class="text-sm text-muted">Discount</label>
+          <div class="flex items-center gap-2">
+            <label class="inline-flex items-center gap-1">
+              <input type="radio" name="pos-discount-mode" value="percent" checked />
+              <span>%</span>
+            </label>
+            <label class="inline-flex items-center gap-1">
+              <input type="radio" name="pos-discount-mode" value="amount" />
+              <span>$</span>
+            </label>
+          </div>
+          <input id="pos-discount-input" class="input" placeholder="Enter amount or percent" />
+          <button id="pos-discount-apply" class="btn btn-primary">Apply</button>
+        </div>
+
+        <!-- Totals -->
+        <div class="mt-3">
+          <div class="flex justify-between py-1"><span class="text-muted">Subtotal</span><span id="pos-subtotal">$0.00</span></div>
+          <div class="flex justify-between py-1"><span class="text-muted">Discounts</span><span id="pos-discounts">$0.00</span></div>
+          <div class="flex justify-between py-1"><span class="text-muted">Tax</span><span id="pos-tax">$0.00</span></div>
+          <div class="flex justify-between py-2 border-t mt-2 font-semibold"><span>Total</span><span id="pos-total">$0.00</span></div>
+        </div>
+
+        <!-- Payment / Complete -->
+        <div class="mt-2 flex items-center gap-2">
+          <select id="pos-payment" class="select">
+            <option value="" selected disabled>Select payment…</option>
+            <option value="card">Card (Valor)</option>
+            <option value="cash">Cash</option>
+          </select>
+          <button id="pos-split" class="btn btn-ghost">Split payment</button>
+          <input id="pos-customer" class="input flex-1" placeholder="Customer (optional)" />
+          <button id="pos-complete" class="btn btn-primary">Complete Sale</button>
+        </div>
+
+        <!-- Optional: debug/save logs toggle -->
+        <details class="mt-2">
+          <summary class="text-sm">View save logs</summary>
+          <pre id="pos-logs" class="text-xs p-2 bg-muted/20 rounded"></pre>
+        </details>
+      </div>
+    </div>
+
+    <!-- BELOW: Sales list (today/custom) -->
+    <div class="card p-3 mt-3">
+      <div class="flex items-center justify-between mb-2">
+        <div class="font-semibold">Sales (Today / Custom)</div>
+        <div class="flex items-center gap-2">
+          <button id="pos-sales-today" class="btn btn-sm">Today</button>
+          <span class="text-sm">or</span>
+          <input id="pos-date-from" type="date" class="input input-sm" />
+          <span class="text-sm">to</span>
+          <input id="pos-date-to" type="date" class="input input-sm" />
+          <button id="pos-sales-load" class="btn btn-sm btn-primary">Load</button>
+        </div>
+      </div>
+      <div class="overflow-auto">
+        <table class="table w-full">
+          <thead>
+            <tr>
+              <th class="text-left">Time</th>
+              <th class="text-left">Sale ID</th>
+              <th class="text-left">Payment</th>
+              <th class="text-left">Total</th>
+              <th class="text-left">Clerk</th>
+              <th class="text-left">Actions</th>
+            </tr>
+          </thead>
+          <tbody id="pos-sales-body">
+            <!-- rows -->
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
