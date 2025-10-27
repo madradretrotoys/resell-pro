@@ -2,7 +2,11 @@
 import { ensureSession } from "../assets/js/auth.js";
 import { api } from "../assets/js/api.js";
 import { showToast, applyButtonGroupColors } from "../assets/js/ui.js"; // ui.js exports
-
+// Local helper: ui.js doesn't export fmtCurrency in this repo
+const fmtCurrency = (n) => {
+  const v = Number(n || 0);
+  return (v < 0 ? "-$" : "$") + Math.abs(v).toFixed(2);
+};
 /**
  * Router entry point
  * @param {{container:HTMLElement, session:Object}} ctx
