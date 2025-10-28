@@ -371,6 +371,7 @@ label{
 
 /* ===== POS: Ticket single-column helpers (cart → totals → payment row) ===== */
 .pos-totals{
+    width: auto; 
   /* no special frame; mirrors old screen’s inline totals */
 }
 
