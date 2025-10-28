@@ -41,26 +41,9 @@
           </div>
         </div>
 
-        <!-- Cart items -->
-        <div id="pos-cart" class="divide-y my-2">
+        <!-- Cart items (per-line discounts like legacy) -->
+        <div id="pos-cart" class="space-y-2 my-2">
           <!-- rows injected -->
-        </div>
-
-        <!-- Discount row -->
-        <div class="grid grid-cols-[auto_auto_1fr_auto] items-center gap-2 my-2">
-          <label class="text-sm text-muted">Discount</label>
-          <div class="flex items-center gap-2">
-            <label class="inline-flex items-center gap-1">
-              <input type="radio" name="pos-discount-mode" value="percent" checked />
-              <span>%</span>
-            </label>
-            <label class="inline-flex items-center gap-1">
-              <input type="radio" name="pos-discount-mode" value="amount" />
-              <span>$</span>
-            </label>
-          </div>
-          <input id="pos-discount-input" class="input" placeholder="Enter amount or percent" />
-          <button id="pos-discount-apply" class="btn btn-primary">Apply</button>
         </div>
 
         <!-- Totals -->
