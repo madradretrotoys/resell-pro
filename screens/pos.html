@@ -68,12 +68,24 @@
             </div>
           </div>
 
+          <!-- PAYMENT ROW (single horizontal row; wraps nicely on small screens) -->
           <div class="mt-2 pos-pay-row">
-            <select id="pos-payment" class="select pos-pay-item">…</select>
+            <select id="pos-payment" class="select pos-pay-item">
+              <option value="" selected disabled>Select payment…</option>
+              <option value="card">CASH</option>
+              <option value="cash">Visa (Valor)</option>
+              <option value="cash">Master Card (Valor)</option>
+              <option value="cash">Amex (Valor)</option>
+              <option value="cash">Discover (Valor)</option>
+              <option value="cash">Venmo</option>
+              <option value="cash">Zelle</option>
+              <option value="cash">Cashapp</option>
+            </select>
+
             <button id="pos-split" class="btn btn-ghost pos-pay-item">Split payment</button>
-            <input id="pos-customer" class="input pos-pay-grow" placeholder="Customer (optional)" />
             <button id="pos-complete" class="btn btn-primary pos-pay-item">Complete Sale</button>
           </div>
+
             
             
         </div>
