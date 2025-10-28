@@ -376,12 +376,25 @@ label{
 }
 
 
-/* Make the Ticket payment row match the OLD screen exactly */
-.pos-pay-row .select,
-.pos-pay-row .input{
-  width: auto;                /* override global 100% width just in this row */
+.pos-pay-row{
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;        /* wrap gracefully on smaller widths */
 }
 
+.pos-pay-item{
+  flex: 0 0 auto;         /* keep natural size */
+}
+
+.pos-pay-grow{
+  flex: 1 1 240px;        /* customer field stretches, min practical width */
+}
+
+/* Push the primary CTA to the far right edge of the row */
+.pos-pay-row .pos-pay-push{
+  margin-left: auto;
+}
 
 
 /* Big right-side CTA like OLD screen */
