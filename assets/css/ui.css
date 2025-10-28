@@ -369,6 +369,18 @@ label{
 #inventory-intake-screen .table th, 
 #inventory-intake-screen .table td{ padding: 10px 12px; }
 
+/* POS search result rows (image + two-line text + Add) */
+.pos-result-row{
+  display:flex; align-items:center; justify-content:space-between;
+  gap:12px; padding:8px 10px; border:1px solid var(--border);
+  border-radius:10px; background:#fff;
+}
+.pos-result-left{ display:flex; align-items:center; gap:12px; min-width:0; }
+.pos-thumb{ width:56px; height:56px; border-radius:8px; object-fit:cover; background:#f3f4f6; flex:0 0 56px; }
+.pos-thumb--ph{ display:block; }
+.muted{ color:var(--muted); } /* ensure consistent muted tone in results */
+
+
 /* Numeric alignment without changing JS: column-targeted per pane */
 #paneDrafts table th:nth-child(3),
 #paneDrafts table td:nth-child(3),   /* Price */
