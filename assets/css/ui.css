@@ -381,11 +381,7 @@ label{
   width: auto;                /* override global 100% width just in this row */
 }
 
-/* Customer field is the only stretcher */
-.pos-pay-row .pos-pay-grow{
-  flex: 1 1 260px;
-  min-width: 260px;
-}
+
 
 /* Big right-side CTA like OLD screen */
 .pos-pay-row .btn.btn-primary.pos-pay-item{
