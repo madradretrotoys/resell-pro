@@ -265,7 +265,7 @@ export async function init(ctx) {
 
         function cartRow(it, idx) {
       const isMisc = !it.sku;
-      const meta = isMisc ? "Custom" : String(it.sku);
+      const meta = isMisc ? "" : String(it.sku);
       const modePercent = !it.discount || it.discount.mode === "percent";
       const discVal = (it.discount?.value ?? 0);
 
