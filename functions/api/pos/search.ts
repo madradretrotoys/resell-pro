@@ -1,5 +1,5 @@
 // /api/pos/search  — POS inventory search with primary image
-// - Query: ?q=string
+
 // - Auth: session cookie + x-tenant-id header (added by your api() helper)
 // - Returns: { items: [{ item_id, sku, product_short_title, price, qty, instore_loc, case_bin_shelf, image_url }] }
 
