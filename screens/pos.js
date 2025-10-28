@@ -90,27 +90,20 @@ export async function init(ctx) {
 
   function makeState() {
     return {
-      items: [], // [{sku, name, price, qty}]
-      discount: { mode: "percent", value: 0 }, // or {mode:'amount'}
+      // items: [{ sku, name, price, qty, discount:{mode:'percent'|'amount', value:number} }]
+      items: [],
       taxRate: 0.0,
       totals: { subtotal: 0, discount: 0, tax: 0, total: 0 },
     };
   }
 
-  function wireSearch() {
-    el.qBtn.addEventListener("click", () => doSearch());
-    el.q.addEventListener("keydown", (e) => {
-      if (e.key === "Enter") doSearch();
-    });
-    el.qClear.addEventListener("click", () => {
-      el.q.value = "";
-      el.results.innerHTML = "";
-    });
-    el.quickMisc.addEventListener("click", () => {
-      // Add a one-off “Misc” line at $0.00 for quick custom price
-      state.items.push({ sku: null, name: "Misc item", price: 0, qty: 1 });
+  function wireCart() {
+    el.ticketEmpty.addEventListener("click", () => {
+      state.items = [];
       render();
     });
+
+    // per-item handlers are delegated in render() via [data-qty], [data-remove], [data-apply-discount]
   }
 
   async function doSearch() {
@@ -129,40 +122,45 @@ export async function init(ctx) {
     }
   }
 
-  function renderResults(items) {
-    if (!items.length) {
-      el.results.innerHTML = `<div class="text-sm text-muted">No items found</div>`;
-      return;
+    function renderResults(items) {
+      if (!items.length) {
+        el.results.innerHTML = `<div class="text-sm text-muted">No items found</div>`;
+        return;
+      }
+      el.results.innerHTML = items.map((it) => {
+        const meta = [
+          it.sku ? String(it.sku) : "",
+          typeof it.price === "number" ? fmtCurrency(it.price) : "",
+          it.location || "",   // e.g., rm2 · 23
+          typeof it.in_stock === "number" ? `In stock: ${it.in_stock}` : ""
+        ].filter(Boolean).join(" · ");
+  
+        return `
+          <div class="flex items-center justify-between p-2 border rounded">
+            <div class="min-w-0">
+              <div class="font-medium truncate">${escapeHtml(it.name)}</div>
+              <div class="text-xs text-muted truncate">${escapeHtml(meta)}</div>
+            </div>
+            <button class="btn btn-sm btn-primary"
+              data-add='${JSON.stringify({
+                sku: it.sku ?? null,
+                name: it.name,
+                price: it.price ?? 0
+              }).replaceAll("'", "&apos;")}'>Add</button>
+          </div>`;
+      }).join("");
+  
+      // delegate add clicks (one binding per render)
+      el.results.onclick = (e) => {
+        const btn = e.target.closest("button[data-add]");
+        if (!btn) return;
+        const data = JSON.parse(btn.getAttribute("data-add"));
+        const found = state.items.find((x) => x.sku && data.sku && x.sku === data.sku);
+        if (found) found.qty += 1;
+        else state.items.push({ ...data, qty: 1, discount: { mode: "percent", value: 0 } });
+        render();
+      };
     }
-    el.results.innerHTML = items
-      .map(
-        (it) => `
-        <div class="flex items-center justify-between p-2 border rounded">
-          <div class="min-w-0">
-            <div class="font-medium truncate">${escapeHtml(it.name)}</div>
-            <div class="text-xs text-muted">SKU: ${escapeHtml(it.sku || "")}</div>
-            <div class="text-xs">${fmtCurrency(it.price || 0)}</div>
-          </div>
-          <button class="btn btn-sm btn-primary" data-add='${JSON.stringify({
-            sku: it.sku,
-            name: it.name,
-            price: it.price,
-          }).replaceAll("'", "&apos;")}'>Add</button>
-        </div>`
-      )
-      .join("");
-
-    // delegate add clicks
-    el.results.addEventListener("click", (e) => {
-      const btn = e.target.closest("button[data-add]");
-      if (!btn) return;
-      const data = JSON.parse(btn.getAttribute("data-add"));
-      const found = state.items.find((x) => x.sku && x.sku === data.sku);
-      if (found) found.qty += 1;
-      else state.items.push({ ...data, qty: 1 });
-      render();
-    }, { once: true });
-  }
 
   function wireCart() {
     el.ticketEmpty.addEventListener("click", () => {
@@ -249,72 +247,129 @@ export async function init(ctx) {
     }
   }
 
-  function cartRow(it, idx) {
-    return `
-      <div class="py-2 flex items-start justify-between gap-3">
-        <div class="min-w-0">
-          <div class="font-medium truncate">${escapeHtml(it.name)}</div>
-          <div class="text-xs text-muted">${it.sku ? "SKU: " + escapeHtml(it.sku) : "Custom"}</div>
-        </div>
-        <div class="flex items-center gap-2">
-          <div class="inline-flex items-center gap-1">
-            <button class="btn btn-xs" data-qty="${idx}|-">−</button>
-            <span class="w-8 text-center">${it.qty}</span>
-            <button class="btn btn-xs" data-qty="${idx}|+">+</button>
+    function cartRow(it, idx) {
+      const meta = [
+        it.sku ? String(it.sku) : "Custom"
+      ].join(" · ");
+      const modePercent = !it.discount || it.discount.mode === "percent";
+      const discVal = (it.discount?.value ?? 0);
+  
+      return `
+        <div class="border rounded p-2">
+          <div class="flex items-start justify-between gap-3">
+            <div class="min-w-0">
+              <div class="font-medium truncate">${escapeHtml(it.name)}</div>
+              <div class="text-xs text-muted">${escapeHtml(meta)}</div>
+              <div class="mt-2 inline-flex items-center gap-1">
+                <button class="btn btn-xs" data-qty="${idx}|-">−</button>
+                <span class="w-8 text-center">${it.qty}</span>
+                <button class="btn btn-xs" data-qty="${idx}|+">+</button>
+              </div>
+            </div>
+            <div class="flex items-center gap-2">
+              <div class="w-20 text-right font-medium">${fmtCurrency(it.price)}</div>
+              <button class="btn btn-ghost btn-xs" data-remove="${idx}">Remove</button>
+            </div>
           </div>
-          <div class="w-20 text-right">${fmtCurrency(it.price)}</div>
-          <button class="btn btn-ghost btn-xs" data-remove="${idx}">Remove</button>
+  
+          <!-- per-item discount row -->
+          <div class="grid grid-cols-[auto_auto_1fr_auto] items-center gap-2 mt-2">
+            <span class="text-sm text-muted">Discount</span>
+            <div class="flex items-center gap-2">
+              <label class="inline-flex items-center gap-1">
+                <input type="radio" name="pos-discount-mode-${idx}" value="percent" ${modePercent ? "checked" : ""} />
+                <span>%</span>
+              </label>
+              <label class="inline-flex items-center gap-1">
+                <input type="radio" name="pos-discount-mode-${idx}" value="amount" ${!modePercent ? "checked" : ""} />
+                <span>$</span>
+              </label>
+            </div>
+            <input class="input" id="pos-discount-input-${idx}" value="${discVal}" placeholder="${modePercent ? 'Enter percent' : 'Enter dollars'}" />
+            <button class="btn btn-primary" data-apply-discount="${idx}">Apply</button>
+          </div>
         </div>
-      </div>
-    `;
-  }
+      `;
+    }
+
 
   function render() {
     // cart list
     el.cart.innerHTML = state.items.map(cartRow).join("");
 
-    // bind qty/remove once per render
-    el.cart.querySelectorAll("[data-qty]").forEach((btn) => {
-      btn.addEventListener("click", async () => {
-        const [i, op] = btn.getAttribute("data-qty").split("|");
-        const idx = Number(i);
-        const item = state.items[idx];
-        if (!item) return;
-        item.qty = Math.max(1, item.qty + (op === "+" ? 1 : -1));
-        await refreshTotalsViaServer();
+      // bind qty/remove once per render
+      el.cart.querySelectorAll("[data-qty]").forEach((btn) => {
+        btn.addEventListener("click", async () => {
+          const [i, op] = btn.getAttribute("data-qty").split("|");
+          const idx = Number(i);
+          const item = state.items[idx];
+          if (!item) return;
+          item.qty = Math.max(1, item.qty + (op === "+" ? 1 : -1));
+          await refreshTotalsViaServer();
+        });
       });
-    });
-    el.cart.querySelectorAll("[data-remove]").forEach((btn) => {
-      btn.addEventListener("click", async () => {
-        const idx = Number(btn.getAttribute("data-remove"));
-        state.items.splice(idx, 1);
-        await refreshTotalsViaServer();
+      el.cart.querySelectorAll("[data-remove]").forEach((btn) => {
+        btn.addEventListener("click", async () => {
+          const idx = Number(btn.getAttribute("data-remove"));
+          state.items.splice(idx, 1);
+          await refreshTotalsViaServer();
+        });
       });
-    });
-
-    // totals (client fallback until server calculates)
-    computeTotalsClient();
-    paintTotals();
-  }
-
-  function computeTotalsClient() {
-    const subtotal = state.items.reduce((s, it) => s + (it.price || 0) * (it.qty || 0), 0);
-    let discount = 0;
-    if (state.discount.mode === "percent") {
-      discount = subtotal * (Number(state.discount.value || 0) / 100);
-    } else {
-      discount = Number(state.discount.value || 0);
+  
+          // bind qty/remove once per render
+      el.cart.querySelectorAll("[data-qty]").forEach((btn) => {
+        btn.addEventListener("click", async () => {
+          const [i, op] = btn.getAttribute("data-qty").split("|");
+          const idx = Number(i);
+          const item = state.items[idx];
+          if (!item) return;
+          item.qty = Math.max(1, item.qty + (op === "+" ? 1 : -1));
+          await refreshTotalsViaServer();
+        });
+      });
+      el.cart.querySelectorAll("[data-remove]").forEach((btn) => {
+        btn.addEventListener("click", async () => {
+          const idx = Number(btn.getAttribute("data-remove"));
+          state.items.splice(idx, 1);
+          await refreshTotalsViaServer();
+        });
+      });
+      el.cart.querySelectorAll("[data-apply-discount]").forEach((btn) => {
+        btn.addEventListener("click", async () => {
+          const idx = Number(btn.getAttribute("data-apply-discount"));
+          const row = el.cart.querySelector(`#pos-discount-input-${idx}`);
+          const mode = (el.cart.querySelector(`input[name="pos-discount-mode-${idx}"]:checked`)?.value) || "percent";
+          const val = Number(row?.value || 0);
+          if (!state.items[idx]) return;
+          state.items[idx].discount = { mode, value: isFinite(val) ? val : 0 };
+          await refreshTotalsViaServer();
+        });
+      });
+  
+      // totals (client fallback until server calculates)
+      computeTotalsClient();
+      paintTotals();
     }
-    discount = Math.min(discount, subtotal);
-    const taxable = Math.max(0, subtotal - discount);
-    const tax = taxable * Number(state.taxRate || 0);
-    const total = taxable + tax;
-    state.totals = { subtotal, discount, tax, total };
-  }
+  
+    function computeTotalsClient() {
+      let subtotal = 0, discountTotal = 0;
+      for (const it of state.items) {
+        const line = (it.price || 0) * (it.qty || 0);
+        subtotal += line;
+        const d = it.discount || { mode: "percent", value: 0 };
+        const ld = d.mode === "percent" ? (line * (Number(d.value || 0) / 100)) : Number(d.value || 0);
+        discountTotal += Math.min(ld, line);
+      }
+      const taxable = Math.max(0, subtotal - discountTotal);
+      const tax = taxable * Number(state.taxRate || 0);
+      const total = taxable + tax;
+      state.totals = { subtotal, discount: discountTotal, tax, total };
+    }
+
 
   async function refreshTotalsViaServer() {
     try {
-      const body = { items: state.items, discount: state.discount };
+      const body = { items: state.items };
       const r = await api("/api/pos/price/preview", { method: "POST", json: body });
       if (r && typeof r.subtotal === "number") {
         state.totals = {
