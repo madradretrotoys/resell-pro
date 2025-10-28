@@ -40,20 +40,19 @@
             <button id="pos-ticket-empty" class="btn btn-ghost btn-sm">Empty</button>
           </div>
         </div>
-      
-        <!-- Inner grid: left = cart (full width area), right = compact summary/payment -->
-        <div class="grid grid-cols-1 lg:grid-cols-3 gap-3">
-          <!-- LEFT: Cart items (fills two-thirds on desktop) -->
-          <div class="lg:col-span-2">
+
+        <!-- Explicit ticket grid (no Tailwind breakpoint dependency) -->
+        <div class="pos-ticket-grid">
+          <!-- LEFT: Cart -->
+          <div class="pos-ticket-cart">
             <div id="pos-cart" class="grid grid-cols-1 gap-2">
               <!-- rows injected -->
             </div>
           </div>
-      
-          <!-- RIGHT: Totals + Payment (one-third on desktop) -->
-          <div class="lg:col-span-1">
-            <!-- Totals -->
-            <div class="border rounded p-3">
+
+          <!-- RIGHT: Totals + Payment -->
+          <div class="pos-ticket-aside">
+            <div class="pos-ticket-summary">
               <div class="flex justify-between py-1">
                 <span class="text-muted">Subtotal</span>
                 <span id="pos-subtotal">$0.00</span>
@@ -71,25 +70,24 @@
                 <span id="pos-total">$0.00</span>
               </div>
             </div>
-      
-            <!-- Payment / Complete -->
-            <div class="mt-3 flex flex-col gap-2">
+
+            <div class="pos-ticket-actions">
               <select id="pos-payment" class="select">
                 <option value="" selected disabled>Select payment…</option>
                 <option value="card">Card (Valor)</option>
                 <option value="cash">Cash</option>
               </select>
-      
-              <div class="flex items-center gap-2">
-                <button id="pos-split" class="btn btn-ghost flex-none">Split payment</button>
-                <input id="pos-customer" class="input flex-1" placeholder="Customer (optional)" />
+
+              <div class="pos-ticket-row">
+                <button id="pos-split" class="btn btn-ghost">Split payment</button>
+                <input id="pos-customer" class="input" placeholder="Customer (optional)" />
               </div>
-      
-              <button id="pos-complete" class="btn btn-primary w-full">Complete Sale</button>
+
+              <button id="pos-complete" class="btn btn-primary">Complete Sale</button>
             </div>
           </div>
         </div>
-      
+
         <!-- Optional: debug/save logs toggle (kept full width under the grid) -->
         <details class="mt-3">
           <summary class="text-sm">View save logs</summary>
@@ -97,6 +95,7 @@
         </details>
       </div>
 
+    </div> <!-- 👈 CLOSE the outer two-column wrapper -->
 
     <!-- BELOW: Sales list (today/custom) -->
     <div class="card p-3 mt-3">
