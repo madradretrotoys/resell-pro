@@ -375,30 +375,27 @@ label{
 }
 
 
-/* Override global width:100% for controls inside the payment row */
+/* Make the Ticket payment row match the OLD screen exactly */
 .pos-pay-row .select,
 .pos-pay-row .input{
-  width: auto;                /* stop stretching to full row */
+  width: auto;                /* override global 100% width just in this row */
 }
 
-/* Keep the customer field as the only stretcher */
+/* Customer field is the only stretcher */
 .pos-pay-row .pos-pay-grow{
-  flex: 1 1 260px;            /* grow nicely; min practical width */
+  flex: 1 1 260px;
   min-width: 260px;
 }
 
-/* Give Complete button a strong, fixed presence like the old UI */
+/* Big right-side CTA like OLD screen */
 .pos-pay-row .btn.btn-primary.pos-pay-item{
-  flex: 0 0 320px;            /* wide CTA on desktop */
+  flex: 0 0 360px;            /* wide, stable button on desktop */
 }
 
-/* Responsive: allow the row to wrap on small screens */
+/* Wrap gracefully on small screens */
 @media (max-width: 780px){
-  .pos-pay-row{
-    gap: 6px;
-  }
   .pos-pay-row .btn.btn-primary.pos-pay-item{
-    flex: 1 1 100%;          /* CTA goes full width when wrapped */
+    flex: 1 1 100%;           /* CTA full width when wrapped */
   }
 }
 
