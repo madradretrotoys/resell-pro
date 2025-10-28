@@ -263,50 +263,59 @@ export async function init(ctx) {
     }
   }
 
-    function cartRow(it, idx) {
-      const meta = [
-        it.sku ? String(it.sku) : "Custom"
-      ].join(" · ");
+        function cartRow(it, idx) {
+      const isMisc = !it.sku;
+      const meta = isMisc ? "Custom" : String(it.sku);
       const modePercent = !it.discount || it.discount.mode === "percent";
       const discVal = (it.discount?.value ?? 0);
-  
+
+      // Price: input for misc; static text for normal items
+      const priceCell = isMisc
+        ? `<input class="input input-sm w-[88px] text-right" value="${Number(it.price || 0)}" data-price="${idx}" />`
+        : `<div class="w-[88px] text-right font-medium">${fmtCurrency(it.price)}</div>`;
+
       return `
         <div class="border rounded p-2">
-          <div class="flex items-start justify-between gap-3">
+          <!-- ROW 1: header -->
+          <div class="flex items-start justify-between gap-2">
             <div class="min-w-0">
               <div class="font-medium truncate">${escapeHtml(it.name)}</div>
-              <div class="text-xs text-muted">${escapeHtml(meta)}</div>
-              <div class="mt-2 inline-flex items-center gap-1">
-                <button class="btn btn-xs" data-qty="${idx}|-">−</button>
-                <span class="w-8 text-center">${it.qty}</span>
-                <button class="btn btn-xs" data-qty="${idx}|+">+</button>
-              </div>
+              <div class="text-xs text-muted truncate">${escapeHtml(meta)}</div>
             </div>
             <div class="flex items-center gap-2">
-              <div class="w-20 text-right font-medium">${fmtCurrency(it.price)}</div>
+              ${priceCell}
               <button class="btn btn-ghost btn-xs" data-remove="${idx}">Remove</button>
             </div>
           </div>
-  
-          <!-- per-item discount row -->
-          <div class="grid grid-cols-[auto_auto_1fr_auto] items-center gap-2 mt-2">
-            <span class="text-sm text-muted">Discount</span>
-            <div class="flex items-center gap-2">
-              <label class="inline-flex items-center gap-1">
-                <input type="radio" name="pos-discount-mode-${idx}" value="percent" ${modePercent ? "checked" : ""} />
-                <span>%</span>
-              </label>
-              <label class="inline-flex items-center gap-1">
-                <input type="radio" name="pos-discount-mode-${idx}" value="amount" ${!modePercent ? "checked" : ""} />
-                <span>$</span>
-              </label>
+
+          <!-- ROW 2: controls -->
+          <div class="mt-2 flex items-center justify-between gap-2">
+            <div class="inline-flex items-center gap-1">
+              <button class="btn btn-xs" data-qty="${idx}|-">−</button>
+              <span class="w-8 text-center">${it.qty}</span>
+              <button class="btn btn-xs" data-qty="${idx}|+">+</button>
             </div>
-            <input class="input" id="pos-discount-input-${idx}" value="${discVal}" placeholder="${modePercent ? 'Enter percent' : 'Enter dollars'}" />
-            <button class="btn btn-primary" data-apply-discount="${idx}">Apply</button>
+
+            <div class="grid grid-cols-[auto_auto_1fr_auto] items-center gap-2 flex-1">
+              <span class="text-sm text-muted">Discount</span>
+              <div class="flex items-center gap-2">
+                <label class="inline-flex items-center gap-1">
+                  <input type="radio" name="pos-discount-mode-${idx}" value="percent" ${modePercent ? "checked" : ""} />
+                  <span>%</span>
+                </label>
+                <label class="inline-flex items-center gap-1">
+                  <input type="radio" name="pos-discount-mode-${idx}" value="amount" ${!modePercent ? "checked" : ""} />
+                  <span>$</span>
+                </label>
+              </div>
+              <input class="input input-sm" id="pos-discount-input-${idx}" value="${discVal}" placeholder="${modePercent ? 'Enter percent' : 'Enter dollars'}" />
+              <button class="btn btn-primary btn-sm" data-apply-discount="${idx}">Apply</button>
+            </div>
           </div>
         </div>
       `;
     }
+
 
 
   function render() {
