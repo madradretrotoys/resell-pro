@@ -374,19 +374,32 @@ label{
   /* no special frame; mirrors old screen’s inline totals */
 }
 
-.pos-pay-row{
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;        /* wrap gracefully on smaller widths */
+
+/* Override global width:100% for controls inside the payment row */
+.pos-pay-row .select,
+.pos-pay-row .input{
+  width: auto;                /* stop stretching to full row */
 }
 
-.pos-pay-item{
-  flex: 0 0 auto;         /* keep natural size */
+/* Keep the customer field as the only stretcher */
+.pos-pay-row .pos-pay-grow{
+  flex: 1 1 260px;            /* grow nicely; min practical width */
+  min-width: 260px;
 }
 
-.pos-pay-grow{
-  flex: 1 1 240px;        /* customer field stretches, min practical width */
+/* Give Complete button a strong, fixed presence like the old UI */
+.pos-pay-row .btn.btn-primary.pos-pay-item{
+  flex: 0 0 320px;            /* wide CTA on desktop */
+}
+
+/* Responsive: allow the row to wrap on small screens */
+@media (max-width: 780px){
+  .pos-pay-row{
+    gap: 6px;
+  }
+  .pos-pay-row .btn.btn-primary.pos-pay-item{
+    flex: 1 1 100%;          /* CTA goes full width when wrapped */
+  }
 }
 
 
