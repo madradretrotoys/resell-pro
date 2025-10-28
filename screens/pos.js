@@ -66,15 +66,16 @@ export async function init(ctx) {
     state.taxRate = Number(meta.tax_rate ?? 0);
   } catch (err) {
     log(`meta error: ${err?.message || err}`);
+    // non-fatal; we’ll render with safe defaults
+  } finally {
+    // Always clear the spinner and render the screen
+    swap("content");
+    wireSearch();
+    wireCart();
+    wireTotals();
+    wireSales();
+    render();
   }
-
-  wireSearch();
-  wireCart();
-  wireTotals();
-  wireSales();
-
-  swap("content");
-  render();
 
   // ————— helpers —————
   function wireSearch() {
@@ -99,14 +100,16 @@ export async function init(ctx) {
     });
   }
 
-  function swap(which) {
-    el.banner.classList.add("hidden");
-    el.denied.classList.add("hidden");
-    el.loading.classList.add("hidden");
-    el.content.classList.add("hidden");
-    if (which === "denied") el.denied.classList.remove("hidden");
-    if (which === "loading") el.loading.classList.remove("hidden");
-    if (which === "content") el.content.classList.remove("hidden");
+ function swap(which) {
+    // Use explicit display control so banners never "bleed through" on boot
+    const set = (el, show) => { if (!el) return; el.style.display = show ? "" : "none"; };
+    set(el.banner, false);
+    set(el.denied, false);
+    set(el.loading, false);
+    set(el.content, false);
+    if (which === "denied") set(el.denied, true);
+    if (which === "loading") set(el.loading, true);
+    if (which === "content") set(el.content, true);
   }
 
   function makeState() {
@@ -132,8 +135,8 @@ export async function init(ctx) {
     if (!q) return;
     el.results.innerHTML = `<div class="text-sm text-muted">Searching…</div>`;
     try {
-      // Expect API to read from app.inventory and return {items:[{sku,name,price,location,in_stock}]}
-      const res = await api(`/api/inventory/search?q=${encodeURIComponent(q)}`, { method: "GET" });
+      // New endpoint: searches app.inventory (sku, category_nm, product_short_title), joins primary image
+      const res = await api(`/api/pos/search?q=${encodeURIComponent(q)}`, { method: "GET" });
       const items = res?.items || res?.rows || [];
       renderResults(items);
     } catch (err) {
@@ -142,45 +145,54 @@ export async function init(ctx) {
     }
   }
 
-    function renderResults(items) {
-      if (!items.length) {
-        el.results.innerHTML = `<div class="text-sm text-muted">No items found</div>`;
-        return;
-      }
-      el.results.innerHTML = items.map((it) => {
-        const meta = [
-          it.sku ? String(it.sku) : "",
-          typeof it.price === "number" ? fmtCurrency(it.price) : "",
-          it.location || "",   // e.g., rm2 · 23
-          typeof it.in_stock === "number" ? `In stock: ${it.in_stock}` : ""
-        ].filter(Boolean).join(" · ");
-  
-        return `
-          <div class="flex items-center justify-between p-2 border rounded">
-            <div class="min-w-0">
-              <div class="font-medium truncate">${escapeHtml(it.name)}</div>
-              <div class="text-xs text-muted truncate">${escapeHtml(meta)}</div>
-            </div>
-            <button class="btn btn-sm btn-primary"
-              data-add='${JSON.stringify({
-                sku: it.sku ?? null,
-                name: it.name,
-                price: it.price ?? 0
-              }).replaceAll("'", "&apos;")}'>Add</button>
-          </div>`;
-      }).join("");
-  
-      // delegate add clicks (one binding per render)
-      el.results.onclick = (e) => {
-        const btn = e.target.closest("button[data-add]");
-        if (!btn) return;
-        const data = JSON.parse(btn.getAttribute("data-add"));
-        const found = state.items.find((x) => x.sku && data.sku && x.sku === data.sku);
-        if (found) found.qty += 1;
-        else state.items.push({ ...data, qty: 1, discount: { mode: "percent", value: 0 } });
-        render();
-      };
+  function renderResults(items) {
+    if (!items.length) {
+      el.results.innerHTML = `<div class="text-sm text-muted">No items found</div>`;
+      return;
     }
+
+    el.results.innerHTML = items.map((it) => {
+      // API returns: item_id, sku, product_short_title, price, qty, instore_loc, case_bin_shelf, image_url
+      const meta = [
+        it.sku ? String(it.sku) : "",
+        typeof it.price === "number" ? fmtCurrency(it.price) : "",
+        (typeof it.qty === "number" ? `Qty: ${it.qty}` : ""),
+        (it.instore_loc || ""),
+        (it.case_bin_shelf || "")
+      ].filter(Boolean).join(" · ");
+
+      const img = it.image_url ? `<img class="pos-thumb" src="${escapeHtml(it.image_url)}" alt="">` :
+                                 `<div class="pos-thumb pos-thumb--ph"></div>`;
+
+      return `
+        <div class="pos-result-row">
+          <div class="pos-result-left">
+            ${img}
+            <div class="min-w-0">
+              <div class="font-medium truncate">${escapeHtml(it.product_short_title || it.name || "")}</div>
+              <div class="text-xs muted truncate">${escapeHtml(meta)}</div>
+            </div>
+          </div>
+          <button class="btn btn-sm btn-primary"
+            data-add='${JSON.stringify({
+              sku: it.sku ?? null,
+              name: it.product_short_title || it.name || "",
+              price: it.price ?? 0
+            }).replaceAll("'", "&apos;")}'>Add</button>
+        </div>`;
+    }).join("");
+
+    el.results.onclick = (e) => {
+      const btn = e.target.closest("button[data-add]");
+      if (!btn) return;
+      const data = JSON.parse(btn.getAttribute("data-add"));
+      const found = state.items.find((x) => x.sku && data.sku && x.sku === data.sku);
+      if (found) found.qty += 1;
+      else state.items.push({ ...data, qty: 1, discount: { mode: "percent", value: 0 } });
+      render();
+    };
+  }
+
 
   
 
