@@ -102,15 +102,8 @@ export const onRequestGet: PagesFunction = async ({ request, env }) => {
       LIMIT 50;
     `;
 
-    return json({ items: rows });
-  } catch (err: any) {
-    return json({ error: err?.message || String(err) }, 500);
+  return json({ ok: true, rows }, 200);
+  } catch (e: any) {
+    return json({ ok: false, error: "server_error", message: String(e?.message || e) }, 500);
   }
 };
-
-function json(body: any, status = 200): Response {
-  return new Response(JSON.stringify(body), {
-    status,
-    headers: { "content-type": "application/json; charset=utf-8" }
-  });
-}
