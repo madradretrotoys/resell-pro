@@ -77,6 +77,27 @@ export async function init(ctx) {
   render();
 
   // ————— helpers —————
+  function wireSearch() {
+    // Search button + Enter key
+    el.qBtn.addEventListener("click", () => doSearch());
+    el.q.addEventListener("keydown", (e) => { if (e.key === "Enter") doSearch(); });
+    // Clear
+    el.qClear.addEventListener("click", () => {
+      el.q.value = "";
+      el.results.innerHTML = "";
+    });
+    // + Misc (adds a custom line so ticket UI can be tested without search)
+    el.quickMisc.addEventListener("click", () => {
+      state.items.push({
+        sku: null,
+        name: "Misc item",
+        price: 0,
+        qty: 1,
+        discount: { mode: "percent", value: 0 }
+      });
+      render();
+    });
+  }
 
   function swap(which) {
     el.banner.classList.add("hidden");
@@ -111,11 +132,10 @@ export async function init(ctx) {
     if (!q) return;
     el.results.innerHTML = `<div class="text-sm text-muted">Searching…</div>`;
     try {
-      // If you already have an inventory search endpoint, swap it in here:
-      // const res = await api(`/api/inventory/search?q=${encodeURIComponent(q)}`);
-      // For now, use meta as a placeholder/no-op result:
-      const res = { items: [] };
-      renderResults(res.items || []);
+      // Expect API to read from app.inventory and return {items:[{sku,name,price,location,in_stock}]}
+      const res = await api(`/api/inventory/search?q=${encodeURIComponent(q)}`, { method: "GET" });
+      const items = res?.items || res?.rows || [];
+      renderResults(items);
     } catch (err) {
       el.results.innerHTML = `<div class="text-danger text-sm">Search failed</div>`;
       log(err?.message || err);
@@ -162,22 +182,7 @@ export async function init(ctx) {
       };
     }
 
-  function wireCart() {
-    el.ticketEmpty.addEventListener("click", () => {
-      state.items = [];
-      state.discount = { mode: "percent", value: 0 };
-      render();
-    });
-
-    el.discountApply.addEventListener("click", async () => {
-      const mode =
-        root.querySelector('input[name="pos-discount-mode"]:checked')?.value ||
-        "percent";
-      const raw = Number(el.discountInput.value || 0);
-      state.discount = { mode, value: isFinite(raw) ? raw : 0 };
-      await refreshTotalsViaServer();
-    });
-  }
+  
 
   function wireTotals() {
     el.complete.addEventListener("click", async () => {
@@ -186,8 +191,7 @@ export async function init(ctx) {
       if (!payment) return;
       try {
         const body = {
-          items: state.items,
-          discount: state.discount,
+          items: state.items,                     // items carry their own {discount}
           customer: (el.customer.value || "").trim() || null,
           payment,
         };
@@ -316,24 +320,6 @@ export async function init(ctx) {
         });
       });
   
-          // bind qty/remove once per render
-      el.cart.querySelectorAll("[data-qty]").forEach((btn) => {
-        btn.addEventListener("click", async () => {
-          const [i, op] = btn.getAttribute("data-qty").split("|");
-          const idx = Number(i);
-          const item = state.items[idx];
-          if (!item) return;
-          item.qty = Math.max(1, item.qty + (op === "+" ? 1 : -1));
-          await refreshTotalsViaServer();
-        });
-      });
-      el.cart.querySelectorAll("[data-remove]").forEach((btn) => {
-        btn.addEventListener("click", async () => {
-          const idx = Number(btn.getAttribute("data-remove"));
-          state.items.splice(idx, 1);
-          await refreshTotalsViaServer();
-        });
-      });
       el.cart.querySelectorAll("[data-apply-discount]").forEach((btn) => {
         btn.addEventListener("click", async () => {
           const idx = Number(btn.getAttribute("data-apply-discount"));
