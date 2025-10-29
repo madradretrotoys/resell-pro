@@ -76,7 +76,7 @@ export const onRequestGet: PagesFunction = async ({ request, env }) => {
         SELECT DISTINCT ON (ii.item_id)
                ii.item_id, ii.cdn_url AS image_url
         FROM app.item_images ii
-        WHERE ii.tenant_id = ${tenantId}
+        WHERE ii.tenant_id = ${tenant_id}
         ORDER BY ii.item_id, (CASE WHEN ii.is_primary THEN 0 ELSE 1 END), ii.created_at DESC
       )
       SELECT
@@ -90,7 +90,7 @@ export const onRequestGet: PagesFunction = async ({ request, env }) => {
         p.image_url
       FROM app.inventory i
       LEFT JOIN primary_img p ON p.item_id = i.item_id
-      WHERE i.tenant_id = ${tenantId}
+      WHERE i.tenant_id = ${tenant_id}
         AND (
           i.sku ILIKE ${"%" + q + "%"} OR
           i.category_nm ILIKE ${"%" + q + "%"} OR
