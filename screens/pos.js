@@ -208,7 +208,14 @@ export async function init(ctx) {
       const data = JSON.parse(btn.getAttribute("data-add"));
       const found = state.items.find((x) => x.sku && data.sku && x.sku === data.sku);
       if (found) found.qty += 1;
-      else state.items.push({ ...data, qty: 1, discount: { mode: "percent", value: 0 } });
+      else state.items.push({
+        ...data,
+        qty: 1,
+        discount: { mode: "percent", value: 0 },
+        inventory_qty: data.qty || 0,
+        instore_loc: data.instore_loc || "",
+        case_bin_shelf: data.case_bin_shelf || ""
+      });
       render();
     };
   }
@@ -283,58 +290,71 @@ export async function init(ctx) {
     }
   }
 
-        function cartRow(it, idx) {
-      const isMisc = !it.sku;
-      const meta = isMisc ? "" : String(it.sku);
-      const modePercent = !it.discount || it.discount.mode === "percent";
-      const discVal = (it.discount?.value ?? 0);
-
-      // Price: input for misc; static text for normal items
-      const priceCell = isMisc
-        ? `<input class="input input-sm w-[88px] text-right" value="${Number(it.price || 0)}" data-price="${idx}" />`
-        : `<div class="w-[88px] text-right font-medium">${fmtCurrency(it.price)}</div>`;
-
-      return `
-        <div class="border rounded p-2">
-          <!-- ROW 1: header -->
-          <div class="flex items-start justify-between gap-2">
-            <div class="min-w-0">
-              <div class="font-medium truncate">${escapeHtml(it.name)}</div>
-              <div class="text-xs text-muted truncate">${escapeHtml(meta)}</div>
-            </div>
-            <div class="flex items-center gap-2">
-              ${priceCell}
-              <button class="btn btn-ghost btn-xs" data-remove="${idx}">Remove</button>
-            </div>
+  function cartRow(it, idx) {
+    const isMisc = !it.sku;
+    const metaParts = [];
+    if (it.sku) metaParts.push(it.sku);
+    if (typeof it.price === "number") metaParts.push(fmtCurrency(it.price));
+    if (it.inventory_qty) metaParts.push(`Qty:${it.inventory_qty}`);
+    if (it.instore_loc) metaParts.push(it.instore_loc);
+    if (it.case_bin_shelf) metaParts.push(it.case_bin_shelf);
+    const meta = metaParts.join(" · ");
+  
+    const modePercent = !it.discount || it.discount.mode === "percent";
+    const discVal = (it.discount?.value ?? 0);
+  
+    const priceCell = isMisc
+      ? `<input class="input input-sm w-[88px] text-right" value="${Number(it.price || 0)}" data-price="${idx}" />`
+      : `<div class="w-[88px] text-right font-medium">${fmtCurrency(it.price)}</div>`;
+  
+    const lineTotal = fmtCurrency(
+      (it.price || 0) * (it.qty || 0) -
+      (it.discount?.mode === "percent"
+        ? ((it.price || 0) * (it.qty || 0) * (it.discount?.value || 0) / 100)
+        : (it.discount?.value || 0))
+    );
+  
+    return `
+      <div class="ticket-row border rounded p-2">
+        <!-- ROW 1: product title and meta -->
+        <div class="flex flex-col gap-0.5 mb-1">
+          <div class="font-medium truncate">${escapeHtml(it.name)}</div>
+          <div class="text-xs muted truncate">${escapeHtml(meta)}</div>
+        </div>
+  
+        <!-- ROW 2: controls (qty, discount, total, remove) -->
+        <div class="ticket-controls flex items-center justify-between gap-2 flex-wrap">
+          <div class="inline-flex items-center gap-1">
+            <button class="btn btn-xs" data-qty="${idx}|-">−</button>
+            <span class="w-8 text-center">${it.qty}</span>
+            <button class="btn btn-xs" data-qty="${idx}|+">+</button>
           </div>
-
-          <!-- ROW 2: controls -->
-          <div class="mt-2 flex items-center justify-between gap-2">
-            <div class="inline-flex items-center gap-1">
-              <button class="btn btn-xs" data-qty="${idx}|-">−</button>
-              <span class="w-8 text-center">${it.qty}</span>
-              <button class="btn btn-xs" data-qty="${idx}|+">+</button>
-            </div>
-
-            <div class="grid grid-cols-[auto_auto_1fr_auto] items-center gap-2 flex-1">
-              <span class="text-sm text-muted">Discount</span>
-              <div class="flex items-center gap-2">
-                <label class="inline-flex items-center gap-1">
-                  <input type="radio" name="pos-discount-mode-${idx}" value="percent" ${modePercent ? "checked" : ""} />
-                  <span>%</span>
-                </label>
-                <label class="inline-flex items-center gap-1">
-                  <input type="radio" name="pos-discount-mode-${idx}" value="amount" ${!modePercent ? "checked" : ""} />
-                  <span>$</span>
-                </label>
-              </div>
-              <input class="input input-sm" id="pos-discount-input-${idx}" value="${discVal}" placeholder="${modePercent ? 'Enter percent' : 'Enter dollars'}" />
-              <button class="btn btn-primary btn-sm" data-apply-discount="${idx}">Apply</button>
-            </div>
+  
+          <div class="flex items-center gap-2 flex-1 justify-end flex-wrap">
+            <div class="ticket-line-total text-right">${lineTotal}</div>
+            <button class="btn btn-ghost btn-xs" data-remove="${idx}">Remove</button>
           </div>
         </div>
-      `;
-    }
+  
+        <!-- ROW 3: discount -->
+        <div class="mt-2 grid grid-cols-[auto_auto_1fr_auto] items-center gap-2">
+          <span class="text-sm text-muted">Discount</span>
+          <div class="flex items-center gap-2">
+            <label class="inline-flex items-center gap-1">
+              <input type="radio" name="pos-discount-mode-${idx}" value="percent" ${modePercent ? "checked" : ""} />
+              <span>%</span>
+            </label>
+            <label class="inline-flex items-center gap-1">
+              <input type="radio" name="pos-discount-mode-${idx}" value="amount" ${!modePercent ? "checked" : ""} />
+              <span>$</span>
+            </label>
+          </div>
+          <input class="input input-sm" id="pos-discount-input-${idx}" value="${discVal}" placeholder="${modePercent ? 'Enter percent' : 'Enter dollars'}" />
+          <button class="btn btn-primary btn-sm" data-apply-discount="${idx}">Apply</button>
+        </div>
+      </div>
+    `;
+  }    
 
 
 
@@ -369,6 +389,16 @@ export async function init(ctx) {
           const val = Number(row?.value || 0);
           if (!state.items[idx]) return;
           state.items[idx].discount = { mode, value: isFinite(val) ? val : 0 };
+          await refreshTotalsViaServer();
+        });
+      });
+
+      el.cart.querySelectorAll("[data-price]").forEach((inp) => {
+        inp.addEventListener("input", async () => {
+          const idx = Number(inp.getAttribute("data-price"));
+          const val = Number(inp.value || 0);
+          if (!isFinite(val)) return;
+          state.items[idx].price = val;
           await refreshTotalsViaServer();
         });
       });
