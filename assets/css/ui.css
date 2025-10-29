@@ -375,6 +375,42 @@ label{
   /* no special frame; mirrors old screen’s inline totals */
 }
 
+.pos-totals{
+    width: auto; 
+  /* no special frame; mirrors old screen’s inline totals */
+}
+
+/* ===== POS Ticket row layout improvements ===== */
+.ticket-row{
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.ticket-controls{
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+}
+
+.ticket-line-total{
+  min-width: 80px;
+  text-align: right;
+  font-weight: 600;
+}
+
+@media (max-width: 640px){
+  .ticket-controls{
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 4px;
+  }
+  .ticket-line-total{
+    width: 100%;
+    text-align: right;
+  }
+}
 
 .pos-pay-row{
   display: flex;
