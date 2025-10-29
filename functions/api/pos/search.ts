@@ -1,4 +1,4 @@
-// /api/pos/search — POS inventory search with primary image
+// /api/pos/search — POS inventory search with primary image + DIAGNOSTIC LOGGING
 // - Auth: session cookie + x-tenant-id header (added by api() helper on the client)
 // - Returns: { ok: true, items: [{ item_id, sku, product_short_title, price, qty, instore_loc, case_bin_shelf, image_url }] }
 
@@ -51,24 +51,40 @@ async function verifyJwt(token: string, secret: string): Promise<any> {
 }
 
 export default async function handler(request: Request, env: any) {
+  const startedAt = Date.now();
   try {
+    console.log("[pos.search] start", { url: request.url });
+
     // Session (cookie) → JWT
     const cookie = request.headers.get("cookie");
     const token = readCookie(cookie, "session");
-    if (!token) return json({ ok: false, error: "no_cookie" }, 401);
+    if (!token) {
+      console.warn("[pos.search] no_cookie");
+      return json({ ok: false, error: "no_cookie" }, 401);
+    }
 
     const payload = await verifyJwt(token, String(env.JWT_SECRET));
     const actor_user_id = String((payload as any).sub || "");
-    if (!actor_user_id) return json({ ok: false, error: "bad_token" }, 401);
+    if (!actor_user_id) {
+      console.warn("[pos.search] bad_token");
+      return json({ ok: false, error: "bad_token" }, 401);
+    }
 
     // Tenant header
     const tenant_id = request.headers.get("x-tenant-id");
-    if (!tenant_id) return json({ ok: false, error: "missing_tenant" }, 400);
+    if (!tenant_id) {
+      console.warn("[pos.search] missing_tenant");
+      return json({ ok: false, error: "missing_tenant" }, 400);
+    }
 
-    // Parse query term (fixes "q is not defined")
+    // Parse query term
     const url = new URL(request.url);
     const q = (url.searchParams.get("q") || "").trim();
-    if (!q) return json({ ok: true, items: [] }, 200);
+    console.log("[pos.search] params", { tenant_id, actor_user_id, q });
+    if (!q) {
+      console.log("[pos.search] empty q — returning []");
+      return json({ ok: true, items: [] }, 200);
+    }
 
     const sql = neon(String(env.DATABASE_URL));
 
@@ -80,12 +96,18 @@ export default async function handler(request: Request, env: any) {
       WHERE m.tenant_id = ${tenant_id} AND m.user_id = ${actor_user_id}
       LIMIT 1
     `;
-    if (actor.length === 0 || actor[0].active === false) return json({ ok: false, error: "forbidden" }, 403);
+    console.log("[pos.search] auth", actor[0] || null);
+    if (actor.length === 0 || actor[0].active === false) {
+      console.warn("[pos.search] forbidden (no membership or inactive)");
+      return json({ ok: false, error: "forbidden" }, 403);
+    }
     const allow = ["owner", "admin", "manager"].includes(actor[0].role) || !!actor[0].can_pos;
-    if (!allow) return json({ ok: false, error: "forbidden" }, 403);
+    if (!allow) {
+      console.warn("[pos.search] forbidden (role/can_pos)");
+      return json({ ok: false, error: "forbidden" }, 403);
+    }
 
-    // Query: tenant scoping via item_listing_profile (consistent with recent.ts),
-    // primary image via tenant-scoped item_images, search on sku/category_nm/product_short_title.
+    console.log("[pos.search] running SQL…");
     const rows = await sql/*sql*/`
       WITH imgs AS (
         SELECT
@@ -128,8 +150,14 @@ export default async function handler(request: Request, env: any) {
       LIMIT 50;
     `;
 
+    console.log("[pos.search] rows", { count: rows.length, sample: rows[0] || null });
+    const elapsed = Date.now() - startedAt;
+    console.log("[pos.search] done", { elapsed_ms: elapsed });
+
     return json({ ok: true, items: rows }, 200);
   } catch (e: any) {
+    const elapsed = Date.now() - startedAt;
+    console.error("[pos.search] error", { elapsed_ms: elapsed, message: e?.message || String(e), stack: e?.stack });
     return json({ ok: false, error: "server_error", message: String(e?.message || e) }, 500);
   }
 }
