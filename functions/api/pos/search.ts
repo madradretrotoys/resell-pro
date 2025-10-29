@@ -42,6 +42,7 @@ async function verifyJwt(token: string, secret: string): Promise<any> {
 }
 
 export const onRequestGet: PagesFunction = async ({ request, env }) => {
+  let startedAt = Date.now();
   try {
     // AuthN
     const cookieHeader = request.headers.get("cookie") || "";
@@ -74,7 +75,7 @@ export const onRequestGet: PagesFunction = async ({ request, env }) => {
     const url = new URL(request.url);
     const limitRaw = Number(url.searchParams.get("limit") || 50);
     const limit = Number.isFinite(limitRaw) ? Math.max(1, Math.min(100, limitRaw)) : 50;
-    const startedAt = Date.now();
+    startedAt = Date.now();
     console.log("[pos.search] start", { url: request.url });
     const q = (url.searchParams.get("q") || "").trim();
     console.log("[pos.search] params", { tenant_id, actor_user_id, q });
@@ -109,12 +110,13 @@ export const onRequestGet: PagesFunction = async ({ request, env }) => {
         i.case_bin_shelf,
         p.image_url
       FROM app.inventory i
-      INNER JOIN app.item_listing_profile lp
-        ON lp.item_id = i.item_id
-       AND lp.tenant_id = ${tenant_id}
       LEFT JOIN primary_img p
         ON p.item_id = i.item_id
-      WHERE i.item_status = 'active'
+      WHERE
+        /* business filters: exclude non-sellable */
+        COALESCE(i.qty, 0) > 0
+        AND (i.item_status IS NULL OR i.item_status NOT IN ('sold','draft'))
+        /* keyword match: sku, category_nm, or product_short_title */
         AND (
           i.sku ILIKE ${"%" + q + "%"}
           OR i.category_nm ILIKE ${"%" + q + "%"}
@@ -123,7 +125,7 @@ export const onRequestGet: PagesFunction = async ({ request, env }) => {
       ORDER BY
         (CASE WHEN i.sku ILIKE ${q + "%"} THEN 0 ELSE 1 END),
         i.updated_at DESC NULLS LAST
-      LIMIT 50;
+      LIMIT ${limit};
     `;
 
     console.log("[pos.search] rows", { count: rows.length, sample: rows[0] || null });
