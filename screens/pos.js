@@ -132,16 +132,36 @@ export async function init(ctx) {
 
   async function doSearch() {
     const q = (el.q.value || "").trim();
-    if (!q) return;
+    if (!q) {
+      log(`[pos.ui] search: empty q — skipping`);
+      console.log("[pos.ui] search: empty q — skipping");
+      return;
+    }
+
     el.results.innerHTML = `<div class="text-sm text-muted">Searching…</div>`;
+    log(`[pos.ui] search: start q="${q}"`);
+    console.log("[pos.ui] search: start", { q });
+
     try {
       // New endpoint: searches app.inventory (sku, category_nm, product_short_title), joins primary image
-      const res = await api(`/api/pos/search?q=${encodeURIComponent(q)}`, { method: "GET" });
+      const url = `/api/pos/search?q=${encodeURIComponent(q)}`;
+      const res = await api(url, { method: "GET" });
+
+      console.log("[pos.ui] search: response", res);
+      log(`[pos.ui] search: ok=${!!res?.ok} items=${(res?.items || res?.rows || []).length}`);
+
       const items = res?.items || res?.rows || [];
+      if (!items.length) {
+        console.log("[pos.ui] search: no results");
+      } else {
+        console.log("[pos.ui] search: first item", items[0]);
+      }
       renderResults(items);
     } catch (err) {
       el.results.innerHTML = `<div class="text-danger text-sm">Search failed</div>`;
-      log(err?.message || err);
+      const msg = err?.message || String(err);
+      log(`[pos.ui] search: error ${msg}`);
+      console.error("[pos.ui] search: error", err);
     }
   }
 
