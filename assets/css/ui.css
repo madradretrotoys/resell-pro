@@ -370,14 +370,20 @@ label{
 #inventory-intake-screen .table td{ padding: 10px 12px; }
 
 /* ===== POS: Ticket single-column helpers (cart → totals → payment row) ===== */
+/* Push totals block to the far right and keep it compact on desktop. */
 .pos-totals{
-    width: auto; 
-  /* no special frame; mirrors old screen’s inline totals */
+  width: min(320px, 100%);      /* fixed-ish width so margin:auto can push it */
+  margin-left: auto;            /* moves the block to the right edge */
 }
 
-.pos-totals{
-    width: auto; 
-  /* no special frame; mirrors old screen’s inline totals */
+/* On phones, let it span full width (stacked layout). */
+@media (max-width: 640px){
+  .pos-totals{ width: 100%; margin-left: 0; }
+}
+
+/* Make the Discounts amount visually negative in red (label stays neutral). */
+.pos-totals #pos-discounts{
+  color: var(--danger);
 }
 
 /* ===== POS Ticket row layout improvements ===== */
