@@ -197,7 +197,10 @@ export async function init(ctx) {
             data-add='${JSON.stringify({
               sku: it.sku ?? null,
               name: it.product_short_title || it.name || "",
-              price: it.price ?? 0
+              price: it.price ?? 0,
+              qty: it.qty ?? 0,                     // on-hand (for cap)
+              instore_loc: it.instore_loc || "",    // e.g., rm2
+              case_bin_shelf: it.case_bin_shelf || "" // e.g., 15
             }).replaceAll("'", "&apos;")}'>Add</button>
         </div>`;
     }).join("");
@@ -207,16 +210,26 @@ export async function init(ctx) {
       if (!btn) return;
       const data = JSON.parse(btn.getAttribute("data-add"));
       const found = state.items.find((x) => x.sku && data.sku && x.sku === data.sku);
-      if (found) found.qty += 1;
-      else state.items.push({
-        ...data,
-        qty: 1,
-        discount: { mode: "percent", value: 0 },
-        inventory_qty: data.qty || 0,
-        instore_loc: data.instore_loc || "",
-        case_bin_shelf: data.case_bin_shelf || ""
-      });
-      render();
+      
+      if (found) {
+        const max = Number(found.inventory_qty || 0);
+        if (max && found.qty >= max) {
+          showBanner(`Only ${max} in stock for ${escapeHtml(found.sku)}. To sell more, add a Misc line.`);
+          return;
+        }
+        found.qty += 1;
+        render();               // ensure the visible qty updates immediately
+      } else {
+        state.items.push({
+          ...data,
+          qty: 1,
+          discount: { mode: "percent", value: 0 },
+          inventory_qty: Number(data.qty || 0),
+          instore_loc: data.instore_loc || "",
+          case_bin_shelf: data.case_bin_shelf || ""
+        });
+        render();
+      }
     };
   }
 
@@ -369,17 +382,27 @@ export async function init(ctx) {
           const idx = Number(i);
           const item = state.items[idx];
           if (!item) return;
-          item.qty = Math.max(1, item.qty + (op === "+" ? 1 : -1));
+      
+          const delta = (op === "+") ? 1 : -1;
+          let nextQty = Math.max(1, Number(item.qty || 1) + delta);
+      
+          // Cap to on-hand for inventoried items (misc has no cap)
+          const max = Number(item.inventory_qty || 0);
+          if (op === "+" && item.sku && max && nextQty > max) {
+            showBanner(`Only ${max} in stock for ${escapeHtml(item.sku)}. To sell more, add a Misc line.`);
+            return; // do not change qty
+          }
+      
+          item.qty = nextQty;
+      
+          // Immediately re-render so the visible qty changes from "1"
+          render();
+      
+          // Then ask server for previewed totals (tax, etc.)
           await refreshTotalsViaServer();
         });
       });
-      el.cart.querySelectorAll("[data-remove]").forEach((btn) => {
-        btn.addEventListener("click", async () => {
-          const idx = Number(btn.getAttribute("data-remove"));
-          state.items.splice(idx, 1);
-          await refreshTotalsViaServer();
-        });
-      });
+
   
       el.cart.querySelectorAll("[data-apply-discount]").forEach((btn) => {
         btn.addEventListener("click", async () => {
@@ -466,6 +489,11 @@ export async function init(ctx) {
     el.logs.textContent = `${el.logs.textContent || ""}\n${line}`.trim();
   }
 
+  function showBanner(message) {
+    el.banner.classList.remove("hidden");
+    el.banner.innerHTML = `<div class="card p-2">${escapeHtml(message || "")}</div>`;
+  }
+  
   function escapeHtml(s) {
     return String(s ?? "")
       .replaceAll("&", "&amp;")
