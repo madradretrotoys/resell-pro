@@ -397,6 +397,14 @@ label{
   background: #fff;
 }
 
+/* Use ticket-row padding for totals, without the frame */
+.ticket-row--totals{
+  border: 0;
+  background: transparent;
+  /* keep .ticket-row’s padding so right inset matches item rows */
+  padding: 12px;
+}
+
 /* extra separation between successive items */
 #pos-cart .ticket-row + .ticket-row{
   margin-top: 8px;
