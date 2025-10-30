@@ -19,7 +19,7 @@
   --field-radius: 12px;
   --field-pad-x: 12px;
 
-  --gap-16: 16px;
+  --gap-16: 16px;f
   --gap-24: 24px;
 
   --text: #111827;         /* neutral-900 */
@@ -385,7 +385,40 @@ label{
   display: flex;
   flex-direction: column;
   gap: 4px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 12px;
+  background: #fff;
 }
+
+/* extra separation between successive items */
+#pos-cart .ticket-row + .ticket-row{
+  margin-top: 8px;
+}
+
+/* Ticket header row should not wrap on desktop */
+@media (min-width: 641px){
+  .pos-ticket-header{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap: 8px;
+    flex-wrap: nowrap;
+  }
+}
+
+.discount-row{
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;      /* wrap gracefully on very small screens */
+}
+.discount-row .push{
+  margin-left: auto;    /* send Apply to the far right */
+}
+
+.btn-xs{ height: 28px; padding: 0 10px; font-size: 12px; }
+.input-sm{ height: 32px; }
 
 .ticket-controls{
   display: flex;
