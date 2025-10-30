@@ -372,7 +372,7 @@ label{
 /* ===== POS: Ticket single-column helpers (cart → totals → payment row) ===== */
 /* Push totals block to the far right and keep it compact on desktop. */
 .pos-totals{
-  width: min(320px, 100%);      /* fixed-ish width so margin:auto can push it */
+  //width: min(320px, 100%);      /* fixed-ish width so margin:auto can push it */
   margin-left: auto;            /* moves the block to the right edge */
 }
 
