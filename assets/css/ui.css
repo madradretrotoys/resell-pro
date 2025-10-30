@@ -405,6 +405,12 @@ label{
   padding: 12px;
 }
 
+/* Placeholder button used to align totals with the item-row action column */
+.btn-placeholder{
+  visibility: hidden;     /* keep space in layout */
+  pointer-events: none;   /* ensure it never intercepts clicks */
+}
+
 /* extra separation between successive items */
 #pos-cart .ticket-row + .ticket-row{
   margin-top: 8px;
