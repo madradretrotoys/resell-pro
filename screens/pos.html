@@ -89,18 +89,102 @@
           <div class="mt-2 pos-pay-row">
             <select id="pos-payment" class="select pos-pay-item">
               <option value="" selected disabled>Select payment…</option>
-              <option value="card">CASH</option>
-              <option value="cash">Visa (Valor)</option>
-              <option value="cash">Master Card (Valor)</option>
-              <option value="cash">Amex (Valor)</option>
-              <option value="cash">Discover (Valor)</option>
-              <option value="cash">Venmo</option>
-              <option value="cash">Zelle</option>
-              <option value="cash">Cashapp</option>
+              <option value="cash">CASH</option>
+              <option value="card:visa">Visa (Valor)</option>
+              <option value="card:mastercard">MasterCard (Valor)</option>
+              <option value="card:amex">Amex (Valor)</option>
+              <option value="card:discover">Discover (Valor)</option>
+              <option value="wallet:venmo">Venmo</option>
+              <option value="wallet:zelle">Zelle</option>
+              <option value="wallet:cashapp">Cash App</option>
             </select>
 
             <button id="pos-split" class="btn btn-ghost pos-pay-item">Split payment</button>
-            <button id="pos-complete" class="btn btn-primary pos-pay-item pos-pay-push">Complete Sale</button>
+            <button id="pos-complete" class="btn btn-primary pos-pay-item pos-pay-push" disabled>Complete Sale</button>
+          </div>
+
+          <!-- CASH PAYMENT MODAL -->
+          <div id="pos-cash-modal" class="modal-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="pos-cash-title">
+            <div class="modal-card card">
+              <div class="flex items-center justify-between mb-2">
+                <div id="pos-cash-title" class="font-semibold">Cash Payment</div>
+                <button id="pos-cash-close" class="btn btn-ghost btn-sm" aria-label="Close">Close</button>
+              </div>
+
+              <div class="stack-16">
+                <div>
+                  <label>Total Due</label>
+                  <input id="pos-cash-total" type="number" class="input" readonly />
+                </div>
+                <div>
+                  <label>Amount Received</label>
+                  <input id="pos-cash-received" type="number" class="input" inputmode="decimal" placeholder="Enter amount received" />
+                </div>
+                <div>
+                  <label>Change Due</label>
+                  <input id="pos-cash-change" type="number" class="input" readonly />
+                </div>
+
+                <div class="flex items-center gap-2">
+                  <button id="pos-cash-exact" class="btn btn-ghost">Exact amount</button>
+                  <button id="pos-cash-round" class="btn btn-ghost">Round to next $</button>
+                  <button id="pos-cash-confirm" class="btn btn-primary pos-pay-push">Confirm Cash</button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- SPLIT PAYMENT MODAL -->
+          <div id="pos-split-modal" class="modal-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="pos-split-title">
+            <div class="modal-card card">
+              <div class="flex items-center justify-between mb-2">
+                <div id="pos-split-title" class="font-semibold">Split Payment</div>
+                <button id="pos-split-close" class="btn btn-ghost btn-sm" aria-label="Close">Close</button>
+              </div>
+
+              <div class="stack-16">
+                <div class="muted text-sm">Distribute the total across multiple payments.</div>
+
+                <div class="overflow-auto">
+                  <table class="table w-full" id="pos-split-table">
+                    <thead>
+                      <tr>
+                        <th class="text-left">Method</th>
+                        <th class="text-left">Amount</th>
+                        <th class="text-left">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody id="pos-split-body">
+                      <!-- rows injected -->
+                    </tbody>
+                  </table>
+                </div>
+
+                <div class="flex items-center gap-2">
+                  <select id="pos-split-method" class="select">
+                    <option value="cash">CASH</option>
+                    <option value="card:visa">Visa (Valor)</option>
+                    <option value="card:mastercard">MasterCard (Valor)</option>
+                    <option value="card:amex">Amex (Valor)</option>
+                    <option value="card:discover">Discover (Valor)</option>
+                    <option value="wallet:venmo">Venmo</option>
+                    <option value="wallet:zelle">Zelle</option>
+                    <option value="wallet:cashapp">Cash App</option>
+                  </select>
+                  <input id="pos-split-amount" type="number" class="input" inputmode="decimal" placeholder="Amount" />
+                  <button id="pos-split-add" class="btn btn-ghost">Add Payment</button>
+                </div>
+
+                <div class="flex items-center justify-between">
+                  <div class="muted">Remaining:</div>
+                  <div id="pos-split-remaining" class="font-semibold">$0.00</div>
+                </div>
+
+                <div class="flex items-center">
+                  <button id="pos-split-confirm" class="btn btn-primary pos-pay-push" disabled>Confirm Split</button>
+                </div>
+              </div>
+            </div>
           </div>
 
             
