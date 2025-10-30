@@ -63,7 +63,9 @@ export async function init(ctx) {
   let meta = {};
   try {
     meta = await api("/api/pos/meta", { method: "GET" });
-    state.taxRate = Number(meta.tax_rate ?? 0);
+    state.previewEnabled = !!meta.preview_enabled;
+    const mRate = Number(meta.tax_rate);
+    if (Number.isFinite(mRate) && mRate > 0) state.taxRate = mRate;
   } catch (err) {
     log(`meta error: ${err?.message || err}`);
     // non-fatal; we’ll render with safe defaults
@@ -116,7 +118,8 @@ export async function init(ctx) {
     return {
       // items: [{ sku, name, price, qty, discount:{mode:'percent'|'amount', value:number} }]
       items: [],
-      taxRate: 0.0,
+      taxRate: 0.080, // temporary default: 8.0%
+      previewEnabled: false, // server preview gate (prevents 405 spam)
       totals: { subtotal: 0, discount: 0, tax: 0, total: 0 },
     };
   }
@@ -349,8 +352,8 @@ export async function init(ctx) {
           </div>
         </div>
   
-        <!-- ROW 3: discount -->
-        <div class="mt-2 grid grid-cols-[auto_auto_1fr_auto] items-center gap-2">
+        <!-- ROW 3: discount (single line; Apply at far right) -->
+        <div class="mt-2 discount-row">
           <span class="text-sm text-muted">Discount</span>
           <div class="flex items-center gap-2">
             <label class="inline-flex items-center gap-1">
@@ -362,8 +365,8 @@ export async function init(ctx) {
               <span>$</span>
             </label>
           </div>
-          <input class="input input-sm" id="pos-discount-input-${idx}" value="${discVal}" placeholder="${modePercent ? 'Enter percent' : 'Enter dollars'}" />
-          <button class="btn btn-primary btn-sm" data-apply-discount="${idx}">Apply</button>
+          <input class="input input-sm w-[120px]" id="pos-discount-input-${idx}" value="${discVal}" placeholder="${modePercent ? 'Enter percent' : 'Enter dollars'}" />
+          <button class="btn btn-primary btn-sm push" data-apply-discount="${idx}">Apply</button>
         </div>
       </div>
     `;
@@ -412,6 +415,8 @@ export async function init(ctx) {
           const val = Number(row?.value || 0);
           if (!state.items[idx]) return;
           state.items[idx].discount = { mode, value: isFinite(val) ? val : 0 };
+          // Repaint row so the right-side line total updates immediately
+          render();
           await refreshTotalsViaServer();
         });
       });
@@ -425,7 +430,17 @@ export async function init(ctx) {
           await refreshTotalsViaServer();
         });
       });
-  
+
+      el.cart.querySelectorAll("[data-remove]").forEach((btn) => {
+        btn.addEventListener("click", async () => {
+          const idx = Number(btn.getAttribute("data-remove"));
+          if (!Number.isInteger(idx)) return;
+          state.items.splice(idx, 1);
+          render();
+          await refreshTotalsViaServer();
+        });
+      });
+    
       // totals (client fallback until server calculates)
       computeTotalsClient();
       paintTotals();
@@ -447,34 +462,41 @@ export async function init(ctx) {
     }
 
 
-  async function refreshTotalsViaServer() {
-    try {
-      const body = { items: state.items };
-      const r = await api("/api/pos/price/preview", { method: "POST", json: body });
-      if (r && typeof r.subtotal === "number") {
-        state.totals = {
-          subtotal: r.subtotal,
-          discount: r.discount,
-          tax: r.tax,
-          total: r.total,
-        };
-        if (typeof r.tax_rate === "number") state.taxRate = r.tax_rate;
-        if (r.capped && r.message) {
-          el.banner.classList.remove("hidden");
-          el.banner.innerHTML = `<div class="card p-2">${escapeHtml(r.message)}</div>`;
-        } else {
-          el.banner.classList.add("hidden");
-          el.banner.innerHTML = "";
-        }
-      } else {
+    async function refreshTotalsViaServer() {
+      if (!state.previewEnabled) {
+        // Use client math only; keep console clean (no 405s)
         computeTotalsClient();
+        paintTotals();
+        return;
       }
-    } catch (err) {
-      computeTotalsClient();
-      log(`preview failed: ${err?.message || err}`);
+    
+      try {
+        const body = { items: state.items };
+        const r = await api("/api/pos/price/preview", { method: "POST", json: body });
+        if (r && typeof r.subtotal === "number") {
+          state.totals = {
+            subtotal: r.subtotal,
+            discount: r.discount,
+            tax: r.tax,
+            total: r.total,
+          };
+          if (typeof r.tax_rate === "number") state.taxRate = r.tax_rate;
+          if (r.capped && r.message) {
+            el.banner.classList.remove("hidden");
+            el.banner.innerHTML = `<div class="card p-2">${escapeHtml(r.message)}</div>`;
+          } else {
+            el.banner.classList.add("hidden");
+            el.banner.innerHTML = "";
+          }
+        } else {
+          computeTotalsClient();
+        }
+      } catch (err) {
+        computeTotalsClient();
+        log(`preview failed: ${err?.message || err}`);
+      }
+      paintTotals();
     }
-    paintTotals();
-  }
 
   function paintTotals() {
     el.subtotal.textContent = fmtCurrency(state.totals.subtotal);
