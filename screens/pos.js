@@ -39,17 +39,15 @@ export async function init(ctx) {
     split: root.querySelector("#pos-split"),
     customer: root.querySelector("#pos-customer"),
     complete: root.querySelector("#pos-complete"),
-    // cash modal
-    cashModal: root.querySelector("#pos-cash-modal"),
+    // cash panel
+    cashPanel: root.querySelector("#pos-cash-panel"),
     cashClose: root.querySelector("#pos-cash-close"),
-    cashTotal: root.querySelector("#pos-cash-total"),
+    cashTotalTxt: root.querySelector("#pos-cash-total-txt"),
     cashReceived: root.querySelector("#pos-cash-received"),
-    cashChange: root.querySelector("#pos-cash-change"),
-    cashExact: root.querySelector("#pos-cash-exact"),
-    cashRound: root.querySelector("#pos-cash-round"),
+    cashChangeTxt: root.querySelector("#pos-cash-change-txt"),
     cashConfirm: root.querySelector("#pos-cash-confirm"),
-    // split modal
-    splitModal: root.querySelector("#pos-split-modal"),
+    // split panel
+    splitPanel: root.querySelector("#pos-split-panel"),
     splitClose: root.querySelector("#pos-split-close"),
     splitTable: root.querySelector("#pos-split-table"),
     splitBody: root.querySelector("#pos-split-body"),
@@ -261,56 +259,53 @@ export async function init(ctx) {
 
   
 
-  function wireTotals() {
-    // Enable/disable Complete based on whether a payment is set
+    function wireTotals() {
     const refreshCompleteEnabled = () => {
       el.complete.disabled = !state.payment || !state.items.length;
     };
+    const show = (n) => n && n.classList.remove("hidden");
+    const hide = (n) => n && n.classList.add("hidden");
 
-    // Open/close helpers
-    const open = (node) => { node?.classList.remove("hidden"); };
-    const close = (node) => { node?.classList.add("hidden"); };
+    // ---------- CASH (panel) ----------
+    const fmtMoney = (n) => (Number(n || 0) < 0 ? "-$" : "$") + Math.abs(Number(n || 0)).toFixed(2);
 
-    // ---------- CASH ----------
     const paintCash = () => {
       const total = Number(state.totals.total || 0);
       const received = Number(el.cashReceived.value || 0);
       const change = Math.max(0, received - total);
-      el.cashTotal.value = total.toFixed(2);
-      el.cashChange.value = change.toFixed(2);
+      el.cashTotalTxt.textContent = fmtMoney(total);
+      el.cashChangeTxt.textContent = fmtMoney(change);
     };
 
-    const startCashFlow = () => {
-      // prefill and show modal
+    const openCash = () => {
       el.cashReceived.value = "";
       paintCash();
-      open(el.cashModal);
-      // focus for speed
+      show(el.cashPanel);
+      hide(el.splitPanel);
       setTimeout(() => el.cashReceived?.focus?.(), 0);
     };
+
+    const closeCash = () => hide(el.cashPanel);
 
     el.payment.addEventListener("change", () => {
       const v = el.payment.value;
       if (v === "cash") {
-        startCashFlow();
+        openCash();
+        state.payment = null; // wait for confirm
+      } else if (v) {
+        // single non-cash method (no processor yet)
+        closeCash();
+        hide(el.splitPanel);
+        state.payment = { type: "single", method: v, amount: Number(state.totals.total || 0) };
       } else {
-        // for non-cash direct selections, just record a simple payment stub (no processor yet)
-        state.payment = v ? { type: "single", method: v, amount: Number(state.totals.total || 0) } : null;
-        refreshCompleteEnabled();
+        closeCash();
+        hide(el.splitPanel);
+        state.payment = null;
       }
+      refreshCompleteEnabled();
     });
 
-    el.cashClose.addEventListener("click", () => close(el.cashModal));
-    el.cashExact.addEventListener("click", () => {
-      el.cashReceived.value = String(Number(state.totals.total || 0).toFixed(2));
-      paintCash();
-    });
-    el.cashRound.addEventListener("click", () => {
-      const total = Number(state.totals.total || 0);
-      const rounded = Math.ceil(total);
-      el.cashReceived.value = String(rounded.toFixed(2));
-      paintCash();
-    });
+    el.cashClose.addEventListener("click", () => { closeCash(); el.payment.value = ""; state.payment = null; refreshCompleteEnabled(); });
     el.cashReceived.addEventListener("input", paintCash);
 
     el.cashConfirm.addEventListener("click", () => {
@@ -322,36 +317,26 @@ export async function init(ctx) {
       }
       const change = Math.max(0, received - total);
       state.payment = { type: "cash", amount: total, received, change };
-      el.payment.value = "cash"; // reflect choice in the row
-      close(el.cashModal);
+      closeCash();
       refreshCompleteEnabled();
     });
 
-    // ---------- SPLIT ----------
-    const fmtMoney = (n) => (Number(n || 0) < 0 ? "-$" : "$") + Math.abs(Number(n || 0)).toFixed(2);
-
+    // ---------- SPLIT (panel) ----------
     const paintSplitTable = () => {
-      // rows
-      el.splitBody.innerHTML = state.splitParts.map((p, i) => {
-        return `
-          <tr>
-            <td>${escapeHtml(p.method_label || p.method)}</td>
-            <td>${fmtMoney(p.amount)}</td>
-            <td><button class="btn btn-xs btn-ghost" data-split-remove="${i}">Remove</button></td>
-          </tr>
-        `;
-      }).join("");
+      el.splitBody.innerHTML = state.splitParts.map((p, i) => `
+        <tr>
+          <td>${escapeHtml(p.method_label || p.method)}</td>
+          <td>${fmtMoney(p.amount)}</td>
+          <td><button class="btn btn-xs btn-ghost" data-split-remove="${i}">Remove</button></td>
+        </tr>
+      `).join("");
 
-      // remaining
       const total = Number(state.totals.total || 0);
       const paid = state.splitParts.reduce((s, p) => s + Number(p.amount || 0), 0);
       const remaining = Math.max(0, total - paid);
       el.splitRemaining.textContent = fmtMoney(remaining);
-
-      // confirm only when exact match
       el.splitConfirm.disabled = !(remaining === 0 && state.splitParts.length > 0);
 
-      // bind remove
       el.splitBody.querySelectorAll("[data-split-remove]").forEach(btn => {
         btn.addEventListener("click", () => {
           const idx = Number(btn.getAttribute("data-split-remove") || -1);
@@ -378,14 +363,16 @@ export async function init(ctx) {
     };
 
     el.split.addEventListener("click", () => {
-      // reset working set for the modal
+      hide(el.cashPanel);
       state.splitParts = [];
       el.splitAmount.value = "";
       el.splitMethod.value = "cash";
       paintSplitTable();
-      open(el.splitModal);
+      show(el.splitPanel);
+      refreshCompleteEnabled();
     });
-    el.splitClose.addEventListener("click", () => close(el.splitModal));
+
+    el.splitClose.addEventListener("click", () => { hide(el.splitPanel); refreshCompleteEnabled(); });
 
     el.splitAdd.addEventListener("click", () => {
       const m = el.splitMethod.value;
@@ -399,10 +386,10 @@ export async function init(ctx) {
     el.splitConfirm.addEventListener("click", () => {
       const total = Number(state.totals.total || 0);
       const paid = state.splitParts.reduce((s, p) => s + Number(p.amount || 0), 0);
-      if (paid !== total) return; // safety
+      if (paid !== total) return;
       state.payment = { type: "split", total, parts: [...state.splitParts] };
+      hide(el.splitPanel);
       el.payment.value = ""; // reflect split (no single method selected)
-      close(el.splitModal);
       refreshCompleteEnabled();
     });
 
@@ -410,7 +397,6 @@ export async function init(ctx) {
     el.complete.addEventListener("click", async () => {
       if (!state.items.length || !state.payment) return;
 
-      // For now we keep a simple string description for server logging; processor wiring later.
       let paymentDesc = "";
       if (state.payment.type === "cash") {
         paymentDesc = `cash:${state.payment.amount.toFixed(2)};received=${state.payment.received.toFixed(2)};change=${state.payment.change.toFixed(2)}`;
@@ -422,14 +408,11 @@ export async function init(ctx) {
 
       try {
         const body = {
-          items: state.items,                     // items carry their own {discount}
+          items: state.items,
           customer: (el.customer?.value || "").trim() || null,
-          payment: paymentDesc,                   // temporary descriptor until processor integration
+          payment: paymentDesc,
         };
-        const res = await api("/api/pos/checkout/start", {
-          method: "POST",
-          json: body,
-        });
+        const res = await api("/api/pos/checkout/start", { method: "POST", json: body });
         log(res);
         el.banner.classList.remove("hidden");
         el.banner.innerHTML = `<div class="card p-2">Sale started — awaiting processor result…</div>`;
@@ -439,9 +422,17 @@ export async function init(ctx) {
       }
     });
 
-    // initial enablement
+    // Keep cash totals display fresh if panel is open when totals change
+    const origPaintTotals = paintTotals;
+    const self = this;
+    paintTotals = function() {
+      origPaintTotals.call(self);
+      if (!el.cashPanel.classList.contains("hidden")) paintCash();
+    };
+
     refreshCompleteEnabled();
   }
+
 
   function wireSales() {
     el.salesToday.addEventListener("click", async () => {
