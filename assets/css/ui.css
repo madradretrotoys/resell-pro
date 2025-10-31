@@ -64,6 +64,15 @@
 /* Typography helpers */
 .muted{ color: var(--muted); }
 
+/* Section titles (used in POS & cards) */
+.section-title{
+  font-weight: 700;
+  font-size: 18px;
+  line-height: 1.3;
+  margin: 0 0 10px;   /* consistent spacing below the heading */
+  color: var(--text);
+}
+
 /* Fields */
 input[type="text"], input[type="number"], input[type="email"], select, textarea{
   /* display: block;  ← remove to stop default stacking */
