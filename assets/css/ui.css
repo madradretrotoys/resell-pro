@@ -84,9 +84,10 @@ textarea{
 
 label{
   display: inline-block;
-  margin-bottom: 8px;
+  margin-bottom: 0;            /* remove global stacked-form spacing */
   font-size: 14px;
-  color: var(--text);           /* labels readable on white */
+  color: var(--text);
+  vertical-align: middle;      /* play nicer in inline/flex rows */
 }
 
 /* ===== Marketplace Settings list ===== */
