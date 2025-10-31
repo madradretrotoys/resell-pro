@@ -263,10 +263,10 @@ export async function init(ctx) {
       const refreshCompleteEnabled = () => {
         el.complete.disabled = !state.payment || !state.items.length;
       };
-      const show = (n) => n && n.classList.remove("hidden");
-      const hide = (n) => n && n.classList.add("hidden");
+      const show = (n) => { if (n) n.style.display = ""; };
+      const hide = (n) => { if (n) n.style.display = "none"; };
     
-      // Ensure payment panels are hidden on screen load
+      // Ensure payment panels are hidden on screen load (independent of CSS classes)
       hide(el.cashPanel);
       hide(el.splitPanel);
 
@@ -431,7 +431,7 @@ export async function init(ctx) {
         const self = this;
         paintTotals = function() {
           origPaintTotals.call(self);
-          if (!el.cashPanel.classList.contains("hidden")) paintCash();
+          if (el.cashPanel && el.cashPanel.style.display !== "none") paintCash();
         };
     
         refreshCompleteEnabled();
