@@ -128,7 +128,7 @@
             <div id="pos-split-panel" class="card pos-panel pos-compact" style="display:none">
               <div class="font-semibold text-lg">Split Payment</div>
               <div class="flex items-center gap-2 flex-wrap mb-2">
-                <select id="pos-split-method" class="select input-sm w-[220px]">
+                <select id="pos-split-method" class="select input-sm pos-w-method">
                   <option value="cash">CASH</option>
                   <option value="card:visa">Visa (Valor)</option>
                   <option value="card:mastercard">MasterCard (Valor)</option>
@@ -138,7 +138,7 @@
                   <option value="wallet:zelle">Zelle</option>
                   <option value="wallet:cashapp">Cash App</option>
                 </select>
-                <input id="pos-split-amount" type="number" class="input input-sm w-[120px]" inputmode="decimal" placeholder="Amount" />
+                <input id="pos-split-amount" type="number" class="input input-sm pos-w-amount" inputmode="decimal" placeholder="Amount" />
                 <button id="pos-split-add" class="btn btn-ghost btn-sm">Add Payment</button>
               </div>
   
@@ -158,7 +158,7 @@
               <div class="flex items-center gap-2 mt-2">
                 <div class="muted">Remaining:</div>
                 <div id="pos-split-remaining" class="font-semibold">$0.00</div>
-                <button id="pos-split-confirm" class="btn btn-primary btn-sm ml-auto" disabled>Confirm Split</button>
+                <button id="pos-split-confirm" class="btn btn-primary btn-sm pos-push" disabled>Confirm Split</button>
                 <button id="pos-split-close" class="btn btn-ghost btn-sm">Close</button>
               </div>
             </div>
