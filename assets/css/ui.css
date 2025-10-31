@@ -591,3 +591,11 @@ label{
 }
 
 .modal-card .stack-16 > * + *{ margin-top: 16px; }
+
+/* ===== POS panel compact helpers (scoped, safe) ===== */
+.pos-w-amount { width: 120px; }
+.pos-w-method { width: 220px; }
+.pos-push     { margin-left: auto; }
+
+
+
