@@ -16,7 +16,7 @@
     <!-- LEFT: Search / Results -->
     <div class="card p-3">
       <div class="flex items-center justify-between mb-2">
-        <div class="font-semibold">Inventory Search</div>
+        <div class="section-title">Inventory Search</div>
       </div>
       <div class="flex items-center gap-2 mb-2">
         <input id="pos-search" class="input w-full" placeholder="+ Misc — or — type to search" />
@@ -38,13 +38,13 @@
       <!-- RIGHT: Ticket -->
       <div class="card p-3">
         <div class="flex items-center justify-between mb-2">
-          <div class="font-semibold">Ticket</div>
+          <div class="section-title">Ticket</div>
           <div class="flex items-center gap-2">
             <button id="pos-ticket-empty" class="btn btn-ghost btn-sm">Empty</button>
           </div>
         </div>
 
-                <!-- Full-width Ticket column: Cart → Totals → Payment row -->
+        <!-- Full-width Ticket column: Cart → Totals → Payment row -->
         <div>
           <!-- CART (full width) -->
           <div id="pos-cart" class="grid grid-cols-1 gap-2">
@@ -119,8 +119,10 @@
                   <label>Change Due</label>
                   <div id="pos-cash-change-txt" class="pos-static pos-w-amount text-right">$0.00</div>
                 </div>
-                <button id="pos-cash-confirm" class="btn btn-primary btn-sm pos-push">Confirm Cash</button>
-                <button id="pos-cash-close" class="btn btn-ghost btn-sm">Close</button> 
+                <div class="flex items-center gap-2 pos-push">
+                  <button id="pos-cash-confirm" class="btn btn-primary btn-sm">Confirm Cash</button>
+                  <button id="pos-cash-close" class="btn btn-ghost btn-sm">Close</button>
+                </div>
               </div>
             </div>
   
@@ -158,8 +160,10 @@
               <div class="flex items-center gap-2 mt-2">
                 <div class="muted">Remaining:</div>
                 <div id="pos-split-remaining" class="font-semibold">$0.00</div>
-                <button id="pos-split-confirm" class="btn btn-primary btn-sm pos-push" disabled>Confirm Split</button>
-                <button id="pos-split-close" class="btn btn-ghost btn-sm">Close</button>
+                <div class="flex items-center gap-2 pos-push">
+                  <button id="pos-split-confirm" class="btn btn-primary btn-sm" disabled>Confirm Split</button>
+                  <button id="pos-split-close" class="btn btn-ghost btn-sm">Close</button>
+                </div>
               </div>
             </div>
 
