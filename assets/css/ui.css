@@ -591,3 +591,39 @@ label{
 }
 
 .modal-card .stack-16 > * + *{ margin-top: 16px; }
+
+/* ===== Global utility ===== */
+.hidden{ display: none !important; }  /* make hidden work outside intake */
+
+/* ===== POS compact payment layout ===== */
+.pos-compact .btn{ height: 32px; padding: 0 12px; }          /* like .btn-sm */
+.pos-compact .input,
+.pos-compact .select{ height: 32px; }                         /* compact fields */
+.pos-panel{ margin-top: 8px; }                                /* small separation */
+
+/* Stop 100% width inside compact payment rows */
+.pos-compact .input,
+.pos-compact .select{ width: auto; }
+
+/* Narrow, reasonable widths */
+.pos-w-method{ width: 240px; max-width: 100%; }
+.pos-w-amount{ width: 140px; max-width: 100%; }
+.pos-w-change{ width: 120px; max-width: 100%; }
+
+/* Static value style to match totals */
+.pos-static{
+  min-height: 32px;
+  display: inline-flex;
+  align-items: center;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--field-radius);
+  background: #fff;
+}
+
+/* Small labeled field block */
+.pos-field{ display:flex; flex-direction:column; gap:6px; }
+.pos-field label{ margin:0; font-size: 12px; color: var(--muted); }
+
+
+
