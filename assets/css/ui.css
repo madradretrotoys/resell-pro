@@ -19,7 +19,7 @@
   --field-radius: 12px;
   --field-pad-x: 12px;
 
-  --gap-16: 16px;f
+  --gap-16: 16px;
   --gap-24: 24px;
 
   --text: #111827;         /* neutral-900 */
@@ -592,10 +592,26 @@ label{
 
 .modal-card .stack-16 > * + *{ margin-top: 16px; }
 
-/* ===== POS panel compact helpers (scoped, safe) ===== */
-.pos-w-amount { width: 120px; }
-.pos-w-method { width: 220px; }
-.pos-push     { margin-left: auto; }
+/* ===== POS: neutralize framework width defaults inside POS panels =====
+   This ensures inputs/selects in POS payment panels do NOT stretch to 100%
+   unless you explicitly opt in with .input-full or a specific width helper. */
+.pos-panel .input,
+.pos-panel .select,
+.pos-panel input[type="text"],
+.pos-panel input[type="number"],
+.pos-panel input[type="email"],
+.pos-panel select,
+.pos-panel textarea{
+  width: auto;
+  max-width: 100%;
+}
 
+/* ===== POS panel compact helpers (higher specificity so they win) ===== */
+.pos-panel .pos-w-amount { width: 120px; }   /* e.g., Amount Received, Change Due */
+.pos-panel .pos-w-method { width: 220px; }   /* e.g., Split Method select */
+.pos-panel .pos-push     { margin-left: auto; }  /* push Confirm to the far right */
+
+/* ===== Generic full-width opt-in (use only where you WANT full width) ===== */
+.input-full { width: 100%; }
 
 
