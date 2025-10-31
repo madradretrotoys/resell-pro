@@ -127,9 +127,9 @@
             </div>
   
             <!-- SPLIT PANEL (inline; hidden until Split clicked) -->
-            <div id="pos-split-panel" class="card pos-panel pos-compact" style="display:none">
-              <div class="font-semibold text-lg">Split Payment</div>
-              <div class="flex items-center gap-2 flex-wrap mb-2">
+              <div id="pos-split-panel" class="card pos-panel pos-compact" style="display:none">
+                <div class="section-title">Split Payment</div>
+                <div class="flex items-center gap-2 flex-wrap mb-2">
                 <select id="pos-split-method" class="select input-sm pos-w-method">
                   <option value="cash">CASH</option>
                   <option value="card:visa">Visa (Valor)</option>
@@ -185,9 +185,9 @@
     <!-- BELOW: Sales list (today/custom) -->
     <div class="card p-3 mt-3">
       <div class="flex items-center justify-between mb-2">
-        <div class="font-semibold">Sales (Today / Custom)</div>
+        <div class="section-title">Sales (Today / Custom)</div>
         <div class="flex items-center gap-2">
-          <button id="pos-sales-today" class="btn btn-sm">Today</button>
+            <button id="pos-sales-today" class="btn btn-sm">Today</button>
           <span class="text-sm">or</span>
           <input id="pos-date-from" type="date" class="input input-sm" />
           <span class="text-sm">to</span>
