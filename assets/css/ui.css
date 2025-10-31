@@ -592,6 +592,11 @@ label{
 
 .modal-card .stack-16 > * + *{ margin-top: 16px; }
 
+/* ===== Opt-in helpers (use only where you want the old behavior) ===== */
+.label-stack { display: inline-block; margin-bottom: 8px; } /* stacked label spacing */
+.input-full  { width: 100%; }                                /* stretch when desired */
+
+
 /* ===== POS: neutralize framework width defaults inside POS panels =====
    This ensures inputs/selects in POS payment panels do NOT stretch to 100%
    unless you explicitly opt in with .input-full or a specific width helper. */
