@@ -557,3 +557,37 @@ label{
   #inventory-intake-screen{ --gap: 20px; }
   #inventory-intake-screen .sectionTitle{ margin-bottom: 14px; }
 }
+
+/* ===== Modal Overlay + Card (POS) ===== */
+.modal-overlay{
+  position: fixed;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  background: rgba(17, 24, 39, 0.45); /* neutral-900 @ ~45% */
+  z-index: 1000;
+}
+
+.modal-overlay.hidden{ display: none; }
+
+.modal-card{
+  width: min(560px, calc(100vw - 32px));
+  box-sizing: border-box;
+  padding: var(--card-pad-d);
+  border-radius: var(--card-radius);
+}
+
+@media (max-width: 640px){
+  .modal-card{
+    width: calc(100vw - 24px);
+    padding: var(--card-pad-m);
+  }
+}
+
+/* Keep inputs comfortable inside modals */
+.modal-card .input,
+.modal-card .select{
+  height: var(--field-h);
+}
+
+.modal-card .stack-16 > * + *{ margin-top: 16px; }
