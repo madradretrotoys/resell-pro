@@ -537,7 +537,7 @@ export async function init(ctx) {
             </label>
           </div>
           <input class="input input-sm w-[120px]" id="pos-discount-input-${idx}" value="${discVal}" placeholder="${modePercent ? 'Enter percent' : 'Enter dollars'}" />
-          <button class="btn btn-primary btn-sm push" data-apply-discount="${idx}">Apply</button>
+          <button class="btn btn-primary btn-sm" data-apply-discount="${idx}">Apply</button>
         </div>
       </div>
     `;
