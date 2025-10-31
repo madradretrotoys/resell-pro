@@ -66,8 +66,7 @@
 
 /* Fields */
 input[type="text"], input[type="number"], input[type="email"], select, textarea{
-  display: block;
-  
+  /* display: block;  ← remove to stop default stacking */
   height: var(--field-h);
   border: 1px solid var(--border);
   border-radius: var(--field-radius);
