@@ -489,7 +489,8 @@ export async function init(ctx) {
     const isMisc = !it.sku;
     const metaParts = [];
     if (it.sku) metaParts.push(it.sku);
-    if (typeof it.price === "number") metaParts.push(fmtCurrency(it.price));
+    // Only show the unit price in meta for inventoried items
+    if (it.sku && typeof it.price === "number") metaParts.push(fmtCurrency(it.price));
     if (it.inventory_qty) metaParts.push(`Qty:${it.inventory_qty}`);
     if (it.instore_loc) metaParts.push(it.instore_loc);
     if (it.case_bin_shelf) metaParts.push(it.case_bin_shelf);
@@ -529,9 +530,11 @@ export async function init(ctx) {
           </div>
   
           <div class="flex items-center gap-2 flex-1 justify-end flex-wrap">
+            ${priceCell}
             <div class="ticket-line-total text-right">${lineTotal}</div>
             <button class="btn btn-ghost btn-xs" data-remove="${idx}">Remove</button>
           </div>
+          
         </div>
   
         <!-- ROW 3: discount (single line; Apply at far right) -->
