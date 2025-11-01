@@ -116,6 +116,14 @@ export async function init(ctx) {
         discount: { mode: "percent", value: 0 }
       });
       render();
+    
+      // Put the caret in the newly-added Misc price field so you can type immediately
+      const priceInputs = el.cart.querySelectorAll("[data-price]");
+      const last = priceInputs[priceInputs.length - 1];
+      if (last) {
+        last.focus();
+        last.select?.();
+      }
     });
   }
 
@@ -491,7 +499,10 @@ export async function init(ctx) {
     const discVal = (it.discount?.value ?? 0);
   
     const priceCell = isMisc
-      ? `<input class="input input-sm w-[88px] text-right" value="${Number(it.price || 0)}" data-price="${idx}" />`
+      ? `<input type="number" inputmode="decimal" step="0.01" min="0"
+           class="input input-sm w-[88px] text-right"
+           value="${Number(it.price || 0)}"
+           data-price="${idx}" />`
       : `<div class="w-[88px] text-right font-medium">${fmtCurrency(it.price)}</div>`;
   
     const lineTotal = fmtCurrency(
@@ -598,6 +609,11 @@ export async function init(ctx) {
           const val = Number(inp.value || 0);
           if (!isFinite(val)) return;
           state.items[idx].price = val;
+      
+          // Repaint this row immediately so the visible line total updates as you type
+          render();
+      
+          // Then recompute preview totals (client or server)
           await refreshTotalsViaServer();
         });
       });
