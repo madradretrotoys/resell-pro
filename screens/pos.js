@@ -64,6 +64,11 @@ export async function init(ctx) {
     dateTo: root.querySelector("#pos-date-to"),
     salesLoad: root.querySelector("#pos-sales-load"),
     salesBody: root.querySelector("#pos-sales-body"),
+
+    // VALOR status / fallback
+    valorBar: root.querySelector("#pos-valor-bar"),
+    valorMsg: root.querySelector("#pos-valor-msg"),
+    valorFinalize: root.querySelector("#pos-valor-finalize"),
   };
 
   try {
@@ -83,11 +88,20 @@ export async function init(ctx) {
     state.previewEnabled = !!meta.preview_enabled;
     const mRate = Number(meta.tax_rate);
     if (Number.isFinite(mRate) && mRate > 0) state.taxRate = mRate;
+
+    // Valor config surfaced by the server (defaults are safe if absent)
+    state.valor = {
+      enabled: !!meta.valor_enabled,
+      environment: meta.valor_environment || "production",
+      ackTimeoutMs: Number(meta.valor_ack_timeout_ms ?? 12000),
+      pollIntervalMs: Number(meta.valor_poll_interval_ms ?? 1200),
+      pollTimeoutMs: Number(meta.valor_poll_timeout_ms ?? 40000),
+    };
   } catch (err) {
     log(`meta error: ${err?.message || err}`);
     // non-fatal; we’ll render with safe defaults
   } finally {
-    // Always clear the spinner and render the screen
+    // Always clear the spinner and
     swap("content");
     wireSearch();
     wireCart();
@@ -408,7 +422,8 @@ export async function init(ctx) {
         // ---------- COMPLETE ----------
         el.complete.addEventListener("click", async () => {
           if (!state.items.length || !state.payment) return;
-    
+
+          // Describe the payment succinctly (mirrors the legacy)
           let paymentDesc = "";
           if (state.payment.type === "cash") {
             paymentDesc = `cash:${state.payment.amount.toFixed(2)};received=${state.payment.received.toFixed(2)};change=${state.payment.change.toFixed(2)}`;
@@ -417,17 +432,128 @@ export async function init(ctx) {
           } else if (state.payment.type === "single") {
             paymentDesc = state.payment.method;
           }
-    
+
           try {
             const body = {
               items: state.items,
               customer: (el.customer?.value || "").trim() || null,
               payment: paymentDesc,
             };
+
             const res = await api("/api/pos/checkout/start", { method: "POST", json: body });
             log(res);
+
+            // If no processor is involved, the server may return completed immediately
+            if (res?.status === "completed" && res?.sale_id) {
+              el.banner.classList.remove("hidden");
+              el.banner.innerHTML = `<div class="card p-2">Sale completed. Receipt #${escapeHtml(res.sale_id)}</div>`;
+              state.items = [];
+              state.payment = null;
+              render();
+              return;
+            }
+
+            // Card flow: show Valor bar and start polling
+            if (res?.status === "waiting_for_valor" && res?.invoice) {
+              el.banner.classList.remove("hidden");
+              el.banner.innerHTML = `<div class="card p-2">Sale started — awaiting processor result…</div>`;
+
+              // Show VALOR bar
+              el.valorBar?.classList.remove("hidden");
+              el.valorMsg.textContent = `Waiting (invoice ${res.invoice})…`;
+
+              // Reveal manual finalize after ackTimeout
+              const ackMs = state?.valor?.ackTimeoutMs ?? 12000;
+              const pollMs = state?.valor?.pollIntervalMs ?? 1200;
+              const pollTimeout = state?.valor?.pollTimeoutMs ?? 40000;
+
+              let revealed = false;
+              let elapsed = 0;
+              let done = false;
+              let timerId = null;
+
+              const revealTimer = setTimeout(() => {
+                if (done) return;
+                revealed = true;
+                el.valorFinalize?.classList.remove("hidden");
+              }, ackMs);
+
+              // Manual finalize
+              el.valorFinalize.onclick = async () => {
+                try {
+                  el.valorFinalize.disabled = true;
+                  el.valorMsg.textContent = "Finalizing without reply…";
+                  const ff = await api("/api/pos/checkout/force-finalize", {
+                    method: "POST",
+                    json: { invoice: res.invoice }
+                  });
+                  if (ff?.ok && ff?.sale_id) {
+                    el.banner.classList.remove("hidden");
+                    el.banner.innerHTML = `<div class="card p-2">Sale finalized. Receipt #${escapeHtml(ff.sale_id)}</div>`;
+                  } else {
+                    showToast("Could not finalize yet — still waiting on data.");
+                  }
+                } catch (e) {
+                  showToast(`Finalize failed: ${e?.message || e}`);
+                } finally {
+                  el.valorFinalize.disabled = false;
+                }
+              };
+
+              // Poll function
+              const pollOnce = async () => {
+                try {
+                  const r = await api(`/api/pos/checkout/status?invoice=${encodeURIComponent(res.invoice)}`, { method: "GET" });
+                  if (r?.status === "pending") return; // keep waiting
+
+                  done = true;
+                  clearInterval(timerId);
+                  clearTimeout(revealTimer);
+                  el.valorFinalize?.classList.add("hidden");
+
+                  if (r?.status === "approved" && r?.sale_id) {
+                    el.valorMsg.textContent = "Approved";
+                    el.banner.classList.remove("hidden");
+                    el.banner.innerHTML = `<div class="card p-2">Sale approved. Receipt #${escapeHtml(r.sale_id)}</div>`;
+                    state.items = [];
+                    state.payment = null;
+                    render();
+                    return;
+                  }
+                  if (r?.status === "declined") {
+                    el.valorMsg.textContent = "Declined";
+                    const msg = r?.message ? ` — ${escapeHtml(r.message)}` : "";
+                    el.banner.classList.remove("hidden");
+                    el.banner.innerHTML = `<div class="card p-2">Card declined${msg}</div>`;
+                    return;
+                  }
+
+                  // Unknown terminal state
+                  el.valorMsg.textContent = "Unknown status";
+                } catch (e) {
+                  // Non-fatal: keep polling
+                }
+              };
+
+              // Start polling up to pollTimeout
+              timerId = setInterval(() => {
+                elapsed += pollMs;
+                if (elapsed >= pollTimeout) {
+                  clearInterval(timerId);
+                  // Timeout (keep finalize visible if revealed)
+                  if (!revealed) el.valorFinalize?.classList.remove("hidden");
+                  el.valorMsg.textContent = "Still waiting…";
+                } else {
+                  pollOnce();
+                }
+              }, pollMs);
+
+              return;
+            }
+
+            // Fallback for unexpected response
             el.banner.classList.remove("hidden");
-            el.banner.innerHTML = `<div class="card p-2">Sale started — awaiting processor result…</div>`;
+            el.banner.innerHTML = `<div class="card p-2">Checkout started. Waiting on processor…</div>`;
           } catch (err) {
             el.banner.classList.remove("hidden");
             el.banner.innerHTML = `<div class="card p-2">Checkout failed: ${escapeHtml(err?.message || String(err))}</div>`;
