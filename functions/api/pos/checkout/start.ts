@@ -3,6 +3,7 @@
 // If no card is involved, finalizes the sale immediately.
 //
 // NOTE: Mirrors legacy field names (e.g., invoicenumber) for compatibility.
+import { neon } from "@neondatabase/serverless";
 
 export const onRequest: PagesFunction<Env> = async (ctx) => {
   const { request, env } = ctx;
@@ -92,22 +93,67 @@ async function computeTotals(env: Env, tenantId: string, items: any[]) {
   return { items, totals: { subtotal, discount: 0, tax, total } };
 }
 
-async function finalizeSale(env: Env, tenantId: string, args: { items: any[], totals: any, payment: string, snapshot: any }) {
-  // TODO: insert into app.sales and related lines, return human-friendly receipt/sale ID
-  // For now, return synthetic id
-  return "S-" + Math.floor(Date.now() / 1000);
+async function finalizeSale(
+  env: Env,
+  tenantId: string,
+  args: { items: any[]; totals: any; payment: string; snapshot: any }
+) {
+  const sql = neon(env.DATABASE_URL);
+  const snapshot = JSON.stringify({
+    items: args.items,
+    totals: args.totals,
+    payment: args.payment,
+    raw: args.snapshot,
+  });
+
+  const rows = await sql/*sql*/`
+    INSERT INTO app.sales (tenant_id, sale_ts, subtotal, tax, total, payment, pos_snapshot)
+    VALUES (${tenantId}::uuid, now(), ${args.totals.subtotal}::numeric, ${args.totals.tax}::numeric,
+            ${args.totals.total}::numeric, ${args.payment}, ${snapshot}::jsonb)
+    RETURNING sale_id
+  `;
+  return rows[0]?.sale_id || null;
 }
 
 async function insertValorPublish(env: Env, row: any) {
-  // TODO: insert into app.valor_publish
+  const sql = neon(env.DATABASE_URL);
+  const payload = JSON.stringify(row.payload ?? {});
+  await sql/*sql*/`
+    INSERT INTO app.valor_publish
+      (tenant_id, req_txn_id, invoice_number, phase, http, url, payload, status, created_at)
+    VALUES
+      (${row.tenant_id}::uuid, ${row.req_txn_id}, ${row.invoice_number},
+       ${row.phase || "start"}, ${row.http || "POST"}, ${row.url || ""},
+       ${payload}::jsonb, 'created', now())
+  `;
 }
 
 async function openValorSession(env: Env, row: any) {
-  // TODO: insert into app.valor_sessions_log
+  const sql = neon(env.DATABASE_URL);
+  const snap = JSON.stringify({
+    items: row.items ?? [],
+    totals: row.totals ?? null,
+    payment: row.payment ?? null
+  });
+  await sql/*sql*/`
+    INSERT INTO app.valor_sessions_log
+      (tenant_id, invoice_number, req_txn_id, attempt, amount_cents, status, started_at, pos_snapshot, webhook_json)
+    VALUES
+      (${row.tenant_id}::uuid, ${row.invoice_number}, ${row.req_txn_id},
+       ${row.attempt || 1}, ${row.amount_cents || 0}, ${row.status || "pending"},
+       ${row.started_at || new Date().toISOString()}, ${snap}::jsonb, ${row.webhook_json ? JSON.stringify(row.webhook_json) : null}::jsonb)
+  `;
 }
 
 async function markValorPublishAck(env: Env, reqTxnId: string, data: any) {
-  // TODO: update app.valor_publish by req_txn_id
+  const sql = neon(env.DATABASE_URL);
+  await sql/*sql*/`
+    UPDATE app.valor_publish
+       SET status = 'sent',
+           ack_msg = ${String(data?.ack_msg || "sent")},
+           acked_at = now()
+     WHERE req_txn_id = ${reqTxnId}
+  `;
 }
 
 async function publishToValor(env: Env, args: { invoicenumber: string, amount: number, req_txn_id: string }) {
