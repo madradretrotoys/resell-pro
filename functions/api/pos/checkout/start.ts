@@ -121,17 +121,26 @@ async function finalizeSale(
   args: { items: any[]; totals: any; payment: string; snapshot: any }
 ) {
   const sql = neon(env.DATABASE_URL);
-  const snapshot = JSON.stringify({
+
+  // Store POS detail per schema (items_json text). Other sales columns are nullable.
+  const itemsJson = JSON.stringify({
     items: args.items,
     totals: args.totals,
     payment: args.payment,
-    raw: args.snapshot,
+    raw: args.snapshot
   });
 
   const rows = await sql/*sql*/`
-    INSERT INTO app.sales (tenant_id, sale_ts, subtotal, tax, total, payment, pos_snapshot)
-    VALUES (${tenantId}::uuid, now(), ${args.totals.subtotal}::numeric, ${args.totals.tax}::numeric,
-            ${args.totals.total}::numeric, ${args.payment}, ${snapshot}::jsonb)
+    INSERT INTO app.sales (tenant_id, sale_ts, subtotal, tax, total, payment_method, items_json)
+    VALUES (
+      ${tenantId}::uuid,
+      now(),
+      ${args.totals.subtotal}::numeric,
+      ${args.totals.tax}::numeric,
+      ${args.totals.total}::numeric,
+      ${args.payment},
+      ${itemsJson}
+    )
     RETURNING sale_id
   `;
   return rows[0]?.sale_id || null;
