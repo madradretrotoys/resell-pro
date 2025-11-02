@@ -10,8 +10,30 @@ export const onRequest: PagesFunction<Env> = async (ctx) => {
   const tenantId = request.headers.get("x-tenant-id") || "";
   if (!tenantId) return json({ ok: false, error: "Missing tenant" }, 400);
 
-  const body = await request.json().catch(() => null) as any;
-  if (!body || !Array.isArray(body.items)) return json({ ok: false, error: "Invalid payload" }, 400);
+  // Parse body defensively and improve diagnostics
+  let body: any = null;
+  try {
+    body = await request.json();
+  } catch {
+    body = null;
+  }
+  
+  if (!body || typeof body !== "object") {
+    return json({ ok: false, error: "Invalid payload: no JSON body" }, 400);
+  }
+  
+  // Normalize items to a true array if the client sent something array-like
+  let items = body.items;
+  if (items && !Array.isArray(items) && typeof items.length === "number") {
+    try { items = Array.from(items); } catch { /* ignore */ }
+  }
+  
+  if (!Array.isArray(items)) {
+    const t = typeof body.items;
+    return json({ ok: false, error: `Invalid payload: items is ${t}` }, 400);
+  }
+  
+  body.items = items;
 
   // Server-side reprice / tax (simplified placeholder)
   const repriced = await computeTotals(env, tenantId, body.items);
