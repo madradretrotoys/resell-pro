@@ -86,10 +86,12 @@ export async function init(ctx) {
   try {
     meta = await api("/api/pos/meta", { method: "GET" });
     state.previewEnabled = !!meta.preview_enabled;
+
+    // Server-driven tax (falls back to state.taxRate default if absent)
     const mRate = Number(meta.tax_rate);
     if (Number.isFinite(mRate) && mRate > 0) state.taxRate = mRate;
 
-    // Valor config surfaced by the server (defaults are safe if absent)
+    // Valor config (used by the Complete Sale flow for card payments)
     state.valor = {
       enabled: !!meta.valor_enabled,
       environment: meta.valor_environment || "production",
@@ -101,7 +103,7 @@ export async function init(ctx) {
     log(`meta error: ${err?.message || err}`);
     // non-fatal; we’ll render with safe defaults
   } finally {
-    // Always clear the spinner and
+    // Always clear the spinner and render the screen
     swap("content");
     wireSearch();
     wireCart();
