@@ -442,7 +442,11 @@ export async function init(ctx) {
               payment: paymentDesc,
             };
 
-            const res = await api("/api/pos/checkout/start", { method: "POST", json: body });
+            const res = await api("/api/pos/checkout/start", {
+              method: "POST",
+              headers: { "content-type": "application/json" },
+              body: JSON.stringify(body)
+            });
             log(res);
 
             // If no processor is involved, the server may return completed immediately
