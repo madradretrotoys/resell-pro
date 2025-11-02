@@ -100,6 +100,19 @@
               <button id="pos-split" class="btn btn-ghost pos-pay-item">Split payment</button>
               <button id="pos-complete" class="btn btn-primary pos-pay-item pos-pay-push" disabled>Complete Sale</button>
             </div>
+
+            <!-- VALOR STATUS / FALLBACK (initially hidden; shown when card flow starts) -->
+            <div id="pos-valor-bar" class="mt-2 hidden">
+              <div class="card p-2 flex items-center gap-3 flex-wrap">
+                <div class="text-sm">
+                  <span class="font-semibold">VALOR:</span>
+                  <span id="pos-valor-msg" class="align-middle">Idle</span>
+                </div>
+                <button id="pos-valor-finalize" class="btn btn-ghost btn-sm hidden">
+                  Finalize without reply
+                </button>
+              </div>
+            </div>
   
             <!-- CASH PANEL (inline; hidden until CASH selected) -->
               <div id="pos-cash-panel" class="card pos-panel pos-compact" style="display:none">
