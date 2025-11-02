@@ -151,11 +151,11 @@ async function insertValorPublish(env: Env, row: any) {
   const payload = JSON.stringify(row.payload ?? {});
   await sql/*sql*/`
     INSERT INTO app.valor_publish
-      (tenant_id, req_txn_id, invoice_number, phase, http, url, payload, status, created_at)
+      (tenant_id, req_txn_id, invoice_number, phase, http, url, payload, created_at)
     VALUES
       (${row.tenant_id}::uuid, ${row.req_txn_id}, ${row.invoice_number},
        ${row.phase || "start"}, ${row.http || "POST"}, ${row.url || ""},
-       ${payload}::jsonb, 'created', now())
+       ${payload}::jsonb, now())
   `;
 }
 
@@ -180,9 +180,7 @@ async function markValorPublishAck(env: Env, reqTxnId: string, data: any) {
   const sql = neon(env.DATABASE_URL);
   await sql/*sql*/`
     UPDATE app.valor_publish
-       SET status = 'sent',
-           ack_msg = ${String(data?.ack_msg || "sent")},
-           acked_at = now()
+       SET ack_msg = ${String(data?.ack_msg || "sent")}
      WHERE req_txn_id = ${reqTxnId}
   `;
 }
