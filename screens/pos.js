@@ -677,7 +677,11 @@ export async function init(ctx) {
           return `<tr>
             <td class="whitespace-nowrap">${escapeHtml(r.time)}</td>
             <td class="whitespace-nowrap">${escapeHtml(r.sale_id)}</td>
-            <td><div class="text-sm whitespace-normal break-words max-w-[40ch]">${escapeHtml(r.payment || "")}</div></td>
+            <td class="align-top">
+              <div class="text-sm whitespace-normal break-all max-w-[40ch]">
+                ${escapeHtml(r.payment || "")}
+              </div>
+            </td>
             <td class="whitespace-nowrap">${fmtCurrency(r.total || 0)}</td>
             <td class="whitespace-nowrap">${escapeHtml(r.clerk || "")}</td>
             <td class="whitespace-nowrap">
