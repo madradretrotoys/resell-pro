@@ -438,6 +438,7 @@ export async function init(ctx) {
           try {
             const body = {
               items: state.items,
+              totals: { ...state.totals, tax_rate: state.taxRate },
               customer: (el.customer?.value || "").trim() || null,
               payment: paymentDesc,
             };
