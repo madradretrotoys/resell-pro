@@ -507,6 +507,10 @@ export async function init(ctx) {
               state.items = [];
               state.payment = null;
               render();
+              
+              // NEW: refresh Sales table for “Today”
+              try { await loadSales({ preset: "today" }); } catch {}
+              document.getElementById("pos-sales")?.scrollIntoView({ behavior: "smooth", block: "start" });
               return;
             }
 
@@ -547,6 +551,10 @@ export async function init(ctx) {
                   if (ff?.ok && ff?.sale_id) {
                     el.banner.classList.remove("hidden");
                     el.banner.innerHTML = `<div class="card p-2">Sale finalized. Receipt #${escapeHtml(ff.sale_id)}</div>`;
+                    
+                    // NEW: refresh Sales table for “Today”
+                    try { await loadSales({ preset: "today" }); } catch {}
+                    document.getElementById("pos-sales")?.scrollIntoView({ behavior: "smooth", block: "start" });
                   } else {
                     showToast("Could not finalize yet — still waiting on data.");
                   }
@@ -583,6 +591,10 @@ export async function init(ctx) {
                     state.items = [];
                     state.payment = null;
                     render();
+                    
+                    // NEW: refresh Sales table for “Today”
+                    try { await loadSales({ preset: "today" }); } catch {}
+                    document.getElementById("pos-sales")?.scrollIntoView({ behavior: "smooth", block: "start" });
                     return;
                   }
                   
