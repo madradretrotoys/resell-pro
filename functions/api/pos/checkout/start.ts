@@ -231,12 +231,13 @@ async function finalizeSale(
 ) {
   const sql = neon(env.DATABASE_URL);
 
-  // Save a verbose snapshot for audit/debug + UI drill-ins
+  // Store only the canonical, enriched view — no duplication
   const itemsJson = JSON.stringify({
-    items: args.items,          // includes line_raw, line_discount, line_subtotal, line_tax, line_total
-    totals: args.totals,        // includes raw_subtotal, line_discounts, subtotal, tax, total, tax_rate
-    payment: args.payment,
-    raw: args.snapshot          // original client payload
+    schema: "pos:v1",
+    source_totals: "client", // documents where totals came from; helpful for audits
+    items: args.items,
+    totals: args.totals,
+    payment: args.payment
   });
 
   const rows = await sql/*sql*/`
