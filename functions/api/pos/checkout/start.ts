@@ -54,8 +54,28 @@ export const onRequest: PagesFunction<Env> = async (ctx) => {
   }
   
   const clientTotals = coerceTotals(body.totals);
+  // Ensure per-line fields exist (line_discount, line_final). Do NOT change totals.
+  const r2 = (v: any) => Number.parseFloat(Number(v || 0).toFixed(2));
+  const ensureLineFields = (list: any[]) => (list || []).map((raw) => {
+    const qty = Math.max(1, Number(raw?.qty ?? 0));
+    const unit = Number(raw?.price ?? 0);
+    const mode = String(raw?.discount?.mode ?? "percent").toLowerCase();
+    const val  = Number(raw?.discount?.value ?? 0);
+    const lineRaw = unit * qty;
+    const hasDisc = Number.isFinite(Number(raw?.line_discount));
+    const hasFinal = Number.isFinite(Number(raw?.line_final));
+    const disc = hasDisc ? Number(raw.line_discount) :
+                (mode === "percent" ? (lineRaw * (val / 100)) : val);
+    const final = hasFinal ? Number(raw.line_final) : (lineRaw - disc);
+    return {
+      ...raw,
+      line_discount: r2(Math.min(disc, lineRaw)),
+      line_final:    r2(Math.max(0, final)),
+    };
+  });
+  
   const repriced = clientTotals
-    ? { items: body.items, totals: clientTotals }
+    ? { items: ensureLineFields(body.items), totals: clientTotals }
     : await computeTotals(env, tenantId, body.items); // fallback only
 
   // Determine payment shape
@@ -92,8 +112,8 @@ export const onRequest: PagesFunction<Env> = async (ctx) => {
     amount_cents: Math.round(repriced.totals.total * 100),
     status: "pending",
     started_at: new Date().toISOString(),
-    // Freeze same data the UI saw (no recompute later)
-    items: body.items,
+    // Keep exactly what the UI saw (now enriched with line_discount & line_final)
+    items: repriced.items,
     totals: repriced.totals,
     payment,
     webhook_json: null,
