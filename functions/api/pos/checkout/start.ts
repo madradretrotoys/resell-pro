@@ -107,12 +107,74 @@ function makeInvoiceNumber(tenantId: string) {
 }
 
 async function computeTotals(env: Env, tenantId: string, items: any[]) {
-  // TODO: real pricing; ensure parity with /api/pos/price/preview
-  const subtotal = items.reduce((s, it) => s + Number(it.price || 0) * Number(it.qty || 1), 0);
-  const taxRate = Number(env.DEFAULT_TAX_RATE ?? 0.085);
-  const tax = +(subtotal * taxRate).toFixed(2);
+  // Pull tenant tax from DB; fallback to env/default if missing.
+  const sql = neon(env.DATABASE_URL);
+  let taxRate = Number(env.DEFAULT_TAX_RATE ?? 0.085);
+  try {
+    const rows = await sql/*sql*/`
+      SELECT sales_tax::numeric AS rate
+      FROM app.tax_rates
+      WHERE key = 'default'
+      LIMIT 1
+    `;
+    if (rows?.[0]?.rate != null) taxRate = Number(rows[0].rate);
+  } catch {
+    // ignore — fallback already set
+  }
+
+  // Normalize and compute line math with discounts
+  const normalized = (items || []).map((raw) => {
+    const qty = Math.max(1, Number(raw?.qty ?? 1));
+    const unit = Number(raw?.price ?? 0);
+    const mode = String(raw?.discount?.mode ?? "").toLowerCase(); // "percent" | "amount" | ""
+    const value = Number(raw?.discount?.value ?? 0);
+
+    const lineRaw = +(unit * qty).toFixed(2);
+    const lineDisc =
+      mode === "percent" ? +((lineRaw * (value / 100))).toFixed(2)
+      : mode === "amount" ? +((value * qty)).toFixed(2)
+      : 0;
+
+    const lineSub = +(lineRaw - lineDisc).toFixed(2);
+    const lineTax = +(lineSub * taxRate).toFixed(2);
+    const lineTotal = +(lineSub + lineTax).toFixed(2);
+
+    return {
+      sku: raw?.sku ?? null,
+      name: raw?.name ?? null,
+      price: unit,
+      qty,
+      discount: mode ? { mode, value } : undefined,
+      // derived
+      line_raw: lineRaw,
+      line_discount: lineDisc,
+      line_subtotal: lineSub,
+      line_tax: lineTax,
+      line_total: lineTotal,
+      // pass-through references if present
+      instore_loc: raw?.instore_loc ?? null,
+      case_bin_shelf: raw?.case_bin_shelf ?? null,
+      inventory_qty: raw?.inventory_qty ?? null,
+    };
+  });
+
+  const rawSubtotal = normalized.reduce((s, it) => s + it.line_raw, 0);
+  const lineDiscounts = normalized.reduce((s, it) => s + it.line_discount, 0);
+  const subtotal = +(rawSubtotal - lineDiscounts).toFixed(2);
+  const tax = +(normalized.reduce((s, it) => s + it.line_tax, 0)).toFixed(2);
   const total = +(subtotal + tax).toFixed(2);
-  return { items, totals: { subtotal, discount: 0, tax, total } };
+
+  return {
+    items: normalized,
+    totals: {
+      raw_subtotal: +rawSubtotal.toFixed(2),
+      line_discounts: +lineDiscounts.toFixed(2),
+      subtotal,
+      tax,
+      total,
+      tax_rate: taxRate,
+    },
+  };
 }
 
 async function finalizeSale(
@@ -122,19 +184,31 @@ async function finalizeSale(
 ) {
   const sql = neon(env.DATABASE_URL);
 
-  // Store POS detail per schema (items_json text). Other sales columns are nullable.
+  // Save a verbose snapshot for audit/debug + UI drill-ins
   const itemsJson = JSON.stringify({
-    items: args.items,
-    totals: args.totals,
+    items: args.items,          // includes line_raw, line_discount, line_subtotal, line_tax, line_total
+    totals: args.totals,        // includes raw_subtotal, line_discounts, subtotal, tax, total, tax_rate
     payment: args.payment,
-    raw: args.snapshot
+    raw: args.snapshot          // original client payload
   });
 
   const rows = await sql/*sql*/`
-    INSERT INTO app.sales (tenant_id, sale_ts, subtotal, tax, total, payment_method, items_json)
+    INSERT INTO app.sales (
+      sale_ts,
+      tenant_id,
+      raw_subtotal,
+      line_discounts,
+      subtotal,
+      tax,
+      total,
+      payment_method,
+      items_json
+    )
     VALUES (
-      ${tenantId}::uuid,
       now(),
+      ${tenantId}::uuid,
+      ${args.totals.raw_subtotal}::numeric,
+      ${args.totals.line_discounts}::numeric,
       ${args.totals.subtotal}::numeric,
       ${args.totals.tax}::numeric,
       ${args.totals.total}::numeric,
