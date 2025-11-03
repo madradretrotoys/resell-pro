@@ -110,6 +110,9 @@ export async function init(ctx) {
     wireTotals();
     wireSales();
     render();
+    // NEW: show today's sales automatically on boot
+    try { await loadSales({ preset: "today" }); } catch {}
+
   }
 
   // ————— helpers —————
