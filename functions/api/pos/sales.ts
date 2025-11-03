@@ -14,41 +14,44 @@ export const onRequest: PagesFunction<Env> = async (ctx) => {
   const fromQ = url.searchParams.get("from") || "";
   const toQ = url.searchParams.get("to") || "";
 
-  // Build time window
-  // - preset=today → [today, tomorrow)
-  // - else if from/to provided → [from, to] (inclusive)
-  // - else default to today
-  let whereClause = "";
-  let params: any[] = [tenantId];
-
-  if (preset === "today" || (!fromQ && !toQ)) {
-    whereClause = `
+  // Build time window (bind parameters with the template tag; no $2/$3)
+  const todayQuery = sql/*sql*/`
+    SELECT
+      sale_id,
+      to_char(sale_ts, 'YYYY-MM-DD HH24:MI') AS time,
+      payment_method AS payment,
+      total::numeric                         AS total,
+      NULL::text                             AS clerk
+    FROM app.sales
+    WHERE tenant_id = ${tenantId}::uuid
       AND sale_ts >= date_trunc('day', now())
       AND sale_ts <  date_trunc('day', now()) + interval '1 day'
-    `;
-  } else {
-    // Accept ISO date or date-time; coerce safely in SQL
-    whereClause = `
-      AND sale_ts >= COALESCE((to_timestamp($2, 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')), (to_timestamp($2, 'YYYY-MM-DD')))
-      AND sale_ts <= COALESCE((to_timestamp($3, 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')), (to_timestamp($3, 'YYYY-MM-DD')) + interval '1 day' - interval '1 second')
-    `;
-    params.push(fromQ || "", toQ || "");
-  }
+    ORDER BY sale_ts DESC
+    LIMIT 200
+  `;
+
+  const rangeQuery = sql/*sql*/`
+    SELECT
+      sale_id,
+      to_char(sale_ts, 'YYYY-MM-DD HH24:MI') AS time,
+      payment_method AS payment,
+      total::numeric                         AS total,
+      NULL::text                             AS clerk
+    FROM app.sales
+    WHERE tenant_id = ${tenantId}::uuid
+      AND sale_ts >= ${fromQ || ""}::date
+      AND sale_ts <  (${toQ || ""}::date + interval '1 day')
+    ORDER BY sale_ts DESC
+    LIMIT 200
+  `;
 
   try {
-    const rows = await sql/*sql*/`
-      SELECT
-        sale_id,
-        to_char(sale_ts, 'YYYY-MM-DD HH24:MI') AS time,
-        payment_method AS payment,
-        total::numeric                         AS total,
-        NULL::text                             AS clerk
-      FROM app.sales
-      WHERE tenant_id = ${params[0]}::uuid
-      ${sql.unsafe(whereClause)}
-      ORDER BY sale_ts DESC
-      LIMIT 200
-    `;
+    const rows =
+      (preset === "today" || (!fromQ && !toQ))
+        ? await todayQuery
+        : await rangeQuery;
+
+    return j({ ok: true, rows });
 
     return j({ ok: true, rows });
   } catch (e: any) {
