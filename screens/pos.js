@@ -345,7 +345,11 @@ export async function init(ctx) {
           }
           const change = Math.max(0, received - total);
           state.payment = { type: "cash", amount: total, received, change };
-          closeCash();
+        
+          // Keep panel visible; lock so user sees exactly what will be sent
+          el.cashConfirm.disabled = true;
+          el.cashReceived.disabled = true;
+        
           refreshCompleteEnabled();
         });
     
@@ -418,10 +422,17 @@ export async function init(ctx) {
           const toCents = (x) => Math.round(Number(x || 0) * 100);
           const total = Number(state.totals.total || 0);
           const paid = state.splitParts.reduce((s, p) => s + Number(p.amount || 0), 0);
-          if (toCents(paid) !== toCents(total)) return;  // guard against float drift
+          if (toCents(paid) !== toCents(total)) return;
         
           state.payment = { type: "split", total, parts: [...state.splitParts] };
-          hide(el.splitPanel);
+        
+          // Keep panel visible; lock so user sees exactly what will be sent
+          el.splitConfirm.disabled = true;
+          el.splitMethod.disabled = true;
+          el.splitAmount.disabled = true;
+          el.splitAdd.disabled = true;
+          el.splitBody.querySelectorAll("[data-split-remove]").forEach(b => b.disabled = true);
+        
           el.payment.value = ""; // reflect split (no single method selected)
           refreshCompleteEnabled();
         });
@@ -482,10 +493,17 @@ export async function init(ctx) {
             });
             log(res);
 
-            // If no processor is involved, the server may return completed immediately
             if (res?.status === "completed" && res?.sale_id) {
               el.banner.classList.remove("hidden");
               el.banner.innerHTML = `<div class="card p-2">Sale completed. Receipt #${escapeHtml(res.sale_id)}</div>`;
+            
+              // Close & reset panels/locks
+              hide(el.cashPanel); hide(el.splitPanel);
+              el.cashConfirm.disabled = false; el.cashReceived.disabled = false;
+              el.splitConfirm.disabled = false; el.splitMethod.disabled = false;
+              el.splitAmount.disabled = false; el.splitAdd.disabled = false;
+              state.splitParts = [];
+            
               state.items = [];
               state.payment = null;
               render();
@@ -554,11 +572,20 @@ export async function init(ctx) {
                     el.valorMsg.textContent = "Approved";
                     el.banner.classList.remove("hidden");
                     el.banner.innerHTML = `<div class="card p-2">Sale approved. Receipt #${escapeHtml(r.sale_id)}</div>`;
+                  
+                    // Close & reset panels/locks
+                    hide(el.cashPanel); hide(el.splitPanel);
+                    el.cashConfirm.disabled = false; el.cashReceived.disabled = false;
+                    el.splitConfirm.disabled = false; el.splitMethod.disabled = false;
+                    el.splitAmount.disabled = false; el.splitAdd.disabled = false;
+                    state.splitParts = [];
+                  
                     state.items = [];
                     state.payment = null;
                     render();
                     return;
                   }
+                  
                   if (r?.status === "declined") {
                     el.valorMsg.textContent = "Declined";
                     const msg = r?.message ? ` — ${escapeHtml(r.message)}` : "";
