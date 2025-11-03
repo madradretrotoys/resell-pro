@@ -38,16 +38,18 @@ export const onRequest: PagesFunction<Env> = async (ctx) => {
   // Prefer client totals (exactly what the UI showed). Fallback to computeTotals if absent.
   function coerceTotals(t: any) {
     if (!t || typeof t !== "object") return null;
+    const n = (v: any) => Number.isFinite(Number(v)) ? Number(v) : 0;
+    const r2 = (v: any) => Number.parseFloat(n(v).toFixed(2));
+  
+    // Trust client values, clamp to 2 decimals (no recalculation)
     const out = {
-      raw_subtotal: Number(t.raw_subtotal ?? t.subtotal ?? 0),
-      line_discounts: Number(t.line_discounts ?? t.discount ?? 0),
-      subtotal: Number(t.subtotal ?? 0),
-      tax: Number(t.tax ?? 0),
-      total: Number(t.total ?? 0),
-      tax_rate: Number(t.tax_rate ?? 0),
+      raw_subtotal: r2(t.raw_subtotal ?? t.subtotal ?? 0),
+      line_discounts: r2(t.line_discounts ?? t.discount ?? 0),
+      subtotal: r2(t.subtotal ?? 0),
+      tax: r2(t.tax ?? 0),
+      total: r2(t.total ?? 0),
+      tax_rate: n(t.tax_rate ?? 0) // keep as provided (e.g., 0.08)
     };
-    // Basic sanity clamps
-    Object.keys(out).forEach(k => { if (!Number.isFinite((out as any)[k])) (out as any)[k] = 0; });
     return out;
   }
   
@@ -90,6 +92,10 @@ export const onRequest: PagesFunction<Env> = async (ctx) => {
     amount_cents: Math.round(repriced.totals.total * 100),
     status: "pending",
     started_at: new Date().toISOString(),
+    // Freeze same data the UI saw (no recompute later)
+    items: body.items,
+    totals: repriced.totals,
+    payment,
     webhook_json: null,
   });
 
