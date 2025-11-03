@@ -678,7 +678,7 @@ export async function init(ctx) {
             <td class="whitespace-nowrap">${escapeHtml(r.time)}</td>
             <td class="whitespace-nowrap">${escapeHtml(r.sale_id)}</td>
             <td class="align-top">
-              <div class="text-sm whitespace-normal break-all max-w-[40ch]">
+              <div class="text-sm pos-wrap">
                 ${escapeHtml(r.payment || "")}
               </div>
             </td>
