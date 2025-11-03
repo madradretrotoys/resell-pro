@@ -280,6 +280,32 @@ label{
 .table thead th{ font-weight: 600; }
 .table tbody tr + tr td{ border-top: 1px solid var(--border); }
 
+/* === POS Sales table helpers === */
+.table-fixed { table-layout: fixed; }                 /* keep columns from auto-growing */
+
+.pos-wrap {                                           /* real word-wrapping utility */
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+/* Keep the sales table within the card; define practical column widths */
+.pos-sales-card .table { width: 100%; }
+.pos-sales-card .table th:nth-child(1),
+.pos-sales-card .table td:nth-child(1){ width: 116px; }  /* Time */
+.pos-sales-card .table th:nth-child(2),
+.pos-sales-card .table td:nth-child(2){ width: 260px; }  /* Sale ID */
+.pos-sales-card .table th:nth-child(3),
+.pos-sales-card .table td:nth-child(3){ width: auto; }   /* Payment (flex/wrap) */
+.pos-sales-card .table th:nth-child(4),
+.pos-sales-card .table td:nth-child(4){ width: 104px; }  /* Total */
+.pos-sales-card .table th:nth-child(5),
+.pos-sales-card .table td:nth-child(5){ width: 96px; }   /* Clerk */
+.pos-sales-card .table th:nth-child(6),
+.pos-sales-card .table td:nth-child(6){ width: 140px; }  /* Actions */
+
+/* Prevent the card from visually “bursting” if a parent gets wider momentarily */
+.pos-sales-card { overflow: hidden; }
+
 /* ===== Existing Intake-specific styles (kept for now; screen can migrate) ===== */
 #inventory-intake-screen{
   --card-radius: 12px;
