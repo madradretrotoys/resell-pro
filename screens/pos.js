@@ -436,9 +436,18 @@ export async function init(ctx) {
           }
 
           try {
+            // Freeze UI totals exactly as displayed (2-decimals)
+            const r2 = (n) => Number.parseFloat(Number(n || 0).toFixed(2));
             const body = {
               items: state.items,
-              totals: { ...state.totals, tax_rate: state.taxRate },
+              totals: {
+                raw_subtotal: r2((state.totals.subtotal || 0) + (state.totals.discount || 0)),
+                line_discounts: r2(state.totals.discount || 0),
+                subtotal: r2(state.totals.subtotal || 0),
+                tax: r2(state.totals.tax || 0),
+                total: r2(state.totals.total || 0),
+                tax_rate: Number(state.taxRate || 0) // keep as given (e.g., 0.08)
+              },
               customer: (el.customer?.value || "").trim() || null,
               payment: paymentDesc,
             };
