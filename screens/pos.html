@@ -206,8 +206,16 @@
           <button id="pos-sales-load" class="btn btn-sm btn-primary">Load</button>
         </div>
       </div>
-      <div class="overflow-auto">
-        <table class="table w-full">
+      <div class="overflow-x-auto">
+        <table class="table w-full table-fixed">
+          <colgroup>
+            <col style="width:120px" />
+            <col style="width:260px" />
+            <col /> <!-- Payment grows but wraps -->
+            <col style="width:100px" />
+            <col style="width:120px" />
+            <col style="width:140px" />
+          </colgroup>
           <thead>
             <tr>
               <th class="text-left">Time</th>
