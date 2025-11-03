@@ -675,12 +675,12 @@ export async function init(ctx) {
       el.salesBody.innerHTML = rows
         .map((r) => {
           return `<tr>
-            <td>${escapeHtml(r.time)}</td>
-            <td>${escapeHtml(r.sale_id)}</td>
-            <td>${escapeHtml(r.payment || "")}</td>
-            <td>${fmtCurrency(r.total || 0)}</td>
-            <td>${escapeHtml(r.clerk || "")}</td>
-            <td>
+            <td class="whitespace-nowrap">${escapeHtml(r.time)}</td>
+            <td class="whitespace-nowrap">${escapeHtml(r.sale_id)}</td>
+            <td><div class="text-sm break-words max-w-[48rem]">${escapeHtml(r.payment || "")}</div></td>
+            <td class="whitespace-nowrap">${fmtCurrency(r.total || 0)}</td>
+            <td class="whitespace-nowrap">${escapeHtml(r.clerk || "")}</td>
+            <td class="whitespace-nowrap">
               <button class="btn btn-xs" data-copy='${r.sale_id}'>Copy total</button>
               <button class="btn btn-xs btn-ghost" data-refund='${r.sale_id}'>Refund…</button>
             </td>
