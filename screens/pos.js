@@ -359,11 +359,13 @@ export async function init(ctx) {
             </tr>
           `).join("");
     
+          const toCents = (x) => Math.round(Number(x || 0) * 100);
           const total = Number(state.totals.total || 0);
           const paid = state.splitParts.reduce((s, p) => s + Number(p.amount || 0), 0);
           const remaining = Math.max(0, total - paid);
           el.splitRemaining.textContent = fmtMoney(remaining);
-          el.splitConfirm.disabled = !(remaining === 0 && state.splitParts.length > 0);
+          el.splitConfirm.disabled = !(toCents(paid) === toCents(total) && state.splitParts.length > 0);
+
     
           el.splitBody.querySelectorAll("[data-split-remove]").forEach(btn => {
             btn.addEventListener("click", () => {
@@ -371,6 +373,7 @@ export async function init(ctx) {
               if (idx >= 0) {
                 state.splitParts.splice(idx, 1);
                 paintSplitTable();
+                refreshCompleteEnabled();
               }
             });
           });
@@ -389,7 +392,7 @@ export async function init(ctx) {
           };
           return map[v] || v;
         };
-    
+        
         el.split.addEventListener("click", () => {
           hide(el.cashPanel);
           state.splitParts = [];
@@ -412,9 +415,11 @@ export async function init(ctx) {
         });
     
         el.splitConfirm.addEventListener("click", () => {
+          const toCents = (x) => Math.round(Number(x || 0) * 100);
           const total = Number(state.totals.total || 0);
           const paid = state.splitParts.reduce((s, p) => s + Number(p.amount || 0), 0);
-          if (paid !== total) return;
+          if (toCents(paid) !== toCents(total)) return;  // guard against float drift
+        
           state.payment = { type: "split", total, parts: [...state.splitParts] };
           hide(el.splitPanel);
           el.payment.value = ""; // reflect split (no single method selected)
@@ -455,18 +460,21 @@ export async function init(ctx) {
             
             const body = {
               // send enriched lines so server stores line_discount + line_final exactly as shown in UI
-              items: state.items.map(enrichLine),
-              totals: {
-                raw_subtotal: r2(state.totals.subtotal || 0),
-                line_discounts: r2(state.totals.discount || 0),
-                subtotal: r2((state.totals.subtotal || 0) - (state.totals.discount || 0)),
-                tax: r2(state.totals.tax || 0),
-                total: r2(state.totals.total || 0),
-                tax_rate: Number(state.taxRate || 0)
-              },
-              customer: (el.customer?.value || "").trim() || null,
-              payment: paymentDesc,
-            };
+              const body = {
+                items: state.items.map(enrichLine),
+                totals: {
+                  raw_subtotal: r2(state.totals.subtotal || 0),
+                  line_discounts: r2(state.totals.discount || 0),
+                  subtotal: r2((state.totals.subtotal || 0) - (state.totals.discount || 0)),
+                  tax: r2(state.totals.tax || 0),
+                  total: r2(state.totals.total || 0),
+                  tax_rate: Number(state.taxRate || 0)
+                },
+                customer: (el.customer?.value || "").trim() || null,
+                payment: paymentDesc,
+                // 👇 include structured split parts for storage/audit (undefined for non-split)
+                payment_parts: state.payment?.type === "split" ? state.payment.parts : undefined,
+              };
 
             const res = await api("/api/pos/checkout/start", {
               method: "POST",
