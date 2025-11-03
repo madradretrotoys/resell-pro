@@ -443,8 +443,8 @@ export async function init(ctx) {
           try {
             // Freeze UI totals exactly as displayed (2-decimals)
             const r2 = (n) => Number.parseFloat(Number(n || 0).toFixed(2));
-
-              const enrichLine = (it) => {
+            
+            const enrichLine = (it) => {
               const qty = Math.max(1, Number(it.qty || 0));
               const unit = Number(it.price || 0);
               const mode = (it.discount?.mode || "percent").toLowerCase();
@@ -460,21 +460,20 @@ export async function init(ctx) {
             
             const body = {
               // send enriched lines so server stores line_discount + line_final exactly as shown in UI
-              const body = {
-                items: state.items.map(enrichLine),
-                totals: {
-                  raw_subtotal: r2(state.totals.subtotal || 0),
-                  line_discounts: r2(state.totals.discount || 0),
-                  subtotal: r2((state.totals.subtotal || 0) - (state.totals.discount || 0)),
-                  tax: r2(state.totals.tax || 0),
-                  total: r2(state.totals.total || 0),
-                  tax_rate: Number(state.taxRate || 0)
-                },
-                customer: (el.customer?.value || "").trim() || null,
-                payment: paymentDesc,
-                // 👇 include structured split parts for storage/audit (undefined for non-split)
-                payment_parts: state.payment?.type === "split" ? state.payment.parts : undefined,
-              };
+              items: state.items.map(enrichLine),
+              totals: {
+                raw_subtotal: r2(state.totals.subtotal || 0),
+                line_discounts: r2(state.totals.discount || 0),
+                subtotal: r2((state.totals.subtotal || 0) - (state.totals.discount || 0)),
+                tax: r2(state.totals.tax || 0),
+                total: r2(state.totals.total || 0),
+                tax_rate: Number(state.taxRate || 0)
+              },
+              customer: (el.customer?.value || "").trim() || null,
+              payment: paymentDesc,
+              // 👇 include structured split parts for storage/audit (undefined for non-split)
+              payment_parts: state.payment?.type === "split" ? state.payment.parts : undefined,
+            };
 
             const res = await api("/api/pos/checkout/start", {
               method: "POST",
