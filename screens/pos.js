@@ -438,6 +438,21 @@ export async function init(ctx) {
           try {
             // Freeze UI totals exactly as displayed (2-decimals)
             const r2 = (n) => Number.parseFloat(Number(n || 0).toFixed(2));
+
+              const enrichLine = (it) => {
+              const qty = Math.max(1, Number(it.qty || 0));
+              const unit = Number(it.price || 0);
+              const mode = (it.discount?.mode || "percent").toLowerCase();
+              const val  = Number(it.discount?.value || 0);
+              const lineRaw = unit * qty;
+              const lineDisc = mode === "percent" ? (lineRaw * (val / 100)) : val;
+              return {
+                ...it,
+                line_discount: r2(Math.min(lineDisc, lineRaw)),       // exact as UI
+                line_final:    r2(Math.max(0, lineRaw - lineDisc)),   // exact as UI (pre-tax)
+              };
+            };
+            
             const body = {
               items: state.items,
               totals: {
