@@ -35,8 +35,26 @@ export const onRequest: PagesFunction<Env> = async (ctx) => {
   
   body.items = items;
 
-  // Server-side reprice / tax (simplified placeholder)
-  const repriced = await computeTotals(env, tenantId, body.items);
+  // Prefer client totals (exactly what the UI showed). Fallback to computeTotals if absent.
+  function coerceTotals(t: any) {
+    if (!t || typeof t !== "object") return null;
+    const out = {
+      raw_subtotal: Number(t.raw_subtotal ?? t.subtotal ?? 0),
+      line_discounts: Number(t.line_discounts ?? t.discount ?? 0),
+      subtotal: Number(t.subtotal ?? 0),
+      tax: Number(t.tax ?? 0),
+      total: Number(t.total ?? 0),
+      tax_rate: Number(t.tax_rate ?? 0),
+    };
+    // Basic sanity clamps
+    Object.keys(out).forEach(k => { if (!Number.isFinite((out as any)[k])) (out as any)[k] = 0; });
+    return out;
+  }
+  
+  const clientTotals = coerceTotals(body.totals);
+  const repriced = clientTotals
+    ? { items: body.items, totals: clientTotals }
+    : await computeTotals(env, tenantId, body.items); // fallback only
 
   // Determine payment shape
   const payment: string = String(body.payment || "");
@@ -109,7 +127,7 @@ function makeInvoiceNumber(tenantId: string) {
 async function computeTotals(env: Env, tenantId: string, items: any[]) {
   // Pull tenant tax from DB; fallback to env/default if missing.
   const sql = neon(env.DATABASE_URL);
-  let taxRate = Number(env.DEFAULT_TAX_RATE ?? 0.085);
+  let taxRate = Number(env.DEFAULT_TAX_RATE ?? 0.080);
   try {
     const rows = await sql/*sql*/`
       SELECT sales_tax::numeric AS rate
@@ -120,7 +138,10 @@ async function computeTotals(env: Env, tenantId: string, items: any[]) {
     if (rows?.[0]?.rate != null) taxRate = Number(rows[0].rate);
   } catch {
     // ignore — fallback already set
+    
   }
+  // <<< add this normalization so 8.5 becomes 0.085 if we ever fall back >>>
+  if (taxRate > 1) taxRate = taxRate / 100;
 
   // Normalize and compute line math with discounts
   const normalized = (items || []).map((raw) => {
