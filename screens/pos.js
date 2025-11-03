@@ -441,9 +441,9 @@ export async function init(ctx) {
             const body = {
               items: state.items,
               totals: {
-                raw_subtotal: r2((state.totals.subtotal || 0) + (state.totals.discount || 0)),
+                raw_subtotal: r2(state.totals.subtotal || 0),
                 line_discounts: r2(state.totals.discount || 0),
-                subtotal: r2(state.totals.subtotal || 0),
+                subtotal: r2((state.totals.subtotal || 0) - (state.totals.discount || 0)),
                 tax: r2(state.totals.tax || 0),
                 total: r2(state.totals.total || 0),
                 tax_rate: Number(state.taxRate || 0) // keep as given (e.g., 0.08)
