@@ -237,7 +237,10 @@ async function finalizeSale(
     source_totals: "client", // documents where totals came from; helpful for audits
     items: args.items,
     totals: args.totals,
-    payment: args.payment
+    payment: args.payment,
+     // If client supplied structured parts, persist them for reconciliation
+    payment_parts: Array.isArray(args?.snapshot?.payment_parts) ? args.snapshot.payment_parts : undefined
+
   });
 
   const rows = await sql/*sql*/`
@@ -286,7 +289,8 @@ async function openValorSession(env: Env, row: any) {
   const snap = JSON.stringify({
     items: row.items ?? [],
     totals: row.totals ?? null,
-    payment: row.payment ?? null
+    payment: row.payment ?? null,
+    payment_parts: Array.isArray(row.payment_parts) ? row.payment_parts : undefined
   });
   await sql/*sql*/`
     INSERT INTO app.valor_sessions_log
