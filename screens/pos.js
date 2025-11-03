@@ -454,14 +454,15 @@ export async function init(ctx) {
             };
             
             const body = {
-              items: state.items,
+              // send enriched lines so server stores line_discount + line_final exactly as shown in UI
+              items: state.items.map(enrichLine),
               totals: {
                 raw_subtotal: r2(state.totals.subtotal || 0),
                 line_discounts: r2(state.totals.discount || 0),
                 subtotal: r2((state.totals.subtotal || 0) - (state.totals.discount || 0)),
                 tax: r2(state.totals.tax || 0),
                 total: r2(state.totals.total || 0),
-                tax_rate: Number(state.taxRate || 0) // keep as given (e.g., 0.08)
+                tax_rate: Number(state.taxRate || 0)
               },
               customer: (el.customer?.value || "").trim() || null,
               payment: paymentDesc,
