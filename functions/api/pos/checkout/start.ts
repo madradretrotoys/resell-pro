@@ -311,8 +311,57 @@ async function markValorPublishAck(env: Env, reqTxnId: string, data: any) {
   `;
 }
 
-async function publishToValor(env: Env, args: { invoicenumber: string, amount: number, req_txn_id: string }) {
-  // TODO: perform Valor publish with mirrored names
-  // return { message: "sent" };
+async function publishToValor(
+  env: Env,
+  args: { invoicenumber: string; amount: number; req_txn_id: string; epi?: string }
+) {
+  // Mirror legacy payload exactly:
+  // - Top-level { invoicenumber, epi? }
+  // - Nested PAYLOAD with REQ_TXN_ID and AMOUNT (cents)
+  const payload = {
+    invoicenumber: String(args.invoicenumber),
+    // Legacy tolerated both "epi" and "EPI"; we’ll send "epi" and log exactly what we send.
+    ...(args.epi ? { epi: String(args.epi) } : {}),
+    PAYLOAD: {
+      REQ_TXN_ID: String(args.req_txn_id),
+      AMOUNT: Math.round(Number(args.amount) * 100) // cents
+    }
+  };
+
+  // Log REQUEST phase exactly like legacy “Valor Publish Log”
+  await insertValorPublish(env, {
+    tenant_id: env.TENANT_ID || null,   // optional: leave null if not set here
+    req_txn_id: args.req_txn_id,
+    invoice_number: args.invoicenumber,
+    phase: "request",
+    http: "POST",
+    url: env.VALOR_PUBLISH_URL || "",
+    payload
+  });
+
+  // Perform the publish (best-effort; valor side should accept mirrored legacy shape)
+  let respText = "";
+  try {
+    const r = await fetch(env.VALOR_PUBLISH_URL || "", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(payload)
+    });
+    respText = await r.text();
+  } catch (e: any) {
+    respText = `error:${e?.message || String(e)}`;
+  }
+
+  // Log RESPONSE phase so correlation-by-REQ_TXN_ID works (legacy sheets did this too)
+  await insertValorPublish(env, {
+    tenant_id: env.TENANT_ID || null,
+    req_txn_id: args.req_txn_id,
+    invoice_number: args.invoicenumber,
+    phase: "response",
+    http: "POST",
+    url: env.VALOR_PUBLISH_URL || "",
+    payload: { response: respText }
+  });
+
   return { message: "sent" };
 }
