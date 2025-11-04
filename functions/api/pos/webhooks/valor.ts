@@ -78,8 +78,92 @@ function normalizeStatus(p: any): "pending" | "approved" | "declined" {
   return "pending";
 }
 
-// ----- DB helpers (implement with Neon) -----
-async function insertWebhookLog(env: Env, row: any) { /* TODO: insert into app.valor_webhook_log */ }
-async function updateSessionStatus(env: Env, tenantId: string, invoice: string, status: string, wh: any) { /* TODO */ }
-async function ensureSaleForApproved(env: Env, tenantId: string, invoice: string, wh: any) { /* TODO */ return "S-" + Math.floor(Date.now() / 1000); }
-async function stampSaleId(env: Env, tenantId: string, invoice: string, saleId: string) { /* TODO */ }
+// ----- DB helpers (Neon) -----
+async function insertWebhookLog(env: Env, row: any) {
+  const sql = neon(env.DATABASE_URL);
+  await sql/*sql*/`
+    INSERT INTO app.valor_webhook_log
+      (tenant_id, req_txn_id, invoice_number, state, amount, total_with_fees, raw, created_at)
+    VALUES
+      (${row.tenant_id || null}::uuid, ${row.req_txn_id || null}, ${row.invoice_number || null},
+       ${row.state || null}, ${row.amount ?? null}, ${row.total_with_fees ?? null},
+       ${JSON.stringify(row.raw || {})}::jsonb, now())
+  `;
+}
+
+async function updateSessionStatus(env: Env, tenantId: string, invoice: string, status: string, wh: any) {
+  // Update most-recent session for this invoice (pending -> approved/declined).
+  const sql = neon(env.DATABASE_URL);
+  await sql/*sql*/`
+    UPDATE app.valor_sessions_log
+       SET status = ${status},
+           webhook_json = ${JSON.stringify(wh || {})}::jsonb
+     WHERE tenant_id = ${tenantId}::uuid
+       AND invoice_number = ${invoice}
+     ORDER BY started_at DESC
+     LIMIT 1
+  `;
+}
+
+async function ensureSaleForApproved(env: Env, tenantId: string, invoice: string, wh: any) {
+  const sql = neon(env.DATABASE_URL);
+
+  // If a sale already exists for this session, return it.
+  const rowsExisting = await sql/*sql*/`
+    SELECT sale_id
+      FROM app.valor_sessions_log
+     WHERE tenant_id = ${tenantId}::uuid
+       AND invoice_number = ${invoice}
+     ORDER BY started_at DESC
+     LIMIT 1
+  `;
+  if (rowsExisting?.[0]?.sale_id) return rowsExisting[0].sale_id;
+
+  // Use the POS snapshot saved at session-open to create the canonical sale row.
+  const sess = (await sql/*sql*/`
+    SELECT pos_snapshot
+      FROM app.valor_sessions_log
+     WHERE tenant_id = ${tenantId}::uuid
+       AND invoice_number = ${invoice}
+     ORDER BY started_at DESC
+     LIMIT 1
+  `)?.[0];
+
+  const snap = sess?.pos_snapshot || {};
+  const items = snap?.items || [];
+  const totals = snap?.totals || { raw_subtotal: 0, line_discounts: 0, subtotal: 0, tax: 0, total: 0 };
+
+  // Mirror finalizeSale insert (canonical single source of truth)
+  const itemsJson = JSON.stringify({
+    schema: "pos:v1",
+    source_totals: "client",
+    items,
+    totals,
+    payment: "card",
+    payment_parts: Array.isArray(snap?.payment_parts) ? snap.payment_parts : undefined
+  });
+
+  const ins = await sql/*sql*/`
+    INSERT INTO app.sales (
+      sale_ts, tenant_id, raw_subtotal, line_discounts, subtotal, tax, total, payment_method, items_json
+    ) VALUES (
+      now(), ${tenantId}::uuid, ${totals.raw_subtotal}::numeric, ${totals.line_discounts}::numeric,
+      ${totals.subtotal}::numeric, ${totals.tax}::numeric, ${totals.total}::numeric,
+      'card', ${itemsJson}
+    )
+    RETURNING sale_id
+  `;
+  return ins?.[0]?.sale_id || null;
+}
+
+async function stampSaleId(env: Env, tenantId: string, invoice: string, saleId: string) {
+  const sql = neon(env.DATABASE_URL);
+  await sql/*sql*/`
+    UPDATE app.valor_sessions_log
+       SET sale_id = ${saleId}
+     WHERE tenant_id = ${tenantId}::uuid
+       AND invoice_number = ${invoice}
+     ORDER BY started_at DESC
+     LIMIT 1
+  `;
+}
