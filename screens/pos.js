@@ -719,7 +719,7 @@ export async function init(ctx) {
     const priceCell = isMisc
       ? `<input type="number" inputmode="decimal" step="0.01" min="0"
            class="input input-sm w-[88px] text-right"
-           value="${Number(it.price || 0)}"
+           value="${Number(it.price || 0).toFixed(2)}"
            data-price="${idx}" />`
       : `<div class="w-[88px] text-right font-medium">${fmtCurrency(it.price)}</div>`;
   
