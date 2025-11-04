@@ -288,8 +288,6 @@ label{
   word-break: break-word;
 }
 
-/* Keep the sales table within the card; define practical column widths */
-.pos-sales-card .table { width: 100%; }
 .pos-sales-card .table th:nth-child(1),
 .pos-sales-card .table td:nth-child(1){ width: 116px; }  /* Time */
 .pos-sales-card .table th:nth-child(2),
@@ -299,7 +297,7 @@ label{
 .pos-sales-card .table th:nth-child(4),
 .pos-sales-card .table td:nth-child(4){ width: 104px; }  /* Total */
 .pos-sales-card .table th:nth-child(5),
-.pos-sales-card .table td:nth-child(5){ width: 140px; }  /* Actions */
+.pos-sales-card .table td:nth-child(5){ width: 140px; }  /* Actions (moved up) */
 
 /* Prevent the card from visually “bursting” if a parent gets wider momentarily */
 .pos-sales-card { overflow: hidden; }
