@@ -823,19 +823,28 @@ export async function init(ctx) {
         });
       });
 
+      // (in render() after el.cart.innerHTML = ...)
       el.cart.querySelectorAll("[data-price]").forEach((inp) => {
-        inp.addEventListener("input", async () => {
+        // Commit on change/blur so the user can type "12." then "12.50"
+        const commit = async () => {
           const idx = Number(inp.getAttribute("data-price"));
-          const val = Number(inp.value || 0);
-          if (!isFinite(val)) return;
+          const raw = (inp.value || "").trim();
+      
+          // Accept "12", "12.", "12.3", "12.34" (up to 2 decimals; trailing dot allowed)
+          if (!/^\d+(\.\d{0,2})?$/.test(raw)) return;
+      
+          const val = parseFloat(raw);
+          if (!Number.isFinite(val)) return;
+      
           state.items[idx].price = val;
       
-          // Repaint this row immediately so the visible line total updates as you type
+          // Re-render and refresh totals after the user finishes typing
           render();
-      
-          // Then recompute preview totals (client or server)
           await refreshTotalsViaServer();
-        });
+        };
+      
+        inp.addEventListener("change", commit);
+        inp.addEventListener("blur", commit);
       });
 
       el.cart.querySelectorAll("[data-remove]").forEach((btn) => {
