@@ -690,7 +690,6 @@ export async function init(ctx) {
               </div>
             </td>
             <td class="whitespace-nowrap">${fmtCurrency(r.total || 0)}</td>
-            <td class="whitespace-nowrap">${escapeHtml(r.clerk || "")}</td>
             <td class="whitespace-nowrap">
               <button class="btn btn-xs" data-copy='${r.sale_id}'>Copy total</button>
               <button class="btn btn-xs btn-ghost" data-refund='${r.sale_id}'>Refund…</button>
