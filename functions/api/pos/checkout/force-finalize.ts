@@ -27,11 +27,56 @@ function json(data: any, status = 200): Response {
 }
 
 async function getPendingSession(env: Env, tenantId: string, invoice: string) {
-  // TODO: select * from app.valor_sessions_log where invoice_number = $1 and status='pending'
-  return { invoice_number: invoice, amount_cents: 0 };
+  const sql = neon(env.DATABASE_URL);
+  const rows = await sql/*sql*/`
+    SELECT invoice_number, req_txn_id, amount_cents, started_at, pos_snapshot
+      FROM app.valor_sessions_log
+     WHERE tenant_id = ${tenantId}::uuid
+       AND invoice_number = ${invoice}
+       AND status = 'pending'
+     ORDER BY started_at DESC
+     LIMIT 1
+  `;
+  return rows?.[0] || null;
 }
 
 async function finalizePendingSale(env: Env, tenantId: string, sess: any) {
-  // TODO: create sale row; attach invoice number; return sale_id
-  return "S-" + Math.floor(Date.now() / 1000);
+  const sql = neon(env.DATABASE_URL);
+  const snap = sess?.pos_snapshot || {};
+  const items = snap?.items || [];
+  const totals = snap?.totals || { raw_subtotal: 0, line_discounts: 0, subtotal: 0, tax: 0, total: 0 };
+
+  const itemsJson = JSON.stringify({
+    schema: "pos:v1",
+    source_totals: "client",
+    items,
+    totals,
+    payment: "card",
+    payment_parts: Array.isArray(snap?.payment_parts) ? snap.payment_parts : undefined
+  });
+
+  const ins = await sql/*sql*/`
+    INSERT INTO app.sales (
+      sale_ts, tenant_id, raw_subtotal, line_discounts, subtotal, tax, total, payment_method, items_json
+    ) VALUES (
+      now(), ${tenantId}::uuid, ${totals.raw_subtotal}::numeric, ${totals.line_discounts}::numeric,
+      ${totals.subtotal}::numeric, ${totals.tax}::numeric, ${totals.total}::numeric,
+      'card', ${itemsJson}
+    )
+    RETURNING sale_id
+  `;
+  const saleId = ins?.[0]?.sale_id || null;
+
+  // Keep session pending; just stamp sale_id so webhook can reconcile later.
+  if (saleId) {
+    await sql/*sql*/`
+      UPDATE app.valor_sessions_log
+         SET sale_id = ${saleId}
+       WHERE tenant_id = ${tenantId}::uuid
+         AND invoice_number = ${sess.invoice_number}
+       ORDER BY started_at DESC
+       LIMIT 1
+    `;
+  }
+  return saleId;
 }
