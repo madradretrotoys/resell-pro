@@ -39,6 +39,14 @@ function readDeclineMessage(wh: any) {
 }
 
 async function getSession(env: Env, tenantId: string, invoice: string) {
-  // TODO: select latest from app.valor_sessions_log where tenant_id & invoice_number
-  return null;
+  const sql = neon(env.DATABASE_URL);
+  const rows = await sql/*sql*/`
+    SELECT status, sale_id, webhook_json
+      FROM app.valor_sessions_log
+     WHERE tenant_id = ${tenantId}::uuid
+       AND invoice_number = ${invoice}
+     ORDER BY started_at DESC
+     LIMIT 1
+  `;
+  return rows?.[0] || null;
 }
