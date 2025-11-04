@@ -1,237 +1,67 @@
-<!-- POS Screen (Cloudflare + Neon) -->
-<div class="page">
+// /api/pos/sales
+// Returns { rows: [...] } for the POS "Sales (Today / Custom)" table.
 
-  <!-- Standard screen chrome -->
-  <div id="screen-banner" class="mb-3 hidden"></div>
-  <div id="screen-access-denied" class="hidden">
-    <div class="card p-3">Access denied</div>
-  </div>
-  <div id="screen-loading" class="card p-3">
-    Loading POS…
-  </div>
+import { neon } from "@neondatabase/serverless";
 
-  <div id="screen-content" class="hidden">
-    <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+export const onRequest: PagesFunction<Env> = async (ctx) => {
+  const { request, env } = ctx;
+  const sql = neon(env.DATABASE_URL);
+  const tenantId = request.headers.get("x-tenant-id") || "";
+  if (!tenantId) return j({ ok: false, error: "Missing tenant" }, 400);
 
-    <!-- LEFT: Search / Results -->
-    <div class="card p-3">
-      <div class="flex items-center justify-between mb-2">
-        <div class="section-title">Inventory Search</div>
-      </div>
-      <div class="flex items-center gap-2 mb-2">
-        <input id="pos-search" class="input w-full" placeholder="Enter SKU" />
-        <button id="pos-search-btn" class="btn btn-primary">Search</button>
-        <button id="pos-search-clear" class="btn btn-ghost">Clear</button>
-      </div>
+  const url = new URL(request.url);
+  const preset = (url.searchParams.get("preset") || "").toLowerCase();
+  const fromQ = url.searchParams.get("from") || "";
+  const toQ = url.searchParams.get("to") || "";
 
-        <div id="pos-quick-row" class="flex items-center gap-2 mb-3">
-          <button id="pos-quick-misc" class="btn btn-sm">+ Misc</button>
-        </div>
+  // Build time window (bind parameters with the template tag; no $2/$3)
+  const todayQuery = sql/*sql*/`
+    SELECT
+      sale_id,
+      to_char(sale_ts, 'YYYY-MM-DD HH24:MI') AS time,
+      payment_method AS payment,
+      total::numeric                         AS total,
+      NULL::text                             AS clerk
+    FROM app.sales
+    WHERE tenant_id = ${tenantId}::uuid
+      AND sale_ts >= date_trunc('day', now())
+      AND sale_ts <  date_trunc('day', now()) + interval '1 day'
+    ORDER BY sale_ts DESC
+    LIMIT 200
+  `;
 
-        <div id="pos-results" class="space-y-2 max-h-[60vh] overflow-auto">
-          <!-- search results with “Add” buttons go here -->
-        </div>
-      </div>
+  const rangeQuery = sql/*sql*/`
+    SELECT
+      sale_id,
+      to_char(sale_ts, 'YYYY-MM-DD HH24:MI') AS time,
+      payment_method AS payment,
+      total::numeric                         AS total,
+      NULL::text                             AS clerk
+    FROM app.sales
+    WHERE tenant_id = ${tenantId}::uuid
+      AND sale_ts >= ${fromQ || ""}::date
+      AND sale_ts <  (${toQ || ""}::date + interval '1 day')
+    ORDER BY sale_ts DESC
+    LIMIT 200
+  `;
 
-      <!-- RIGHT: Ticket -->
-      <div class="card p-3">
-        <div class="flex items-center justify-between mb-2">
-          <div class="section-title">Ticket</div>
-          <div class="flex items-center gap-2">
-            <button id="pos-ticket-empty" class="btn btn-ghost btn-sm">Empty</button>
-          </div>
-        </div>
+  try {
+    const rows =
+      (preset === "today" || (!fromQ && !toQ))
+        ? await todayQuery
+        : await rangeQuery;
 
-        <!-- Full-width Ticket column: Cart → Totals → Payment row -->
-        <div>
-          <!-- CART (full width) -->
-          <div id="pos-cart" class="grid grid-cols-1 gap-2">
-            <!-- rows injected -->
-          </div>
+    return j({ ok: true, rows });
 
-          <!-- TOTALS (share exact padding with item rows) -->
-          <div class="mt-3 ticket-row ticket-row--totals">
-            <!-- Match the item-row control bar layout -->
-            <div class="ticket-controls flex items-center justify-between gap-2 flex-wrap">
-              <!-- Left cluster (QTY spacer) — intentionally empty to keep columns consistent -->
-              <div class="inline-flex items-center gap-1"></div>
-          
-              <!-- Right cluster (amount + action column) -->
-              <div class="flex items-center gap-2 flex-1 justify-end flex-wrap">
-                <div class="pos-totals text-right w-[320px] max-w-full">
-                  <div class="flex justify-between py-1">
-                    <span class="text-muted">Subtotal</span>
-                    <span id="pos-subtotal">$0.00</span>
-                  </div>
-                  <div class="flex justify-between py-1">
-                    <span class="text-muted">Discounts</span>
-                    <span id="pos-discounts">$0.00</span>
-                  </div>
-                  <div class="flex justify-between py-1">
-                    <span class="text-muted">Tax</span>
-                    <span id="pos-tax">$0.00</span>
-                  </div>
-                  <div class="flex justify-between py-2 border-t mt-2 font-semibold">
-                    <span>Total</span>
-                    <span id="pos-total">$0.00</span>
-                  </div>
-                </div>
-                <!-- Invisible placeholder = same width/shape as the real Remove button.
-                     Keeps the outer edge identical to item rows. -->
-                <button class="btn btn-ghost btn-xs btn-placeholder" aria-hidden="true" tabindex="-1">Remove</button>
-              </div>
-            </div>
-          </div>
-          
-            <!-- PAYMENT ROW (single horizontal row; wraps nicely on small screens) -->
-            <div class="mt-2 pos-pay-row pos-compact">
-              <select id="pos-payment" class="select pos-pay-item pos-w-method">
-                <option value="" selected disabled>Select payment…</option>
-                <option value="cash">CASH</option>
-                <option value="card:visa">Visa (Valor)</option>
-                <option value="card:mastercard">MasterCard (Valor)</option>
-                <option value="card:amex">Amex (Valor)</option>
-                <option value="card:discover">Discover (Valor)</option>
-                <option value="wallet:venmo">Venmo</option>
-                <option value="wallet:zelle">Zelle</option>
-                <option value="wallet:cashapp">Cash App</option>
-              </select>
-  
-              <button id="pos-split" class="btn btn-ghost pos-pay-item">Split payment</button>
-              <button id="pos-complete" class="btn btn-primary pos-pay-item pos-pay-push" disabled>Complete Sale</button>
-            </div>
+    return j({ ok: true, rows });
+  } catch (e: any) {
+    return j({ ok: false, error: String(e?.message || e) }, 500);
+  }
+};
 
-            <!-- VALOR STATUS / FALLBACK (initially hidden; shown when card flow starts) -->
-            <div id="pos-valor-bar" class="mt-2 hidden">
-              <div class="card p-2 flex items-center gap-3 flex-wrap">
-                <div class="text-sm">
-                  <span class="font-semibold">VALOR:</span>
-                  <span id="pos-valor-msg" class="align-middle">Idle</span>
-                </div>
-                <button id="pos-valor-finalize" class="btn btn-ghost btn-sm hidden">
-                  Finalize without reply
-                </button>
-              </div>
-            </div>
-  
-            <!-- CASH PANEL (inline; hidden until CASH selected) -->
-              <div id="pos-cash-panel" class="card pos-panel pos-compact" style="display:none">
-                <div class="section-title">Cash Payment</div>
-                <div class="flex items-center gap-3 flex-wrap">
-                <div class="pos-field">
-                  <label>Total Due</label>
-                  <div id="pos-cash-total-txt" class="pos-static pos-w-amount text-right">$0.00</div>
-                </div>
-                <div class="pos-field">
-                  <label>Amount Received</label>
-                  <input id="pos-cash-received" type="number" class="input input-sm pos-w-amount" inputmode="decimal" placeholder="0.00" />
-                </div>
-                <div class="pos-field">
-                  <label>Change Due</label>
-                  <div id="pos-cash-change-txt" class="pos-static pos-w-amount text-right">$0.00</div>
-                </div>
-                <div class="flex items-center gap-2 pos-push">
-                  <button id="pos-cash-confirm" class="btn btn-primary btn-sm">Confirm Cash</button>
-                  <button id="pos-cash-close" class="btn btn-ghost btn-sm">Close</button>
-                </div>
-              </div>
-            </div>
-  
-            <!-- SPLIT PANEL (inline; hidden until Split clicked) -->
-              <div id="pos-split-panel" class="card pos-panel pos-compact" style="display:none">
-                <div class="section-title">Split Payment</div>
-                <div class="flex items-center gap-2 flex-wrap mb-2">
-                <select id="pos-split-method" class="select input-sm pos-w-method">
-                  <option value="cash">CASH</option>
-                  <option value="card:visa">Visa (Valor)</option>
-                  <option value="card:mastercard">MasterCard (Valor)</option>
-                  <option value="card:amex">Amex (Valor)</option>
-                  <option value="card:discover">Discover (Valor)</option>
-                  <option value="wallet:venmo">Venmo</option>
-                  <option value="wallet:zelle">Zelle</option>
-                  <option value="wallet:cashapp">Cash App</option>
-                </select>
-                <input id="pos-split-amount" type="number" class="input input-sm pos-w-amount" inputmode="decimal" placeholder="Amount" />
-                <button id="pos-split-add" class="btn btn-ghost btn-sm">Add Payment</button>
-              </div>
-  
-              <div class="overflow-auto">
-                <table class="table w-full" id="pos-split-table">
-                  <thead>
-                    <tr>
-                      <th class="text-left">Method</th>
-                      <th class="text-left">Amount</th>
-                      <th class="text-left">Actions</th>
-                    </tr>
-                  </thead>
-                  <tbody id="pos-split-body"><!-- rows injected --></tbody>
-                </table>
-              </div>
-  
-              <div class="flex items-center gap-2 mt-2">
-                <div class="muted">Remaining:</div>
-                <div id="pos-split-remaining" class="font-semibold">$0.00</div>
-                <div class="flex items-center gap-2 pos-push">
-                  <button id="pos-split-confirm" class="btn btn-primary btn-sm" disabled>Confirm Split</button>
-                  <button id="pos-split-close" class="btn btn-ghost btn-sm">Close</button>
-                </div>
-              </div>
-            </div>
-
-
-            
-            
-        </div>
-
-
-        <!-- Optional: debug/save logs toggle (kept full width under the grid) -->
-        <details class="mt-3">
-          <summary class="text-sm">View save logs</summary>
-          <pre id="pos-logs" class="text-xs p-2 bg-muted/20 rounded"></pre>
-        </details>
-      </div>
-
-    </div> <!-- 👈 CLOSE the outer two-column wrapper -->
-
-    <!-- BELOW: Sales list (today/custom) -->
-    <div id="pos-sales" class="card p-3 mt-3">
-      <div class="flex items-center justify-between mb-2">
-        <div class="section-title">Sales (Today / Custom)</div>
-        <div class="flex items-center gap-2">
-            <button id="pos-sales-today" class="btn btn-sm">Today</button>
-          <span class="text-sm">or</span>
-          <input id="pos-date-from" type="date" class="input input-sm" />
-          <span class="text-sm">to</span>
-          <input id="pos-date-to" type="date" class="input input-sm" />
-          <button id="pos-sales-load" class="btn btn-sm btn-primary">Load</button>
-        </div>
-      </div>
-      <div class="overflow-x-auto">
-        <div class="table-wrap">
-          <table class="table table-fixed">
-            <colgroup>
-              <col style="width:120px" />
-              <col style="width:260px" />
-              <col style="width:40ch" /> <!-- Payment column fixed to ~40 characters -->
-              <col style="width:100px" />
-              <col style="width:120px" />
-              <col style="width:140px" />
-            </colgroup>
-            <thead>
-              <tr>
-                <th class="text-left">Time</th>
-                <th class="text-left">Sale ID</th>
-                <th class="text-left">Payment</th>
-                <th class="text-left">Total</th>
-                <th class="text-left">Clerk</th>
-                <th class="text-left">Actions</th>
-              </tr>
-            </thead>
-            <tbody id="pos-sales-body">
-              <!-- rows -->
-            </tbody>
-          </table>
-      </div>
-    </div>
-  </div>
-</div>
+function j(data: any, status = 200): Response {
+  return new Response(JSON.stringify(data), {
+    status,
+    headers: { "content-type": "application/json" },
+  });
+}
