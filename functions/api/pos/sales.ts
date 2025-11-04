@@ -17,11 +17,12 @@ export const onRequest: PagesFunction<Env> = async (ctx) => {
   // Build time window (bind parameters with the template tag; no $2/$3)
   const todayQuery = sql/*sql*/`
   SELECT
-    sale_id,
-    to_char(sale_ts, 'YYYY-MM-DD HH24:MI') AS time,
-    payment_method AS payment,
-    total::numeric                         AS total
-  FROM app.sales
+  sale_id,
+  to_char(sale_ts, 'YYYY-MM-DD HH24:MI') AS time,
+  payment_method AS payment,
+  total::numeric                         AS total,
+  NULL::text                             AS clerk
+FROM app.sales
     WHERE tenant_id = ${tenantId}::uuid
       AND sale_ts >= date_trunc('day', now())
       AND sale_ts <  date_trunc('day', now()) + interval '1 day'
