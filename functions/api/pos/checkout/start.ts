@@ -121,7 +121,12 @@ export const onRequest: PagesFunction<Env> = async (ctx) => {
 
   // Publish to Valor (mirror names & shapes; keep invoicenumber)
   try {
-    const valorRes = await publishToValor(env, { invoicenumber, amount: repriced.totals.total, req_txn_id: reqTxnId });
+    const valorRes = await publishToValor(env, {
+      tenant_id: tenantId,                // << pass the real tenant
+      invoicenumber,
+      amount: repriced.totals.total,
+      req_txn_id: reqTxnId
+    });
     await markValorPublishAck(env, reqTxnId, { ack_msg: valorRes?.message || "sent" });
   } catch (e: any) {
     await markValorPublishAck(env, reqTxnId, { ack_msg: `error:${e?.message || e}` });
@@ -313,14 +318,11 @@ async function markValorPublishAck(env: Env, reqTxnId: string, data: any) {
 
 async function publishToValor(
   env: Env,
-  args: { invoicenumber: string; amount: number; req_txn_id: string; epi?: string }
+  args: { tenant_id: string; invoicenumber: string; amount: number; req_txn_id: string; epi?: string }
 ) {
   // Mirror legacy payload exactly:
-  // - Top-level { invoicenumber, epi? }
-  // - Nested PAYLOAD with REQ_TXN_ID and AMOUNT (cents)
   const payload = {
     invoicenumber: String(args.invoicenumber),
-    // Legacy tolerated both "epi" and "EPI"; we’ll send "epi" and log exactly what we send.
     ...(args.epi ? { epi: String(args.epi) } : {}),
     PAYLOAD: {
       REQ_TXN_ID: String(args.req_txn_id),
@@ -328,9 +330,9 @@ async function publishToValor(
     }
   };
 
-  // Log REQUEST phase exactly like legacy “Valor Publish Log”
+  // REQUEST log (must use real tenant_id)
   await insertValorPublish(env, {
-    tenant_id: env.TENANT_ID || null,   // optional: leave null if not set here
+    tenant_id: args.tenant_id,
     req_txn_id: args.req_txn_id,
     invoice_number: args.invoicenumber,
     phase: "request",
@@ -339,7 +341,7 @@ async function publishToValor(
     payload
   });
 
-  // Perform the publish (best-effort; valor side should accept mirrored legacy shape)
+  // Perform the publish
   let respText = "";
   try {
     const r = await fetch(env.VALOR_PUBLISH_URL || "", {
@@ -352,9 +354,9 @@ async function publishToValor(
     respText = `error:${e?.message || String(e)}`;
   }
 
-  // Log RESPONSE phase so correlation-by-REQ_TXN_ID works (legacy sheets did this too)
+  // RESPONSE log (same tenant_id)
   await insertValorPublish(env, {
-    tenant_id: env.TENANT_ID || null,
+    tenant_id: args.tenant_id,
     req_txn_id: args.req_txn_id,
     invoice_number: args.invoicenumber,
     phase: "response",
