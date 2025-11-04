@@ -654,13 +654,6 @@ export async function init(ctx) {
 
 
   function wireSales() {
-    // One-time: lock Sales layout so the Payment column can wrap
-    // and the table can’t auto-grow past the card.
-    const salesCardEl  = el.salesBody?.closest(".card");
-    const salesTableEl = el.salesBody?.closest("table");
-    if (salesCardEl)  salesCardEl.classList.add("pos-sales-card");   // enables scoped widths + overflow guard
-    if (salesTableEl) salesTableEl.classList.add("table", "table-fixed"); // fixed layout + base table styling
-  
     el.salesToday.addEventListener("click", async () => {
       await loadSales({ preset: "today" });
     });
