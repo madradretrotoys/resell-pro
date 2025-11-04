@@ -299,9 +299,7 @@ label{
 .pos-sales-card .table th:nth-child(4),
 .pos-sales-card .table td:nth-child(4){ width: 104px; }  /* Total */
 .pos-sales-card .table th:nth-child(5),
-.pos-sales-card .table td:nth-child(5){ width: 96px; }   /* Clerk */
-.pos-sales-card .table th:nth-child(6),
-.pos-sales-card .table td:nth-child(6){ width: 140px; }  /* Actions */
+.pos-sales-card .table td:nth-child(5){ width: 140px; }  /* Actions */
 
 /* Prevent the card from visually “bursting” if a parent gets wider momentarily */
 .pos-sales-card { overflow: hidden; }
