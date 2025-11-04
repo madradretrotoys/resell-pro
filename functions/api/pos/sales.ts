@@ -14,7 +14,7 @@ export const onRequest: PagesFunction<Env> = async (ctx) => {
   const fromQ = url.searchParams.get("from") || "";
   const toQ = url.searchParams.get("to") || "";
 
-  // Build time window (bind parameters with the template tag; no $2/$3)
+ // Build time window (bind parameters with the template tag; no $2/$3)
   const todayQuery = sql/*sql*/`
     SELECT
       sale_id,
@@ -50,8 +50,6 @@ export const onRequest: PagesFunction<Env> = async (ctx) => {
       (preset === "today" || (!fromQ && !toQ))
         ? await todayQuery
         : await rangeQuery;
-
-    return j({ ok: true, rows });
 
     return j({ ok: true, rows });
   } catch (e: any) {
