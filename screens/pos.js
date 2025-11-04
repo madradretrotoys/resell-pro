@@ -823,29 +823,34 @@ export async function init(ctx) {
         });
       });
 
-      // (in render() after el.cart.innerHTML = ...)
       el.cart.querySelectorAll("[data-price]").forEach((inp) => {
-        // Commit on change/blur so the user can type "12." then "12.50"
-        const commit = async () => {
-          const idx = Number(inp.getAttribute("data-price"));
-          const raw = (inp.value || "").trim();
-      
-          // Accept "12", "12.", "12.3", "12.34" (up to 2 decimals; trailing dot allowed)
-          if (!/^\d+(\.\d{0,2})?$/.test(raw)) return;
-      
-          const val = parseFloat(raw);
-          if (!Number.isFinite(val)) return;
-      
-          state.items[idx].price = val;
-      
-          // Re-render and refresh totals after the user finishes typing
-          render();
-          await refreshTotalsViaServer();
-        };
-      
-        inp.addEventListener("change", commit);
-        inp.addEventListener("blur", commit);
-      });
+      // Commit on change/blur; support values like ".99" by normalizing to "0.99"
+      const commit = async () => {
+        const idx = Number(inp.getAttribute("data-price"));
+        let raw = (inp.value || "").trim();
+    
+        // Ignore empty/placeholder states
+        if (raw === "" || raw === ".") return;
+    
+        // Normalize leading-decimal forms (".6" -> "0.6", ".99" -> "0.99")
+        if (/^\.\d{1,2}$/.test(raw)) raw = "0" + raw;
+    
+        // Accept up to 2 decimals; "12", "12.", "12.3", "12.34", and "0.99"
+        if (!/^\d+(\.\d{0,2})?$/.test(raw)) return;
+    
+        const val = parseFloat(raw);
+        if (!Number.isFinite(val)) return;
+    
+        state.items[idx].price = val;
+    
+        // Re-render and refresh totals after the user finishes typing
+        render();
+        await refreshTotalsViaServer();
+      };
+    
+      inp.addEventListener("change", commit);
+      inp.addEventListener("blur", commit);
+    });
 
       el.cart.querySelectorAll("[data-remove]").forEach((btn) => {
         btn.addEventListener("click", async () => {
