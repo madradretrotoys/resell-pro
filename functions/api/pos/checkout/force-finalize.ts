@@ -30,7 +30,7 @@ function json(data: any, status = 200): Response {
 async function getPendingSession(env: Env, tenantId: string, invoice: string) {
   const sql = neon(env.DATABASE_URL);
   const rows = await sql/*sql*/`
-    SELECT invoice_number, req_txn_id, amount_cents, started_at, pos_snapshot
+    SELECT invoice_number, txn_id, amount_cents, started_at, pos_snapshot
       FROM app.valor_sessions_log
      WHERE tenant_id = ${tenantId}::uuid
        AND invoice_number = ${invoice}
