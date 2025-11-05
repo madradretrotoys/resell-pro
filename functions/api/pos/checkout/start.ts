@@ -312,13 +312,20 @@ async function openValorSession(env: Env, row: any) {
     payment: row.payment ?? null,
     payment_parts: Array.isArray(row.payment_parts) ? row.payment_parts : undefined
   });
+  // Store the client POS snapshot inside webhook_json (under a namespaced key)
+  // so we keep the data without changing your table.
+  const combined = JSON.stringify({
+    pos_snapshot: JSON.parse(snap),
+    ...(row.webhook_json ? { webhook_json: row.webhook_json } : {})
+  });
+  
   await sql/*sql*/`
     INSERT INTO app.valor_sessions_log
-      (tenant_id, invoice_number, req_txn_id, attempt, amount_cents, status, started_at, pos_snapshot, webhook_json)
+      (tenant_id, invoice_number, req_txn_id, attempt, amount_cents, status, started_at, webhook_json)
     VALUES
       (${row.tenant_id}::uuid, ${row.invoice_number}, ${row.req_txn_id},
        ${row.attempt || 1}, ${row.amount_cents || 0}, ${row.status || "pending"},
-       ${row.started_at || new Date().toISOString()}, ${snap}::jsonb, ${row.webhook_json ? JSON.stringify(row.webhook_json) : null}::jsonb)
+       ${row.started_at || new Date().toISOString()}, ${combined}::jsonb)
   `;
 }
 
