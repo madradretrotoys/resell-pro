@@ -279,14 +279,23 @@ async function finalizeSale(
 async function insertValorPublish(env: Env, row: any) {
   const sql = neon(env.DATABASE_URL);
   const payload = JSON.stringify(row.payload ?? {});
-  await sql/*sql*/`
-    INSERT INTO app.valor_publish
-      (tenant_id, req_txn_id, invoice_number, phase, http, url, payload, created_at)
-    VALUES
-      (${row.tenant_id}::uuid, ${row.req_txn_id}, ${row.invoice_number},
-       ${row.phase || "start"}, ${row.http || "POST"}, ${row.url || ""},
-       ${payload}::jsonb, now())
-  `;
+  try {
+    await sql/*sql*/`
+      INSERT INTO app.valor_publish
+        (tenant_id, req_txn_id, invoice_number, phase, http, url, payload, created_at)
+      VALUES
+        (${row.tenant_id}::uuid, ${row.req_txn_id}, ${row.invoice_number},
+         ${row.phase || "start"}, ${row.http || "POST"}, ${row.url || ""},
+         ${payload}::jsonb, now())
+      ON CONFLICT DO NOTHING
+    `;
+  } catch (e: any) {
+    // Allow duplicate-key errors to pass without breaking checkout/start.
+    const msg = String(e?.message || e);
+    if (!/duplicate key value violates unique constraint/i.test(msg)) {
+      throw e;
+    }
+  }
 }
 
 async function openValorSession(env: Env, row: any) {
