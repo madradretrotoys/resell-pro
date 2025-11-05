@@ -125,12 +125,14 @@ export const onRequest: PagesFunction<Env> = async (ctx) => {
   // Publish to Valor (mirror names & shapes; keep invoicenumber)
   try {
     const valorRes = await publishToValor(env, {
-      tenant_id: tenantId,                // << pass the real tenant
+      tenant_id: tenantId,
       invoicenumber,
       amount: repriced.totals.total,
-      txn_id: txnId   // we now treat this as the valor txn_id
+      txn_id: txnId,
     });
-    await markValorPublishAck(env, txnId, { ack_msg: valorRes?.message || "sent" });
+    await markValorPublishAck(env, txnId, {
+      ack_msg: valorRes?.message || (valorRes?.accepted ? "accepted" : "sent"),
+    });
   } catch (e: any) {
     await markValorPublishAck(env, txnId, { ack_msg: `error:${e?.message || e}` });
   }
@@ -345,76 +347,82 @@ async function publishToValor(
   env: Env,
   args: { tenant_id: string; invoicenumber: string; amount: number; txn_id: string; epi?: string }
 ) {
-  // Build the payload to match the legacy Apps Script format exactly
-  const payload = {
-    invoicenumber: String(args.invoicenumber),
-    ...(args.epi ? { epi: String(args.epi) } : {}),
-    PAYLOAD: {
-      TXN_ID: String(args.txn_id),
-      AMOUNT: Math.round(Number(args.amount) * 100) // cents
-    }
+  // ≤24 chars + ALL CAPS for Valor; also ensures we send INVOICENUMBER in both places
+  const INVOICENUMBER = String(args.invoicenumber).slice(0, 24).toUpperCase();
+
+  // Build legacy envelope (keys & casing)
+  const body: any = {
+    appid:      env.VALOR_APPID,
+    appkey:     env.VALOR_APPKEY,
+    epi:        args.epi || env.VALOR_EPI,
+    txn_type:   "vc_publish",
+    channel_id: env.VALOR_CHANNEL_ID,
+    version:    "1",
+    INVOICENUMBER, // TOP-LEVEL (ALL CAPS)
+    payload: {     // lower-case payload (not PAYLOAD)
+      TRAN_MODE:   "1",
+      TRAN_CODE:   "1",
+      AMOUNT:      String(Math.round(Number(args.amount) * 100)), // cents as STRING
+      REQ_TXN_ID:  String(args.txn_id || ""), // compat only; Valor doesn't use it
+      INVOICENUMBER,                          // duplicate inside payload
+    },
   };
 
-  // High-signal console logs for Cloudflare logs (diagnostic only)
-  try {
-    console.log("[VALOR][publish][build]", {
-      tenant_id: args.tenant_id,
-      invoicenumber: payload.invoicenumber,
-      epi: payload["epi"] ?? null,
-      amount_cents: payload.PAYLOAD.AMOUNT,
-      txn_id: payload.PAYLOAD.TXN_ID
-    });
-  } catch (_) { /* ignore logging errors */ }
+  // Ensure publish URL includes ?status (legacy requirement)
+  let url = String(env.VALOR_PUBLISH_URL || "");
+  if (url && !/[?&]status(=|$)/i.test(url)) {
+    url += (url.includes("?") ? "&" : "?") + "status";
+  }
 
-  // JOURNAL: request (must use the real tenant_id)
+  // Mask secrets for the request journal
+  const masked = { ...body, appkey: body.appkey ? String(body.appkey).slice(0, 4) + "***" : undefined };
+
+  // JOURNAL: request → app.valor_publish
   await insertValorPublish(env, {
     tenant_id: args.tenant_id,
     txn_id: args.txn_id,
-    invoice_number: args.invoicenumber,
+    invoice_number: INVOICENUMBER,
     phase: "request",
     http: "POST",
-    url: env.VALOR_PUBLISH_URL || "",
-    payload
+    url,
+    payload: masked
   });
-
-  // Emit the request body to logs (truncated) so you can compare with Apps Script
-  try {
-    console.log("[VALOR][publish][request]", JSON.stringify(payload).slice(0, 2000));
-  } catch (_) { /* ignore */ }
 
   // Perform the publish
   let respStatus = -1;
   let respText = "";
+  let respJson: any = null;
   try {
-    const r = await fetch(env.VALOR_PUBLISH_URL || "", {
+    const r = await fetch(url, {
       method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify(payload)
+      headers: { "Content-Type": "application/json", Accept: "application/json" },
+      body: JSON.stringify(body)
     });
     respStatus = r.status;
-    respText = await r.text();
+    const t = await r.text();
+    respText = t;
+    try { respJson = JSON.parse(t); } catch { /* non-JSON OK */ }
   } catch (e: any) {
     respText = `error:${e?.message || String(e)}`;
   }
 
-  // RESPONSE journal
+  // JOURNAL: response
   await insertValorPublish(env, {
     tenant_id: args.tenant_id,
     txn_id: args.txn_id,
-    invoice_number: args.invoicenumber,
+    invoice_number: INVOICENUMBER,
     phase: "response",
     http: "POST",
-    url: env.VALOR_PUBLISH_URL || "",
+    url,
     payload: { status: respStatus, response: respText }
   });
 
-  // Emit response to logs (truncated) to trace terminal comms
-  try {
-    console.log("[VALOR][publish][response]", {
-      status: respStatus,
-      text: String(respText || "").slice(0, 1000)
-    });
-  } catch (_) { /* ignore */ }
+  // Treat VC07 / timeout as accepted (legacy behavior)
+  const ackMsg = String((respJson && (respJson.ACKMSG || respJson.ack_msg)) || respText || "");
+  const accepted =
+    (respStatus >= 200 && respStatus < 300) ||
+    /VC07/i.test(ackMsg) ||
+    /timeout/i.test(ackMsg);
 
-  return { message: "sent" };
+  return { accepted, message: ackMsg || "sent" };
 }
