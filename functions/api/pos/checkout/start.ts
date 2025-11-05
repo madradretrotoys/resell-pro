@@ -89,7 +89,10 @@ export const onRequest: PagesFunction<Env> = async (ctx) => {
   }
 
   // Card flow — open Valor publish + session
-  const invoicenumber = makeInvoiceNumber(tenantId);
+  let invoicenumber = makeInvoiceNumber(tenantId);
+  // hard guard (belt & suspenders) — ensure ≤24 chars before any write/publish
+  if (invoicenumber.length > 24) invoicenumber = invoicenumber.slice(0, 24);
+  
   const reqTxnId = makeReqTxnId();
 
   // Record outbound intent
@@ -151,8 +154,11 @@ function makeReqTxnId() {
 }
 
 function makeInvoiceNumber(tenantId: string) {
-  const now = Date.now();
-  return `INV-${tenantId.slice(0, 8)}-${now}`;
+  // Legacy-friendly invoice: short tenant prefix + base36 timestamp, hard-capped at 24 chars.
+  const t = (tenantId || "").replace(/-/g, "").slice(0, 6).toUpperCase();
+  const ts = Date.now().toString(36).toUpperCase(); // much shorter than decimal
+  const raw = `INV-${t}-${ts}`;
+  return raw.slice(0, 24);
 }
 
 async function computeTotals(env: Env, tenantId: string, items: any[]) {
