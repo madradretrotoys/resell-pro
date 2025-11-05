@@ -93,7 +93,7 @@ export const onRequest: PagesFunction<Env> = async (ctx) => {
   // hard guard (belt & suspenders) — ensure ≤24 chars before any write/publish
   if (invoicenumber.length > 24) invoicenumber = invoicenumber.slice(0, 24);
   
-  const txnId = maketxnId();
+  const txnId = makeTxnId();
 
   // Record outbound intent
   await insertValorPublish(env, {
