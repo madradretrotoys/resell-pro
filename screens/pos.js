@@ -489,11 +489,24 @@ export async function init(ctx) {
               payment_parts: state.payment?.type === "split" ? state.payment.parts : undefined,
             };
 
-            const res = await api("/api/pos/checkout/start", {
-              method: "POST",
-              headers: { "content-type": "application/json" },
-              body: JSON.stringify(body)
-            });
+            console.group("[POS] checkout/start");
+            console.log("[POS] request body", body);
+            
+            let res;
+            try {
+              res = await api("/api/pos/checkout/start", {
+                method: "POST",
+                headers: { "content-type": "application/json" },
+                body: JSON.stringify(body)
+              });
+              console.log("[POS] response", res);
+            } catch (err) {
+              console.error("[POS] start failed", err);
+              throw err; // keep existing banner behaviour
+            } finally {
+              console.groupEnd();
+            }
+            
             log(res);
 
             if (res?.status === "completed" && res?.sale_id) {
