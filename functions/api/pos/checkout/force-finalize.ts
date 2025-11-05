@@ -1,6 +1,7 @@
 // /api/pos/checkout/force-finalize
 // When the clerk chooses to finalize a sale without waiting for the Valor reply.
 // We write the sale now, mark the session pending; the webhook will reconcile later.
+import { neon } from "@neondatabase/serverless";
 
 export const onRequest: PagesFunction<Env> = async (ctx) => {
   const { request, env } = ctx;
