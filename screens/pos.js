@@ -583,9 +583,16 @@ export async function init(ctx) {
 
               // Poll function
               const pollOnce = async () => {
-                try {
-                  const r = await api(`/api/pos/checkout/status?invoice=${encodeURIComponent(res.invoice)}`, { method: "GET" });
-                  if (r?.status === "pending") return; // keep waiting
+              try {
+                console.group("[POS] status poll");
+                console.log("[POS] GET /status", { invoice: res.invoice });
+                const r = await api(`/api/pos/checkout/status?invoice=${encodeURIComponent(res.invoice)}`, { method: "GET" });
+                console.log("[POS] /status response", r);
+            
+                if (r?.status === "pending") {
+                  console.log("[POS] /status pending");
+                  return; // keep waiting
+                }
 
                   done = true;
                   clearInterval(timerId);
@@ -625,7 +632,10 @@ export async function init(ctx) {
                   // Unknown terminal state
                   el.valorMsg.textContent = "Unknown status";
                 } catch (e) {
+                  console.error("[POS] /status error", e); // visible in DevTools
                   // Non-fatal: keep polling
+                } finally {
+                  console.groupEnd();
                 }
               };
 
