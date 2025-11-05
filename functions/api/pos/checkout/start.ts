@@ -93,13 +93,13 @@ export const onRequest: PagesFunction<Env> = async (ctx) => {
   // hard guard (belt & suspenders) — ensure ≤24 chars before any write/publish
   if (invoicenumber.length > 24) invoicenumber = invoicenumber.slice(0, 24);
   
-  const reqTxnId = makeReqTxnId();
+  const txnId = maketxnId();
 
   // Record outbound intent
   await insertValorPublish(env, {
     tenant_id: tenantId,
     phase: "start",
-    req_txn_id: reqTxnId,
+    txn_id: txnId,
     url: "valor/purchase", // informational; real URL used in publish call
     http: "POST",
     payload: { items: repriced.items, totals: repriced.totals, payment, invoicenumber },
@@ -110,7 +110,7 @@ export const onRequest: PagesFunction<Env> = async (ctx) => {
   await openValorSession(env, {
     tenant_id: tenantId,
     invoice_number: invoicenumber,
-    req_txn_id: reqTxnId,
+    txn_id: txnId,
     attempt: 1,
     amount_cents: Math.round(repriced.totals.total * 100),
     status: "pending",
@@ -128,11 +128,11 @@ export const onRequest: PagesFunction<Env> = async (ctx) => {
       tenant_id: tenantId,                // << pass the real tenant
       invoicenumber,
       amount: repriced.totals.total,
-      req_txn_id: reqTxnId
+      txn_id: txnId   // we now treat this as the valor txn_id
     });
-    await markValorPublishAck(env, reqTxnId, { ack_msg: valorRes?.message || "sent" });
+    await markValorPublishAck(env, txnId, { ack_msg: valorRes?.message || "sent" });
   } catch (e: any) {
-    await markValorPublishAck(env, reqTxnId, { ack_msg: `error:${e?.message || e}` });
+    await markValorPublishAck(env, txnId, { ack_msg: `error:${e?.message || e}` });
   }
 
   // Return waiting response so the POS can poll
@@ -149,8 +149,8 @@ function json(data: any, status = 200): Response {
   return new Response(JSON.stringify(data), { status, headers: { "content-type": "application/json" } });
 }
 
-function makeReqTxnId() {
-  return "rtx_" + crypto.randomUUID();
+function makeTxnId() {
+  return "tx_" + crypto.randomUUID();
 }
 
 function makeInvoiceNumber(tenantId: string) {
@@ -288,9 +288,9 @@ async function insertValorPublish(env: Env, row: any) {
   try {
     await sql/*sql*/`
       INSERT INTO app.valor_publish
-        (tenant_id, req_txn_id, invoice_number, phase, http, url, payload, created_at)
+        (tenant_id, txn_id, invoice_number, phase, http, url, payload, created_at)
       VALUES
-        (${row.tenant_id}::uuid, ${row.req_txn_id}, ${row.invoice_number},
+        (${row.tenant_id}::uuid, ${row.txn_id}, ${row.invoice_number},
          ${row.phase || "start"}, ${row.http || "POST"}, ${row.url || ""},
          ${payload}::jsonb, now())
       ON CONFLICT DO NOTHING
@@ -319,35 +319,38 @@ async function openValorSession(env: Env, row: any) {
     ...(row.webhook_json ? { webhook_json: row.webhook_json } : {})
   });
   
+  // anchor: INSERT INTO app.valor_sessions_log
   await sql/*sql*/`
     INSERT INTO app.valor_sessions_log
-      (tenant_id, invoice_number, req_txn_id, attempt, amount_cents, status, started_at, webhook_json)
+      (tenant_id, invoice_number, txn_id, attempt, amount_cents, status, started_at, webhook_json)
     VALUES
-      (${row.tenant_id}::uuid, ${row.invoice_number}, ${row.req_txn_id},
+      (${row.tenant_id}::uuid, ${row.invoice_number}, ${row.txn_id},
        ${row.attempt || 1}, ${row.amount_cents || 0}, ${row.status || "pending"},
        ${row.started_at || new Date().toISOString()}, ${combined}::jsonb)
   `;
 }
 
-async function markValorPublishAck(env: Env, reqTxnId: string, data: any) {
+async function markValorPublishAck(env: Env, txnId: string, data: any) {
   const sql = neon(env.DATABASE_URL);
+  // anchor: UPDATE app.valor_publish
   await sql/*sql*/`
     UPDATE app.valor_publish
        SET ack_msg = ${String(data?.ack_msg || "sent")}
-     WHERE req_txn_id = ${reqTxnId}
+     WHERE txn_id = ${txnId}
+        OR invoice_number = ${data?.invoice || null}
   `;
 }
 
 async function publishToValor(
   env: Env,
-  args: { tenant_id: string; invoicenumber: string; amount: number; req_txn_id: string; epi?: string }
+  args: { tenant_id: string; invoicenumber: string; amount: number; txn_id: string; epi?: string }
 ) {
   // Build the payload to match the legacy Apps Script format exactly
   const payload = {
     invoicenumber: String(args.invoicenumber),
     ...(args.epi ? { epi: String(args.epi) } : {}),
     PAYLOAD: {
-      REQ_TXN_ID: String(args.req_txn_id),
+      TXN_ID: String(args.txn_id),
       AMOUNT: Math.round(Number(args.amount) * 100) // cents
     }
   };
@@ -359,14 +362,14 @@ async function publishToValor(
       invoicenumber: payload.invoicenumber,
       epi: payload["epi"] ?? null,
       amount_cents: payload.PAYLOAD.AMOUNT,
-      req_txn_id: payload.PAYLOAD.REQ_TXN_ID
+      txn_id: payload.PAYLOAD.TXN_ID
     });
   } catch (_) { /* ignore logging errors */ }
 
   // JOURNAL: request (must use the real tenant_id)
   await insertValorPublish(env, {
     tenant_id: args.tenant_id,
-    req_txn_id: args.req_txn_id,
+    txn_id: args.txn_id,
     invoice_number: args.invoicenumber,
     phase: "request",
     http: "POST",
@@ -397,7 +400,7 @@ async function publishToValor(
   // RESPONSE journal
   await insertValorPublish(env, {
     tenant_id: args.tenant_id,
-    req_txn_id: args.req_txn_id,
+    txn_id: args.txn_id,
     invoice_number: args.invoicenumber,
     phase: "response",
     http: "POST",
