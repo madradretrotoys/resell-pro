@@ -19,9 +19,9 @@ export const onRequest: PagesFunction<Env> = async (ctx) => {
         request.headers.get("x-tenant-id") ||
         "";
 
-      const reqTxnId =
-        payload?.req_txn_id ||
-        payload?.data?.req_txn_id ||
+      const txnId =
+        payload?.txn_id ||
+        payload?.data?.txn_id ||
         ("rtx_" + crypto.randomUUID());
 
       const invoicenumber =
@@ -33,7 +33,7 @@ export const onRequest: PagesFunction<Env> = async (ctx) => {
       // 1) Log raw webhook
       await insertWebhookLog(env, {
         tenant_id: tenantId,
-        req_txn_id: reqTxnId,
+        txn_id: txnId,
         invoice_number: invoicenumber || null,
         state: payload?.state || payload?.data?.state || null,
         amount: payload?.amount ?? payload?.data?.amount ?? null,
@@ -83,9 +83,9 @@ async function insertWebhookLog(env: Env, row: any) {
   const sql = neon(env.DATABASE_URL);
   await sql/*sql*/`
     INSERT INTO app.valor_webhook_log
-      (tenant_id, req_txn_id, invoice_number, state, amount, total_with_fees, raw, created_at)
+      (tenant_id, txn_id, invoice_number, state, amount, total_with_fees, raw, created_at)
     VALUES
-      (${row.tenant_id || null}::uuid, ${row.req_txn_id || null}, ${row.invoice_number || null},
+      (${row.tenant_id || null}::uuid, ${row.txn_id || null}, ${row.invoice_number || null},
        ${row.state || null}, ${row.amount ?? null}, ${row.total_with_fees ?? null},
        ${JSON.stringify(row.raw || {})}::jsonb, now())
   `;
