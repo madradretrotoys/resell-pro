@@ -342,7 +342,7 @@ async function publishToValor(
   env: Env,
   args: { tenant_id: string; invoicenumber: string; amount: number; req_txn_id: string; epi?: string }
 ) {
-  // Mirror legacy payload exactly:
+  // Build the payload to match the legacy Apps Script format exactly
   const payload = {
     invoicenumber: String(args.invoicenumber),
     ...(args.epi ? { epi: String(args.epi) } : {}),
@@ -352,7 +352,18 @@ async function publishToValor(
     }
   };
 
-  // REQUEST log (must use real tenant_id)
+  // High-signal console logs for Cloudflare logs (diagnostic only)
+  try {
+    console.log("[VALOR][publish][build]", {
+      tenant_id: args.tenant_id,
+      invoicenumber: payload.invoicenumber,
+      epi: payload["epi"] ?? null,
+      amount_cents: payload.PAYLOAD.AMOUNT,
+      req_txn_id: payload.PAYLOAD.REQ_TXN_ID
+    });
+  } catch (_) { /* ignore logging errors */ }
+
+  // JOURNAL: request (must use the real tenant_id)
   await insertValorPublish(env, {
     tenant_id: args.tenant_id,
     req_txn_id: args.req_txn_id,
@@ -363,7 +374,13 @@ async function publishToValor(
     payload
   });
 
+  // Emit the request body to logs (truncated) so you can compare with Apps Script
+  try {
+    console.log("[VALOR][publish][request]", JSON.stringify(payload).slice(0, 2000));
+  } catch (_) { /* ignore */ }
+
   // Perform the publish
+  let respStatus = -1;
   let respText = "";
   try {
     const r = await fetch(env.VALOR_PUBLISH_URL || "", {
@@ -371,12 +388,13 @@ async function publishToValor(
       headers: { "content-type": "application/json" },
       body: JSON.stringify(payload)
     });
+    respStatus = r.status;
     respText = await r.text();
   } catch (e: any) {
     respText = `error:${e?.message || String(e)}`;
   }
 
-  // RESPONSE log (same tenant_id)
+  // RESPONSE journal
   await insertValorPublish(env, {
     tenant_id: args.tenant_id,
     req_txn_id: args.req_txn_id,
@@ -384,8 +402,16 @@ async function publishToValor(
     phase: "response",
     http: "POST",
     url: env.VALOR_PUBLISH_URL || "",
-    payload: { response: respText }
+    payload: { status: respStatus, response: respText }
   });
+
+  // Emit response to logs (truncated) to trace terminal comms
+  try {
+    console.log("[VALOR][publish][response]", {
+      status: respStatus,
+      text: String(respText || "").slice(0, 1000)
+    });
+  } catch (_) { /* ignore */ }
 
   return { message: "sent" };
 }
