@@ -381,8 +381,8 @@ async function publishToValor(
 
   // Build legacy envelope (keys & casing)
   const body: any = {
-    appid:      env.VALOR_APPID,
-    appkey:     env.VALOR_APPKEY,
+    appid:      env.VALOR_APP_ID,
+    appkey:     env.VALOR_APP_KEY,
     epi:        args.epi || env.VALOR_EPI,
     txn_type:   "vc_publish",
     channel_id: env.VALOR_CHANNEL_ID,
