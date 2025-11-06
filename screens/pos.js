@@ -650,11 +650,31 @@ export async function init(ctx) {
                 }
               };
             
-              // Retry → close modal; clerk retries on terminal. No publish here.
+              // Retry — fully re-enable Inventory, Ticket, and Payment so clerk can edit and retry
               if (el.valorRetry) el.valorRetry.onclick = () => {
+                // Close the modal and clear the waiting UI
                 if (el.valorModal) el.valorModal.style.display = "none";
-                el.valorMsg.textContent = "Retry on the terminal, then press Finalize if approved.";
-                showToast("Have the customer try the card again. Press Finalize if it approves.");
+                if (el.valorBar) el.valorBar.classList.add("hidden");
+              
+                // Unlock everything that Complete Sale locked (search, results Add, ticket controls, payment row)
+                setUiLocked(false);            // flips state.uiLocked and re-enables controls via helpers
+                render();                      // repaint so buttons/inputs are interactive again
+              
+                // Recompute the Complete Sale button state (same rule as elsewhere)
+                const can = !!state.payment && !!state.items.length && !state.uiLocked;
+                if (el.complete) {
+                  el.complete.disabled = !can;
+                  if (can) {
+                    el.complete.classList.add("btn-success");
+                    el.complete.classList.remove("btn-primary");
+                  } else {
+                    el.complete.classList.remove("btn-success");
+                  }
+                }
+              
+                // Inform the clerk
+                el.valorMsg.textContent = "Ready to retry — inventory and ticket re-enabled.";
+                showToast("You can edit the sale or retry the card. Press Complete Sale when ready.");
               };
             }
             // --- /wire buttons ---
