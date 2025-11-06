@@ -500,16 +500,16 @@ export async function init(ctx) {
             console.log("[POS] request body", body);
             
             // --- START THE FORCE-FINALIZE TIMER AT CLICK TIME (no waiting for /start) ---
-            let ffTimerStarted = true;
             el.valorBar?.classList.remove("hidden");
             el.valorMsg.textContent = "Waiting…";
-            // prepare amount text immediately
+            // amount immediately
             if (el.valorModalAmount) el.valorModalAmount.textContent = fmtCurrency(state?.totals?.total || 0);
-            // show the modal at exactly 20s from click, regardless of network/Valor
-            setTimeout(() => {
-              // we do not need invoice here; this is a force-finalize path
-              if (el.valorModalInvoice) el.valorModalInvoice.textContent = "—";
-              if (el.valorModal) el.valorModal.style.display = "";
+            // clear any prior timer (hot reloads, double-clicks, etc.)
+            if (window.__ffTimerHandle) clearTimeout(window.__ffTimerHandle);
+            // set exactly 20s from the click
+            window.__ffTimerHandle = setTimeout(() => {
+              if (el.valorModalInvoice) el.valorModalInvoice.textContent = "—"; // we are NOT using invoice at all
+              if (el.valorModal) el.valorModal.style.display = "";              // open modal
             }, 20000);
             // --- /timer ---
             
@@ -551,50 +551,34 @@ export async function init(ctx) {
               return;
             }
 
-            // Card flow: show Valor bar and start polling
+            // Card flow: show Valor bar (NO POLLING, NO SECOND TIMER)
             if (res?.status === "waiting_for_valor" && res?.invoice) {
               el.banner.classList.remove("hidden");
-              el.banner.innerHTML = `<div class="card p-2">Sale started — awaiting processor result…</div>`;
-
-              // Show VALOR bar
+              el.banner.innerHTML = `<div class="card p-2">Sale started — you can force finalize if terminal shows Approved.</div>`;
+            
+              // Show VALOR bar immediately; keep text simple
               el.valorBar?.classList.remove("hidden");
-              el.valorMsg.textContent = `Waiting (invoice ${res.invoice})…`;
-
-              // === anchor: CARD FLOW — FORCE-FINALIZE MODAL (POLL-FREE, 20s TIMER) ===
-              const ackMs = 20000; // exactly 20 seconds after publish
-              let modalShown = false;
-              
-              // Prepare modal text (invoice shown only as a hint; not used anywhere)
-              if (el.valorModalInvoice) el.valorModalInvoice.textContent = res.invoice || "—";
+              el.valorMsg.textContent = "Waiting…";
+              // set modal texts (invoice is only a hint; NOT USED by finalize)
+              if (el.valorModalInvoice) el.valorModalInvoice.textContent = "—";
               if (el.valorModalAmount)  el.valorModalAmount.textContent  = fmtCurrency(state?.totals?.total || 0);
-              
-              // Show the modal exactly at 20s — NO POLLING, NO STATUS CHECKS.
-              setTimeout(() => {
-                if (modalShown) return;
-                modalShown = true;
-                if (el.valorModal) el.valorModal.style.display = ""; // open modal
-              }, ackMs);
-              
-              // Primary: Terminal Approved — finalize (NO INVOICE; send snapshot like CASH)
+            
+              // Wire buttons ONCE (no timers here)
               if (el.valorApprove) el.valorApprove.onclick = async () => {
                 try {
                   el.valorApprove.disabled = true;
                   el.valorRetry.disabled = true;
                   el.valorMsg.textContent = "Finalizing…";
-              
+            
                   const r2 = (n) => Number.parseFloat(Number(n || 0).toFixed(2));
                   const enrichLine = (it) => {
                     const qty = Math.max(1, Number(it.qty || 0));
                     const unit = Number(it.price || 0);
                     const mode = (it.discount?.mode || "percent").toLowerCase();
                     const val  = Number(it.discount?.value || 0);
-                    const lineRaw = unit * qty;
-                    const lineDisc = mode === "percent" ? (lineRaw * (val / 100)) : val;
-                    return {
-                      ...it,
-                      line_discount: r2(Math.min(lineDisc, lineRaw)),
-                      line_final:    r2(Math.max(0, lineRaw - lineDisc)),
-                    };
+                    const raw  = unit * qty;
+                    const disc = mode === "percent" ? (raw * (val / 100)) : val;
+                    return { ...it, line_discount: r2(Math.min(disc, raw)), line_final: r2(Math.max(0, raw - disc)) };
                   };
                   const payload = {
                     items: state.items.map(enrichLine),
@@ -609,18 +593,14 @@ export async function init(ctx) {
                     payment: "card",
                     payment_parts: state.payment?.type === "split" ? state.payment.parts : undefined
                   };
-              
-                  const ff = await api("/api/pos/checkout/force-finalize", {
-                    method: "POST",
-                    json: payload
-                  });
-              
+            
+                  const ff = await api("/api/pos/checkout/force-finalize", { method: "POST", json: payload });
+            
                   if (ff?.ok && ff?.sale_id) {
                     if (el.valorModal) el.valorModal.style.display = "none";
                     el.banner.classList.remove("hidden");
                     el.banner.innerHTML = `<div class="card p-2">Sale finalized. Receipt #${escapeHtml(ff.sale_id)}</div>`;
-              
-                    // reset UI
+                    // Reset UI like cash
                     state.items = [];
                     state.payment = null;
                     render();
@@ -636,89 +616,13 @@ export async function init(ctx) {
                   el.valorRetry.disabled = false;
                 }
               };
-              
-              // Secondary: Retry (NO publish; simply close modal and let clerk try again)
+            
               if (el.valorRetry) el.valorRetry.onclick = () => {
                 if (el.valorModal) el.valorModal.style.display = "none";
                 el.valorMsg.textContent = "Retry on the terminal, then press Finalize if approved.";
                 showToast("Have the customer try the card again. Press Finalize if it approves.");
               };
-              // === /anchor: CARD FLOW — FORCE-FINALIZE MODAL ===
-
-              // Poll function
-              const pollOnce = async () => {
-              try {
-                console.group("[POS] status poll");
-                console.log("[POS] GET /status", { invoice: res.invoice });
-                const r = await api(`/api/pos/checkout/status?invoice=${encodeURIComponent(res.invoice)}`, { method: "GET" });
-                console.log("[POS] /status response", r);
             
-                if (r?.status === "pending") {
-                  console.log("[POS] /status pending");
-                  return; // keep waiting
-                }
-
-                  done = true;
-                  clearInterval(timerId);
-                  clearTimeout(revealTimer);
-                  el.valorFinalize?.classList.add("hidden");
-                  if (el.valorModal) el.valorModal.style.display = "none"; // close force-finalize modal if open
-
-                  if (r?.status === "approved" && r?.sale_id) {
-                    el.valorMsg.textContent = "Approved";
-                    el.banner.classList.remove("hidden");
-                    el.banner.innerHTML = `<div class="card p-2">Sale approved. Receipt #${escapeHtml(r.sale_id)}</div>`;
-                  
-                    // Close & reset panels/locks
-                    hide(el.cashPanel); hide(el.splitPanel);
-                    el.cashConfirm.disabled = false; el.cashReceived.disabled = false;
-                    el.splitConfirm.disabled = false; el.splitMethod.disabled = false;
-                    el.splitAmount.disabled = false; el.splitAdd.disabled = false;
-                    state.splitParts = [];
-                  
-                    state.items = [];
-                    state.payment = null;
-                    render();
-                    
-                    // NEW: refresh Sales table for “Today”
-                    try { await loadSales({ preset: "today" }); } catch {}
-                    document.getElementById("pos-sales")?.scrollIntoView({ behavior: "smooth", block: "start" });
-                    return;
-                  }
-                  
-                  if (r?.status === "declined") {
-                    el.valorMsg.textContent = "Declined";
-                    const msg = r?.message ? ` — ${escapeHtml(r.message)}` : "";
-                    el.banner.classList.remove("hidden");
-                    el.banner.innerHTML = `<div class="card p-2">Card declined${msg}</div>`;
-                    return;
-                  }
-
-                  // Unknown terminal state
-                  el.valorMsg.textContent = "Unknown status";
-                } catch (e) {
-                  console.error("[POS] /status error", e); // visible in DevTools
-                  // Non-fatal: keep polling
-                } finally {
-                  console.groupEnd();
-                }
-              };
-
-              // Start polling up to pollTimeout
-              timerId = setInterval(() => {
-                elapsed += pollMs;
-                if (elapsed >= pollTimeout) {
-                clearInterval(timerId);
-                // On timeout, make sure the modal is visible right now
-                if (el.valorModal && el.valorModal.style.display === "none") {
-                  el.valorModal.style.display = "";
-                }
-                el.valorMsg.textContent = "Still waiting…";
-              } else {
-                pollOnce();
-              }
-              }, pollMs);
-
               return;
             }
 
