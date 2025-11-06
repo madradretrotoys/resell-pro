@@ -47,6 +47,7 @@ export const onRequest: PagesFunction<Env> = async (ctx) => {
   }
 
   return json({ ok: true, status: String(sess.status || "pending"), debug: { steps, at: nowIso } });
+}; // <-- close onRequest before defining helpers
 
 function json(data: any, status = 200): Response {
   return new Response(JSON.stringify(data), { status, headers: { "content-type": "application/json" } });
