@@ -222,6 +222,7 @@ export async function init(ctx) {
     state.payment = null;
     state.invoice = null;
     state.splitParts = [];
+    state.cardSeqIndex = -1; // ensure new sale starts with no active card slice
   
     // Fully reset PAYMENT UI (dropdown, panels, and any disabled controls)
     if (el.payment) el.payment.value = "";                  // back to "Select payment…"
@@ -749,6 +750,7 @@ export async function init(ctx) {
                   console.groupEnd();
               
                   if (ff?.sale_id) {
+                    state.cardSeqIndex = -1; // clean slate for next sale
                     showBanner(`Sale finalized. Receipt #${escapeHtml(ff.sale_id)}`);
                     await resetScreen();
                   } else {
@@ -837,7 +839,8 @@ export async function init(ctx) {
               // Ensure Valor UI stays hidden for non-card flows
               if (el.valorBar) el.valorBar.classList.add("hidden");
               if (el.valorModal) el.valorModal.style.display = "none";
-            
+
+              state.cardSeqIndex = -1; // clean slate for next sale
               showBanner(`Sale completed. Receipt #${escapeHtml(res.sale_id)}`);
               await resetScreen();
               return;
