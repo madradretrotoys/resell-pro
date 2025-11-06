@@ -96,11 +96,16 @@ async function insertWebhookLog(env: Env, row: any) {
 // If tenantId is unknown, drop the tenant filter and target by invoice only.
 async function updateSessionStatus(env: Env, tenantId: string, invoice: string, status: string, wh: any) {
   const sql = neon(env.DATABASE_URL);
+  const stamped = {
+    ...wh,
+    _debug: { source: "webhook", status, at: new Date().toISOString() }
+  };
+
   if (tenantId) {
     await sql/*sql*/`
       UPDATE app.valor_sessions_log
          SET status = ${status},
-             webhook_json = ${JSON.stringify(wh || {})}::jsonb
+             webhook_json = ${JSON.stringify(stamped)}::jsonb
        WHERE tenant_id = ${tenantId}::uuid
          AND invoice_number = ${invoice}
        ORDER BY started_at DESC
@@ -110,7 +115,7 @@ async function updateSessionStatus(env: Env, tenantId: string, invoice: string, 
     await sql/*sql*/`
       UPDATE app.valor_sessions_log
          SET status = ${status},
-             webhook_json = ${JSON.stringify(wh || {})}::jsonb
+             webhook_json = ${JSON.stringify(stamped)}::jsonb
        WHERE invoice_number = ${invoice}
        ORDER BY started_at DESC
        LIMIT 1
