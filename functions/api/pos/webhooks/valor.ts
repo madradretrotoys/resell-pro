@@ -32,6 +32,10 @@ export const onRequest: PagesFunction<Env> = async (ctx) => {
         "";
 
       // 1) Log raw webhook
+      // NEW: heartbeat — stamp _debug as soon as the webhook hits (even before status is known)  
+      await heartbeatSession(env, tenantId, invoicenumber);
+      
+      // 1) Log raw webhook
       await insertWebhookLog(env, {
         tenant_id: tenantId,
         txn_id: txnId,
@@ -41,7 +45,7 @@ export const onRequest: PagesFunction<Env> = async (ctx) => {
         total_with_fees: payload?.total_with_fees ?? null,
         raw: payload,
       });
-
+      
       // 2) Update session status
       const status = normalizeStatus(payload);
       await updateSessionStatus(env, tenantId, invoicenumber, status, payload);
@@ -122,6 +126,33 @@ async function updateSessionStatus(env: Env, tenantId: string, invoice: string, 
     `;
   }
 }
+
+// Heartbeat: ensure we leave a trace in webhook_json even if we can't decode status yet.
+async function heartbeatSession(env: Env, tenantId: string, invoice: string) {
+  if (!invoice) return;
+  const sql = neon(env.DATABASE_URL);
+  const beat = { _debug: { source: "webhook_heartbeat", at: new Date().toISOString() } };
+
+  if (tenantId) {
+    await sql/*sql*/`
+      UPDATE app.valor_sessions_log
+         SET webhook_json = COALESCE(webhook_json, '{}'::jsonb) || ${JSON.stringify(beat)}::jsonb
+       WHERE tenant_id = ${tenantId}::uuid
+         AND invoice_number = ${invoice}
+       ORDER BY started_at DESC
+       LIMIT 1
+    `;
+  } else {
+    await sql/*sql*/`
+      UPDATE app.valor_sessions_log
+         SET webhook_json = COALESCE(webhook_json, '{}'::jsonb) || ${JSON.stringify(beat)}::jsonb
+       WHERE invoice_number = ${invoice}
+       ORDER BY started_at DESC
+       LIMIT 1
+    `;
+  }
+}
+
 
 async function ensureSaleForApproved(env: Env, tenantId: string, invoice: string, wh: any) {
   const sql = neon(env.DATABASE_URL);
