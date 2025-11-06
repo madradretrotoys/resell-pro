@@ -213,12 +213,45 @@ export async function init(ctx) {
       el.banner.classList.add("hidden");
       el.banner.innerHTML = "";
     }
-    // Clear cart & payment
+  
+    // Clear cart & state
     state.items = [];
     state.payment = null;
     state.invoice = null;
+    state.splitParts = [];
+  
+    // Fully reset PAYMENT UI (dropdown, panels, and any disabled controls)
+    if (el.payment) el.payment.value = "";                  // back to "Select payment…"
+    if (el.complete) {
+      el.complete.disabled = true;                          // requires a payment + at least one item
+      el.complete.classList.remove("btn-success");
+      el.complete.classList.add("btn-primary");
+    }
+    // Cash panel → hide + re-enable inputs/buttons
+    if (el.cashPanel) el.cashPanel.style.display = "none";
+    if (el.cashConfirm) el.cashConfirm.disabled = false;
+    if (el.cashReceived) {
+      el.cashReceived.disabled = false;
+      el.cashReceived.value = "";
+    }
+    // Split panel → hide + clear working fields + re-enable controls
+    if (el.splitPanel) el.splitPanel.style.display = "none";
+    if (el.splitAmount) el.splitAmount.value = "";
+    if (el.splitMethod) el.splitMethod.value = "cash";
+    if (el.splitConfirm) el.splitConfirm.disabled = false;
+    if (el.splitMethod) el.splitMethod.disabled = false;
+    if (el.splitAmount) el.splitAmount.disabled = false;
+    if (el.splitAdd) el.splitAdd.disabled = false;
+    el.splitBody?.querySelectorAll("[data-split-remove]").forEach(b => b.disabled = false);
+  
+    // Ensure the payment row is interactive again
+    setPaymentControlsEnabled(true);
     setUiLocked(false);
+  
+    // Repaint UI from a clean slate
     render();
+  
+    // Refresh Today list and scroll into view (unchanged)
     try { await loadSales({ preset: "today" }); } catch {}
     document.getElementById("pos-sales")?.scrollIntoView({ behavior: "smooth", block: "start" });
   }
@@ -518,8 +551,9 @@ export async function init(ctx) {
         // ---------- COMPLETE ----------
         el.complete.addEventListener("click", async () => {
           if (!state.items.length || !state.payment) return;
-        
-          // NEW: hard lock UI and debounce double-clicks
+          if (!state.payment) { showBanner("Select a payment method."); return; }
+          
+          //hard lock UI and debounce double-clicks
           setUiLocked(true);
           if (el.complete) el.complete.disabled = true;
         
