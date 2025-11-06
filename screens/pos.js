@@ -618,7 +618,7 @@ export async function init(ctx) {
             window.__ffTimerHandle = setTimeout(() => {
               if (el.valorModalInvoice) el.valorModalInvoice.textContent = "—"; // we are NOT using invoices
               if (el.valorModal) el.valorModal.style.display = "";
-            }, 20000);
+            }, 10000);
             // --- /timer ---
             
             // --- WIRE BUTTONS NOW (so they work the moment the modal opens) ---
