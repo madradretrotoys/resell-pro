@@ -269,6 +269,8 @@ label{
 .btn-ghost:hover{ background: #f3f4f6; }
 .btn-danger{ background: var(--danger); color: #fff; border-color: var(--danger); }
 .btn-danger:hover{ background: var(--danger-h); border-color: var(--danger-h); }
+.btn-success{ background: #16a34a; color: #fff; border-color: #16a34a; }  /* emerald-600 */
+.btn-success:hover{ background: #15803d; border-color: #15803d; }         /* emerald-700 */
 
 /* Tables (Users reference) */
 .table{ width: 100%; border-collapse: separate; border-spacing: 0; }
