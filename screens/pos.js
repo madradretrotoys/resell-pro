@@ -546,34 +546,28 @@ export async function init(ctx) {
               el.valorBar?.classList.remove("hidden");
               el.valorMsg.textContent = `Waiting (invoice ${res.invoice})…`;
 
-              // === anchor: CARD FLOW — FORCE-FINALIZE MODAL (replaces manual-finalize button reveal) ===
-              const ackMs = 20000; // show modal ~20s after publish (legacy behavior)
-              const pollMs = state?.valor?.pollIntervalMs ?? 1200;
-              const pollTimeout = state?.valor?.pollTimeoutMs ?? 40000;
-
+              // === anchor: CARD FLOW — FORCE-FINALIZE MODAL (POLL-FREE, 20s TIMER) ===
+              const ackMs = 20000; // exactly 20 seconds after publish
               let modalShown = false;
-              let elapsed = 0;
-              let done = false;
-              let timerId = null;
-
-              // Prepare modal text
-              if (el.valorModalInvoice) el.valorModalInvoice.textContent = res.invoice;
+              
+              // Prepare modal text (invoice shown only as a hint; not used anywhere)
+              if (el.valorModalInvoice) el.valorModalInvoice.textContent = res.invoice || "—";
               if (el.valorModalAmount)  el.valorModalAmount.textContent  = fmtCurrency(state?.totals?.total || 0);
-
-              // Reveal the modal after the delay
-              const revealTimer = setTimeout(() => {
-                if (done || modalShown) return;
+              
+              // Show the modal exactly at 20s — NO POLLING, NO STATUS CHECKS.
+              setTimeout(() => {
+                if (modalShown) return;
                 modalShown = true;
-                if (el.valorModal) el.valorModal.style.display = "";  // open modal
+                if (el.valorModal) el.valorModal.style.display = ""; // open modal
               }, ackMs);
-
-              // Primary: Terminal Approved — finalize
+              
+              // Primary: Terminal Approved — finalize (NO INVOICE; send snapshot like CASH)
               if (el.valorApprove) el.valorApprove.onclick = async () => {
                 try {
                   el.valorApprove.disabled = true;
                   el.valorRetry.disabled = true;
-                  el.valorMsg.textContent = "Finalizing without reply…";
-                  // Build the same snapshot shape we send for CASH, then finalize immediately
+                  el.valorMsg.textContent = "Finalizing…";
+              
                   const r2 = (n) => Number.parseFloat(Number(n || 0).toFixed(2));
                   const enrichLine = (it) => {
                     const qty = Math.max(1, Number(it.qty || 0));
@@ -599,22 +593,27 @@ export async function init(ctx) {
                       tax_rate: Number(state.taxRate || 0)
                     },
                     payment: "card",
-                    // keep for audits if you later use split + card
                     payment_parts: state.payment?.type === "split" ? state.payment.parts : undefined
                   };
-                  
+              
                   const ff = await api("/api/pos/checkout/force-finalize", {
                     method: "POST",
                     json: payload
                   });
+              
                   if (ff?.ok && ff?.sale_id) {
                     if (el.valorModal) el.valorModal.style.display = "none";
                     el.banner.classList.remove("hidden");
                     el.banner.innerHTML = `<div class="card p-2">Sale finalized. Receipt #${escapeHtml(ff.sale_id)}</div>`;
+              
+                    // reset UI
+                    state.items = [];
+                    state.payment = null;
+                    render();
                     try { await loadSales({ preset: "today" }); } catch {}
                     document.getElementById("pos-sales")?.scrollIntoView({ behavior: "smooth", block: "start" });
                   } else {
-                    showToast("Could not finalize yet — still waiting on data.");
+                    showToast("Finalize failed — server did not return sale_id.");
                   }
                 } catch (e) {
                   showToast(`Finalize failed: ${e?.message || e}`);
@@ -623,29 +622,12 @@ export async function init(ctx) {
                   el.valorRetry.disabled = false;
                 }
               };
-
-              // Secondary: Resend Now/Card Declined/Error — retry
-              if (el.valorRetry) el.valorRetry.onclick = async () => {
-                try {
-                  el.valorApprove.disabled = true;
-                  el.valorRetry.disabled = true;
-                  el.valorMsg.textContent = "Resending to terminal…";
-                  const rr = await api("/api/pos/checkout/resend", {
-                    method: "POST",
-                    json: { invoice: res.invoice }
-                  });
-                  if (rr?.ok) {
-                    if (el.valorModal) el.valorModal.style.display = "none";
-                    showToast("Resent to terminal.");
-                  } else {
-                    showToast(rr?.error ? String(rr.error) : "Could not resend.");
-                  }
-                } catch (e) {
-                  showToast(`Retry failed: ${e?.message || e}`);
-                } finally {
-                  el.valorApprove.disabled = false;
-                  el.valorRetry.disabled = false;
-                }
+              
+              // Secondary: Retry (NO publish; simply close modal and let clerk try again)
+              if (el.valorRetry) el.valorRetry.onclick = () => {
+                if (el.valorModal) el.valorModal.style.display = "none";
+                el.valorMsg.textContent = "Retry on the terminal, then press Finalize if approved.";
+                showToast("Have the customer try the card again. Press Finalize if it approves.");
               };
               // === /anchor: CARD FLOW — FORCE-FINALIZE MODAL ===
 
