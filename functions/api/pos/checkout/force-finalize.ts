@@ -30,7 +30,7 @@ function json(data: any, status = 200): Response {
 async function getPendingSession(env: Env, tenantId: string, invoice: string) {
   const sql = neon(env.DATABASE_URL);
   const rows = await sql/*sql*/`
-    SELECT invoice_number, txn_id, amount_cents, started_at, pos_snapshot
+    SELECT invoice_number, txn_id, amount_cents, started_at, webhook_json
       FROM app.valor_sessions_log
      WHERE tenant_id = ${tenantId}::uuid
        AND invoice_number = ${invoice}
@@ -43,16 +43,21 @@ async function getPendingSession(env: Env, tenantId: string, invoice: string) {
 
 async function finalizePendingSale(env: Env, tenantId: string, sess: any) {
   const sql = neon(env.DATABASE_URL);
-  const snap = sess?.pos_snapshot || {};
-  const items = snap?.items || [];
+
+  // 👇 snapshot is stored under webhook_json.pos_snapshot (from /start)
+  let snap: any = {};
+  try { snap = (sess?.webhook_json?.pos_snapshot) || {}; } catch { snap = {}; }
+
+  const items = Array.isArray(snap?.items) ? snap.items : [];
   const totals = snap?.totals || { raw_subtotal: 0, line_discounts: 0, subtotal: 0, tax: 0, total: 0 };
+  const paymentMethod = typeof snap?.payment === "string" && snap.payment ? snap.payment : "card";
 
   const itemsJson = JSON.stringify({
     schema: "pos:v1",
     source_totals: "client",
     items,
     totals,
-    payment: "card",
+    payment: paymentMethod,
     payment_parts: Array.isArray(snap?.payment_parts) ? snap.payment_parts : undefined
   });
 
@@ -62,7 +67,7 @@ async function finalizePendingSale(env: Env, tenantId: string, sess: any) {
     ) VALUES (
       now(), ${tenantId}::uuid, ${totals.raw_subtotal}::numeric, ${totals.line_discounts}::numeric,
       ${totals.subtotal}::numeric, ${totals.tax}::numeric, ${totals.total}::numeric,
-      'card', ${itemsJson}
+      ${paymentMethod}, ${itemsJson}
     )
     RETURNING sale_id
   `;
