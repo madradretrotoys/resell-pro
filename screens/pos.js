@@ -546,7 +546,19 @@ export async function init(ctx) {
                     payment_parts: state.payment?.type === "split" ? state.payment.parts : undefined
                   };
             
-                  const ff = await api("/api/pos/checkout/force-finalize", { method: "POST", json: payload });
+                  // Debug: echo exactly what we're about to send
+                  console.group("[POS] force-finalize");
+                  console.log("[POS] force-finalize payload", payload);
+                  
+                  // Send explicit JSON (mirror /start) so the server always parses it
+                  const ff = await api("/api/pos/checkout/force-finalize", {
+                    method: "POST",
+                    headers: { "content-type": "application/json" },
+                    body: JSON.stringify(payload)
+                  });
+                  
+                  console.log("[POS] force-finalize response", ff);
+                  console.groupEnd();
                   if (ff?.ok && ff?.sale_id) {
                     if (el.valorModal) el.valorModal.style.display = "none";
                     el.banner.classList.remove("hidden");
