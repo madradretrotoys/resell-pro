@@ -502,16 +502,80 @@ export async function init(ctx) {
             // --- START THE FORCE-FINALIZE TIMER AT CLICK TIME (no waiting for /start) ---
             el.valorBar?.classList.remove("hidden");
             el.valorMsg.textContent = "Waiting…";
-            // amount immediately
             if (el.valorModalAmount) el.valorModalAmount.textContent = fmtCurrency(state?.totals?.total || 0);
-            // clear any prior timer (hot reloads, double-clicks, etc.)
             if (window.__ffTimerHandle) clearTimeout(window.__ffTimerHandle);
-            // set exactly 20s from the click
             window.__ffTimerHandle = setTimeout(() => {
-              if (el.valorModalInvoice) el.valorModalInvoice.textContent = "—"; // we are NOT using invoice at all
-              if (el.valorModal) el.valorModal.style.display = "";              // open modal
+              if (el.valorModalInvoice) el.valorModalInvoice.textContent = "—"; // we are NOT using invoices
+              if (el.valorModal) el.valorModal.style.display = "";
             }, 20000);
             // --- /timer ---
+            
+            // --- WIRE BUTTONS NOW (so they work the moment the modal opens) ---
+            if (!window.__ffWired) {
+              window.__ffWired = true;
+            
+              const r2 = (n) => Number.parseFloat(Number(n || 0).toFixed(2));
+              const enrich = (it) => {
+                const qty = Math.max(1, Number(it.qty || 0));
+                const unit = Number(it.price || 0);
+                const mode = (it.discount?.mode || "percent").toLowerCase();
+                const val  = Number(it.discount?.value || 0);
+                const raw  = unit * qty;
+                const disc = mode === "percent" ? (raw * (val / 100)) : val;
+                return { ...it, line_discount: r2(Math.min(disc, raw)), line_final: r2(Math.max(0, raw - disc)) };
+              };
+            
+              // Terminal Approved → finalize immediately with items+totals (cash-style)
+              if (el.valorApprove) el.valorApprove.onclick = async () => {
+                try {
+                  el.valorApprove.disabled = true;
+                  el.valorRetry.disabled = true;
+                  el.valorMsg.textContent = "Finalizing…";
+            
+                  const payload = {
+                    items: state.items.map(enrich),
+                    totals: {
+                      raw_subtotal: r2(state.totals.subtotal || 0),
+                      line_discounts: r2(state.totals.discount || 0),
+                      subtotal: r2((state.totals.subtotal || 0) - (state.totals.discount || 0)),
+                      tax: r2(state.totals.tax || 0),
+                      total: r2(state.totals.total || 0),
+                      tax_rate: Number(state.taxRate || 0)
+                    },
+                    payment: "card",
+                    payment_parts: state.payment?.type === "split" ? state.payment.parts : undefined
+                  };
+            
+                  const ff = await api("/api/pos/checkout/force-finalize", { method: "POST", json: payload });
+                  if (ff?.ok && ff?.sale_id) {
+                    if (el.valorModal) el.valorModal.style.display = "none";
+                    el.banner.classList.remove("hidden");
+                    el.banner.innerHTML = `<div class="card p-2">Sale finalized. Receipt #${escapeHtml(ff.sale_id)}</div>`;
+                    // reset like cash
+                    state.items = [];
+                    state.payment = null;
+                    render();
+                    try { await loadSales({ preset: "today" }); } catch {}
+                    document.getElementById("pos-sales")?.scrollIntoView({ behavior: "smooth", block: "start" });
+                  } else {
+                    showToast("Finalize failed — server did not return sale_id.");
+                  }
+                } catch (e) {
+                  showToast(`Finalize failed: ${e?.message || e}`);
+                } finally {
+                  el.valorApprove.disabled = false;
+                  el.valorRetry.disabled = false;
+                }
+              };
+            
+              // Retry → close modal; clerk retries on terminal. No publish here.
+              if (el.valorRetry) el.valorRetry.onclick = () => {
+                if (el.valorModal) el.valorModal.style.display = "none";
+                el.valorMsg.textContent = "Retry on the terminal, then press Finalize if approved.";
+                showToast("Have the customer try the card again. Press Finalize if it approves.");
+              };
+            }
+            // --- /wire buttons ---
             
             let res;
             try {
