@@ -153,24 +153,84 @@ export async function init(ctx) {
     });
   }
 
- function swap(which) {
-    // Use explicit display control so banners never "bleed through" on boot
-    const set = (el, show) => { if (!el) return; el.style.display = show ? "" : "none"; };
-    set(el.banner, false);
-    set(el.denied, false);
-    set(el.loading, false);
-    set(el.content, false);
-    if (which === "denied") set(el.denied, true);
-    if (which === "loading") set(el.loading, true);
-    if (which === "content") set(el.content, true);
+   function swap(which) {
+      // Use explicit display control so banners never "bleed through" on boot
+      const set = (el, show) => { if (!el) return; el.style.display = show ? "" : "none"; };
+      set(el.banner, false);
+      set(el.denied, false);
+      set(el.loading, false);
+      set(el.content, false);
+      if (which === "denied") set(el.denied, true);
+      if (which === "loading") set(el.loading, true);
+      if (which === "content") set(el.content, true);
+   }
+  
+   // ---- UI LOCK / PAYMENT UNLOCK / RESET ----
+  function setPaymentControlsEnabled(on) {
+    // Only payment row (retry after a decline, cart stays frozen)
+    if (el.payment) el.payment.disabled = !on;
+    if (el.split) el.split.disabled = !on;
+    if (el.complete) el.complete.disabled = !on;
+    if (el.cashClose) el.cashClose.disabled = !on;
+    if (el.cashConfirm) el.cashConfirm.disabled = !on;
+    if (el.splitAdd) el.splitAdd.disabled = !on;
+    if (el.splitConfirm) el.splitConfirm.disabled = !on;
   }
-
+  
+  function setUiLocked(on) {
+    state.uiLocked = !!on;
+  
+    // Search / results
+    if (el.q) el.q.disabled = on;
+    if (el.qBtn) el.qBtn.disabled = on;
+    if (el.qClear) el.qClear.disabled = on;
+    if (el.quickMisc) el.quickMisc.disabled = on;
+    // disable “Add” buttons in results
+    el.results?.querySelectorAll("button").forEach(b => b.disabled = on);
+  
+    // Ticket-level actions
+    if (el.ticketEmpty) el.ticketEmpty.disabled = on;
+    if (el.discountApply) el.discountApply.disabled = on;
+  
+    // Payment row (will be re-enabled selectively on decline)
+    setPaymentControlsEnabled(!on);
+  
+    // Dynamic cart controls (render will re-bind, but clamp now too)
+    el.cart?.querySelectorAll("[data-qty],[data-remove],[data-price],[data-apply-discount]")
+      .forEach(n => { n.disabled = on; n.setAttribute("aria-disabled", String(on)); });
+  
+    // Visual busy hint on the main button
+    if (el.complete) {
+      el.complete.setAttribute("aria-busy", on ? "true" : "false");
+    }
+  }
+  
+  async function resetScreen() {
+    // Clear all transient UI and state to prepare for next sale
+    if (el.valorModal) el.valorModal.style.display = "none";
+    if (el.valorBar) el.valorBar.classList.add("hidden");
+    if (el.banner) {
+      el.banner.classList.add("hidden");
+      el.banner.innerHTML = "";
+    }
+    // Clear cart & payment
+    state.items = [];
+    state.payment = null;
+    state.invoice = null;
+    setUiLocked(false);
+    render();
+    try { await loadSales({ preset: "today" }); } catch {}
+    document.getElementById("pos-sales")?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+  
+  
   function makeState() {
     return {
       // items: [{ sku, name, price, qty, discount:{mode:'percent'|'amount', value:number} }]
       items: [],
       taxRate: 0.080, // temporary default: 8.0%
       previewEnabled: false, // server preview gate (prevents 405 spam)
+      uiLocked: false,        // NEW: global UI lock while a sale is in-flight
       totals: { subtotal: 0, discount: 0, tax: 0, total: 0 },
       // payment UI state
       payment: null,          // e.g., { type:'cash', received, change, amount } or { type:'split', parts:[{method, amount}], total }
@@ -295,7 +355,15 @@ export async function init(ctx) {
 
     function wireTotals() {
       const refreshCompleteEnabled = () => {
-        el.complete.disabled = !state.payment || !state.items.length;
+        const can = !!state.payment && !!state.items.length && !state.uiLocked;
+        el.complete.disabled = !can;
+        // Green when enabled per spec
+        if (can) {
+          el.complete.classList.add("btn-success");
+          el.complete.classList.remove("btn-primary");
+        } else {
+          el.complete.classList.remove("btn-success");
+        }
       };
       const show = (n) => { if (n) n.style.display = ""; };
       const hide = (n) => { if (n) n.style.display = "none"; };
@@ -450,6 +518,12 @@ export async function init(ctx) {
         // ---------- COMPLETE ----------
         el.complete.addEventListener("click", async () => {
           if (!state.items.length || !state.payment) return;
+        
+          // NEW: hard lock UI and debounce double-clicks
+          setUiLocked(true);
+          if (el.complete) el.complete.disabled = true;
+        
+          
 
           // Describe the payment succinctly (mirrors the legacy)
           let paymentDesc = "";
@@ -500,6 +574,9 @@ export async function init(ctx) {
             console.log("[POS] request body", body);
             
             // --- START THE FORCE-FINALIZE TIMER AT CLICK TIME (no waiting for /start) ---
+            // --- Immediate user feedback ---
+            showBanner(`Sent to terminal — waiting for approval (Total ${fmtCurrency(state?.totals?.total || 0)})`);
+
             el.valorBar?.classList.remove("hidden");
             el.valorMsg.textContent = "Waiting…";
             if (el.valorModalAmount) el.valorModalAmount.textContent = fmtCurrency(state?.totals?.total || 0);
@@ -559,16 +636,9 @@ export async function init(ctx) {
                   
                   console.log("[POS] force-finalize response", ff);
                   console.groupEnd();
-                  if (ff?.ok && ff?.sale_id) {
-                    if (el.valorModal) el.valorModal.style.display = "none";
-                    el.banner.classList.remove("hidden");
-                    el.banner.innerHTML = `<div class="card p-2">Sale finalized. Receipt #${escapeHtml(ff.sale_id)}</div>`;
-                    // reset like cash
-                    state.items = [];
-                    state.payment = null;
-                    render();
-                    try { await loadSales({ preset: "today" }); } catch {}
-                    document.getElementById("pos-sales")?.scrollIntoView({ behavior: "smooth", block: "start" });
+                  if (ff?.sale_id) {
+                    showBanner(`Sale finalized. Receipt #${escapeHtml(ff.sale_id)}`);
+                    await resetScreen();
                   } else {
                     showToast("Finalize failed — server did not return sale_id.");
                   }
@@ -607,23 +677,8 @@ export async function init(ctx) {
             log(res);
 
             if (res?.status === "completed" && res?.sale_id) {
-              el.banner.classList.remove("hidden");
-              el.banner.innerHTML = `<div class="card p-2">Sale completed. Receipt #${escapeHtml(res.sale_id)}</div>`;
-            
-              // Close & reset panels/locks
-              hide(el.cashPanel); hide(el.splitPanel);
-              el.cashConfirm.disabled = false; el.cashReceived.disabled = false;
-              el.splitConfirm.disabled = false; el.splitMethod.disabled = false;
-              el.splitAmount.disabled = false; el.splitAdd.disabled = false;
-              state.splitParts = [];
-            
-              state.items = [];
-              state.payment = null;
-              render();
-              
-              // NEW: refresh Sales table for “Today”
-              try { await loadSales({ preset: "today" }); } catch {}
-              document.getElementById("pos-sales")?.scrollIntoView({ behavior: "smooth", block: "start" });
+              showBanner(`Sale completed. Receipt #${escapeHtml(res.sale_id)}`);
+              await resetScreen();
               return;
             }
 
@@ -756,7 +811,7 @@ export async function init(ctx) {
           <div class="flex items-center gap-2 flex-1 justify-end flex-wrap">
             ${priceCell}
             <div class="ticket-line-total text-right">${lineTotal}</div>
-            <button class="btn btn-ghost btn-xs" data-remove="${idx}">Remove</button>
+            <button class="btn btn-danger btn-xs" data-remove="${idx}" ${state.uiLocked ? "disabled aria-disabled='true'" : ""}>Remove</button>
           </div>
           
         </div>
@@ -786,6 +841,12 @@ export async function init(ctx) {
   function render() {
     // cart list
     el.cart.innerHTML = state.items.map(cartRow).join("");
+
+    // NEW: enforce lock on newly rendered controls
+    if (state.uiLocked) {
+      el.cart.querySelectorAll("[data-qty],[data-remove],[data-price],[data-apply-discount]")
+        .forEach(n => { n.disabled = true; n.setAttribute("aria-disabled", "true"); });
+    }
 
       // bind qty/remove once per render
       el.cart.querySelectorAll("[data-qty]").forEach((btn) => {
