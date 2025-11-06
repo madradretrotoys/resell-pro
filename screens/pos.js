@@ -499,6 +499,20 @@ export async function init(ctx) {
             console.group("[POS] checkout/start");
             console.log("[POS] request body", body);
             
+            // --- START THE FORCE-FINALIZE TIMER AT CLICK TIME (no waiting for /start) ---
+            let ffTimerStarted = true;
+            el.valorBar?.classList.remove("hidden");
+            el.valorMsg.textContent = "Waiting…";
+            // prepare amount text immediately
+            if (el.valorModalAmount) el.valorModalAmount.textContent = fmtCurrency(state?.totals?.total || 0);
+            // show the modal at exactly 20s from click, regardless of network/Valor
+            setTimeout(() => {
+              // we do not need invoice here; this is a force-finalize path
+              if (el.valorModalInvoice) el.valorModalInvoice.textContent = "—";
+              if (el.valorModal) el.valorModal.style.display = "";
+            }, 20000);
+            // --- /timer ---
+            
             let res;
             try {
               res = await api("/api/pos/checkout/start", {
