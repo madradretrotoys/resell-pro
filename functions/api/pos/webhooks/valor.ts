@@ -1,5 +1,6 @@
 // /api/pos/webhooks/valor
 // Mirrors the previous handler but scoped under /pos/* so it stays organized with POS code.
+import { neon } from "@neondatabase/serverless";
 
 export const onRequest: PagesFunction<Env> = async (ctx) => {
   const { request, env, waitUntil } = ctx;
