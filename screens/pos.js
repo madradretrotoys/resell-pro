@@ -573,9 +573,39 @@ export async function init(ctx) {
                   el.valorApprove.disabled = true;
                   el.valorRetry.disabled = true;
                   el.valorMsg.textContent = "Finalizing without reply…";
+                  // Build the same snapshot shape we send for CASH, then finalize immediately
+                  const r2 = (n) => Number.parseFloat(Number(n || 0).toFixed(2));
+                  const enrichLine = (it) => {
+                    const qty = Math.max(1, Number(it.qty || 0));
+                    const unit = Number(it.price || 0);
+                    const mode = (it.discount?.mode || "percent").toLowerCase();
+                    const val  = Number(it.discount?.value || 0);
+                    const lineRaw = unit * qty;
+                    const lineDisc = mode === "percent" ? (lineRaw * (val / 100)) : val;
+                    return {
+                      ...it,
+                      line_discount: r2(Math.min(lineDisc, lineRaw)),
+                      line_final:    r2(Math.max(0, lineRaw - lineDisc)),
+                    };
+                  };
+                  const payload = {
+                    items: state.items.map(enrichLine),
+                    totals: {
+                      raw_subtotal: r2(state.totals.subtotal || 0),
+                      line_discounts: r2(state.totals.discount || 0),
+                      subtotal: r2((state.totals.subtotal || 0) - (state.totals.discount || 0)),
+                      tax: r2(state.totals.tax || 0),
+                      total: r2(state.totals.total || 0),
+                      tax_rate: Number(state.taxRate || 0)
+                    },
+                    payment: "card",
+                    // keep for audits if you later use split + card
+                    payment_parts: state.payment?.type === "split" ? state.payment.parts : undefined
+                  };
+                  
                   const ff = await api("/api/pos/checkout/force-finalize", {
                     method: "POST",
-                    json: { invoice: res.invoice }
+                    json: payload
                   });
                   if (ff?.ok && ff?.sale_id) {
                     if (el.valorModal) el.valorModal.style.display = "none";
@@ -682,13 +712,15 @@ export async function init(ctx) {
               timerId = setInterval(() => {
                 elapsed += pollMs;
                 if (elapsed >= pollTimeout) {
-                  clearInterval(timerId);
-                  // Timeout (keep finalize visible if revealed)
-                  if (!revealed) el.valorFinalize?.classList.remove("hidden");
-                  el.valorMsg.textContent = "Still waiting…";
-                } else {
-                  pollOnce();
+                clearInterval(timerId);
+                // On timeout, make sure the modal is visible right now
+                if (el.valorModal && el.valorModal.style.display === "none") {
+                  el.valorModal.style.display = "";
                 }
+                el.valorMsg.textContent = "Still waiting…";
+              } else {
+                pollOnce();
+              }
               }, pollMs);
 
               return;
