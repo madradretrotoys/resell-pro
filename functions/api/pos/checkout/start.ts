@@ -284,25 +284,54 @@ async function finalizeSale(
   return rows[0]?.sale_id || null;
 }
 
+// Upsert-by-phase so we always persist what we sent/received for this txn_id.
 async function insertValorPublish(env: Env, row: any) {
   const sql = neon(env.DATABASE_URL);
-  const payload = JSON.stringify(row.payload ?? {});
-  try {
+  const phase = String(row.phase || "start");
+  const reqUrl = row.url || "";
+  const http = row.http || "POST";
+  const j = (o: any) => JSON.stringify(o ?? {});
+
+  if (phase === "start") {
+    // First write: create the row
     await sql/*sql*/`
       INSERT INTO app.valor_publish
         (tenant_id, txn_id, invoice_number, phase, http, url, payload, created_at)
       VALUES
         (${row.tenant_id}::uuid, ${row.txn_id}, ${row.invoice_number},
-         ${row.phase || "start"}, ${row.http || "POST"}, ${row.url || ""},
-         ${payload}::jsonb, now())
-      ON CONFLICT DO NOTHING
+         ${phase}, ${http}, ${reqUrl}, ${j(row.payload)}::jsonb, now())
+      ON CONFLICT (txn_id) DO NOTHING
     `;
-  } catch (e: any) {
-    // Allow duplicate-key errors to pass without breaking checkout/start.
-    const msg = String(e?.message || e);
-    if (!/duplicate key value violates unique constraint/i.test(msg)) {
-      throw e;
-    }
+    return;
+  }
+
+  if (phase === "request") {
+    // Store the masked request + final URL used
+    await sql/*sql*/`
+      UPDATE app.valor_publish
+         SET phase   = ${phase},
+             http    = ${http},
+             url     = ${reqUrl},
+             payload = COALESCE(payload, '{}'::jsonb)
+                       || jsonb_build_object('request', ${j(row.payload)}::jsonb)
+       WHERE txn_id = ${row.txn_id}
+    `;
+    return;
+  }
+
+  if (phase === "response") {
+    // Store the raw response (status/text) and keep ack_msg for quick scanning
+    await sql/*sql*/`
+      UPDATE app.valor_publish
+         SET phase   = ${phase},
+             http    = ${http},
+             url     = ${reqUrl},
+             ack_msg = ${String(row.payload?.response ?? row.ack_msg ?? "")},
+             payload = COALESCE(payload, '{}'::jsonb)
+                       || jsonb_build_object('response', ${j(row.payload)}::jsonb)
+       WHERE txn_id = ${row.txn_id}
+    `;
+    return;
   }
 }
 
