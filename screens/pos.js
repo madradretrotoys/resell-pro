@@ -206,6 +206,9 @@ export async function init(ctx) {
   }
   
   async function resetScreen() {
+    // Cancel any pending force-finalize timer between sales
+    if (window.__ffTimerHandle) { clearTimeout(window.__ffTimerHandle); window.__ffTimerHandle = null; }
+
     // Clear all transient UI and state to prepare for next sale
     if (el.valorModal) el.valorModal.style.display = "none";
     if (el.valorBar) el.valorBar.classList.add("hidden");
@@ -731,6 +734,12 @@ export async function init(ctx) {
             log(res);
 
             if (res?.status === "completed" && res?.sale_id) {
+              // Hard-cancel any pending Valor timer in case it was set earlier
+              if (window.__ffTimerHandle) { clearTimeout(window.__ffTimerHandle); window.__ffTimerHandle = null; }
+              // Ensure Valor UI stays hidden for non-card flows
+              if (el.valorBar) el.valorBar.classList.add("hidden");
+              if (el.valorModal) el.valorModal.style.display = "none";
+            
               showBanner(`Sale completed. Receipt #${escapeHtml(res.sale_id)}`);
               await resetScreen();
               return;
