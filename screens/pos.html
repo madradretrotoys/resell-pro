@@ -113,6 +113,27 @@
                 </button>
               </div>
             </div>
+
+            <!-- anchor: VALOR FORCE-FINALIZE MODAL (inserted) -->
+            <div id="pos-valor-modal" class="modal" style="display:none">
+              <div class="modal-box max-w-md">
+                <div class="text-lg font-semibold mb-2">Make a Selection…</div>
+                <p class="text-sm mb-3">
+                  If the terminal already shows <span class="font-semibold">Approved</span> Finalize now.
+                  If it shows <span class="font-semibold">Declined or Errors</span> you can retry immediately.
+                </p>
+                <div id="pos-valor-modal-text" class="text-sm bg-muted/30 rounded p-2 mb-3">
+                  <div><span class="text-muted">Invoice:</span> <span id="pos-valor-invoice">—</span></div>
+                  <div><span class="text-muted">Card amount:</span> <span id="pos-valor-amount">$0.00</span></div>
+                </div>
+                <div class="flex gap-2">
+                  <button id="pos-valor-approve" class="btn btn-primary flex-1">Terminal Approved — finalize</button>
+                  <button id="pos-valor-retry" class="btn btn-ghost flex-1">Resend Now/Card Declined/Error — retry</button>
+                </div>
+              </div>
+            </div>
+            <!-- /anchor: VALOR FORCE-FINALIZE MODAL -->
+          
   
             <!-- CASH PANEL (inline; hidden until CASH selected) -->
               <div id="pos-cash-panel" class="card pos-panel pos-compact" style="display:none">
