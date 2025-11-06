@@ -261,18 +261,21 @@ export async function init(ctx) {
   
   
   function makeState() {
-    return {
-      // items: [{ sku, name, price, qty, discount:{mode:'percent'|'amount', value:number} }]
-      items: [],
-      taxRate: 0.080, // temporary default: 8.0%
-      previewEnabled: false, // server preview gate (prevents 405 spam)
-      uiLocked: false,        // NEW: global UI lock while a sale is in-flight
-      totals: { subtotal: 0, discount: 0, tax: 0, total: 0 },
-      // payment UI state
-      payment: null,          // e.g., { type:'cash', received, change, amount } or { type:'split', parts:[{method, amount}], total }
-      splitParts: [],         // working set for Split modal
-    };
-  }
+  return {
+    // items: [{ sku, name, price, qty, discount:{mode:'percent'|'amount', value:number} }]
+    items: [],
+    taxRate: 0.080, // temporary default: 8.0%
+    previewEnabled: false, // server preview gate (prevents 405 spam)
+    uiLocked: false,        // NEW: global UI lock while a sale is in-flight
+    totals: { subtotal: 0, discount: 0, tax: 0, total: 0 },
+    // payment UI state
+    payment: null,          // e.g., { type:'cash', received, change, amount } or { type:'split', parts:[{method, amount}], total }
+    splitParts: [],         // working set for Split modal
+
+    // sequencing for split card flows (-1 = not sequencing; otherwise index in payment.parts)
+    cardSeqIndex: -1,
+  };
+}
 
   function wireCart() {
     el.ticketEmpty.addEventListener("click", () => {
@@ -590,6 +593,27 @@ export async function init(ctx) {
               };
             };
             
+            // Decide if this sale includes a card and which slice (if split) we should publish now
+            const hasCard =
+              (state.payment?.type === "single" && String(state.payment.method || "").startsWith("card:")) ||
+              (state.payment?.type === "split"  && Array.isArray(state.payment.parts) && state.payment.parts.some(p => String(p?.method || "").startsWith("card:")));
+            
+            // For split+card, initialize the sequence to the first card part
+            let currentPartIdx = -1;
+            if (state.payment?.type === "split" && hasCard) {
+              currentPartIdx = Number.isInteger(state.cardSeqIndex) && state.cardSeqIndex >= 0
+                ? state.cardSeqIndex
+                : state.payment.parts.findIndex(p => String(p?.method || "").startsWith("card:"));
+              state.cardSeqIndex = currentPartIdx;
+            }
+            
+            // Compute the amount to PUBLISH on this /start call
+            const publishAmount = hasCard
+              ? (state.payment?.type === "single"
+                  ? Number(state.totals.total || 0)
+                  : Number(state.payment.parts?.[currentPartIdx]?.amount || 0))
+              : Number(state.totals.total || 0);
+            
             const body = {
               // send enriched lines so server stores line_discount + line_final exactly as shown in UI
               items: state.items.map(enrichLine),
@@ -598,30 +622,31 @@ export async function init(ctx) {
                 line_discounts: r2(state.totals.discount || 0),
                 subtotal: r2((state.totals.subtotal || 0) - (state.totals.discount || 0)),
                 tax: r2(state.totals.tax || 0),
-                total: r2(state.totals.total || 0),
+                total: r2(publishAmount),               // << publish only this slice for card flows
                 tax_rate: Number(state.taxRate || 0)
               },
               customer: (el.customer?.value || "").trim() || null,
               payment: paymentDesc,
-              // 👇 include structured split parts for storage/audit (undefined for non-split)
+              // keep full split parts for storage/audit; final write happens after last part
               payment_parts: state.payment?.type === "split" ? state.payment.parts : undefined,
             };
-
+            
             console.group("[POS] checkout/start");
             console.log("[POS] request body", body);
             
-            // --- START THE FORCE-FINALIZE TIMER AT CLICK TIME (no waiting for /start) ---
-            // --- Immediate user feedback ---
-            showBanner(`Sent to terminal — waiting for approval (Total ${fmtCurrency(state?.totals?.total || 0)})`);
-
-            el.valorBar?.classList.remove("hidden");
-            el.valorMsg.textContent = "Waiting…";
-            if (el.valorModalAmount) el.valorModalAmount.textContent = fmtCurrency(state?.totals?.total || 0);
-            if (window.__ffTimerHandle) clearTimeout(window.__ffTimerHandle);
-            window.__ffTimerHandle = setTimeout(() => {
-              if (el.valorModalInvoice) el.valorModalInvoice.textContent = "—"; // we are NOT using invoices
-              if (el.valorModal) el.valorModal.style.display = "";
-            }, 10000);
+            // --- START THE FORCE-FINALIZE TIMER AT CLICK TIME (only for card flows) ---
+            if (hasCard) {
+              const uiAmount = publishAmount;
+              showBanner(`Sent to terminal — waiting for approval (Card ${fmtCurrency(uiAmount)})`);
+              el.valorBar?.classList.remove("hidden");
+              el.valorMsg.textContent = "Waiting…";
+              if (el.valorModalAmount) el.valorModalAmount.textContent = fmtCurrency(uiAmount);
+              if (window.__ffTimerHandle) clearTimeout(window.__ffTimerHandle);
+              window.__ffTimerHandle = setTimeout(() => {
+                if (el.valorModalInvoice) el.valorModalInvoice.textContent = "—";
+                if (el.valorModal) el.valorModal.style.display = "";
+              }, 10000);
+            }
             // --- /timer ---
             
             // --- WIRE BUTTONS NOW (so they work the moment the modal opens) ---
@@ -639,13 +664,66 @@ export async function init(ctx) {
                 return { ...it, line_discount: r2(Math.min(disc, raw)), line_final: r2(Math.max(0, raw - disc)) };
               };
             
-              // Terminal Approved → finalize immediately with items+totals (cash-style)
+              // Terminal Approved → advance to next card part, or finalize once when all parts are done
               if (el.valorApprove) el.valorApprove.onclick = async () => {
                 try {
                   el.valorApprove.disabled = true;
                   el.valorRetry.disabled = true;
-                  el.valorMsg.textContent = "Finalizing…";
-            
+                  el.valorMsg.textContent = "Processing…";
+              
+                  const isSplit = state.payment?.type === "split";
+                  if (isSplit && Array.isArray(state.payment.parts)) {
+                    // Find the next card:* slice AFTER the current one
+                    const parts = state.payment.parts;
+                    const start = Number.isInteger(state.cardSeqIndex) ? (state.cardSeqIndex + 1) : 0;
+                    let nextIdx = -1;
+                    for (let i = start; i < parts.length; i++) {
+                      if (String(parts[i]?.method || "").startsWith("card:")) { nextIdx = i; break; }
+                    }
+              
+                    if (nextIdx >= 0) {
+                      // Start next card slice: update index, UI, timer, and publish /start with that slice's amount
+                      state.cardSeqIndex = nextIdx;
+                      const amt = Number(parts[nextIdx]?.amount || 0);
+              
+                      // UI for this slice
+                      showBanner(`Sent to terminal — waiting for approval (Card ${fmtCurrency(amt)})`);
+                      el.valorBar?.classList.remove("hidden");
+                      el.valorMsg.textContent = "Waiting…";
+                      if (el.valorModalAmount) el.valorModalAmount.textContent = fmtCurrency(amt);
+              
+                      // Restart the timer
+                      if (window.__ffTimerHandle) clearTimeout(window.__ffTimerHandle);
+                      window.__ffTimerHandle = setTimeout(() => {
+                        if (el.valorModalInvoice) el.valorModalInvoice.textContent = "—";
+                        if (el.valorModal) el.valorModal.style.display = "";
+                      }, 10000);
+              
+                      // Publish this slice to /start (override total to the slice amount)
+                      const bodySlice = {
+                        items: state.items.map(enrich),
+                        totals: {
+                          raw_subtotal: r2(state.totals.subtotal || 0),
+                          line_discounts: r2(state.totals.discount || 0),
+                          subtotal: r2((state.totals.subtotal || 0) - (state.totals.discount || 0)),
+                          tax: r2(state.totals.tax || 0),
+                          total: r2(amt),
+                          tax_rate: Number(state.taxRate || 0)
+                        },
+                        customer: (el.customer?.value || "").trim() || null,
+                        payment: "card",
+                        payment_parts: parts
+                      };
+                      try { await api("/api/pos/checkout/start", { method: "POST", json: bodySlice }); } catch {}
+              
+                      // Allow another Approve/Retry for the next slice
+                      el.valorApprove.disabled = false;
+                      el.valorRetry.disabled = false;
+                      return;
+                    }
+                  }
+              
+                  // No more card parts → finalize once with the full snapshot
                   const payload = {
                     items: state.items.map(enrich),
                     totals: {
@@ -659,20 +737,17 @@ export async function init(ctx) {
                     payment: "card",
                     payment_parts: state.payment?.type === "split" ? state.payment.parts : undefined
                   };
-            
-                  // Debug: echo exactly what we're about to send
-                  console.group("[POS] force-finalize");
+              
+                  console.group("[POS] force-finalize (final)");
                   console.log("[POS] force-finalize payload", payload);
-                  
-                  // Send explicit JSON (mirror /start) so the server always parses it
                   const ff = await api("/api/pos/checkout/force-finalize", {
                     method: "POST",
                     headers: { "content-type": "application/json" },
                     body: JSON.stringify(payload)
                   });
-                  
                   console.log("[POS] force-finalize response", ff);
                   console.groupEnd();
+              
                   if (ff?.sale_id) {
                     showBanner(`Sale finalized. Receipt #${escapeHtml(ff.sale_id)}`);
                     await resetScreen();
@@ -687,32 +762,55 @@ export async function init(ctx) {
                 }
               };
             
-              // Retry — fully re-enable Inventory, Ticket, and Payment so clerk can edit and retry
-              if (el.valorRetry) el.valorRetry.onclick = () => {
-                // Close the modal and clear the waiting UI
+              // Retry — resend the CURRENT card slice; also unlock UI for edits
+              if (el.valorRetry) el.valorRetry.onclick = async () => {
+                // Close modal; keep the bar visible while retrying
                 if (el.valorModal) el.valorModal.style.display = "none";
-                if (el.valorBar) el.valorBar.classList.add("hidden");
+                el.valorBar?.classList.remove("hidden");
+                el.valorMsg.textContent = "Waiting…";
               
-                // Unlock everything that Complete Sale locked (search, results Add, ticket controls, payment row)
-                setUiLocked(false);            // flips state.uiLocked and re-enables controls via helpers
-                render();                      // repaint so buttons/inputs are interactive again
+                // Allow edits without advancing the slice
+                setUiLocked(false);
+                render();
               
-                // Recompute the Complete Sale button state (same rule as elsewhere)
-                const can = !!state.payment && !!state.items.length && !state.uiLocked;
-                if (el.complete) {
-                  el.complete.disabled = !can;
-                  if (can) {
-                    el.complete.classList.add("btn-success");
-                    el.complete.classList.remove("btn-primary");
-                  } else {
-                    el.complete.classList.remove("btn-success");
-                  }
+                // Determine current slice amount
+                let amt = 0;
+                if (state.payment?.type === "single" && String(state.payment.method || "").startsWith("card:")) {
+                  amt = Number(state.totals.total || 0);
+                } else if (state.payment?.type === "split" && Array.isArray(state.payment.parts)) {
+                  const idx = Number.isInteger(state.cardSeqIndex)
+                    ? state.cardSeqIndex
+                    : state.payment.parts.findIndex(p => String(p?.method || "").startsWith("card:"));
+                  state.cardSeqIndex = idx;
+                  amt = Number(state.payment.parts?.[idx]?.amount || 0);
                 }
+                if (el.valorModalAmount) el.valorModalAmount.textContent = fmtCurrency(amt);
               
-                // Inform the clerk
-                el.valorMsg.textContent = "Ready to retry — inventory and ticket re-enabled.";
-                showToast("You can edit the sale or retry the card. Press Complete Sale when ready.");
+                // Restart timer
+                if (window.__ffTimerHandle) clearTimeout(window.__ffTimerHandle);
+                window.__ffTimerHandle = setTimeout(() => {
+                  if (el.valorModalInvoice) el.valorModalInvoice.textContent = "—";
+                  if (el.valorModal) el.valorModal.style.display = "";
+                }, 10000);
+              
+                // Publish /start for this slice (override total to slice amount)
+                const bodySlice = {
+                  items: state.items.map(enrich),
+                  totals: {
+                    raw_subtotal: r2(state.totals.subtotal || 0),
+                    line_discounts: r2(state.totals.discount || 0),
+                    subtotal: r2((state.totals.subtotal || 0) - (state.totals.discount || 0)),
+                    tax: r2(state.totals.tax || 0),
+                    total: r2(amt),
+                    tax_rate: Number(state.taxRate || 0)
+                  },
+                  customer: (el.customer?.value || "").trim() || null,
+                  payment: "card",
+                  payment_parts: state.payment?.type === "split" ? state.payment.parts : undefined
+                };
+                try { await api("/api/pos/checkout/start", { method: "POST", json: bodySlice }); } catch {}
               };
+
             }
             // --- /wire buttons ---
             
@@ -752,7 +850,14 @@ export async function init(ctx) {
               el.valorBar?.classList.remove("hidden");
               el.valorMsg.textContent = "Waiting…";
               if (el.valorModalInvoice) el.valorModalInvoice.textContent = "—";
-              if (el.valorModalAmount)  el.valorModalAmount.textContent  = fmtCurrency(state?.totals?.total || 0);
+            
+              // Keep the modal showing the current slice amount (matches the publishAmount used above)
+              let uiAmount = Number(state.totals.total || 0);
+              if (state.payment?.type === "split" && Number.isInteger(state.cardSeqIndex) && state.cardSeqIndex >= 0) {
+                uiAmount = Number(state.payment.parts?.[state.cardSeqIndex]?.amount || uiAmount);
+              }
+              if (el.valorModalAmount) el.valorModalAmount.textContent = fmtCurrency(uiAmount);
+            
               // Do NOT set timers, do NOT bind buttons, do NOT poll here.
               return;
             }
