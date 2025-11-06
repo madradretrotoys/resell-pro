@@ -615,78 +615,15 @@ export async function init(ctx) {
               return;
             }
 
-            // Card flow: show Valor bar (NO POLLING, NO SECOND TIMER)
+            // Card flow (no polling; handlers were wired at click time)
             if (res?.status === "waiting_for_valor" && res?.invoice) {
               el.banner.classList.remove("hidden");
               el.banner.innerHTML = `<div class="card p-2">Sale started — you can force finalize if terminal shows Approved.</div>`;
-            
-              // Show VALOR bar immediately; keep text simple
               el.valorBar?.classList.remove("hidden");
               el.valorMsg.textContent = "Waiting…";
-              // set modal texts (invoice is only a hint; NOT USED by finalize)
               if (el.valorModalInvoice) el.valorModalInvoice.textContent = "—";
               if (el.valorModalAmount)  el.valorModalAmount.textContent  = fmtCurrency(state?.totals?.total || 0);
-            
-              // Wire buttons ONCE (no timers here)
-              if (el.valorApprove) el.valorApprove.onclick = async () => {
-                try {
-                  el.valorApprove.disabled = true;
-                  el.valorRetry.disabled = true;
-                  el.valorMsg.textContent = "Finalizing…";
-            
-                  const r2 = (n) => Number.parseFloat(Number(n || 0).toFixed(2));
-                  const enrichLine = (it) => {
-                    const qty = Math.max(1, Number(it.qty || 0));
-                    const unit = Number(it.price || 0);
-                    const mode = (it.discount?.mode || "percent").toLowerCase();
-                    const val  = Number(it.discount?.value || 0);
-                    const raw  = unit * qty;
-                    const disc = mode === "percent" ? (raw * (val / 100)) : val;
-                    return { ...it, line_discount: r2(Math.min(disc, raw)), line_final: r2(Math.max(0, raw - disc)) };
-                  };
-                  const payload = {
-                    items: state.items.map(enrichLine),
-                    totals: {
-                      raw_subtotal: r2(state.totals.subtotal || 0),
-                      line_discounts: r2(state.totals.discount || 0),
-                      subtotal: r2((state.totals.subtotal || 0) - (state.totals.discount || 0)),
-                      tax: r2(state.totals.tax || 0),
-                      total: r2(state.totals.total || 0),
-                      tax_rate: Number(state.taxRate || 0)
-                    },
-                    payment: "card",
-                    payment_parts: state.payment?.type === "split" ? state.payment.parts : undefined
-                  };
-            
-                  const ff = await api("/api/pos/checkout/force-finalize", { method: "POST", json: payload });
-            
-                  if (ff?.ok && ff?.sale_id) {
-                    if (el.valorModal) el.valorModal.style.display = "none";
-                    el.banner.classList.remove("hidden");
-                    el.banner.innerHTML = `<div class="card p-2">Sale finalized. Receipt #${escapeHtml(ff.sale_id)}</div>`;
-                    // Reset UI like cash
-                    state.items = [];
-                    state.payment = null;
-                    render();
-                    try { await loadSales({ preset: "today" }); } catch {}
-                    document.getElementById("pos-sales")?.scrollIntoView({ behavior: "smooth", block: "start" });
-                  } else {
-                    showToast("Finalize failed — server did not return sale_id.");
-                  }
-                } catch (e) {
-                  showToast(`Finalize failed: ${e?.message || e}`);
-                } finally {
-                  el.valorApprove.disabled = false;
-                  el.valorRetry.disabled = false;
-                }
-              };
-            
-              if (el.valorRetry) el.valorRetry.onclick = () => {
-                if (el.valorModal) el.valorModal.style.display = "none";
-                el.valorMsg.textContent = "Retry on the terminal, then press Finalize if approved.";
-                showToast("Have the customer try the card again. Press Finalize if it approves.");
-              };
-            
+              // Do NOT set timers, do NOT bind buttons, do NOT poll here.
               return;
             }
 
