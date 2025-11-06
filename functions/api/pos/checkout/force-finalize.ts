@@ -8,18 +8,29 @@ export const onRequest: PagesFunction<Env> = async (ctx) => {
   const tenantId = request.headers.get("x-tenant-id") || "";
   if (!tenantId) return json({ ok: false, error: "Missing tenant" }, 400);
 
+  // TEMP MODE: finalize without waiting for Valor response.
+  // If body contains items/totals (like CASH flow), write a sale immediately.
+  // If body only contains {invoice}, fall back to the session-based finalize (kept for flexibility).
   const body = await request.json().catch(() => null) as any;
+
+  const hasSnapshot = body && Array.isArray(body.items) && body.totals && typeof body.totals === "object";
+  if (hasSnapshot) {
+    const saleId = await finalizeSale(env, tenantId, {
+      items: body.items,
+      totals: body.totals,
+      payment: String(body.payment || "card"),
+      snapshot: body
+    });
+    return json({ ok: true, sale_id: saleId });
+  }
+
+  // Fallback: legacy (needs invoice) — still supported but not required for temp flow
   const invoice = String(body?.invoice || "");
   if (!invoice) return json({ ok: false, error: "Missing invoice" }, 400);
 
-  // Load the pending session (must exist)
   const sess = await getPendingSession(env, tenantId, invoice);
   if (!sess) return json({ ok: false, error: "No pending session" }, 404);
-
-  // Create the sale now (pending card)
   const saleId = await finalizePendingSale(env, tenantId, sess);
-
-  // Keep session pending; webhook will write approval & stamp sale_id if needed
   return json({ ok: true, sale_id: saleId });
 };
 
@@ -86,3 +97,40 @@ async function finalizePendingSale(env: Env, tenantId: string, sess: any) {
   }
   return saleId;
 }
+
+// --- anchor: force-finalize local finalizeSale (copied from /start) ---
+async function finalizeSale(
+  env: Env,
+  tenantId: string,
+  args: { items: any[]; totals: any; payment: string; snapshot: any }
+) {
+  const sql = neon(env.DATABASE_URL);
+
+  const itemsJson = JSON.stringify({
+    schema: "pos:v1",
+    source_totals: "client",
+    items: args.items,
+    totals: args.totals,
+    payment: args.payment,
+    payment_parts: Array.isArray(args?.snapshot?.payment_parts) ? args.snapshot.payment_parts : undefined
+  });
+
+  const rows = await sql/*sql*/`
+    INSERT INTO app.sales (
+      sale_ts, tenant_id, raw_subtotal, line_discounts, subtotal, tax, total, payment_method, items_json
+    )
+    VALUES (
+      now(), ${tenantId}::uuid,
+      ${args.totals.raw_subtotal}::numeric,
+      ${args.totals.line_discounts}::numeric,
+      ${args.totals.subtotal}::numeric,
+      ${args.totals.tax}::numeric,
+      ${args.totals.total}::numeric,
+      ${args.payment},
+      ${itemsJson}
+    )
+    RETURNING sale_id
+  `;
+  return rows[0]?.sale_id || null;
+}
+// --- /anchor: force-finalize local finalizeSale ---
