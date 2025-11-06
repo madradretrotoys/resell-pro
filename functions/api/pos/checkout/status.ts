@@ -27,6 +27,14 @@ export const onRequest: PagesFunction<Env> = async (ctx) => {
     if (ageMs > 10_000) {
       steps.push("fallback:fetch status");
       const resolved = await fetchAndApplyValorStatus(env, tenantId, invoice);
+      
+      // NEW: surface URL + HTTP code + raw state in the browser-visible debug trail
+      if (resolved && resolved._trace) {
+        steps.push(`status.url=${resolved._trace.url}`);
+        steps.push(`status.http=${resolved._trace.http}`);
+        if (resolved._trace.rawState) steps.push(`status.rawState=${resolved._trace.rawState}`);
+      }
+      
       steps.push(`fallback result=${resolved?.status || "unknown"}`);
       if (resolved?.status === "approved") {
         return json({ ok: true, status: "approved", sale_id: resolved.sale_id || undefined, debug: { steps, at: nowIso } });
@@ -80,7 +88,6 @@ async function getSession(env: Env, tenantId: string, invoice: string) {
 // Uses the same invoice we published with.
 async function fetchAndApplyValorStatus(env: Env, tenantId: string, invoice: string) {
   try {
-    // Build the legacy status request (same creds as publish).
     const body = {
       appid:      env.VALOR_APP_ID,
       appkey:     env.VALOR_APP_KEY,
@@ -91,7 +98,6 @@ async function fetchAndApplyValorStatus(env: Env, tenantId: string, invoice: str
       INVOICENUMBER: invoice
     };
 
-    // Status URL (Valor commonly shares same base; if your env has a dedicated STATUS URL, use it).
     let url = String(env.VALOR_STATUS_URL || env.VALOR_PUBLISH_URL || "");
     if (url && !/[?&]status(=|$)/i.test(url)) url += (url.includes("?") ? "&" : "?") + "status";
 
@@ -100,14 +106,15 @@ async function fetchAndApplyValorStatus(env: Env, tenantId: string, invoice: str
       headers: { "Content-Type": "application/json", Accept: "application/json" },
       body: JSON.stringify(body)
     });
+    const http = r.status;
     const text = await r.text();
     let json: any = {}; try { json = JSON.parse(text); } catch {}
 
     // Normalize to our 3 states
-    const s = String(json?.state || json?.data?.state || "").toLowerCase();
+    const rawState = String(json?.state || json?.data?.state || "");
+    const s = rawState.toLowerCase();
     const status = s.includes("approved") ? "approved" : s.includes("declin") ? "declined" : "pending";
 
-    // If we learned something final, write it like the webhook would.
     if (status !== "pending") {
       const sql = neon(env.DATABASE_URL);
       await sql/*sql*/`
@@ -119,7 +126,6 @@ async function fetchAndApplyValorStatus(env: Env, tenantId: string, invoice: str
          ORDER BY started_at DESC
          LIMIT 1
       `;
-      // Return what /status should reflect
       const saleId =
         status === "approved"
           ? (await sql/*sql*/`
@@ -132,11 +138,10 @@ async function fetchAndApplyValorStatus(env: Env, tenantId: string, invoice: str
             `)?.[0]?.sale_id || null
           : null;
 
-      const message =
-        String(json?.message || json?.data?.message || json?.error || json?.state || "");
-      return { status, sale_id: saleId, message };
+      const message = String(json?.message || json?.data?.message || json?.error || json?.state || "");
+      return { status, sale_id: saleId, message, _trace: { url, http, rawState } };
     }
-    return { status: "pending" };
+    return { status: "pending", _trace: { url, http, rawState } };
   } catch {
     return { status: "pending" };
   }
