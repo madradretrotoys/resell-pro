@@ -10,7 +10,7 @@ export const onRequest: PagesFunction<Env> = async (ctx) => {
   const ua = request.headers.get("user-agent") || "";
   const cfRay = request.headers.get("cf-ray") || "";
   const rawBody = await request.text();
-  const head = rawBody.slice(0, 2048); // preview only
+  const head = rawBody.slice(0, 8192); // preview only
   const shaBuf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(rawBody));
   const shaHex = Array.from(new Uint8Array(shaBuf)).map(b => b.toString(16).padStart(2, "0")).join("");
 
