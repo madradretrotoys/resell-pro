@@ -12,8 +12,22 @@ export const onRequest: PagesFunction<Env> = async (ctx) => {
 
   const sess = await getSession(env, tenantId, invoice);
   if (!sess) return json({ ok: true, status: "pending" });
-
-  if (sess.status === "pending") return json({ ok: true, status: "pending" });
+  
+  if (sess.status === "pending") {
+    // VC07 fallback: if the session is a bit old and we haven't seen a webhook,
+    // query Valor's transaction status API and update the session.
+    const ageMs = Date.now() - new Date(sess.started_at).getTime();
+    if (ageMs > 10_000) {
+      const resolved = await fetchAndApplyValorStatus(env, tenantId, invoice);
+      if (resolved?.status === "approved") {
+        return json({ ok: true, status: "approved", sale_id: resolved.sale_id || undefined });
+      }
+      if (resolved?.status === "declined") {
+        return json({ ok: true, status: "declined", message: resolved.message || "" });
+      }
+    }
+    return json({ ok: true, status: "pending" });
+  }
   if (sess.status === "approved") {
     return json({ ok: true, status: "approved", sale_id: sess.sale_id || undefined });
   }
@@ -42,7 +56,7 @@ function readDeclineMessage(wh: any) {
 async function getSession(env: Env, tenantId: string, invoice: string) {
   const sql = neon(env.DATABASE_URL);
   const rows = await sql/*sql*/`
-    SELECT status, sale_id, webhook_json
+    SELECT status, sale_id, webhook_json, started_at
       FROM app.valor_sessions_log
      WHERE tenant_id = ${tenantId}::uuid
        AND invoice_number = ${invoice}
@@ -50,4 +64,70 @@ async function getSession(env: Env, tenantId: string, invoice: string) {
      LIMIT 1
   `;
   return rows?.[0] || null;
+}
+
+// Minimal VC07 fallback: query Valor transaction status and mirror the webhook updater.
+// Uses the same invoice we published with.
+async function fetchAndApplyValorStatus(env: Env, tenantId: string, invoice: string) {
+  try {
+    // Build the legacy status request (same creds as publish).
+    const body = {
+      appid:      env.VALOR_APP_ID,
+      appkey:     env.VALOR_APP_KEY,
+      epi:        env.VALOR_EPI,
+      txn_type:   "transaction_status",
+      channel_id: env.VALOR_CHANNEL_ID,
+      version:    "1",
+      INVOICENUMBER: invoice
+    };
+
+    // Status URL (Valor commonly shares same base; if your env has a dedicated STATUS URL, use it).
+    let url = String(env.VALOR_STATUS_URL || env.VALOR_PUBLISH_URL || "");
+    if (url && !/[?&]status(=|$)/i.test(url)) url += (url.includes("?") ? "&" : "?") + "status";
+
+    const r = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Accept: "application/json" },
+      body: JSON.stringify(body)
+    });
+    const text = await r.text();
+    let json: any = {}; try { json = JSON.parse(text); } catch {}
+
+    // Normalize to our 3 states
+    const s = String(json?.state || json?.data?.state || "").toLowerCase();
+    const status = s.includes("approved") ? "approved" : s.includes("declin") ? "declined" : "pending";
+
+    // If we learned something final, write it like the webhook would.
+    if (status !== "pending") {
+      const sql = neon(env.DATABASE_URL);
+      await sql/*sql*/`
+        UPDATE app.valor_sessions_log
+           SET status = ${status},
+               webhook_json = ${JSON.stringify(json || {})}::jsonb
+         WHERE tenant_id = ${tenantId}::uuid
+           AND invoice_number = ${invoice}
+         ORDER BY started_at DESC
+         LIMIT 1
+      `;
+      // Return what /status should reflect
+      const saleId =
+        status === "approved"
+          ? (await sql/*sql*/`
+              SELECT sale_id
+                FROM app.valor_sessions_log
+               WHERE tenant_id = ${tenantId}::uuid
+                 AND invoice_number = ${invoice}
+               ORDER BY started_at DESC
+               LIMIT 1
+            `)?.[0]?.sale_id || null
+          : null;
+
+      const message =
+        String(json?.message || json?.data?.message || json?.error || json?.state || "");
+      return { status, sale_id: saleId, message };
+    }
+    return { status: "pending" };
+  } catch {
+    return { status: "pending" };
+  }
 }
