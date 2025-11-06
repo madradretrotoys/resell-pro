@@ -5,6 +5,24 @@ import { neon } from "@neondatabase/serverless";
 export const onRequest: PagesFunction<Env> = async (ctx) => {
   const { request, env, waitUntil } = ctx;
 
+  // --- NEW: log exactly what the webhook received (no DB, just console) ---
+  const ct = request.headers.get("content-type") || "";
+  const ua = request.headers.get("user-agent") || "";
+  const cfRay = request.headers.get("cf-ray") || "";
+  const rawBody = await request.text();
+  const head = rawBody.slice(0, 2048); // preview only
+  const shaBuf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(rawBody));
+  const shaHex = Array.from(new Uint8Array(shaBuf)).map(b => b.toString(16).padStart(2, "0")).join("");
+
+  console.log("valor.webhook.recv", {
+    ct, ua, cfRay,
+    len: rawBody.length,
+    sha256: shaHex,
+    head
+  });
+
+
+  
   // Always ACK immediately so the processor never times out
   const ack = json({ ok: true });
 
