@@ -11,7 +11,16 @@ export const onRequest: PagesFunction<Env> = async (ctx) => {
   // TEMP MODE: finalize without waiting for Valor response.
   // If body contains items/totals (like CASH flow), write a sale immediately.
   // If body only contains {invoice}, fall back to the session-based finalize (kept for flexibility).
-  const body = await request.json().catch(() => null) as any;
+  // Try JSON first; if that fails, try text→JSON so we can still parse bodies
+  const contentType = request.headers.get("content-type") || "";
+  let body: any = null;
+  try { body = await request.json(); } catch { /* fall through */ }
+  if (!body) {
+    try {
+      const raw = await request.text();
+      if (raw) body = JSON.parse(raw);
+    } catch { body = null; }
+  }
 
   const hasSnapshot = body && Array.isArray(body.items) && body.totals && typeof body.totals === "object";
   if (hasSnapshot) {
@@ -26,7 +35,13 @@ export const onRequest: PagesFunction<Env> = async (ctx) => {
 
   // Fallback: legacy (needs invoice) — still supported but not required for temp flow
   const invoice = String(body?.invoice || "");
-  if (!invoice) return json({ ok: false, error: "Missing invoice" }, 400);
+  if (!invoice) {
+    const gotKeys = body && typeof body === "object" ? Object.keys(body) : [];
+    return json(
+      { ok: false, error: "Missing snapshot (need items+totals)", debug: { contentType, gotKeys } },
+      400
+    );
+  }
 
   const sess = await getPendingSession(env, tenantId, invoice);
   if (!sess) return json({ ok: false, error: "No pending session" }, 404);
