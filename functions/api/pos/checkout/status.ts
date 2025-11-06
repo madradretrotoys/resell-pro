@@ -3,41 +3,50 @@ import { neon } from "@neondatabase/serverless";
 
 export const onRequest: PagesFunction<Env> = async (ctx) => {
   const { request, env } = ctx;
+  const steps: string[] = [];                         // <-- NEW: in-response debug trail
+  const nowIso = new Date().toISOString();
+
   const tenantId = request.headers.get("x-tenant-id") || "";
-  if (!tenantId) return json({ ok: false, error: "Missing tenant" }, 400);
+  if (!tenantId) return json({ ok: false, error: "Missing tenant", debug: { steps, at: nowIso } }, 400);
 
   const url = new URL(request.url);
   const invoice = url.searchParams.get("invoice") || "";
-  if (!invoice) return json({ ok: false, error: "Missing invoice" }, 400);
+  if (!invoice) return json({ ok: false, error: "Missing invoice", debug: { steps, at: nowIso } }, 400);
 
+  steps.push(`lookup session for ${invoice}`);
   const sess = await getSession(env, tenantId, invoice);
-  if (!sess) return json({ ok: true, status: "pending" });
+  if (!sess) return json({ ok: true, status: "pending", debug: { steps: [...steps, "no session"], at: nowIso } });
   
+  steps.push(`session status=${sess.status}`);
+
   if (sess.status === "pending") {
     // VC07 fallback: if the session is a bit old and we haven't seen a webhook,
     // query Valor's transaction status API and update the session.
     const ageMs = Date.now() - new Date(sess.started_at).getTime();
+    steps.push(`ageMs=${ageMs}`);
     if (ageMs > 10_000) {
+      steps.push("fallback:fetch status");
       const resolved = await fetchAndApplyValorStatus(env, tenantId, invoice);
+      steps.push(`fallback result=${resolved?.status || "unknown"}`);
       if (resolved?.status === "approved") {
-        return json({ ok: true, status: "approved", sale_id: resolved.sale_id || undefined });
+        return json({ ok: true, status: "approved", sale_id: resolved.sale_id || undefined, debug: { steps, at: nowIso } });
       }
       if (resolved?.status === "declined") {
-        return json({ ok: true, status: "declined", message: resolved.message || "" });
+        return json({ ok: true, status: "declined", message: resolved.message || "", debug: { steps, at: nowIso } });
       }
     }
-    return json({ ok: true, status: "pending" });
+    return json({ ok: true, status: "pending", debug: { steps, at: nowIso } });
   }
+  
   if (sess.status === "approved") {
-    return json({ ok: true, status: "approved", sale_id: sess.sale_id || undefined });
+    return json({ ok: true, status: "approved", sale_id: sess.sale_id || undefined, debug: { steps, at: nowIso } });
   }
   if (sess.status === "declined") {
     const msg = readDeclineMessage(sess.webhook_json);
-    return json({ ok: true, status: "declined", message: msg });
+    return json({ ok: true, status: "declined", message: msg, debug: { steps, at: nowIso } });
   }
 
-  return json({ ok: true, status: String(sess.status || "pending") });
-};
+  return json({ ok: true, status: String(sess.status || "pending"), debug: { steps, at: nowIso } });
 
 function json(data: any, status = 200): Response {
   return new Response(JSON.stringify(data), { status, headers: { "content-type": "application/json" } });
