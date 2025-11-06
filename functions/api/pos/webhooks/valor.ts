@@ -139,7 +139,7 @@ async function ensureSaleForApproved(env: Env, tenantId: string, invoice: string
       `;
   if (rowsExisting?.[0]?.sale_id) return rowsExisting[0].sale_id;
 
-  // Use the POS snapshot saved at session-open to create the canonical sale row.
+  // Use the POS snapshot saved at session-open to create the sale row.
   const sess = tenantId
     ? (await sql/*sql*/`
          SELECT pos_snapshot, tenant_id
@@ -158,25 +158,10 @@ async function ensureSaleForApproved(env: Env, tenantId: string, invoice: string
        `)?.[0];
 
   const resolvedTenant = tenantId || sess?.tenant_id;
-  …
-  const ins = await sql/*sql*/`
-    INSERT INTO app.sales (
-      sale_ts, tenant_id, raw_subtotal, line_discounts, subtotal, tax, total, payment_method, items_json
-    ) VALUES (
-      now(), ${resolvedTenant}::uuid, ${totals.raw_subtotal}::numeric, ${totals.line_discounts}::numeric,
-      ${totals.subtotal}::numeric, ${totals.tax}::numeric, ${totals.total}::numeric,
-      'card', ${itemsJson}
-    )
-    RETURNING sale_id
-  `;
-  return ins?.[0]?.sale_id || null;
-}
-
   const snap = sess?.pos_snapshot || {};
   const items = snap?.items || [];
   const totals = snap?.totals || { raw_subtotal: 0, line_discounts: 0, subtotal: 0, tax: 0, total: 0 };
 
-  // Mirror finalizeSale insert (canonical single source of truth)
   const itemsJson = JSON.stringify({
     schema: "pos:v1",
     source_totals: "client",
@@ -190,7 +175,7 @@ async function ensureSaleForApproved(env: Env, tenantId: string, invoice: string
     INSERT INTO app.sales (
       sale_ts, tenant_id, raw_subtotal, line_discounts, subtotal, tax, total, payment_method, items_json
     ) VALUES (
-      now(), ${tenantId}::uuid, ${totals.raw_subtotal}::numeric, ${totals.line_discounts}::numeric,
+      now(), ${resolvedTenant}::uuid, ${totals.raw_subtotal}::numeric, ${totals.line_discounts}::numeric,
       ${totals.subtotal}::numeric, ${totals.tax}::numeric, ${totals.total}::numeric,
       'card', ${itemsJson}
     )
@@ -198,6 +183,8 @@ async function ensureSaleForApproved(env: Env, tenantId: string, invoice: string
   `;
   return ins?.[0]?.sale_id || null;
 }
+
+  
 
 async function stampSaleId(env: Env, tenantId: string, invoice: string, saleId: string) {
   const sql = neon(env.DATABASE_URL);
