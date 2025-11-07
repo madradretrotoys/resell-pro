@@ -5,9 +5,9 @@
 // @description  Injects "Add to Facebook" on Intake, waits for safe gates, then opens Facebook and autofills at a human pace.
 // @author       Melissa + AI
 //
-// @match        https://*/main/*
+// @match        https://resellpros.com/app*
+// @match        https://resellpros.com/main/*
 // @match        https://www.facebook.com/marketplace/create/item*
-//
 // @grant        GM_setValue
 // @grant        GM_getValue
 // @grant        GM_deleteValue
@@ -49,41 +49,23 @@
   const onFacebook = /facebook\.com\/marketplace\/create\/item/i.test(location.href);
 
   // --------------------------------------------------------------------
-  
-
-    const fbBtn = insertButton();
-
-    // Listen for the readiness event the app emits after all gates clear
-    document.addEventListener("intake:facebook-ready", (ev) => {
-      if (!fbBtn) return;
-      fbBtn.disabled = false;
-      fbBtn.classList.remove("opacity-60", "cursor-not-allowed");
-      fbBtn.title = "";
-      // stash the latest payload so clicking is instant
-      if (ev?.detail?.payload) savePayload(ev.detail.payload);
-    });
-
-    // Clicking the button opens Facebook and hands off the payload
-    fbBtn?.addEventListener("click", async () => {
+  // Branch A: Intake page — listen for payload and open Facebook
+  // --------------------------------------------------------------------
+  if (!onFacebook) {
+    window.addEventListener("message", (ev) => {
       try {
-        // If app exposes a builder, prefer fresh data
-        const build = window.rpBuildFacebookPayload;
-        if (typeof build === "function") {
-          const payload = build();
-          savePayload(payload);
-        }
+        if (ev.origin !== location.origin) return;
+        const data = ev.data || {};
+        if (data.type !== "RP_FACEBOOK_CREATE" || !data.payload) return;
+        // cache for the FB tab
+        savePayload(data.payload);
+        window.open("https://www.facebook.com/marketplace/create/item", "_blank", "noopener,noreferrer");
       } catch {}
-      window.open("https://www.facebook.com/marketplace/create/item", "_blank", "noopener");
     });
-
-    // Also, if the page became ready before we injected the button, request a fresh payload
-    // (No-op if the app hasn't emitted readiness yet)
-    try {
-      const evt = new CustomEvent("intake:facebook-ping");
-      document.dispatchEvent(evt);
-    } catch {}
     return;
   }
+  
+    
 
   // --------------------------------------------------------------------
   // Branch B: Facebook create page — consume payload and autofill
