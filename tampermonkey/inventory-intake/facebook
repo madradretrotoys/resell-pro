@@ -227,6 +227,58 @@
       }
     } catch {}
 
-    // All done — we stop here so you can QC and press Publish yourself.
+    // ---------- 4) click Publish and report back ----------
+    async function clickPublish() {
+      // Facebook UI drifts; try several candidate buttons
+      const btns = $$('div[role="button"], button').filter(b =>
+        /publish|post|next/i.test((b.textContent || "")) && !b.disabled
+      );
+      const pub = btns[0] || null;
+      if (!pub) return false;
+      pub.click();
+      await delay(2000);
+      return true;
+    }
+
+    // Attempt to publish
+    let published = await clickPublish();
+
+    // Very light success heuristic: look for a confirmation toast/link on page
+    // (best-effort; FB DOM can change)
+    let remoteUrl = null;
+    try {
+      const a = $$("a").find(x => /view|your listing|see your listing/i.test(x.textContent || ""));
+      if (a && a.href) remoteUrl = a.href;
+    } catch {}
+
+    // Callback to Resell Pro (temporary endpoint; CORS-open)
+    // NOTE: we included item_id in the payload when we left Intake.
+    const itemId  = payload.item_id || null;
+    const tenant  = document.documentElement.getAttribute("data-tenant-id")
+                 || localStorage.getItem("rp:tenant_id") || "";
+
+    const postBack = (state, message) => new Promise((resolve) => {
+      try {
+        // Use GM_xmlhttpRequest to bypass CORS if needed
+        // (add @grant GM_xmlhttpRequest in header if you want to hard-bypass)
+        fetch("https://resellpros.com/api/marketplaces/facebook/callback", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            tenant_id: tenant,
+            item_id: itemId,
+            status: state,                 // 'live' | 'error'
+            remote_url: remoteUrl || null,
+            message: message || null,
+          })
+        }).then(() => resolve()).catch(() => resolve());
+      } catch { resolve(); }
+    });
+
+    if (itemId && tenant) {
+      await postBack(published ? "live" : "error", published ? null : "publish_button_not_found");
+    }
   })();
 })();
+
+    
