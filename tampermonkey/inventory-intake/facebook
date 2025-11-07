@@ -14,6 +14,8 @@
 // @run-at       document-idle
 // @downloadURL https://raw.githubusercontent.com/madradretrotoys/resell-pro/refs/heads/main/tampermonkey/inventory-intake/facebook/resell-pro-facebook-autofill.user.js
 // @updateURL   https://raw.githubusercontent.com/madradretrotoys/resell-pro/refs/heads/main/tampermonkey/inventory-intake/facebook/resell-pro-facebook-autofill.user.js
+// @grant        GM_xmlhttpRequest
+// @connect      resellpros.com
 // ==/UserScript==
 
 (function () {
