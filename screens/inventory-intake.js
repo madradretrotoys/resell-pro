@@ -523,8 +523,14 @@ export async function init() {
                 .catch((e) => console.warn("[intake.js] job kick error", { job_id: jid, error: String(e) }));
             } catch {}
             trackPublishJob(jid);
-          }
+           }
         }
+
+        // When the save is Active, photos are flushed, and eBay jobs are quiet,
+        // this will emit `intake:facebook-ready` ONLY if Facebook is selected
+        // and not already live for this item.
+        await __emitFacebookReadyIfSafe({ saveStatus, jobIds });
+
       } catch (e) {
         console.error("photos:flush:error", e);
       }
@@ -2741,11 +2747,11 @@ document.addEventListener("intake:item-changed", () => refreshInventory({ force:
           try {
             document.dispatchEvent(
               new CustomEvent("intake:item-saved", {
-                // pass save mode and the job_ids we got back from the server
                 detail: {
                   item_id: __currentItemId,
-                  save_status: mode,                 // "active" | "draft"
-                  job_ids: Array.isArray(res?.job_ids) ? res.job_ids : [] // use the real response variable
+                  action: "save",
+                  save_status: (mode === "draft" ? "draft" : "active"),
+                  job_ids: Array.isArray(res?.job_ids) ? res.job_ids : []
                 }
               })
             );
