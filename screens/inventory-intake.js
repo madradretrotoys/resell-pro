@@ -491,7 +491,7 @@ export async function init() {
         const jobIds     = Array.isArray(ev?.detail?.job_ids) ? ev.detail.job_ids : [];
         if (!id) return;
         __currentItemId = id;
-
+        
         
         // Phase 0: once Active, permanently lock Draft action for this listing (UI)
         if (saveStatus === "active") {
@@ -503,7 +503,7 @@ export async function init() {
             draftBtn.title = "Draft save is disabled for Active listings.";
           }
         }
-
+        
         
         if (__pendingFiles.length > 0) {
           const pending = __pendingFiles.splice(0, __pendingFiles.length);
@@ -1452,6 +1452,82 @@ function setMarketplaceVisibility() {
     return allOk;
   }
 
+
+  /* === Facebook handoff helpers (NEW) === */
+
+  // Build the payload the Tampermonkey script will send to Facebook.
+  window.rpBuildFacebookPayload = function rpBuildFacebookPayload() {
+    // 1) title / price / qty
+    const titleEl = document.getElementById("titleInput") || findControlByLabel("Item Name / Description");
+    const priceEl = document.getElementById("priceInput") || findControlByLabel("Price (USD)");
+    const qtyEl   = document.getElementById("qtyInput")   || findControlByLabel("Qty");
+  
+    const title = String(titleEl?.value || "").trim();
+    const price = Number(priceEl?.value || 0) || 0;
+    const qty   = Math.max(0, parseInt(qtyEl?.value || "0", 10) || 0);
+  
+    // 2) long description (listing profile field on the screen)
+    const descEl = document.getElementById("longDescriptionTextarea") || findControlByLabel("Long Description");
+    let description = String(descEl?.value || "").trim();
+  
+    // 3) append store footer lines (Facebook-specific)
+    const footer =
+      "Mad Rad Retro Toys\n" +
+      "5026 Kipling Street\n" +
+      "Wheat Ridge, CO 80033\n" +
+      "MON-SAT 10-5\n" +
+      "SUN 11-5\n" +
+      "303-960-2117";
+    description = description ? `${description}\n\n${footer}` : footer;
+  
+    // 4) hard-coded for v1
+    const category  = "Action Figures";
+    const condition = "Used - Good";
+    const availability = qty > 1 ? "List as in Stock" : "List as Single Item";
+  
+    // 5) images from state (__photos), ordered: primary first, then sort_order
+    const ordered = (__photos || [])
+      .slice()
+      .sort((a, b) => {
+        const pa = a.is_primary ? -1 : 0;
+        const pb = b.is_primary ? -1 : 0;
+        if (pa !== pb) return pa - pb;
+        return (a.sort_order ?? 0) - (b.sort_order ?? 0);
+      })
+      .map(x => String(x.cdn_url || ""))     // cdn_url persisted by server
+      .filter(Boolean);
+  
+    return {
+      title, price, qty, availability, category, condition, description,
+      images: ordered,
+      // include an id for traceability + basic sanity info for the userscript
+      item_id: __currentItemId || null,
+      created_at: Date.now()
+    };
+  };
+  
+  // Only fire when: Active save, photos flushed, and all publish jobs are settled.
+  async function __emitFacebookReadyIfSafe({ saveStatus, jobIds }) {
+    if (String(saveStatus || "").toLowerCase() !== "active") return;
+  
+    // 1) all pending photos flushed?
+    if (__pendingFiles && __pendingFiles.length > 0) return;
+  
+    // 2) publish jobs settled (if any)
+    if (Array.isArray(jobIds) && jobIds.length > 0) {
+      // We rely on trackPublishJob to resolve when terminal.
+      // If caller hasn't awaited them, we can't guarantee settlement — so bail.
+      const anyRunning = document.querySelector('[data-status-text]')?.textContent?.match(/Publishing|Deleting/i);
+      if (anyRunning) return;
+    }
+  
+    const payload = window.rpBuildFacebookPayload();
+    document.dispatchEvent(new CustomEvent("intake:facebook-ready", {
+      detail: { item_id: __currentItemId || null, payload }
+    }));
+  }
+
+  
 // --- Drafts refresh bus + helpers (anchored insert) ---
 let __draftsRefreshTimer = null;
 
