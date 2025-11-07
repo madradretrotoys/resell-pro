@@ -7,6 +7,7 @@
 //
 // @match        https://resellpros.com/app*
 // @match        https://resellpros.com/main/*
+// @match        https://*.resellpros.com/app*
 // @match        https://www.facebook.com/marketplace/create/item*
 // @grant        GM_setValue
 // @grant        GM_getValue
