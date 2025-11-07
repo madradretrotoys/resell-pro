@@ -1506,19 +1506,39 @@ function setMarketplaceVisibility() {
     };
   };
   
-  // Only fire when: Active save, photos flushed, and all publish jobs are settled.
+  // Only fire when: Active save, photos flushed, all publish jobs are settled,
+  // AND the Facebook tile is selected, AND the Facebook listing is not already live.
   async function __emitFacebookReadyIfSafe({ saveStatus, jobIds }) {
     if (String(saveStatus || "").toLowerCase() !== "active") return;
   
-    // 1) all pending photos flushed?
+    // photos flushed?
     if (__pendingFiles && __pendingFiles.length > 0) return;
   
-    // 2) publish jobs settled (if any)
+    // runner quiet?
     if (Array.isArray(jobIds) && jobIds.length > 0) {
-      // We rely on trackPublishJob to resolve when terminal.
-      // If caller hasn't awaited them, we can't guarantee settlement — so bail.
       const anyRunning = document.querySelector('[data-status-text]')?.textContent?.match(/Publishing|Deleting/i);
       if (anyRunning) return;
+    }
+  
+    // is Facebook selected?
+    const isFacebookSelected = (() => {
+      // use the cached meta to map selected ids → slug
+      const rows = (__metaCache?.marketplaces || []);
+      const byId = new Map(rows.map(r => [Number(r.id), String(r.slug || "").toLowerCase()]));
+      for (const id of selectedMarketplaceIds) {
+        if (byId.get(Number(id)) === "facebook") return true;
+      }
+      return false;
+    })();
+    if (!isFacebookSelected) return;
+  
+    // not already live?
+    if (__currentItemId) {
+      try {
+        const snap = await api(`/api/inventory/intake?item_id=${encodeURIComponent(__currentItemId)}`, { method: "GET" });
+        const live = String(snap?.marketplace_listing?.facebook?.status || "").toLowerCase() === "live";
+        if (live) return; // nothing to do
+      } catch {}
     }
   
     const payload = window.rpBuildFacebookPayload();
