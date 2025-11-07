@@ -186,7 +186,10 @@
       $('textarea');
 
     if (titleBox) await typeSlow(titleBox, payload.title || "");
-    if (priceBox) await typeSlow(priceBox, String((payload.price || 0).toFixed ? payload.price.toFixed(2) : payload.price || "0")));
+    if (priceBox) {
+      const priceNum = Number.isFinite(Number(payload.price)) ? Number(payload.price) : 0;
+      await typeSlow(priceBox, priceNum.toFixed(2));
+    }
 
     if (descBox) {
       // Contenteditable vs textarea
