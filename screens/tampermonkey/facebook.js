@@ -1,0 +1,248 @@
+// ==UserScript==
+// @name         Resell Pro → Facebook Marketplace Autofill (v1)
+// @namespace    mad-rad-retro-toys
+// @version      1.0.0
+// @description  Injects "Add to Facebook" on Intake, waits for safe gates, then opens Facebook and autofills at a human pace.
+// @author       Melissa + AI
+//
+// ***** MATCH YOUR DOMAINS *****
+// Edit the next two @match lines to your actual app host if needed.
+// @match        https://*/feature/auth-ui/*
+// @match        https://www.facebook.com/marketplace/create/item*
+//
+// @grant        GM_setValue
+// @grant        GM_getValue
+// @grant        GM_deleteValue
+// @run-at       document-idle
+// ==/UserScript==
+
+(function () {
+  const NOW = () => Date.now();
+
+  // -----------------------------
+  // Shared helpers
+  // -----------------------------
+  const delay = (ms) => new Promise((r) => setTimeout(r, ms));
+  const humanPause = (min = 250, max = 800) =>
+    delay(min + Math.floor(Math.random() * (max - min + 1)));
+
+  const PAYLOAD_KEY = "rp_fb_payload";
+  const TTL_MS = 5 * 60 * 1000; // 5 minutes
+
+  const savePayload = (payload) => {
+    GM_setValue(PAYLOAD_KEY, { at: NOW(), payload });
+  };
+  const takePayload = () => {
+    const blob = GM_getValue(PAYLOAD_KEY, null);
+    if (!blob) return null;
+    if (NOW() - (blob.at || 0) > TTL_MS) {
+      try { GM_deleteValue(PAYLOAD_KEY); } catch {}
+      return null;
+    }
+    // leave it for retries; FB can get bouncy
+    return blob.payload || null;
+  };
+
+  // Detect which site we’re on
+  const onFacebook = /facebook\.com\/marketplace\/create\/item/i.test(location.href);
+
+  // --------------------------------------------------------------------
+  // Branch A: Intake page — inject button and wait for "facebook-ready"
+  // --------------------------------------------------------------------
+  if (!onFacebook) {
+    function insertButton() {
+      // Find the first Copy button and insert to the left
+      const copyRow = document.getElementById("copyTitleBtn")
+        || document.querySelector("#copyTitleBtn, #copySkuBtn, #copyPriceBtn, [id^='copy']");
+      if (!copyRow || !copyRow.parentElement) return null;
+
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.id = "rpAddToFacebook";
+      btn.className = "btn btn-primary btn-sm opacity-60 cursor-not-allowed";
+      btn.disabled = true;
+      btn.title = "Finishing publish…";
+      btn.textContent = "Add to Facebook";
+
+      copyRow.parentElement.insertBefore(btn, copyRow);
+      return btn;
+    }
+
+    const fbBtn = insertButton();
+
+    // Listen for the readiness event the app emits after all gates clear
+    document.addEventListener("intake:facebook-ready", (ev) => {
+      if (!fbBtn) return;
+      fbBtn.disabled = false;
+      fbBtn.classList.remove("opacity-60", "cursor-not-allowed");
+      fbBtn.title = "";
+      // stash the latest payload so clicking is instant
+      if (ev?.detail?.payload) savePayload(ev.detail.payload);
+    });
+
+    // Clicking the button opens Facebook and hands off the payload
+    fbBtn?.addEventListener("click", async () => {
+      try {
+        // If app exposes a builder, prefer fresh data
+        const build = window.rpBuildFacebookPayload;
+        if (typeof build === "function") {
+          const payload = build();
+          savePayload(payload);
+        }
+      } catch {}
+      window.open("https://www.facebook.com/marketplace/create/item", "_blank", "noopener");
+    });
+
+    // Also, if the page became ready before we injected the button, request a fresh payload
+    // (No-op if the app hasn't emitted readiness yet)
+    try {
+      const evt = new CustomEvent("intake:facebook-ping");
+      document.dispatchEvent(evt);
+    } catch {}
+    return;
+  }
+
+  // --------------------------------------------------------------------
+  // Branch B: Facebook create page — consume payload and autofill
+  // --------------------------------------------------------------------
+  (async function facebookAutofill() {
+    const payload = takePayload();
+    if (!payload) return; // nothing to do
+
+    // --- helpers to find FB controls (selectors may drift; we try multiple) ---
+    const $ = (sel) => document.querySelector(sel);
+    const $$ = (sel) => Array.from(document.querySelectorAll(sel));
+
+    async function waitFor(sel, { timeout = 20000 } = {}) {
+      const start = NOW();
+      while (NOW() - start < timeout) {
+        const el = $(sel);
+        if (el) return el;
+        await delay(150);
+      }
+      return null;
+    }
+
+    async function typeSlow(el, text) {
+      el.focus();
+      el.value = "";
+      el.dispatchEvent(new Event("input", { bubbles: true }));
+      for (const ch of String(text)) {
+        el.value += ch;
+        el.dispatchEvent(new Event("input", { bubbles: true }));
+        await humanPause(20, 40);
+      }
+      el.blur();
+      el.dispatchEvent(new Event("change", { bubbles: true }));
+      await humanPause(200, 400);
+    }
+
+    // ------- 1) upload photos -------
+    // FB’s uploader is usually an <input type="file"> inside the photo block.
+    // Try several likely selectors; if none found, we skip with a toast.
+    const fileInput =
+      $('input[type="file"][accept*="image"]') ||
+      $('form input[type="file"]') ||
+      await waitFor('input[type="file"]', { timeout: 8000 });
+
+    if (fileInput && Array.isArray(payload.images) && payload.images.length) {
+      const files = [];
+      for (const url of payload.images.slice(0, 10)) { // FB caps around 10
+        try {
+          const res = await fetch(url, { mode: "cors" }).catch(() => null);
+          if (!res || !res.ok) continue;
+          const blob = await res.blob();
+          const ext = /\.jpe?g$/i.test(url) ? "jpg" : (/\.png$/i.test(url) ? "png" : "webp");
+          const f = new File([blob], `photo_${files.length + 1}.${ext}`, { type: blob.type || `image/${ext}` });
+          files.push(f);
+          await humanPause(120, 220);
+        } catch {}
+      }
+      if (files.length) {
+        const dt = new DataTransfer();
+        files.forEach((f) => dt.items.add(f));
+        fileInput.files = dt.files;
+        fileInput.dispatchEvent(new Event("change", { bubbles: true }));
+        await delay(1500); // let the previews render
+      }
+    }
+
+    // ------- 2) title / price / description -------
+    const titleBox =
+      $('input[aria-label="Title"]') ||
+      $('input[placeholder*="Title"]') ||
+      $('input[type="text"]');
+
+    const priceBox =
+      $('input[aria-label="Price"]') ||
+      $('input[placeholder*="Price"]') ||
+      $('input[type="number"]');
+
+    const descBox =
+      $('textarea[aria-label="Description"]') ||
+      $('div[role="textbox"][contenteditable="true"]') ||
+      $('textarea');
+
+    if (titleBox) await typeSlow(titleBox, payload.title || "");
+    if (priceBox) await typeSlow(priceBox, String((payload.price || 0).toFixed ? payload.price.toFixed(2) : payload.price || "0")));
+
+    if (descBox) {
+      // Contenteditable vs textarea
+      if (descBox.tagName === "TEXTAREA") {
+        await typeSlow(descBox, payload.description || "");
+      } else {
+        // contenteditable
+        descBox.focus();
+        document.execCommand("selectAll", false, null);
+        document.execCommand("insertText", false, payload.description || "");
+        descBox.blur();
+        await humanPause();
+      }
+    }
+
+    // ------- 3) category / condition / availability (best-effort; UI can drift) -------
+    // Category
+    try {
+      // FB often uses a searchable dropdown. Click, type, confirm.
+      const catTrigger = $$('div[role="button"]').find(b => /category/i.test(b.textContent || "")) || null;
+      if (catTrigger) {
+        catTrigger.click();
+        await humanPause();
+        const search = $('input[type="search"], input[aria-label*="Search"]');
+        if (search) {
+          await typeSlow(search, payload.category || "Action Figures");
+          await delay(800);
+          const opt = $$('div[role="option"], [role="menuitem"]').find(o => /action figures/i.test(o.textContent || ""));
+          if (opt) opt.click();
+        }
+      }
+    } catch {}
+
+    // Condition
+    try {
+      const condTrigger = $$('div[role="button"]').find(b => /condition/i.test(b.textContent || "")) || null;
+      if (condTrigger) {
+        condTrigger.click();
+        await humanPause();
+        const opt = $$('div[role="option"], [role="menuitem"]').find(o => /used/i.test(o.textContent || ""));
+        opt?.click();
+      }
+    } catch {}
+
+    // Availability
+    try {
+      const availTrigger = $$('div[role="button"]').find(b => /availability/i.test(b.textContent || "")) || null;
+      if (availTrigger) {
+        availTrigger.click();
+        await humanPause();
+        const wantStock = /in stock/i.test(payload.availability || "");
+        const opt = $$('div[role="option"], [role="menuitem"]').find(o =>
+          wantStock ? /in stock/i.test(o.textContent || "") : /single item/i.test(o.textContent || "")
+        );
+        opt?.click();
+      }
+    } catch {}
+
+    // All done — we stop here so you can QC and press Publish yourself.
+  })();
+})();
