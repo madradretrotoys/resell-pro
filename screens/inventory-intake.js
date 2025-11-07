@@ -906,6 +906,17 @@ function setMarketplaceVisibility() {
         return true;
       });
 
+     // Determine if the eBay tile is actually selected right now.
+    // If not selected, we must NOT treat eBay fields as required.
+    const ebaySelected = (() => {
+      const rows = (__metaCache?.marketplaces || []);
+      const byId = new Map(rows.map(r => [Number(r.id), String(r.slug || "").toLowerCase()]));
+      for (const id of selectedMarketplaceIds) {
+        if (byId.get(Number(id)) === "ebay") return true;
+      }
+      return false;
+    })();
+
     // eBay card fields (when the eBay card is rendered and the fields are visible)
     const ebaySelectors = [
       "#ebay_shippingPolicy",
