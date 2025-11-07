@@ -270,6 +270,52 @@ label{
 .btn-danger{ background: var(--danger); color: #fff; border-color: var(--danger); }
 .btn-danger:hover{ background: var(--danger-h); border-color: var(--danger-h); }
 
+/* --- FINAL OVERRIDES: make color variants win against inherited text color or earlier rules --- */
+.btn.btn-success{
+  background: #16a34a !important;   /* emerald-600 */
+  border-color: #16a34a !important;
+  color: #fff !important;            /* force white text on dark bg */
+}
+.btn.btn-success:hover{
+  background: #15803d !important;   /* emerald-700 */
+  border-color: #15803d !important;
+  color: #fff !important;
+}
+
+.btn.btn-danger{
+  background: var(--danger) !important;
+  border-color: var(--danger) !important;
+  color: #fff !important;
+}
+.btn.btn-danger:hover{
+  background: var(--danger-h) !important;
+  border-color: var(--danger-h) !important;
+  color: #fff !important;
+}
+
+.btn.btn-primary{
+  background: var(--brand) !important;
+  border-color: var(--brand) !important;
+  color: #fff !important;
+}
+.btn.btn-primary:hover{
+  background: var(--brand-h) !important;
+  border-color: var(--brand-h) !important;
+  color: #fff !important;
+}
+
+/* Ghost should always remain neutral/dark text */
+.btn.btn-ghost{
+  background: #fff !important;
+  border-color: var(--border) !important;
+  color: var(--text) !important;
+}
+.btn.btn-ghost:hover{
+  background: #f3f4f6 !important;
+  color: var(--text) !important;
+}
+
+
 .btn-success{ background: #16a34a; color: #fff; border-color: #16a34a; }  /* emerald-600 */
 .btn-success:hover{ background: #15803d; border-color: #15803d; }         /* emerald-700 */
 
