@@ -1,5 +1,5 @@
 // begin ebay.ts file
-import type { MarketplaceAdapter, CreateParams, CreateResult } from '../types';
+import type { MarketplaceAdapter, CreateParams, CreateResult, DeleteParams, DeleteResult } from '../types';
 import { getSql } from '../../../_shared/db';
 
 type EbayEnv = 'production' | 'sandbox';
@@ -905,5 +905,288 @@ async function create(params: CreateParams): Promise<CreateResult> {
   };
 } // <-
 
-export const ebayAdapter: MarketplaceAdapter = { create };
+// ───────────────────────────────────────────────────────────────────────────────
+// UPDATE path (recreate strategy): withdraw → delete → reuse create()
+// ───────────────────────────────────────────────────────────────────────────────
+async function update(params: CreateParams): Promise<CreateResult> {
+  const { env, tenant_id, item, profile, mpListing, images } = params;
+  const sql = getSql(env);
+  const warnings: string[] = [];
+
+  // 0) Guard: require an existing offer id on the listing row
+  const oldOfferId = String(mpListing?.mp_offer_id || '').trim();
+  if (!oldOfferId) {
+    throw new Error('update_requires_offer_id: mp_offer_id was not found on item_marketplace_listing');
+  }
+
+  // 1) Load + decrypt token & resolve environment from the same connection used by this listing
+  const desiredConnId = String((mpListing as any)?.connection_id || '').trim();
+
+  let conn = desiredConnId
+    ? await sql/*sql*/`
+        SELECT mc.connection_id, mc.access_token, mc.token_expires_at, mc.environment, mc.secrets_blob
+        FROM app.marketplace_connections mc
+        JOIN app.marketplaces_available ma ON ma.id = mc.marketplace_id
+        WHERE mc.tenant_id = ${tenant_id}
+          AND ma.slug = 'ebay'
+          AND mc.status = 'connected'
+          AND mc.connection_id = ${desiredConnId}
+        LIMIT 1
+      `
+    : [];
+
+  if (!conn?.length) {
+    conn = await sql/*sql*/`
+      SELECT mc.connection_id, mc.access_token, mc.token_expires_at, mc.environment, mc.secrets_blob
+      FROM app.marketplace_connections mc
+      JOIN app.marketplaces_available ma ON ma.id = mc.marketplace_id
+      WHERE mc.tenant_id = ${tenant_id}
+        AND ma.slug = 'ebay'
+        AND mc.status = 'connected'
+      ORDER BY mc.updated_at DESC
+      LIMIT 1
+    `;
+  }
+  if (!conn?.length) throw new Error('Tenant not connected to eBay (no matching connection)');
+
+  const encKey = env.RP_ENCRYPTION_KEY || "";
+  const encAccess = String(conn[0].access_token || "");
+  if (!encAccess) throw new Error('No access_token stored');
+  const accessObj = await decryptJson(encKey, encAccess);
+  const accessToken = String(accessObj?.v || "").trim();
+  if (!accessToken) throw new Error('Decrypted access_token is empty');
+
+  let envStr = String(conn[0].environment || "").trim().toLowerCase() as 'production' | 'sandbox' | '';
+  if (envStr !== "production" && envStr !== "sandbox") {
+    try {
+      const secrets = await decryptJson(encKey, String(conn[0].secrets_blob || ""));
+      const e = String(secrets?.environment || "").trim().toLowerCase();
+      if (e === "production" || e === "sandbox") envStr = e as any;
+    } catch {}
+  }
+  if (envStr !== "production" && envStr !== "sandbox") {
+    throw new Error('update_env_unresolved: could not resolve ebay environment from selected connection');
+  }
+
+  const base = ebayBase(envStr);
+  console.log('[ebay:update.recreate.env]', {
+    connection_id: String(conn?.[0]?.connection_id || ''),
+    environment: envStr,
+    base
+  });
+
+  // Local helpers (minimal; no verbose debug here)
+  async function ebayFetch(path: string, init: RequestInit) {
+    const url = `${base}${path}`;
+    const headers = {
+      ...(init.headers || {}),
+      'authorization': `Bearer ${accessToken}`,
+      'content-type': 'application/json',
+      'content-language': 'en-US'
+    };
+    const r = await fetch(url, { ...init, headers });
+    const txt = await r.text().catch(() => '');
+    if (!r.ok) throw new Error(`${r.status} ${r.statusText} :: ${txt}`.slice(0, 1000));
+    try {
+      return txt && (r.headers.get('content-type') || '').includes('application/json') ? JSON.parse(txt) : txt;
+    } catch { return txt; }
+  }
+
+  // 2) Withdraw if currently published/scheduled (ignore 404/invalid-state)
+  try {
+    console.log('[ebay:update.recreate.withdraw]', { offerId: oldOfferId });
+    await ebayFetch(`/sell/inventory/v1/offer/${encodeURIComponent(oldOfferId)}/withdraw`, {
+      method: 'POST',
+      body: '{}'
+    });
+  } catch (e: any) {
+    const m = String(e?.message || e || '');
+    // treat 404/not-allowed as already ended or not-published; proceed
+    console.warn('[ebay:update.recreate.withdraw.warn]', m.slice(0, 300));
+  }
+
+  // 3) DELETE the old offer entity to free SKU (critical to avoid 25002)
+  try {
+    console.log('[ebay:update.recreate.delete]', { offerId: oldOfferId });
+    await ebayFetch(`/sell/inventory/v1/offer/${encodeURIComponent(oldOfferId)}`, {
+      method: 'DELETE',
+      body: ''
+    });
+  } catch (e: any) {
+    const m = String(e?.message || e || '');
+    if (m.includes(' 404 ') || /not\s*found/i.test(m)) {
+      console.warn('[ebay:update.recreate.delete.skip404]', { offerId: oldOfferId });
+    } else {
+      throw e; // hard failure — don’t proceed to create (prevents 25002 loop)
+    }
+  }
+
+  // 4) Recreate via the existing create() path (re-applies all edits at creation time)
+  console.log('[ebay:update.recreate.create.call]', { sku: String(item?.sku || '') });
+  const created = await create({ env, tenant_id, item, profile, mpListing, images });
+
+  // 5) Emit a precise adapter-level audit for recreate
+  try {
+    await sql/*sql*/`
+      INSERT INTO app.item_marketplace_events
+        (item_id, tenant_id, marketplace_id, kind, payload)
+      VALUES (
+        ${String((item as any)?.item_id || '')},
+        ${tenant_id},
+        ${Number(mpListing?.marketplace_id || 1)},
+        'recreated',
+        ${JSON.stringify({
+          fromOfferId: oldOfferId || null,
+          toOfferId: created?.offerId || null
+        })}
+      )
+    `;
+  } catch (e: any) {
+    console.warn('[ebay:update.recreate.event.warn]', String(e?.message || e || ''));
+  }
+
+  // 6) Return the create() result verbatim (runner will persist offer/url/etc.)
+  return created;
+}
+
+
+// ───────────────────────────────────────────────────────────────────────────────
+// DELETE path (standalone): withdraw → delete offer (idempotent), no recreate
+// ───────────────────────────────────────────────────────────────────────────────
+async function del(params: DeleteParams): Promise<DeleteResult> {
+  const { env, tenant_id, mpListing } = params;
+  const sql = getSql(env);
+  const warnings: string[] = [];
+
+  const oldOfferId = String(mpListing?.mp_offer_id || '').trim() || null;
+  const desiredConnId = String((mpListing as any)?.connection_id || '').trim();
+
+  // Load connection (prefer the one used by the listing)
+  let conn = desiredConnId
+    ? await sql/*sql*/`
+        SELECT mc.connection_id, mc.access_token, mc.token_expires_at, mc.environment, mc.secrets_blob
+        FROM app.marketplace_connections mc
+        JOIN app.marketplaces_available ma ON ma.id = mc.marketplace_id
+        WHERE mc.tenant_id = ${tenant_id}
+          AND ma.slug = 'ebay'
+          AND mc.status = 'connected'
+          AND mc.connection_id = ${desiredConnId}
+        LIMIT 1
+      `
+    : [];
+
+  if (!conn?.length) {
+    conn = await sql/*sql*/`
+      SELECT mc.connection_id, mc.access_token, mc.token_expires_at, mc.environment, mc.secrets_blob
+      FROM app.marketplace_connections mc
+      JOIN app.marketplaces_available ma ON ma.id = mc.marketplace_id
+      WHERE mc.tenant_id = ${tenant_id}
+        AND ma.slug = 'ebay'
+        AND mc.status = 'connected'
+      ORDER BY mc.updated_at DESC
+      LIMIT 1
+    `;
+  }
+  if (!conn?.length) {
+    warnings.push('Tenant not connected to eBay (no matching connection)');
+    return { success: false, offerId: oldOfferId, remoteId: null, connectionId: null, environment: null, warnings };
+  }
+
+  const encKey = env.RP_ENCRYPTION_KEY || "";
+  const encAccess = String(conn[0].access_token || "");
+  if (!encAccess) return { success: false, offerId: oldOfferId, remoteId: null, connectionId: String(conn?.[0]?.connection_id || '') || null, environment: null, warnings: ['No access_token stored'] };
+
+  // Decrypt token
+  function b64d(s: string) { return Uint8Array.from(atob(s), c => c.charCodeAt(0)); }
+  async function decryptJson(base64Key: string, blob: string): Promise<any> {
+    if (!blob) return null;
+    const [ivB64, ctB64] = blob.split(".");
+    const iv = b64d(ivB64);
+    const ct = b64d(ctB64);
+    if (!base64Key) return JSON.parse(new TextDecoder().decode(ct));
+    const key = await crypto.subtle.importKey("raw", b64d(base64Key), { name: "AES-GCM" }, false, ["decrypt"]);
+    const pt = new Uint8Array(await crypto.subtle.decrypt({ name: "AES-GCM", iv }, key, ct));
+    return JSON.parse(new TextDecoder().decode(pt));
+  }
+  const accessObj = await decryptJson(encKey, encAccess);
+  const accessToken = String(accessObj?.v || "").trim();
+  if (!accessToken) return { success: false, offerId: oldOfferId, remoteId: null, connectionId: String(conn?.[0]?.connection_id || '') || null, environment: null, warnings: ['Decrypted access_token is empty'] };
+
+  // Resolve environment
+  type EbayEnv = 'production' | 'sandbox';
+  const baseEnv = ((): EbayEnv => {
+    let envStr = String(conn[0].environment || "").trim().toLowerCase();
+    if (envStr !== "production" && envStr !== "sandbox") {
+      try {
+        const secrets = JSON.parse(new TextDecoder().decode(b64d(String(conn[0].secrets_blob || "").split(".")[1] || "")));
+        const e = String(secrets?.environment || "").trim().toLowerCase();
+        if (e === "production" || e === "sandbox") envStr = e;
+      } catch {}
+    }
+    return (envStr === 'production' ? 'production' : 'sandbox') as EbayEnv;
+  })();
+  const base = baseEnv === 'production' ? 'https://api.ebay.com' : 'https://api.sandbox.ebay.com';
+
+  // Minimal fetch wrapper (mirrors update())
+  async function ebayFetch(path: string, init: RequestInit) {
+    const url = `${base}${path}`;
+    const headers = {
+      ...(init.headers || {}),
+      'authorization': `Bearer ${accessToken}`,
+      'content-type': 'application/json',
+      'content-language': 'en-US'
+    };
+    const r = await fetch(url, { ...init, headers });
+    const txt = await r.text().catch(() => '');
+    if (!r.ok) throw new Error(`${r.status} ${r.statusText} :: ${txt}`.slice(0, 1000));
+    try {
+      return txt && (r.headers.get('content-type') || '').includes('application/json') ? JSON.parse(txt) : txt;
+    } catch { return txt; }
+  }
+
+  // If we have an offer id, attempt withdraw then delete (idempotent on 404)
+  if (oldOfferId) {
+    try {
+      await ebayFetch(`/sell/inventory/v1/offer/${encodeURIComponent(oldOfferId)}/withdraw`, { method: 'POST', body: '{}' });
+    } catch (e: any) {
+      const m = String(e?.message || e || '');
+      // Non-fatal: treat 404/invalid-state as already withdrawn
+      if (!(m.includes(' 404 ') || /not\s*found/i.test(m) || /invalid|already/i.test(m))) {
+        warnings.push(`withdraw_warn: ${m.slice(0, 300)}`);
+      }
+    }
+
+    try {
+      await ebayFetch(`/sell/inventory/v1/offer/${encodeURIComponent(oldOfferId)}`, { method: 'DELETE', body: '' });
+    } catch (e: any) {
+      const m = String(e?.message || e || '');
+      if (m.includes(' 404 ') || /not\s*found/i.test(m)) {
+        // already gone — OK
+      } else {
+        return {
+          success: false,
+          offerId: oldOfferId,
+          remoteId: null,
+          connectionId: String(conn?.[0]?.connection_id || '') || null,
+          environment: baseEnv,
+          warnings: [...warnings, `delete_error: ${m.slice(0, 300)}`]
+        };
+      }
+    }
+  } else {
+    warnings.push('No mp_offer_id present; skipped eBay offer deletion.');
+  }
+
+  return {
+    success: true,
+    offerId: oldOfferId,
+    remoteId: null,
+    connectionId: String(conn?.[0]?.connection_id || '') || null,
+    environment: baseEnv,
+    warnings
+  };
+}
+
+export const ebayAdapter: MarketplaceAdapter = { create, update, delete: del };
+
 // end ebay.ts file

@@ -13,93 +13,142 @@ import type { Env } from '../../../_shared/types';
 async function executeLockedJob(env: Env, job: any) {
   const sql = getSql(env);
 
-  // 2) load inputs for the adapter
-  const [inv] = await sql/*sql*/`
-    SELECT i.item_id, i.sku, i.product_short_title, i.price, i.qty
-    FROM app.inventory i
-    WHERE i.item_id = ${job.item_id} AND i.item_id IS NOT NULL
-    LIMIT 1
-  `;
-
-  const [prof] = await sql/*sql*/`
-    SELECT *
-    FROM app.item_listing_profile
-    WHERE item_id = ${job.item_id} AND tenant_id = ${job.tenant_id}
-    LIMIT 1
-  `;
-
-  const imlRows = await sql/*sql*/`
-    SELECT *
-    FROM app.item_marketplace_listing
-    WHERE item_id = ${job.item_id} AND tenant_id = ${job.tenant_id}
-      AND marketplace_id = ${job.marketplace_id}
-    LIMIT 1
-  `;
-
-  const imgs = await sql/*sql*/`
-    SELECT cdn_url, is_primary, sort_order
-    FROM app.item_images
-    WHERE item_id = ${job.item_id} AND tenant_id = ${job.tenant_id}
-    ORDER BY is_primary DESC, sort_order ASC
-  `;
+  // (inputs are loaded conditionally below; delete op does not need full item/profile/images)
 
   // 3) resolve adapter
   const reg = getRegistry();
-  const adapter = reg.byId(job.marketplace_id);
-  if (!adapter) throw new Error(`No adapter for marketplace_id=${job.marketplace_id}`);
-  // Mark listing as publishing while we attempt the external publish
-  await sql/*sql*/`
-    UPDATE app.item_marketplace_listing
-       SET status='publishing',
-           updated_at = now()
-     WHERE item_id = ${job.item_id}
-       AND tenant_id = ${job.tenant_id}
-       AND marketplace_id = ${job.marketplace_id}
-  `;
-  // 4) perform op
-  const res = await adapter.create({
-    env,
-    tenant_id: job.tenant_id,
-    item: inv,
-    profile: prof,
-    mpListing: imlRows?.[0] || null,
-    images: imgs
-  });
-
-  // Use a value that exists in app.listing_status (e.g., 'live' / 'active').
-  await sql/*sql*/`
-    UPDATE app.item_marketplace_listing
+  
+    const adapter = reg.byId(job.marketplace_id);
+    if (!adapter) throw new Error(`No adapter for marketplace_id=${job.marketplace_id}`);
     
-       SET status='live',
-           mp_item_id = ${res.remoteId || null},
-           mp_item_url = ${res.remoteUrl || null},
-           mp_offer_id = ${res.offerId || null},
-           mp_category_id = ${res.categoryId || null},
-           connection_id  = ${res.connectionId || null},
-           campaign_id    = ${res.campaignId || null}, 
-           last_synced_at = now(),
-           published_at = COALESCE(published_at, now()),
-           updated_at = now()
-     WHERE item_id = ${job.item_id}
-       AND tenant_id = ${job.tenant_id}
-       AND marketplace_id= ${job.marketplace_id}
-  `;
+    const op = String(job.op || 'create').toLowerCase(); // 'create' | 'update' | 'delete'
+    
+    // For delete: we only need the listing row (ids) and tenant context
+    if (op === 'delete') {
+      const [iml] = await sql/*sql*/`
+        SELECT *
+          FROM app.item_marketplace_listing
+         WHERE item_id = ${job.item_id}
+           AND tenant_id = ${job.tenant_id}
+           AND marketplace_id = ${job.marketplace_id}
+         LIMIT 1
+      `;
+    
+      // Soft status while attempting delete
+      await sql/*sql*/`
+        UPDATE app.item_marketplace_listing
+           SET status='deleting',
+               updated_at = now()
+         WHERE item_id = ${job.item_id}
+           AND tenant_id = ${job.tenant_id}
+           AND marketplace_id = ${job.marketplace_id}
+      `;
+    
+      // Call adapter.delete when available; tolerate idempotent 404s
+      if (typeof (adapter as any).delete !== "function") {
+        throw new Error("adapter_missing_delete");
+      }
+      const res = await (adapter as any).delete({
+        env,
+        tenant_id: job.tenant_id,
+        mpListing: iml || null
+      });
+    
+      // Mark listing deleted and clear remote identifiers (or keep for audit if you prefer)
+      await sql/*sql*/`
+        UPDATE app.item_marketplace_listing
+           SET status='deleted',
+               mp_item_id   = NULL,
+               mp_item_url  = NULL,
+               mp_offer_id  = NULL,
+               campaign_id  = NULL,
+               last_error   = NULL,
+               last_synced_at = now(),
+               updated_at     = now()
+         WHERE item_id = ${job.item_id}
+           AND tenant_id = ${job.tenant_id}
+           AND marketplace_id = ${job.marketplace_id}
+      `;
+    
+      await sql/*sql*/`
+        INSERT INTO app.item_marketplace_events
+          (item_id, tenant_id, marketplace_id, kind, payload)
+        VALUES (
+          ${job.item_id},
+          ${job.tenant_id},
+          ${job.marketplace_id},
+          'deleted',
+          ${JSON.stringify({ at: new Date().toISOString(), remote: { offerId: res?.offerId || null, itemId: res?.remoteId || null } })}
+        )
+      `;
+    
+      await sql/*sql*/`
+        UPDATE app.marketplace_publish_jobs
+           SET status='succeeded',
+               updated_at = now()
+         WHERE job_id = ${job.job_id}
+      `;
+      return { ok: true, job_id: job.job_id, status: 'succeeded', remote: undefined };
+    }
+    
+    // Non-delete flow (create/update) stays the same:
+    await sql/*sql*/`
+      UPDATE app.item_marketplace_listing
+         SET status='publishing',
+             updated_at = now()
+       WHERE item_id = ${job.item_id}
+         AND tenant_id = ${job.tenant_id}
+         AND marketplace_id = ${job.marketplace_id}
+    `;
+    const [inv] = await sql/*sql*/`
+      SELECT i.item_id, i.sku, i.product_short_title, i.price, i.qty
+      FROM app.inventory i
+      WHERE i.item_id = ${job.item_id} AND i.item_id IS NOT NULL
+      LIMIT 1
+    `;
+    const [prof] = await sql/*sql*/`
+      SELECT *
+      FROM app.item_listing_profile
+      WHERE item_id = ${job.item_id} AND tenant_id = ${job.tenant_id}
+      LIMIT 1
+    `;
+    const imlRows = await sql/*sql*/`
+      SELECT *
+      FROM app.item_marketplace_listing
+      WHERE item_id = ${job.item_id} AND tenant_id = ${job.tenant_id}
+        AND marketplace_id = ${job.marketplace_id}
+      LIMIT 1
+    `;
+    const imgs = await sql/*sql*/`
+      SELECT cdn_url, is_primary, sort_order
+      FROM app.item_images
+      WHERE item_id = ${job.item_id} AND tenant_id = ${job.tenant_id}
+      ORDER BY is_primary DESC, sort_order ASC
+    `;
+    
+    // 4) perform op
+    const res = op === 'update' && typeof (adapter as any).update === 'function'
+      ? await (adapter as any).update({ env, tenant_id: job.tenant_id, item: inv, profile: prof, mpListing: imlRows?.[0] || null, images: imgs })
+      : await adapter.create({ env, tenant_id: job.tenant_id, item: inv, profile: prof, mpListing: imlRows?.[0] || null, images: imgs });
 
+  
     const liveSnapshot = {
-      mp_item_id:   res.remoteId || null,
-      mp_item_url:  res.remoteUrl || null,
-      mp_offer_id:  res.offerId || null,
+      mp_item_id:     res.remoteId || null,
+      mp_item_url:    res.remoteUrl || null,
+      mp_offer_id:    res.offerId || null,
       mp_category_id: res.categoryId || null,
       connection_id:  res.connectionId || null,
       environment:    res.environment || null,
       published_at:   new Date().toISOString(),
       raw: {
         offer:   res.rawOffer ?? null,
-        publish: res.rawPublish ?? null
+        publish: res.rawPublish ?? null,
+        update:  (res as any).rawUpdate ?? null
       },
       warnings: res.warnings ?? []
     };
   
+    // Always log a live snapshot
     await sql/*sql*/`
       INSERT INTO app.item_marketplace_events
         (item_id, tenant_id, marketplace_id, kind, payload)
@@ -112,13 +161,44 @@ async function executeLockedJob(env: Env, job: any) {
       )
     `;
   
+    // For true edits, also add a concise 'updated' event
+    if (op === 'update') {
+      await sql/*sql*/`
+        INSERT INTO app.item_marketplace_events
+          (item_id, tenant_id, marketplace_id, kind, payload)
+        VALUES (
+          ${job.item_id},
+          ${job.tenant_id},
+          ${job.marketplace_id},
+          'updated',
+          ${JSON.stringify({ at: new Date().toISOString(), offerId: res.offerId || null })}
+        )
+      `;
+    }
+
+    // NEW: persist live identifiers and status on the listing row
+    await sql/*sql*/`
+      UPDATE app.item_marketplace_listing
+         SET status        = 'live',
+             mp_offer_id   = ${res.offerId || null},
+             mp_item_id    = ${res.remoteId || null},
+             mp_item_url   = ${res.remoteUrl || null},
+             connection_id = ${res.connectionId || null},
+             campaign_id   = ${res.campaignId || null},
+             last_synced_at= now(),
+             published_at  = COALESCE(published_at, now()),
+             updated_at    = now()
+       WHERE item_id = ${job.item_id}
+         AND tenant_id = ${job.tenant_id}
+         AND marketplace_id = ${job.marketplace_id}
+    `;
+
     await sql/*sql*/`
       UPDATE app.marketplace_publish_jobs
          SET status='succeeded',
              updated_at = now()
        WHERE job_id = ${job.job_id}
     `;
-  
     return { ok: true, job_id: job.job_id, status: 'succeeded', remote: res };
 }
 
@@ -203,10 +283,16 @@ export async function processJobById(env: Env, jobId: string) {
          AND marketplace_id = ${job.marketplace_id}
     `;
 
+    const opKind = String(job.op || '').toLowerCase();
+    const failKind =
+      opKind === 'delete' ? 'delete_failed' :
+      opKind === 'update' ? 'update_failed' :
+      'create_failed';
+
     await sql/*sql*/`
       INSERT INTO app.item_marketplace_events
         (item_id, tenant_id, marketplace_id, kind, error_message)
-      VALUES (${job.item_id}, ${job.tenant_id}, ${job.marketplace_id}, 'create_failed', ${msg})
+      VALUES (${job.item_id}, ${job.tenant_id}, ${job.marketplace_id}, ${failKind}, ${msg})
     `;
 
     return { ok: false, job_id: job.job_id, error: msg };
@@ -214,7 +300,33 @@ export async function processJobById(env: Env, jobId: string) {
 }
 
 
+// Read-only polling endpoint for clients that GET /run?job_id=...
+export async function onRequestGet(ctx: { env: Env, request: Request }) {
+  try {
+    const sql = getSql(ctx.env);
+    const url = new URL(ctx.request.url);
+    const specific = (url.searchParams.get("job_id") || "").trim();
 
+    if (!specific) {
+      // No job_id → nothing to report for read-only poll
+      return json({ ok: false, status: "unknown" });
+    }
+
+    const [row] = await sql/*sql*/`
+      SELECT job_id, status
+      FROM app.marketplace_publish_jobs
+      WHERE job_id = ${specific}
+      LIMIT 1
+    `;
+
+    if (!row) return json({ ok: false, status: "unknown", job_id: specific });
+    return json({ ok: true, job_id: row.job_id, status: row.status });
+  } catch (e: any) {
+    const msg = String(e?.message || e);
+    console.error("[runner:get] unhandled", msg);
+    return json({ ok: false, error: "runner_get_crash", message: msg }, 500);
+  }
+}
 
 // Public endpoint remains: process the next queued job
 export async function onRequestPost(ctx: { env: Env, request: Request }) {
@@ -308,5 +420,3 @@ export async function onRequestPost(ctx: { env: Env, request: Request }) {
   }
 }
 //end  run.ts code
-
-

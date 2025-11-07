@@ -12,10 +12,11 @@ export function applyButtonGroupColors(root, options = {}){
   if (!root) return;
   const { allGhost = false } = options;
   const hasColorRole = (btn) =>
-    btn.classList.contains('btn-primary') ||
-    btn.classList.contains('btn-secondary') ||
-    btn.classList.contains('btn-ghost') ||
-    btn.classList.contains('btn-danger');
+  btn.classList.contains('btn-primary') ||
+  btn.classList.contains('btn-secondary') ||
+  btn.classList.contains('btn-ghost') ||
+  btn.classList.contains('btn-danger') ||
+  btn.classList.contains('btn-success'); // respect green buttons
 
   const btns = Array.from(root.querySelectorAll('button.btn'));
   if (allGhost){

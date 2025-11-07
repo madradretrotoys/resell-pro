@@ -35,6 +35,7 @@ export async function init() {
   let __pendingFiles = [];        // Files awaiting upload (before item_id exists)
   let __currentItemId = null;     // sync with existing flow
   let __reorderMode = false;
+  let __lockDraft = false;        // Phase 0: once Active, we never allow reverting to Draft (UI lock)
   // Stash the tenant id once we learn it (from /api/inventory/meta or DOM)
   let __tenantId = "";
   
@@ -485,25 +486,42 @@ export async function init() {
       document.addEventListener("intake:item-saved", async (ev) => {
       try {
         const id         = ev?.detail?.item_id;
-        const saveStatus = String(ev?.detail?.save_status || "").toLowerCase(); // "active" | "draft"
+        const saveStatus = String(ev?.detail?.save_status || "").toLowerCase(); // "active" | "draft" | "delete"
+        const action     = String(ev?.detail?.action || (saveStatus === "delete" ? "delete" : "save")).toLowerCase();
         const jobIds     = Array.isArray(ev?.detail?.job_ids) ? ev.detail.job_ids : [];
         if (!id) return;
         __currentItemId = id;
-    
+
+        
+        // Phase 0: once Active, permanently lock Draft action for this listing (UI)
+        if (saveStatus === "active") {
+          __lockDraft = true;
+          const draftBtn = document.getElementById("intake-draft");
+          if (draftBtn) {
+            draftBtn.disabled = true;
+            draftBtn.classList.add("opacity-60", "cursor-not-allowed");
+            draftBtn.title = "Draft save is disabled for Active listings.";
+          }
+        }
+
+        
         if (__pendingFiles.length > 0) {
           const pending = __pendingFiles.splice(0, __pendingFiles.length);
           for (const f of pending) await uploadAndAttach(f);
         }
     
-        if (saveStatus === "active" && jobIds.length > 0) {
-          setEbayStatus("Publishing…", { tone: "info" });
+       // If server returned marketplace job_ids, kick the runner regardless of action
+      if (jobIds.length > 0) {
+        const isDelete = action === "delete" || saveStatus === "delete";
+        setEbayStatus(isDelete ? "Deleting…" : "Publishing…", { tone: "info" });
     
           for (const jid of jobIds) {
-            // fire-and-forget execute
-            fetch(`/api/marketplaces/publish/run?job_id=${encodeURIComponent(jid)}`, { method: "POST" })
-              .catch(() => {});
-          
-            // poll this job id until done (POST-based poller)
+            try {
+              console.log("[intake.js] kick job", { job_id: jid });
+              fetch(`/api/marketplaces/publish/run?job_id=${encodeURIComponent(jid)}`, { method: "POST" })
+                .then((r) => r.ok ? null : r.text().then(t => console.warn("[intake.js] job kick non-200", { job_id: jid, status: r.status, body: t })))
+                .catch((e) => console.warn("[intake.js] job kick error", { job_id: jid, error: String(e) }));
+            } catch {}
             trackPublishJob(jid);
           }
         }
@@ -808,17 +826,22 @@ function setMarketplaceVisibility() {
       btn.classList.toggle("cursor-not-allowed", !enable);
     });
   
-    // DRAFT CTA: enable if Title has any value OR at least one photo (pending or persisted)
+    // DRAFT CTA:
+    // - Normally enables if Title or at least 1 photo
+    // - If __lockDraft is true, force-disable and annotate
     const title = resolveControl(null, "Item Name / Description");
     const hasTitle = !!title && String(title.value || "").trim() !== "";
     const photoCount = (__photos?.length || 0) + (__pendingFiles?.length || 0);
     const hasAnyPhoto = photoCount >= 1;
-    const draftOk = hasTitle || hasAnyPhoto;
     const draftBtn = document.getElementById("intake-draft");
     if (draftBtn) {
+      const draftOk = !__lockDraft && (hasTitle || hasAnyPhoto);
       draftBtn.disabled = !draftOk;
       draftBtn.classList.toggle("opacity-60", !draftOk);
       draftBtn.classList.toggle("cursor-not-allowed", !draftOk);
+      draftBtn.title = __lockDraft
+        ? "Draft save is disabled for Active listings."
+        : "";
     }
   }
 
@@ -2063,9 +2086,22 @@ document.addEventListener("intake:item-changed", () => refreshInventory({ force:
         body: JSON.stringify(payload),
         headers: { "content-type": "application/json" },
       });
+      // Log non-OK responses with full context before throwing
       if (!res || res.ok === false) {
-          throw new Error(res?.error || "intake_failed");
+        try {
+          console.groupCollapsed("[intake.js] POST /api/inventory/intake failed");
+          console.log("payload.sent", payload);                               // what we sent
+          console.log("response.raw", res);                                   // what server returned
+          console.log("surface_error", res?.error || "intake_failed");
+          // If the server started returning more detail (e.g., constraint), show it
+          if (res?.message) console.log("message", res.message);
+          if (res?.constraint) console.log("constraint", res.constraint);
+          if (res?.code) console.log("pg.code", res.code);
+        } finally {
+          console.groupEnd?.();
         }
+        throw new Error(res?.error || "intake_failed");
+      }
         
         // Save defaults (local) on success so user gets the same picks next time
         try {
@@ -2342,6 +2378,20 @@ document.addEventListener("intake:item-changed", () => refreshInventory({ force:
                 body: JSON.stringify({ action: "delete", item_id: __currentItemId }),
               });
               if (!resDel || resDel.ok === false) throw new Error(resDel?.error || "delete_failed");
+
+              // NEW: mirror the Active/Edit path — tell the runner to start with any job_ids
+              try {
+                const jobIds = Array.isArray(resDel?.job_ids) ? resDel.job_ids : [];
+                document.dispatchEvent(new CustomEvent("intake:item-saved", {
+                  detail: {
+                    action: "delete",
+                    save_status: "delete",
+                    item_id: __currentItemId,
+                    job_ids: jobIds,
+                  }
+                }));
+              } catch {}
+              
               alert("Item deleted.");
               // Also refresh Drafts immediately (useful when the page is not fully reloaded yet)
               document.dispatchEvent(new CustomEvent("intake:item-changed"));

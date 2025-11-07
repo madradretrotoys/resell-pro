@@ -184,7 +184,7 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
       return upsertFooter(body, sku, instore_loc, case_bin_shelf);
     }
 
-    // === Helper: enqueue marketplace publish jobs (idempotent; same logic as Create Active) ===
+        // === Helper: enqueue marketplace publish jobs (create vs update + no-change short-circuit) ===
     async function enqueuePublishJobs(
       tenant_id: string,
       item_id: string,
@@ -204,8 +204,6 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
             : (typeof v === "string" && /^\d+$/.test(v) ? Number(v) : null))
           .filter((n: number | null): n is number => n !== null);
 
-        console.log("[intake] enqueue.parsed", { slugs, ids });
-
         if (slugs.length === 0 && ids.length === 0) {
           console.log("[intake] enqueue.skip_no_selection");
           return;
@@ -224,37 +222,129 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
         `;
         console.log("[intake] enqueue.match_enabled", { count: rows.length, rows });
 
+        // Load canonical fields we map to marketplaces (schema-backed)
+        const inv = await sql/*sql*/`
+          SELECT product_short_title
+          FROM app.inventory
+          WHERE item_id = ${item_id}
+          LIMIT 1
+        `;
+        const lst = await sql/*sql*/`
+          SELECT
+            listing_category_key, condition_key, brand_key, color_key, shipping_box_key,
+            listing_category, item_condition, brand_name, primary_color, shipping_box,
+            product_description, weight_lb, weight_oz, shipbx_length, shipbx_width, shipbx_height
+          FROM app.item_listing_profile
+          WHERE item_id = ${item_id} AND tenant_id = ${tenant_id}
+          LIMIT 1
+        `;
+        // For each marketplace, we may also include its listing row (eBay has the richest set today)
+        const imlRows = await sql/*sql*/`
+          SELECT marketplace_id, status, mp_offer_id,
+                 shipping_policy, payment_policy, return_policy, shipping_zip, pricing_format,
+                 buy_it_now_price, allow_best_offer, auto_accept_amount, minimum_offer_amount,
+                 promote, promote_percent, duration, starting_bid, reserve_price
+          FROM app.item_marketplace_listing
+          WHERE item_id = ${item_id} AND tenant_id = ${tenant_id}
+        `;
+
+        // Stable JSON stringify (keys sorted) for hashing
+        const stableStringify = (obj: any) => {
+          const seen = new WeakSet();
+          const sorter = (v: any) => {
+            if (v && typeof v === "object" && !Array.isArray(v)) {
+              if (seen.has(v)) return v;
+              seen.add(v);
+              return Object.keys(v).sort().reduce((acc, k) => { acc[k] = sorter(v[k]); return acc; }, {} as any);
+            }
+            if (Array.isArray(v)) return v.map(sorter);
+            return v;
+          };
+          return JSON.stringify(sorter(obj));
+        };
+        const sha256Hex = async (s: string) => {
+          const data = new TextEncoder().encode(s);
+          const hash = await crypto.subtle.digest("SHA-256", data);
+          return Array.from(new Uint8Array(hash)).map(b => b.toString(16).padStart(2,"0")).join("");
+        };
+
         for (const r of rows) {
-          console.log("[intake] enqueue.insert_job", { marketplace_id: r.id, slug: r.slug, item_id });
+          // Pull the marketplace row (if present) to know current identifiers/status
+          const iml = Array.isArray(imlRows) ? imlRows.find((x:any) => x.marketplace_id === r.id) : null;
+
+          // Build canonical snapshot for this marketplace
+          const snapshot = {
+            item_id,
+            tenant_id,
+            marketplace_id: r.id,
+            product_short_title: inv?.[0]?.product_short_title ?? null,
+            listing_profile: lst?.[0] ?? null,
+            marketplace_listing: iml ?? null
+          };
+          const snapshotStr = stableStringify(snapshot);
+          const hash = await sha256Hex(snapshotStr);
+          const payload_snapshot = { ...snapshot, _hash: hash };
+
+          // Determine desired op
+          // Option A: treat 'live' the same as 'active' so edits enqueue 'update' after first publish
+          const statusNorm = String(iml?.status || "").toLowerCase();
+          const isLiveLike = statusNorm === "active" || statusNorm === "live";
+          const hasActiveOffer = !!(iml?.mp_offer_id) && isLiveLike;
+          const op = hasActiveOffer ? "update" : "create";
+
+          // Compare vs most recent snapshot (any op) to short-circuit no-ops
+          const last = await sql/*sql*/`
+            SELECT payload_snapshot
+            FROM app.marketplace_publish_jobs
+            WHERE tenant_id = ${tenant_id}
+              AND item_id = ${item_id}
+              AND marketplace_id = ${r.id}
+              AND status IN ('queued','running','done')
+            ORDER BY created_at DESC
+            LIMIT 1
+          `;
+          const lastHash = String(last?.[0]?.payload_snapshot?._hash || "");
+          if (lastHash && lastHash === hash) {
+            // Log an event and skip
+            await sql/*sql*/`
+              INSERT INTO app.item_marketplace_events
+                (item_id, tenant_id, marketplace_id, kind)
+              VALUES (${item_id}, ${tenant_id}, ${r.id}, 'skipped_no_change')
+            `;
+            console.log("[intake] enqueue.skip_no_change", { item_id, marketplace_id: r.id });
+            continue;
+          }
+
+          console.log("[intake] enqueue.insert_job", { marketplace_id: r.id, slug: r.slug, item_id, op });
           await sql/*sql*/`
             INSERT INTO app.marketplace_publish_jobs
-              (tenant_id, item_id, marketplace_id, op, status)
-            SELECT ${tenant_id}, ${item_id}, ${r.id}, 'create', 'queued'
+              (tenant_id, item_id, marketplace_id, op, status, payload_snapshot)
+            SELECT ${tenant_id}, ${item_id}, ${r.id}, ${op}, 'queued', ${payload_snapshot}
             WHERE NOT EXISTS (
               SELECT 1 FROM app.marketplace_publish_jobs j
               WHERE j.tenant_id = ${tenant_id}
                 AND j.item_id = ${item_id}
                 AND j.marketplace_id = ${r.id}
-                AND j.op = 'create'
+                AND j.op = ${op}
                 AND j.status IN ('queued','running')
             )
           `;
 
-          console.log("[intake] enqueue.flip_iml_pending", { marketplace_id: r.id, item_id });
+          // Touch listing row (useful for dashboards; do not flip status here)
+          // NOTE: status normalization happens in enqueue decision (active|live => update)
           await sql/*sql*/`
             UPDATE app.item_marketplace_listing
                SET updated_at = now()
              WHERE tenant_id = ${tenant_id}
                AND item_id = ${item_id}
                AND marketplace_id = ${r.id}
-               AND status IN ('draft')
           `;
         }
 
         console.log("[intake] enqueue.done", { item_id });
       } catch (enqueueErr) {
         console.error("[intake] enqueue.error", { item_id, error: String(enqueueErr) });
-        // Best-effort event log (reuse EBAY_MARKETPLACE_ID for now; same as original)
+        // Best-effort event log
         await sql/*sql*/`
           INSERT INTO app.item_marketplace_events
             (item_id, tenant_id, marketplace_id, kind, error_message)
@@ -305,42 +395,92 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
     // If the client requested a delete, do it now (and exit)
     if (body?.action === "delete") {
       if (!item_id_in) return json({ ok: false, error: "missing_item_id" }, 400);
+    
+        // A) Queue marketplace delete jobs FIRST (one per marketplace with a remote id)
+        const iml = await sql/*sql*/`
+          SELECT marketplace_id, mp_offer_id, mp_item_id
+            FROM app.item_marketplace_listing
+           WHERE item_id    = ${item_id_in}
+             AND tenant_id  = ${tenant_id}
+             AND (mp_offer_id IS NOT NULL OR mp_item_id IS NOT NULL)
+        `;
+        const job_ids: string[] = [];
+        for (const r of iml as any[]) {
+          // Try to insert a 'delete' job only if no in-flight job exists
+          const inserted = await sql/*sql*/`
+            WITH ins AS (
+              INSERT INTO app.marketplace_publish_jobs
+                (tenant_id, item_id, marketplace_id, op, status, payload_snapshot)
+              SELECT
+                ${tenant_id}, ${item_id_in}, ${r.marketplace_id}, 'delete', 'queued',
+                ${{
+                  item_id: item_id_in,
+                  tenant_id,
+                  marketplace_id: r.marketplace_id,
+                  marketplace_listing: { mp_offer_id: r.mp_offer_id, mp_item_id: r.mp_item_id }
+                }}
+              WHERE NOT EXISTS (
+                SELECT 1
+                  FROM app.marketplace_publish_jobs j
+                 WHERE j.tenant_id      = ${tenant_id}
+                   AND j.item_id        = ${item_id_in}
+                   AND j.marketplace_id = ${r.marketplace_id}
+                   AND j.op             = 'delete'
+                   AND j.status IN ('queued','running')
+              )
+              RETURNING job_id
+            )
+            SELECT job_id FROM ins
+            UNION ALL
+            -- If nothing inserted (duplicate in-flight), return the existing in-flight job_id
+            SELECT j.job_id
+              FROM app.marketplace_publish_jobs j
+             WHERE j.tenant_id      = ${tenant_id}
+               AND j.item_id        = ${item_id_in}
+               AND j.marketplace_id = ${r.marketplace_id}
+               AND j.op             = 'delete'
+               AND j.status IN ('queued','running')
+             LIMIT 1
+          `;
+          const got = Array.isArray(inserted) && inserted[0]?.job_id ? String(inserted[0].job_id) : null;
+          if (got) job_ids.push(got);
+  
+          // Reflect pending state on the listing row (status now exists in enum)
+          await sql/*sql*/`
+            UPDATE app.item_marketplace_listing
+               SET status='delete_pending', updated_at=now()
+             WHERE item_id=${item_id_in} AND tenant_id=${tenant_id} AND marketplace_id=${r.marketplace_id}
+          `;
+        }
 
-      // 1) Gather all images for this item (need r2_key for deletion)
+    
+      // B) Best-effort delete R2 images and rows (existing logic)
       const imgRows = await sql<{ image_id: string; r2_key: string | null }[]>`
         SELECT image_id, r2_key
-        FROM app.item_images
-        WHERE item_id = ${item_id_in}
+          FROM app.item_images
+         WHERE item_id = ${item_id_in}
       `;
-    
-      // 2) Best-effort delete each object from R2
       for (const r of imgRows) {
         if (!r?.r2_key) continue;
-        try {
-          // R2 binding name matches your upload handler (R2_IMAGES)
-          // @ts-ignore
-          await env.R2_IMAGES.delete(r.r2_key);
-        } catch (e) {
-          // log but don't fail whole operation
-          console.warn("r2.delete failed", r.r2_key, e);
-        }
+        try { /* @ts-ignore */ await env.R2_IMAGES.delete(r.r2_key); } catch (e) { console.warn("r2.delete failed", r.r2_key, e); }
       }
+      await sql/*sql*/`DELETE FROM app.item_images WHERE item_id = ${item_id_in}`;
     
-      // 3) Remove image rows for this item
+      // C) Explicitly remove the item's listing profile (don’t rely on cascade)
       await sql/*sql*/`
-        DELETE FROM app.item_images
-        WHERE item_id = ${item_id_in}
+        DELETE FROM app.item_listing_profile
+         WHERE item_id = ${item_id_in} AND tenant_id = ${tenant_id}
       `;
-      
-      // inventory → item_listing_profile cascades ON DELETE
+    
+      // D) Remove inventory row last
       await sql/*sql*/`
-        WITH s AS (
-          SELECT set_config('app.actor_user_id', ${actor_user_id}, true)
-        )
+        WITH s AS (SELECT set_config('app.actor_user_id', ${actor_user_id}, true))
         DELETE FROM app.inventory
-        WHERE item_id = ${item_id_in};
+         WHERE item_id = ${item_id_in}
       `;
-      return json({ ok: true, deleted: true, item_id: item_id_in }, 200);
+    
+      // E) Return job_ids so the client can trigger/poll the runner
+      return json({ ok: true, deleted: true, item_id: item_id_in, job_ids }, 200);
     }
     
        // If item_id was provided, UPDATE existing rows instead of INSERT
@@ -355,6 +495,11 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
         `;
         if (existing.length === 0) {
           return json({ ok: false, error: "not_found" }, 404);
+        }
+
+        // Phase 0: disallow Active → Draft (server-side guard to match UI)
+        if (isDraft && String(existing[0].item_status || "").toLowerCase() === "active") {
+          return json({ ok: false, error: "cannot_downgrade_active_to_draft" }, 400);
         }
 
         // === DRAFT UPDATE: update any inventory fields; also upsert listing if sent ===
@@ -625,7 +770,7 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
                        ${e.promote}, ${e.promote_percent}, ${e.duration}, ${e.starting_bid}, ${e.reserve_price})
                     ON CONFLICT (item_id, marketplace_id)
                     DO UPDATE SET
-                      status = 'draft',
+                      status = 'live',
                       shipping_policy = EXCLUDED.shipping_policy,
                       payment_policy  = EXCLUDED.payment_policy,
                       return_policy   = EXCLUDED.return_policy,
@@ -1019,9 +1164,29 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
       ms: Date.now() - t0
     }, 200);
 
-  } catch (e: any) {
-    // Try a friendlier error
-    const msg = String(e?.message || e);
+  } catch (err: any) {
+    // —— High-signal server-side logging to surface the true root cause ——
+    // Neon/Postgres errors often include:
+    //   code, detail, hint, schema, table, column, constraint, routine, severity, position
+    try {
+      console.error("[intake] fatal", {
+        took_ms: Date.now() - t0,
+        message: String(err?.message || err),
+        name: err?.name || null,
+        code: err?.code || null,
+        detail: err?.detail || null,
+        hint: err?.hint || null,
+        schema: err?.schema || null,
+        table: err?.table || null,
+        column: err?.column || null,
+        constraint: err?.constraint || null,
+        severity: err?.severity || null,
+        routine: err?.routine || null,
+      });
+    } catch {}
+
+    // Preserve current API contract
+    const msg = String(err?.message || err);
     if (/unique|duplicate/i.test(msg)) return json({ ok: false, error: "duplicate_sku" }, 409);
     return json({ ok: false, error: "server_error", message: msg }, 500);
   }
