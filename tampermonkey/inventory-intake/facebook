@@ -5,8 +5,6 @@
 // @description  Injects "Add to Facebook" on Intake, waits for safe gates, then opens Facebook and autofills at a human pace.
 // @author       Melissa + AI
 //
-// ***** MATCH YOUR DOMAINS *****
-// Edit the next two @match lines to your actual app host if needed.
 // @match        https://*/main/*
 // @match        https://www.facebook.com/marketplace/create/item*
 //
