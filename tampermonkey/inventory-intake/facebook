@@ -7,7 +7,7 @@
 //
 // ***** MATCH YOUR DOMAINS *****
 // Edit the next two @match lines to your actual app host if needed.
-// @match        https://*/feature/auth-ui/*
+// @match        https://*/match/*
 // @match        https://www.facebook.com/marketplace/create/item*
 //
 // @grant        GM_setValue
