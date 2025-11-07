@@ -47,26 +47,7 @@
   const onFacebook = /facebook\.com\/marketplace\/create\/item/i.test(location.href);
 
   // --------------------------------------------------------------------
-  // Branch A: Intake page — inject button and wait for "facebook-ready"
-  // --------------------------------------------------------------------
-  if (!onFacebook) {
-    function insertButton() {
-      // Find the first Copy button and insert to the left
-      const copyRow = document.getElementById("copyTitleBtn")
-        || document.querySelector("#copyTitleBtn, #copySkuBtn, #copyPriceBtn, [id^='copy']");
-      if (!copyRow || !copyRow.parentElement) return null;
-
-      const btn = document.createElement("button");
-      btn.type = "button";
-      btn.id = "rpAddToFacebook";
-      btn.className = "btn btn-primary btn-sm opacity-60 cursor-not-allowed";
-      btn.disabled = true;
-      btn.title = "Finishing publish…";
-      btn.textContent = "Add to Facebook";
-
-      copyRow.parentElement.insertBefore(btn, copyRow);
-      return btn;
-    }
+  
 
     const fbBtn = insertButton();
 
