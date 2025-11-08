@@ -38,7 +38,7 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
     const FACEBOOK_ID = mprow[0]?.id ?? null;
     console.log("[fb.callback] resolved_marketplace_id", { FACEBOOK_ID });
     if (!FACEBOOK_ID) return json({ ok:false, error:"facebook_marketplace_missing" }, 500);
-    
+
     // Upsert the listing row and set status
     if (statusIn === "live") {
       const res = await sql/*sql*/`
