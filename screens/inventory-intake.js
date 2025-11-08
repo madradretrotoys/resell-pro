@@ -1482,7 +1482,7 @@ function setMarketplaceVisibility() {
       
       
         /* === Facebook handoff helpers (NEW) === */
-      
+
         // Build the payload the Tampermonkey script will send to Facebook.
         window.rpBuildFacebookPayload = function rpBuildFacebookPayload() {
           // 1) title / price / qty
@@ -1522,22 +1522,26 @@ function setMarketplaceVisibility() {
               if (pa !== pb) return pa - pb;
               return (a.sort_order ?? 0) - (b.sort_order ?? 0);
             })
-            .map(x => String(x.cdn_url || ""))     // cdn_url persisted by server
+            .map(x => String(x.cdn_url || ""))
             .filter(Boolean);
-          
+        
           const payload = {
             title, price, qty, availability, category, condition, description,
             images: ordered,
             item_id: __currentItemId || null,
             created_at: Date.now()
           };
-          
+        
           // ✅ FULL payload log for debugging
-            try { console.log("[intake.js] facebook payload", JSON.parse(JSON.stringify(payload))); } catch { console.log("[intake.js] facebook payload", payload); }
-          
-            return payload;
-          };
-        };
+          try {
+            console.log("[intake.js] facebook payload", JSON.parse(JSON.stringify(payload)));
+          } catch {
+            console.log("[intake.js] facebook payload", payload);
+          }
+        
+          return payload;
+        }; // <-- end rpBuildFacebookPayload (removed the extra closing brace)
+
         
         // Only fire when: Active save, photos flushed, all publish jobs are settled,
         // AND the Facebook tile is selected, AND the Facebook listing is not already live.
