@@ -273,7 +273,6 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
         };
 
         for (const r of rows) {
-
           const slug = String(r.slug || "").toLowerCase();
 
           // Facebook: ensure stub + publish_started, then continue (no adapter run)
@@ -598,18 +597,23 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
           }
 
 
-          // Upsert eBay marketplace listing when present (draft update)
           {
             const mpSelDraft: number[] = Array.isArray(body?.marketplaces_selected)
               ? body.marketplaces_selected.map((n: any) => Number(n)).filter((n) => !Number.isNaN(n))
               : [];
-          if (EBAY_MARKETPLACE_ID && ebay && mpSelDraft.includes(EBAY_MARKETPLACE_ID)) {
-            const e = normalizeEbay(ebay);
-            if (e) {
-              await sql/*sql*/`
-                INSERT INTO app.item_marketplace_listing
-                  (item_id, tenant_id, marketplace_id, status,
-                   shipping_policy, payment_policy, return_policy, shipping_zip, pricing_format,
+
+            if (EBAY_MARKETPLACE_ID && ebay && mpSelDraft.includes(EBAY_MARKETPLACE_ID)) {
+              const e = normalizeEbay(ebay);
+              if (e) {
+                await sql/*sql*/`
+                  INSERT INTO app.item_marketplace_listing
+                    (item_id, tenant_id, marketplace_id, status,
+                     shipping_policy, payment_policy, return_policy, shipping_zip, pricing_format,
+                     buy_it_now_price, allow_best_offer, auto_accept_amount, minimum_offer_amount,
+                     promote, promote_percent, duration, starting_bid, reserve_price)
+                  VALUES
+                    (${item_id}, ${tenant_id}, ${EBAY_MARKETPLACE_ID}, 'draft',
+                     ${e.shipping_policy}, ${e.payment_policy}, ${e.return_policy}, ${e.shipping_zip}, ${e.pricing_format},
                    buy_it_now_price, allow_best_offer, auto_accept_amount, minimum_offer_amount,
                    promote, promote_percent, duration, starting_bid, reserve_price)
                 VALUES
@@ -786,10 +790,10 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
                 : [];
 
               // Normalize the ebay payload once
-              const e = ebay ? normalizeEbay(ebay) : null;           
-              
+              const e = ebay ? normalizeEbay(ebay) : null;
+
               for (const mpId of mpIds) {
-                 // Facebook: ensure a stub row exists when selected (pre-publish)
+                // Facebook: ensure a stub row exists when selected (pre-publish)
                 if (typeof FACEBOOK_MARKETPLACE_ID === "number" && mpId === FACEBOOK_MARKETPLACE_ID) {
                   await sql/*sql*/`
                     INSERT INTO app.item_marketplace_listing
@@ -805,6 +809,7 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
                   `;
                   continue;
                 }
+
                 // Only write the rich field set for eBay
                 if (mpId === EBAY_MARKETPLACE_ID && e) {
                   await sql/*sql*/`
