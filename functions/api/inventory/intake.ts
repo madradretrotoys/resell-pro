@@ -285,7 +285,7 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
             // Emit a progress event so UI can reflect "in progress"
             await sql/*sql*/`
               INSERT INTO app.item_marketplace_events
-                (item_id, tenant_id, marketplace_id, event_type, meta)
+                (item_id, tenant_id, marketplace_id, kind, payload)
               VALUES
                 (${item_id}, ${tenant_id}, ${r.id}, 'publish_started', jsonb_build_object('source','enqueue'))
             `;
