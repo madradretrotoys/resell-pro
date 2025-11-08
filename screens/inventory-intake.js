@@ -1334,6 +1334,65 @@ function setMarketplaceVisibility() {
 
   // === END NEW ===
 
+  // ===== Marketplace Status UI helpers (Facebook) =====
+  function getFacebookStatusNodes() {
+    const card = Array.from(document.querySelectorAll('#marketplaceCards .card'))
+      .find(c => /facebook/i.test((c.querySelector('.font-semibold')?.textContent || '')));
+    if (!card) return { textEl: null, wrap: null };
+    const wrap = card.querySelector('[data-card-status]') || card;
+    const textEl = card.querySelector('[data-status-text]') || wrap.querySelector('.mono') || wrap;
+    return { textEl, wrap };
+  }
+
+  function setFacebookStatus(label, { link = null, tone = 'muted' } = {}) {
+    const { textEl, wrap } = getFacebookStatusNodes();
+    if (!textEl) return;
+    const classes = ['text-gray-600','text-blue-700','text-green-700','text-red-700'];
+    wrap.classList.remove(...classes);
+    if (tone === 'info')  wrap.classList.add('text-blue-700');
+    if (tone === 'ok')    wrap.classList.add('text-green-700');
+    if (tone === 'error') wrap.classList.add('text-red-700');
+    if (link) {
+      textEl.innerHTML = '';
+      const a = document.createElement('a');
+      a.href = link; a.target = '_blank'; a.rel = 'noopener';
+      a.textContent = label;
+      textEl.appendChild(a);
+    } else {
+      textEl.textContent = label;
+    }
+  }
+
+  async function refreshFacebookTile() {
+    try {
+      if (!__currentItemId) return;
+      const snap = await api(`/api/inventory/intake?item_id=${encodeURIComponent(__currentItemId)}`, { method: "GET" });
+      const row = snap?.marketplace_listing?.facebook || null;
+      const st = String(row?.status || "").toLowerCase();
+      if (!st || st === "draft" || st === "not_listed") {
+        setFacebookStatus("Not Listed", { tone: "muted" });
+        return;
+      }
+      if (st === "publishing" || st === "pending_external") {
+        setFacebookStatus("Publishing…", { tone: "info" });
+        return;
+      }
+      if (st === "live") {
+        const url = row?.mp_item_url || null;
+        setFacebookStatus("Listed", { tone: "ok", link: url || null });
+        return;
+      }
+      if (st === "error" || st === "create_failed") {
+        const msg = (row?.last_error ? String(row.last_error).slice(0, 120) : "");
+        setFacebookStatus(msg ? `Error — ${msg}` : "Error", { tone: "error" });
+        return;
+      }
+      setFacebookStatus("Unknown", { tone: "muted" });
+    } catch (e) {
+      console.warn("[intake.js] refreshFacebookTile failed", e);
+    }
+  }
+  
   // ===== Marketplace Status UI helpers (eBay) =====
   function getEbayStatusNodes() {
     // Find the eBay card and its status span
@@ -1622,9 +1681,10 @@ function setMarketplaceVisibility() {
               ev?.detail?.payload ||
               (typeof window.rpBuildFacebookPayload === "function" ? window.rpBuildFacebookPayload() : null);
             if (!payload) return;
-        
-            console.groupCollapsed("[intake.js] facebook:intake → begin");
-            console.log("[intake.js] payload echo", payload);   // keep an echo here too
+          
+              console.groupCollapsed("[intake.js] facebook:intake → begin");
+              setFacebookStatus("Publishing…", { tone: "info" });
+              console.log("[intake.js] payload echo", payload);   // keep an echo here too
 
           // 1) Same-origin handoff for Tampermonkey cache
           try {
