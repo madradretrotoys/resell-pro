@@ -186,69 +186,100 @@
     const priceBox =
       $('input[aria-label="Price"]') ||
       $('input[placeholder*="Price"]') ||
-      $('input[type="number"]');
+      $('input[type="text"][inputmode="numeric"], input[type="number"]');
 
     const descBox =
       $('textarea[aria-label="Description"]') ||
+      $('div[role="textbox"][contenteditable="true"][aria-label="Description"]') ||
       $('div[role="textbox"][contenteditable="true"]') ||
       $('textarea');
 
-    if (titleBox) await typeSlow(titleBox, payload.title || "");
+    // Title
+    await typeReliable(titleBox, payload.title || "");
+
+    // Price
     if (priceBox) {
       const priceNum = Number.isFinite(Number(payload.price)) ? Number(payload.price) : 0;
-      await typeSlow(priceBox, priceNum.toFixed(2));
+      await typeReliable(priceBox, priceNum.toFixed(2));
     }
 
+    // Description (textarea or contenteditable)
     if (descBox) {
-      if (descBox.tagName === "TEXTAREA") {
-        await typeSlow(descBox, payload.description || "");
-      } else {
+      if (descBox.getAttribute && descBox.getAttribute("contenteditable") === "true") {
         descBox.focus();
         document.execCommand("selectAll", false, null);
         document.execCommand("insertText", false, payload.description || "");
         descBox.blur();
         await humanPause();
+      } else {
+        await typeReliable(descBox, payload.description || "");
+      }
+    }
+
+    // Re-assert values once more in case React re-renders after we type
+    if (titleBox && !titleBox.value) await typeReliable(titleBox, payload.title || "");
+    if (descBox) {
+      const currentDesc = (descBox.value ?? descBox.textContent ?? "").trim();
+      if (!currentDesc) {
+        if (descBox.getAttribute && descBox.getAttribute("contenteditable") === "true") {
+          descBox.focus();
+          document.execCommand("insertText", false, payload.description || "");
+          descBox.blur();
+        } else {
+          await typeReliable(descBox, payload.description || "");
+        }
       }
     }
 
     // ------- 3) category / condition / availability -------
-    try {
-      const catTrigger = $$('div[role="button"]').find(b => /category/i.test(b.textContent || "")) || null;
-      if (catTrigger) {
-        catTrigger.click();
+    async function pickFromMenu(triggerMatch, searchText, optionMatch) {
+      const trigger = Array.from(document.querySelectorAll('div[role="button"]'))
+        .find(b => triggerMatch.test((b.textContent || "")));
+      if (!trigger) return false;
+
+      trigger.click();
+      await humanPause();
+
+      // Some variants show a search box; use it if present
+      const search = await waitFor('input[type="search"], input[aria-label*="Search"]', { timeout: 2000 });
+      if (search && searchText) {
+        await typeReliable(search, searchText);
+        await delay(800);
+      }
+
+      // Choose the option
+      const opt = Array.from(document.querySelectorAll('div[role="option"], [role="menuitem"]'))
+        .find(o => optionMatch.test((o.textContent || "")));
+      if (opt) {
+        opt.click();
         await humanPause();
-        const search = $('input[type="search"], input[aria-label*="Search"]');
-        if (search) {
-          await typeSlow(search, payload.category || "Action Figures");
-          await delay(800);
-          const opt = $$('div[role="option"], [role="menuitem"]').find(o => /action figures/i.test(o.textContent || ""));
-          if (opt) opt.click();
-        }
+        return true;
+      }
+      return false;
+    }
+
+    // Category
+    await pickFromMenu(/category/i, payload.category || "Action Figures", /action figures/i);
+
+    // Condition
+    await pickFromMenu(/condition/i, null, /used/i);
+
+    // Availability
+    {
+      const wantStock = /in stock/i.test(payload.availability || "");
+      await pickFromMenu(/availability/i, null, wantStock ? /in stock/i : /single item/i);
+    }
+
+    // Turn OFF Boost if it appears toggled on
+    try {
+      const boost = Array.from(document.querySelectorAll('[role="switch"], [aria-checked]'))
+        .find(s => /boost/i.test(s.textContent || ""));
+      if (boost && (boost.getAttribute("aria-checked") === "true")) {
+        boost.click();
+        console.log("[tm] boost toggle turned off");
       }
     } catch {}
 
-    try {
-      const condTrigger = $$('div[role="button"]').find(b => /condition/i.test(b.textContent || "")) || null;
-      if (condTrigger) {
-        condTrigger.click();
-        await humanPause();
-        const opt = $$('div[role="option"], [role="menuitem"]').find(o => /used/i.test(o.textContent || ""));
-        opt?.click();
-      }
-    } catch {}
-
-    try {
-      const availTrigger = $$('div[role="button"]').find(b => /availability/i.test(b.textContent || "")) || null;
-      if (availTrigger) {
-        availTrigger.click();
-        await humanPause();
-        const wantStock = /in stock/i.test(payload.availability || "");
-        const opt = $$('div[role="option"], [role="menuitem"]').find(o =>
-          wantStock ? /in stock/i.test(o.textContent || "") : /single item/i.test(o.textContent || "")
-        );
-        opt?.click();
-      }
-    } catch {}
 
     // ---------- 4) click Publish and report back ----------
     async function clickPublish() {
