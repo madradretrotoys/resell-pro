@@ -1425,145 +1425,169 @@ function setMarketplaceVisibility() {
         }
   
        
-  function computeValidity() {
-    // BASIC — always required (explicit control list)
-    const basicControls = getBasicRequiredControls();
-    const basicOk = markBatchValidity(basicControls, hasValue);
-
-    // PHOTOS — must have at least one (persisted or pending)
-    const photoCount = (__photos?.length || 0) + (__pendingFiles?.length || 0);
-    const photosOk = photoCount >= 1;
-    // Light accessibility cue on the Photos card/header when missing
-    (function markPhotos(ok) {
-      const host = document.getElementById("photosCard")
-               || document.getElementById("photosGrid")
-               || document.getElementById("photosCount");
-      if (host) host.setAttribute("aria-invalid", ok ? "false" : "true");
-    })(photosOk);
-
-    
-    // MARKETPLACE — required only when active
-    let marketOk = true;
-    if (marketplaceActive()) {
-      const marketControls = getMarketplaceRequiredControls();
-      marketOk = markBatchValidity(marketControls, hasValue);
-
-      // Require ≥1 selected marketplace tile when marketplace flow is active
-      if (marketOk) {
-        const hasAny = selectedMarketplaceIds.size >= 1;
-        marketOk = marketOk && hasAny;
-        showMarketplaceTilesError(!hasAny);
-      } else {
-        showMarketplaceTilesError(false);
-      }
-    } else {
-      // clear invalid state for marketplace when not required
-      getMarketplaceRequiredControls().forEach(n => n.setAttribute("aria-invalid", "false"));
-      showMarketplaceTilesError(false);
-    }
-
-    // ⬅️ photos are part of the gate
-    const allOk = basicOk && photosOk && marketOk;
-    setCtasEnabled(allOk);
-    document.dispatchEvent(new CustomEvent("intake:validity-changed", { detail: { valid: allOk } }));
-    return allOk;
-  }
-
-
-  /* === Facebook handoff helpers (NEW) === */
-
-  // Build the payload the Tampermonkey script will send to Facebook.
-  window.rpBuildFacebookPayload = function rpBuildFacebookPayload() {
-    // 1) title / price / qty
-    const titleEl = document.getElementById("titleInput") || findControlByLabel("Item Name / Description");
-    const priceEl = document.getElementById("priceInput") || findControlByLabel("Price (USD)");
-    const qtyEl   = document.getElementById("qtyInput")   || findControlByLabel("Qty");
-  
-    const title = String(titleEl?.value || "").trim();
-    const price = Number(priceEl?.value || 0) || 0;
-    const qty   = Math.max(0, parseInt(qtyEl?.value || "0", 10) || 0);
-  
-    // 2) long description (listing profile field on the screen)
-    const descEl = document.getElementById("longDescriptionTextarea") || findControlByLabel("Long Description");
-    let description = String(descEl?.value || "").trim();
-  
-    // 3) append store footer lines (Facebook-specific)
-    const footer =
-      "Mad Rad Retro Toys\n" +
-      "5026 Kipling Street\n" +
-      "Wheat Ridge, CO 80033\n" +
-      "MON-SAT 10-5\n" +
-      "SUN 11-5\n" +
-      "303-960-2117";
-    description = description ? `${description}\n\n${footer}` : footer;
-  
-    // 4) hard-coded for v1
-    const category  = "Action Figures";
-    const condition = "Used - Good";
-    const availability = qty > 1 ? "List as in Stock" : "List as Single Item";
-  
-    // 5) images from state (__photos), ordered: primary first, then sort_order
-    const ordered = (__photos || [])
-      .slice()
-      .sort((a, b) => {
-        const pa = a.is_primary ? -1 : 0;
-        const pb = b.is_primary ? -1 : 0;
-        if (pa !== pb) return pa - pb;
-        return (a.sort_order ?? 0) - (b.sort_order ?? 0);
-      })
-      .map(x => String(x.cdn_url || ""))     // cdn_url persisted by server
-      .filter(Boolean);
-  
-    return {
-      title, price, qty, availability, category, condition, description,
-      images: ordered,
-      // include an id for traceability + basic sanity info for the userscript
-      item_id: __currentItemId || null,
-      created_at: Date.now()
-    };
-  };
-  
-  // Only fire when: Active save, photos flushed, all publish jobs are settled,
-  // AND the Facebook tile is selected, AND the Facebook listing is not already live.
-  async function __emitFacebookReadyIfSafe({ saveStatus, jobIds }) {
-    if (String(saveStatus || "").toLowerCase() !== "active") return;
-  
-    // photos flushed?
-    if (__pendingFiles && __pendingFiles.length > 0) return;
-  
-    // runner quiet?
-    if (Array.isArray(jobIds) && jobIds.length > 0) {
-      const anyRunning = document.querySelector('[data-status-text]')?.textContent?.match(/Publishing|Deleting/i);
-      if (anyRunning) return;
-    }
-  
-    // is Facebook selected?
-    const isFacebookSelected = (() => {
-      // use the cached meta to map selected ids → slug
-      const rows = (__metaCache?.marketplaces || []);
-      const byId = new Map(rows.map(r => [Number(r.id), String(r.slug || "").toLowerCase()]));
-      for (const id of selectedMarketplaceIds) {
-        if (byId.get(Number(id)) === "facebook") return true;
-      }
-      return false;
-    })();
-    if (!isFacebookSelected) return;
-  
-    // not already live?
-    if (__currentItemId) {
-      try {
-        const snap = await api(`/api/inventory/intake?item_id=${encodeURIComponent(__currentItemId)}`, { method: "GET" });
-        const live = String(snap?.marketplace_listing?.facebook?.status || "").toLowerCase() === "live";
-        if (live) return; // nothing to do
-      } catch {}
-    }
-  
-    const payload = window.rpBuildFacebookPayload();
-    document.dispatchEvent(new CustomEvent("intake:facebook-ready", {
-      detail: { item_id: __currentItemId || null, payload }
-    }));
-  }
-
+        function computeValidity() {
+          // BASIC — always required (explicit control list)
+          const basicControls = getBasicRequiredControls();
+          const basicOk = markBatchValidity(basicControls, hasValue);
+      
+          // PHOTOS — must have at least one (persisted or pending)
+          const photoCount = (__photos?.length || 0) + (__pendingFiles?.length || 0);
+          const photosOk = photoCount >= 1;
+          // Light accessibility cue on the Photos card/header when missing
+          (function markPhotos(ok) {
+            const host = document.getElementById("photosCard")
+                     || document.getElementById("photosGrid")
+                     || document.getElementById("photosCount");
+            if (host) host.setAttribute("aria-invalid", ok ? "false" : "true");
+          })(photosOk);
+      
+          
+          // MARKETPLACE — required only when active
+          let marketOk = true;
+          if (marketplaceActive()) {
+            const marketControls = getMarketplaceRequiredControls();
+            marketOk = markBatchValidity(marketControls, hasValue);
+      
+            // Require ≥1 selected marketplace tile when marketplace flow is active
+            if (marketOk) {
+              const hasAny = selectedMarketplaceIds.size >= 1;
+              marketOk = marketOk && hasAny;
+              showMarketplaceTilesError(!hasAny);
+            } else {
+              showMarketplaceTilesError(false);
+            }
+          } else {
+            // clear invalid state for marketplace when not required
+            getMarketplaceRequiredControls().forEach(n => n.setAttribute("aria-invalid", "false"));
+            showMarketplaceTilesError(false);
+          }
+      
+          // ⬅️ photos are part of the gate
+          const allOk = basicOk && photosOk && marketOk;
+          setCtasEnabled(allOk);
+          document.dispatchEvent(new CustomEvent("intake:validity-changed", { detail: { valid: allOk } }));
+          return allOk;
+        }
+      
+      
+        /* === Facebook handoff helpers (NEW) === */
+      
+        // Build the payload the Tampermonkey script will send to Facebook.
+        window.rpBuildFacebookPayload = function rpBuildFacebookPayload() {
+          // 1) title / price / qty
+          const titleEl = document.getElementById("titleInput") || findControlByLabel("Item Name / Description");
+          const priceEl = document.getElementById("priceInput") || findControlByLabel("Price (USD)");
+          const qtyEl   = document.getElementById("qtyInput")   || findControlByLabel("Qty");
+        
+          const title = String(titleEl?.value || "").trim();
+          const price = Number(priceEl?.value || 0) || 0;
+          const qty   = Math.max(0, parseInt(qtyEl?.value || "0", 10) || 0);
+        
+          // 2) long description (listing profile field on the screen)
+          const descEl = document.getElementById("longDescriptionTextarea") || findControlByLabel("Long Description");
+          let description = String(descEl?.value || "").trim();
+        
+          // 3) append store footer lines (Facebook-specific)
+          const footer =
+            "Mad Rad Retro Toys\n" +
+            "5026 Kipling Street\n" +
+            "Wheat Ridge, CO 80033\n" +
+            "MON-SAT 10-5\n" +
+            "SUN 11-5\n" +
+            "303-960-2117";
+          description = description ? `${description}\n\n${footer}` : footer;
+        
+          // 4) hard-coded for v1
+          const category  = "Action Figures";
+          const condition = "Used - Good";
+          const availability = qty > 1 ? "List as in Stock" : "List as Single Item";
+        
+          // 5) images from state (__photos), ordered: primary first, then sort_order
+          const ordered = (__photos || [])
+            .slice()
+            .sort((a, b) => {
+              const pa = a.is_primary ? -1 : 0;
+              const pb = b.is_primary ? -1 : 0;
+              if (pa !== pb) return pa - pb;
+              return (a.sort_order ?? 0) - (b.sort_order ?? 0);
+            })
+            .map(x => String(x.cdn_url || ""))     // cdn_url persisted by server
+            .filter(Boolean);
+        
+          return {
+            title, price, qty, availability, category, condition, description,
+            images: ordered,
+            // include an id for traceability + basic sanity info for the userscript
+            item_id: __currentItemId || null,
+            created_at: Date.now()
+          };
+        };
+        
+        // Only fire when: Active save, photos flushed, all publish jobs are settled,
+        // AND the Facebook tile is selected, AND the Facebook listing is not already live.
+        async function __emitFacebookReadyIfSafe({ saveStatus, jobIds }) {
+          if (String(saveStatus || "").toLowerCase() !== "active") return;
+        
+          // photos flushed?
+          if (__pendingFiles && __pendingFiles.length > 0) return;
+        
+          // runner quiet?
+          if (Array.isArray(jobIds) && jobIds.length > 0) {
+            const anyRunning = document.querySelector('[data-status-text]')?.textContent?.match(/Publishing|Deleting/i);
+            if (anyRunning) return;
+          }
+        
+          // is Facebook selected?
+          const isFacebookSelected = (() => {
+            // use the cached meta to map selected ids → slug
+            const rows = (__metaCache?.marketplaces || []);
+            const byId = new Map(rows.map(r => [Number(r.id), String(r.slug || "").toLowerCase()]));
+            for (const id of selectedMarketplaceIds) {
+              if (byId.get(Number(id)) === "facebook") return true;
+            }
+            return false;
+          })();
+          if (!isFacebookSelected) return;
+        
+          // not already live?
+          if (__currentItemId) {
+            try {
+              const snap = await api(`/api/inventory/intake?item_id=${encodeURIComponent(__currentItemId)}`, { method: "GET" });
+              const live = String(snap?.marketplace_listing?.facebook?.status || "").toLowerCase() === "live";
+              if (live) return; // nothing to do
+            } catch {}
+          }
+        
+          const payload = window.rpBuildFacebookPayload();
+          document.dispatchEvent(new CustomEvent("intake:facebook-ready", {
+            detail: { item_id: __currentItemId || null, payload }
+          }));
+        }
+      
+        // Bridge the CustomEvent to Tampermonkey via postMessage (Facebook fill flow)
+      document.addEventListener("intake:facebook-ready", (ev) => {
+        try {
+          const payload = ev?.detail?.payload || (typeof window.rpBuildFacebookPayload === "function" ? window.rpBuildFacebookPayload() : null);
+          if (!payload) return;
+      
+          // Consumed by the Facebook userscript (@match .../main/...).
+          window.postMessage(
+            { source: "resellpro", type: "facebook:intake", payload },
+            "*"
+          );
+      
+          // Helpful diagnostics in DevTools
+          try {
+            console.groupCollapsed("[intake.js] posted facebook:intake");
+            console.log("item_id", payload.item_id);
+            console.log("title", payload.title);
+            console.log("images", (payload.images || []).length);
+            console.groupEnd?.();
+          } catch {}
+        } catch (e) {
+          console.warn("facebook:postMessage:failed", e);
+        }
+      });
   
 // --- Drafts refresh bus + helpers (anchored insert) ---
 let __draftsRefreshTimer = null;
