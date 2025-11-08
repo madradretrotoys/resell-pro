@@ -1633,23 +1633,24 @@ function setMarketplaceVisibility() {
           console.log("[intake.js] fbWin.stub", { hasStub: !!fbWin, closed: !!fbWin?.closed });
 
           if (!fbWin || fbWin.closed) {
-            // No stub available: open now (can be blocked if not from user gesture)
-            fbWin = window.open(FB_URL, "_blank", "noopener");
+            // No stub available: try to open now (still may be blocked without a user gesture)
+            fbWin = window.open(FB_URL, "_blank", "popup=1");  // no 'noopener'
             const opened = !!fbWin && !fbWin.closed;
             console.log("[intake.js] open.fb →", { opened });
-
+          
             if (!opened) {
               console.warn("[intake.js] popup blocked — allow popups for resellpros.com to auto-open Facebook.");
               if (typeof window.uiToast === "function") {
                 window.uiToast("Popup blocked — please allow popups for resellpros.com, then click Save again to open Facebook.");
               } else {
-                alert("Popup blocked — please allow popups for resellpros.com, then click Save again to open Facebook.");
+                // fall back to non-blocking console notice instead of alert
+                console.log("Popup blocked — please allow popups for resellpros.com, then click Save again to open Facebook.");
               }
               console.groupEnd?.();
               return;
             }
           } else {
-            // Reuse the stub: navigate it after the same-origin cache is set
+            // Reuse the stub we opened on the user click
             console.log("reuse.stubWindow → navigate", FB_URL);
             try { fbWin.location.href = FB_URL; } catch (e) { console.warn("nav to FB_URL failed", e); }
           }
@@ -2401,9 +2402,9 @@ document.addEventListener("intake:item-changed", () => refreshInventory({ force:
               const byId = new Map(rows.map(r => [Number(r.id), String(r.slug || "").toLowerCase()]));
               const wantsFacebook = Array.from(selectedMarketplaceIds).some(id => byId.get(Number(id)) === "facebook");
               if (wantsFacebook) {
-                window.__rpFbWin = window.open("about:blank", "_blank", "noopener");
+                window.__rpFbWin = window.open("about:blank", "_blank", "popup=1");  // no 'noopener' so we keep a handle
                 try {
-                  const d = window.__rpFbWin?.document;
+                  const d = window.__rpFbWin && window.__rpFbWin.document;
                   if (d) {
                     d.title = "Preparing Facebook…";
                     d.body.innerHTML = "<p style='font-family:sans-serif;padding:16px'>Preparing Facebook…</p>";
@@ -2874,7 +2875,21 @@ document.addEventListener("intake:item-changed", () => refreshInventory({ force:
           const msg = mode === "draft"
             ? `Saved draft (#${res?.item_id || "?"}).`
             : `Saved item ${skuPart} (#${res?.item_id || "?"}).`;
-          alert(msg);
+          
+          // Use a non-blocking toast/banner so the Facebook handoff isn't paused
+          if (typeof window.uiToast === "function") {
+            window.uiToast(msg);
+          } else {
+            const id = "intake-save-banner";
+            let b = document.getElementById(id);
+            if (!b) {
+              b = document.createElement("div");
+              b.id = id;
+              b.className = "alert alert-success mb-2";
+              document.body.appendChild(b);
+            }
+            b.textContent = msg;
+          }
           // Remember the item id for subsequent edits/saves
           __currentItemId = res?.item_id || __currentItemId;
           // Also stash on the form for resilience (not strictly required)
