@@ -2350,13 +2350,14 @@ document.addEventListener("intake:item-changed", () => refreshInventory({ force:
         if (Object.keys(ebayListing).length > 0) {
           payload.marketplace_listing = { ...(payload.marketplace_listing || {}), ebay: ebayListing };
         }
-        
+
         // NEW: Facebook flag so the server upserts the stub row
         if (payload.marketplaces_selected.includes("facebook")) {
           payload.marketplace_listing = { ...(payload.marketplace_listing || {}), facebook: {} };
         }
-        
-        return payload;
+
+          return payload;
+       }
 
     
       // Active/new items
