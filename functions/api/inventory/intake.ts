@@ -55,10 +55,9 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
 
     const sql = neon(String(env.DATABASE_URL));
 
-    // Resolve eBay & Facebook marketplace ids once per request
+    // Resolve eBay marketplace id once per request
     const ebayRow = await sql<{ id: number }[]>`SELECT id FROM app.marketplaces_available WHERE slug = 'ebay' LIMIT 1`;
     const EBAY_MARKETPLACE_ID = ebayRow[0]?.id ?? null;
-    
     const fbRow = await sql<{ id: number }[]>`SELECT id FROM app.marketplaces_available WHERE slug = 'facebook' LIMIT 1`;
     const FACEBOOK_MARKETPLACE_ID = fbRow[0]?.id ?? null;
     
@@ -274,9 +273,10 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
         };
 
         for (const r of rows) {
+
           const slug = String(r.slug || "").toLowerCase();
-        
-          // B — Facebook: no adapter run; ensure stub + event exist pre-publish, then continue
+
+          // Facebook: ensure stub + publish_started, then continue (no adapter run)
           if (slug === "facebook") {
             try {
               await sql/*sql*/`
@@ -297,7 +297,8 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
             console.log("[intake] enqueue.skip_facebook_no_adapter", { marketplace_id: r.id, slug: r.slug });
             continue;
           }
-        
+          
+                    
           // Pull the marketplace row (if present) to know current identifiers/status
           const iml = Array.isArray(imlRows) ? imlRows.find((x:any) => x.marketplace_id === r.id) : null;
 
@@ -598,9 +599,10 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
 
 
           // Upsert eBay marketplace listing when present (draft update)
-          const mpSelDraft: number[] = Array.isArray(body?.marketplaces_selected)
-          ? body.marketplaces_selected.map((n: any) => Number(n)).filter((n) => !Number.isNaN(n))
-          : [];
+          {
+            const mpSelDraft: number[] = Array.isArray(body?.marketplaces_selected)
+              ? body.marketplaces_selected.map((n: any) => Number(n)).filter((n) => !Number.isNaN(n))
+              : [];
           if (EBAY_MARKETPLACE_ID && ebay && mpSelDraft.includes(EBAY_MARKETPLACE_ID)) {
             const e = normalizeEbay(ebay);
             if (e) {
@@ -784,11 +786,27 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
                 : [];
 
               // Normalize the ebay payload once
-              const e = ebay ? normalizeEbay(ebay) : null;
-
+              const e = ebay ? normalizeEbay(ebay) : null;           
+              
               for (const mpId of mpIds) {
+                 // Facebook: ensure a stub row exists when selected (pre-publish)
+                if (typeof FACEBOOK_MARKETPLACE_ID === "number" && mpId === FACEBOOK_MARKETPLACE_ID) {
+                  await sql/*sql*/`
+                    INSERT INTO app.item_marketplace_listing
+                      (item_id, tenant_id, marketplace_id, status, updated_at)
+                    VALUES (${item_id}, ${tenant_id}, ${FACEBOOK_MARKETPLACE_ID}, 'publishing', now())
+                    ON CONFLICT (item_id, marketplace_id)
+                    DO UPDATE SET status='publishing', updated_at=now()
+                  `;
+                  await sql/*sql*/`
+                    INSERT INTO app.item_marketplace_events
+                      (item_id, tenant_id, marketplace_id, kind)
+                    VALUES (${item_id}, ${tenant_id}, ${FACEBOOK_MARKETPLACE_ID}, 'publish_started')
+                  `;
+                  continue;
+                }
                 // Only write the rich field set for eBay
-                if (EBAY_MARKETPLACE_ID && mpId === EBAY_MARKETPLACE_ID && e) {
+                if (mpId === EBAY_MARKETPLACE_ID && e) {
                   await sql/*sql*/`
                     INSERT INTO app.item_marketplace_listing
                       (item_id, tenant_id, marketplace_id, status,
@@ -839,27 +857,10 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
                   promote          = EXCLUDED.promote,
                   updated_at       = now()
               `;
-                  continue;
-
-                }
-                // A — Facebook stub row when selected on ACTIVE save; no rich fields here
-                if (FACEBOOK_MARKETPLACE_ID && mpId === FACEBOOK_MARKETPLACE_ID) {
-                  await sql/*sql*/`
-                    INSERT INTO app.item_marketplace_listing
-                      (item_id, tenant_id, marketplace_id, status, updated_at)
-                    VALUES (${item_id}, ${tenant_id}, ${FACEBOOK_MARKETPLACE_ID}, 'publishing', now())
-                    ON CONFLICT (item_id, marketplace_id)
-                    DO UPDATE SET status='publishing', updated_at=now()
-                  `;
-                  await sql/*sql*/`
-                    INSERT INTO app.item_marketplace_events
-                      (item_id, tenant_id, marketplace_id, kind)
-                    VALUES (${item_id}, ${tenant_id}, ${FACEBOOK_MARKETPLACE_ID}, 'publish_started')
-                  `;
-                  continue;
                 }
               }
             }
+          }
           // Enqueue marketplace publish jobs (same behavior as Create Active)
           await enqueuePublishJobs(tenant_id, item_id, body, status);
 
