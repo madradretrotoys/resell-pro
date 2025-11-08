@@ -668,7 +668,7 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
           }
           
           return json({ ok: true, item_id, sku: updInv[0].sku, status, ms: Date.now() - t0 }, 200);
-        }
+        }else {
 
 
           
@@ -876,7 +876,7 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
             job_ids: job_ids_upd,
             ms: Date.now() - t0
           }, 200);
-        }
+        }}
 
 
     
