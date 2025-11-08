@@ -2332,15 +2332,32 @@ document.addEventListener("intake:item-changed", () => refreshInventory({ force:
         const inventory = prune(invAll);
         const listing   = prune(listingAll);
         const payload = { status: "draft", inventory };
-
+      
         if (Object.keys(listing).length > 0) payload.listing = listing;
+
+        // Ensure marketplaces_selected includes the UI selections (including Facebook)
+        try {
+          // Reuse whatever mechanism you already have for tile selection; fallback to data-attributes
+          const selected = new Set(Array.from(document.querySelectorAll('[data-mp-selected="true"]')).map(n => (n.dataset.mpSlug || "").toLowerCase()));
+          // If you store selected IDs elsewhere, merge them here
+          if (!Array.isArray(payload.marketplaces_selected)) payload.marketplaces_selected = [];
+          for (const s of selected) {
+            if (s && !payload.marketplaces_selected.includes(s)) payload.marketplaces_selected.push(s);
+          }
+        } catch { /* no-op */ }
+        
+        // eBay-specific fields (existing)
         if (Object.keys(ebayListing).length > 0) {
-          // Backend: upsert into app.item_marketplace_listing when present
-          payload.marketplace_listing = { ebay: ebayListing };
+          payload.marketplace_listing = { ...(payload.marketplace_listing || {}), ebay: ebayListing };
         }
-        // NOTE: we still omit marketplaces_selected for drafts for now
+        
+        // NEW: Facebook flag so the server upserts the stub row
+        if (payload.marketplaces_selected.includes("facebook")) {
+          payload.marketplace_listing = { ...(payload.marketplace_listing || {}), facebook: {} };
+        }
+        
         return payload;
-      }
+
     
       // Active/new items
       const salesChannel = valByIdOrLabel("salesChannelSelect", "Sales Channel");
@@ -2373,11 +2390,19 @@ document.addEventListener("intake:item-changed", () => refreshInventory({ force:
         payload.item_id = __currentItemId;
       }
       
+      // DEBUG (short): show marketplaces we’re asking for
+      console.log("[intake] marketplaces_selected", payload.marketplaces_selected, "has_fb=", payload?.marketplaces_selected?.includes?.("facebook"));
+      
       const res = await api("/api/inventory/intake", {
         method: "POST",
         body: JSON.stringify(payload),
         headers: { "content-type": "application/json" },
       });
+      
+      // DEBUG (short): confirm server accepted and returned item_id/status
+      if (res?.ok) {
+        console.log("[intake] server.ok item_id=", res.item_id, "status=", res.status);
+      }
       // Log non-OK responses with full context before throwing
       if (!res || res.ok === false) {
         try {
