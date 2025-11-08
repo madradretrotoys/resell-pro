@@ -1,0 +1,330 @@
+// ==UserScript==
+// @name         Resell Pro → Facebook Marketplace Autofill (v1)
+// @namespace    mad-rad-retro-toys
+// @version      1.0.0
+// @description  Injects "Add to Facebook" on Intake, waits for safe gates, then opens Facebook and autofills at a human pace.
+// @author       Melissa + AI
+//
+// @match        https://resellpros.com/app*
+// @match        https://resellpros.com/main/*
+// @match        https://*.resellpros.com/app*
+// @match        https://www.facebook.com/marketplace/create/item*
+// @grant        GM_setValue
+// @grant        GM_getValue
+// @grant        GM_deleteValue
+// @run-at       document-idle
+// @downloadURL https://raw.githubusercontent.com/madradretrotoys/resell-pro/refs/heads/main/tampermonkey/inventory-intake/facebook/resell-pro-facebook-autofill.user.js
+// @updateURL   https://raw.githubusercontent.com/madradretrotoys/resell-pro/refs/heads/main/tampermonkey/inventory-intake/facebook/resell-pro-facebook-autofill.user.js
+// @grant        GM_xmlhttpRequest
+// @connect      resellpros.com
+// ==/UserScript==
+
+(function () {
+  const NOW = () => Date.now();
+
+  // -----------------------------
+  // Shared helpers
+  // -----------------------------
+  const delay = (ms) => new Promise((r) => setTimeout(r, ms));
+  const humanPause = (min = 250, max = 800) =>
+    delay(min + Math.floor(Math.random() * (max - min + 1)));
+
+  const PAYLOAD_KEY = "rp_fb_payload";
+  const TTL_MS = 5 * 60 * 1000; // 5 minutes
+
+  const savePayload = (payload) => {
+    GM_setValue(PAYLOAD_KEY, { at: NOW(), payload });
+  };
+  const takePayload = () => {
+    const blob = GM_getValue(PAYLOAD_KEY, null);
+    if (!blob) return null;
+    if (NOW() - (blob.at || 0) > TTL_MS) {
+      try { GM_deleteValue(PAYLOAD_KEY); } catch {}
+      return null;
+    }
+    // leave it for retries; FB can get bouncy
+    return blob.payload || null;
+  };
+
+  // Detect which site we’re on
+  const onFacebook = /facebook\.com\/marketplace\/create\/item/i.test(location.href);
+
+  // --------------------------------------------------------------------
+  // Branch A: Intake page — listen for payload and open Facebook
+  // --------------------------------------------------------------------
+  if (!onFacebook) {
+      window.addEventListener("message", (ev) => {
+          try {
+              if (ev.origin !== location.origin) return;
+              const data = ev.data || {};
+              if (data.type !== "RP_FACEBOOK_CREATE" || !data.payload) return;
+              // cache for the FB tab; Intake will open the window
+              savePayload(data.payload);
+              console.log("[tm] intake message → payload cached; Intake is responsible for opening Facebook.");
+          } catch {}
+      });
+      return;
+  }
+
+
+
+  // --------------------------------------------------------------------
+  // Branch B: Facebook create page — consume payload and autofill
+  // --------------------------------------------------------------------
+  // Optional: accept a direct postMessage from opener as a second path
+  window.addEventListener("message", (ev) => {
+    try {
+      const data = ev.data || {};
+      if (data.type === "facebook:intake" && data.payload) {
+        savePayload(data.payload); // refresh cache in case we arrived early
+        console.log("[tm] facebook.com message → payload cached");
+      }
+    } catch {}
+  });
+
+  (async function facebookAutofill() {
+    const payload = takePayload();
+    if (!payload) return; // nothing to do
+
+    // --- helpers to find FB controls (selectors may drift; we try multiple) ---
+    const $ = (sel) => document.querySelector(sel);
+    const $$ = (sel) => Array.from(document.querySelectorAll(sel));
+
+    async function waitFor(sel, { timeout = 20000 } = {}) {
+      const start = NOW();
+      while (NOW() - start < timeout) {
+        const el = $(sel);
+        if (el) return el;
+        await delay(150);
+      }
+      return null;
+    }
+
+    /** Write into React-controlled inputs safely */
+    function setNativeValue(el, value) {
+      const { set } = Object.getOwnPropertyDescriptor(el.__proto__, "value") || {};
+      if (set) { set.call(el, value); }
+      else { el.value = value; }
+      el.dispatchEvent(new Event("input", { bubbles: true, composed: true }));
+    }
+
+    async function typeReliable(el, text) {
+      if (!el) return;
+      el.focus();
+      setNativeValue(el, "");
+      await humanPause(40, 80);
+      setNativeValue(el, String(text));
+      el.blur();
+      await humanPause(120, 200);
+    }
+
+    // Log the FULL incoming payload for debugging
+    try { console.log("[tm] incoming payload", JSON.parse(JSON.stringify(payload))); }
+    catch { console.log("[tm] incoming payload", payload); }
+
+     // ------- 1) upload photos (CORS-safe via GM_xmlhttpRequest) -------
+    const fileInput =
+      $('input[type="file"][accept*="image"]') ||
+      await waitFor('input[type="file"][accept*="image"]', { timeout: 12000 });
+
+    // Helper: download an image blob via GM_xmlhttpRequest (bypasses page CORS)
+    function xhrBlob(url) {
+      return new Promise((resolve) => {
+        try {
+          GM_xmlhttpRequest({
+            method: "GET",
+            url,
+            responseType: "blob",
+            onload: (res) => resolve(res.response || null),
+            onerror: () => resolve(null),
+            ontimeout: () => resolve(null),
+          });
+        } catch {
+          resolve(null);
+        }
+      });
+    }
+
+    if (fileInput && Array.isArray(payload.images) && payload.images.length) {
+      const files = [];
+      for (const url of payload.images.slice(0, 10)) {
+        const blob = await xhrBlob(url);
+        if (!blob) continue;
+        const ext = /\.jpe?g$/i.test(url)
+          ? "jpg"
+          : /\.png$/i.test(url)
+          ? "png"
+          : "webp";
+        const f = new File([blob], `photo_${files.length + 1}.${ext}`, {
+          type: blob.type || `image/${ext}`,
+        });
+        files.push(f);
+        await humanPause(100, 180);
+      }
+
+      if (files.length) {
+        const dt = new DataTransfer();
+        files.forEach((f) => dt.items.add(f));
+        fileInput.files = dt.files;
+        fileInput.dispatchEvent(new Event("change", { bubbles: true }));
+        console.log("[tm] photos attached:", files.length);
+        await delay(2000); // allow previews to render
+      } else {
+        console.warn("[tm] no photos attached (download/CORS failure)");
+      }
+    } else {
+      console.warn("[tm] no fileInput or empty payload.images");
+    }
+
+
+    // ------- 2) title / price / description -------
+    const titleBox =
+      $('input[aria-label="Title"]') ||
+      $('input[placeholder*="Title"]') ||
+      $('input[type="text"]');
+
+    const priceBox =
+      $('input[aria-label="Price"]') ||
+      $('input[placeholder*="Price"]') ||
+      $('input[type="text"][inputmode="numeric"], input[type="number"]');
+
+    const descBox =
+      $('textarea[aria-label="Description"]') ||
+      $('div[role="textbox"][contenteditable="true"][aria-label="Description"]') ||
+      $('div[role="textbox"][contenteditable="true"]') ||
+      $('textarea');
+
+    // Title
+    await typeReliable(titleBox, payload.title || "");
+
+    // Price
+    if (priceBox) {
+      const priceNum = Number.isFinite(Number(payload.price)) ? Number(payload.price) : 0;
+      await typeReliable(priceBox, priceNum.toFixed(2));
+    }
+
+    // Description (textarea or contenteditable)
+    if (descBox) {
+      if (descBox.getAttribute && descBox.getAttribute("contenteditable") === "true") {
+        descBox.focus();
+        document.execCommand("selectAll", false, null);
+        document.execCommand("insertText", false, payload.description || "");
+        descBox.blur();
+        await humanPause();
+      } else {
+        await typeReliable(descBox, payload.description || "");
+      }
+    }
+
+    // Re-assert values once more in case React re-renders after we type
+    if (titleBox && !titleBox.value) await typeReliable(titleBox, payload.title || "");
+    if (descBox) {
+      const currentDesc = (descBox.value ?? descBox.textContent ?? "").trim();
+      if (!currentDesc) {
+        if (descBox.getAttribute && descBox.getAttribute("contenteditable") === "true") {
+          descBox.focus();
+          document.execCommand("insertText", false, payload.description || "");
+          descBox.blur();
+        } else {
+          await typeReliable(descBox, payload.description || "");
+        }
+      }
+    }
+
+    // ------- 3) category / condition / availability -------
+    async function pickFromMenu(triggerMatch, searchText, optionMatch) {
+      const trigger = Array.from(document.querySelectorAll('div[role="button"]'))
+        .find(b => triggerMatch.test((b.textContent || "")));
+      if (!trigger) return false;
+
+      trigger.click();
+      await humanPause();
+
+      // Some variants show a search box; use it if present
+      const search = await waitFor('input[type="search"], input[aria-label*="Search"]', { timeout: 2000 });
+      if (search && searchText) {
+        await typeReliable(search, searchText);
+        await delay(800);
+      }
+
+      // Choose the option
+      const opt = Array.from(document.querySelectorAll('div[role="option"], [role="menuitem"]'))
+        .find(o => optionMatch.test((o.textContent || "")));
+      if (opt) {
+        opt.click();
+        await humanPause();
+        return true;
+      }
+      return false;
+    }
+
+    // Category
+    await pickFromMenu(/category/i, payload.category || "Action Figures", /action figures/i);
+
+    // Condition
+    await pickFromMenu(/condition/i, null, /used/i);
+
+    // Availability
+    {
+      const wantStock = /in stock/i.test(payload.availability || "");
+      await pickFromMenu(/availability/i, null, wantStock ? /in stock/i : /single item/i);
+    }
+
+    // Turn OFF Boost if it appears toggled on
+    try {
+      const boost = Array.from(document.querySelectorAll('[role="switch"], [aria-checked]'))
+        .find(s => /boost/i.test(s.textContent || ""));
+      if (boost && (boost.getAttribute("aria-checked") === "true")) {
+        boost.click();
+        console.log("[tm] boost toggle turned off");
+      }
+    } catch {}
+
+
+    // ---------- 4) click Publish and report back ----------
+    async function clickPublish() {
+      const btns = $$('div[role="button"], button').filter(b =>
+        /publish|post|next/i.test((b.textContent || "")) && !b.disabled
+      );
+      const pub = btns[0] || null;
+      if (!pub) return false;
+      pub.click();
+      await delay(2000);
+      return true;
+    }
+
+    let published = await clickPublish();
+
+    // Very light success heuristic: look for a confirmation toast/link on page
+    let remoteUrl = null;
+    try {
+      const a = $$("a").find(x => /view|your listing|see your listing/i.test(x.textContent || ""));
+      if (a && a.href) remoteUrl = a.href;
+    } catch {}
+
+    // Callback to Resell Pro (temporary endpoint; CORS-open)
+    const itemId  = payload.item_id || null;
+    const tenant  = document.documentElement.getAttribute("data-tenant-id")
+                 || localStorage.getItem("rp:tenant_id") || "";
+
+    const postBack = (state, message) => new Promise((resolve) => {
+      try {
+        fetch("https://resellpros.com/api/marketplaces/facebook/callback", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            tenant_id: tenant,
+            item_id: itemId,
+            status: state,                 // 'live' | 'error'
+            remote_url: remoteUrl || null,
+            message: message || null,
+          })
+        }).then(() => resolve()).catch(() => resolve());
+      } catch { resolve(); }
+    });
+
+    if (itemId && tenant) {
+      await postBack(published ? "live" : "error", published ? null : "publish_button_not_found");
+    }
+  })();
+})();

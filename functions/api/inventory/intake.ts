@@ -269,6 +269,12 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
         };
 
         for (const r of rows) {
+          // TEMP: skip Facebook until its adapter is implemented
+          if (String(r.slug || "").toLowerCase() === "facebook") {
+            console.log("[intake] enqueue.skip_no_adapter", { marketplace_id: r.id, slug: r.slug });
+            continue;
+          }
+          
           // Pull the marketplace row (if present) to know current identifiers/status
           const iml = Array.isArray(imlRows) ? imlRows.find((x:any) => x.marketplace_id === r.id) : null;
 

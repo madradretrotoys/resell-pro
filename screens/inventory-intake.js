@@ -485,13 +485,22 @@ export async function init() {
   
       document.addEventListener("intake:item-saved", async (ev) => {
       try {
+
+        console.groupCollapsed("[intake.js] intake:item-saved");
+        console.log("detail", {
+          item_id: ev?.detail?.item_id,
+          action: ev?.detail?.action,
+          save_status: ev?.detail?.save_status,
+          job_ids: ev?.detail?.job_ids
+        });
+        
         const id         = ev?.detail?.item_id;
         const saveStatus = String(ev?.detail?.save_status || "").toLowerCase(); // "active" | "draft" | "delete"
         const action     = String(ev?.detail?.action || (saveStatus === "delete" ? "delete" : "save")).toLowerCase();
         const jobIds     = Array.isArray(ev?.detail?.job_ids) ? ev.detail.job_ids : [];
-        if (!id) return;
+        if (!id) { console.warn("[intake.js] intake:item-saved missing item_id"); console.groupEnd?.(); return; }
         __currentItemId = id;
-
+        
         
         // Phase 0: once Active, permanently lock Draft action for this listing (UI)
         if (saveStatus === "active") {
@@ -503,7 +512,7 @@ export async function init() {
             draftBtn.title = "Draft save is disabled for Active listings.";
           }
         }
-
+        
         
         if (__pendingFiles.length > 0) {
           const pending = __pendingFiles.splice(0, __pendingFiles.length);
@@ -523,10 +532,18 @@ export async function init() {
                 .catch((e) => console.warn("[intake.js] job kick error", { job_id: jid, error: String(e) }));
             } catch {}
             trackPublishJob(jid);
-          }
+           }
         }
+
+        // When the save is Active, photos are flushed, and eBay jobs are quiet,
+        // this will emit `intake:facebook-ready` ONLY if Facebook is selected
+        // and not already live for this item.
+        await __emitFacebookReadyIfSafe({ saveStatus, jobIds });
+
       } catch (e) {
         console.error("photos:flush:error", e);
+      } finally {
+        console.groupEnd?.();
       }
     });
   }
@@ -899,6 +916,17 @@ function setMarketplaceVisibility() {
         if (n.offsetParent === null) return false;
         return true;
       });
+
+     // Determine if the eBay tile is actually selected right now.
+    // If not selected, we must NOT treat eBay fields as required.
+    const ebaySelected = (() => {
+      const rows = (__metaCache?.marketplaces || []);
+      const byId = new Map(rows.map(r => [Number(r.id), String(r.slug || "").toLowerCase()]));
+      for (const id of selectedMarketplaceIds) {
+        if (byId.get(Number(id)) === "ebay") return true;
+      }
+      return false;
+    })();
 
     // eBay card fields (when the eBay card is rendered and the fields are visible)
     const ebaySelectors = [
@@ -1408,50 +1436,254 @@ function setMarketplaceVisibility() {
         }
   
        
-  function computeValidity() {
-    // BASIC — always required (explicit control list)
-    const basicControls = getBasicRequiredControls();
-    const basicOk = markBatchValidity(basicControls, hasValue);
+        function computeValidity() {
+          // BASIC — always required (explicit control list)
+          const basicControls = getBasicRequiredControls();
+          const basicOk = markBatchValidity(basicControls, hasValue);
+      
+          // PHOTOS — must have at least one (persisted or pending)
+          const photoCount = (__photos?.length || 0) + (__pendingFiles?.length || 0);
+          const photosOk = photoCount >= 1;
+          // Light accessibility cue on the Photos card/header when missing
+          (function markPhotos(ok) {
+            const host = document.getElementById("photosCard")
+                     || document.getElementById("photosGrid")
+                     || document.getElementById("photosCount");
+            if (host) host.setAttribute("aria-invalid", ok ? "false" : "true");
+          })(photosOk);
+      
+          
+          // MARKETPLACE — required only when active
+          let marketOk = true;
+          if (marketplaceActive()) {
+            const marketControls = getMarketplaceRequiredControls();
+            marketOk = markBatchValidity(marketControls, hasValue);
+      
+            // Require ≥1 selected marketplace tile when marketplace flow is active
+            if (marketOk) {
+              const hasAny = selectedMarketplaceIds.size >= 1;
+              marketOk = marketOk && hasAny;
+              showMarketplaceTilesError(!hasAny);
+            } else {
+              showMarketplaceTilesError(false);
+            }
+          } else {
+            // clear invalid state for marketplace when not required
+            getMarketplaceRequiredControls().forEach(n => n.setAttribute("aria-invalid", "false"));
+            showMarketplaceTilesError(false);
+          }
+      
+          // ⬅️ photos are part of the gate
+          const allOk = basicOk && photosOk && marketOk;
+          setCtasEnabled(allOk);
+          document.dispatchEvent(new CustomEvent("intake:validity-changed", { detail: { valid: allOk } }));
+          return allOk;
+        }
+      
+      
+        /* === Facebook handoff helpers (NEW) === */
 
-    // PHOTOS — must have at least one (persisted or pending)
-    const photoCount = (__photos?.length || 0) + (__pendingFiles?.length || 0);
-    const photosOk = photoCount >= 1;
-    // Light accessibility cue on the Photos card/header when missing
-    (function markPhotos(ok) {
-      const host = document.getElementById("photosCard")
-               || document.getElementById("photosGrid")
-               || document.getElementById("photosCount");
-      if (host) host.setAttribute("aria-invalid", ok ? "false" : "true");
-    })(photosOk);
+        // Build the payload the Tampermonkey script will send to Facebook.
+        window.rpBuildFacebookPayload = function rpBuildFacebookPayload() {
+          // 1) title / price / qty
+          const titleEl = document.getElementById("titleInput") || findControlByLabel("Item Name / Description");
+          const priceEl = document.getElementById("priceInput") || findControlByLabel("Price (USD)");
+          const qtyEl   = document.getElementById("qtyInput")   || findControlByLabel("Qty");
+        
+          const title = String(titleEl?.value || "").trim();
+          const price = Number(priceEl?.value || 0) || 0;
+          const qty   = Math.max(0, parseInt(qtyEl?.value || "0", 10) || 0);
+        
+          // 2) long description (listing profile field on the screen)
+          const descEl = document.getElementById("longDescriptionTextarea") || findControlByLabel("Long Description");
+          let description = String(descEl?.value || "").trim();
+        
+          // 3) append store footer lines (Facebook-specific)
+          const footer =
+            "Mad Rad Retro Toys\n" +
+            "5026 Kipling Street\n" +
+            "Wheat Ridge, CO 80033\n" +
+            "MON-SAT 10-5\n" +
+            "SUN 11-5\n" +
+            "303-960-2117";
+          description = description ? `${description}\n\n${footer}` : footer;
+        
+          // 4) hard-coded for v1
+          const category  = "Action Figures";
+          const condition = "Used - Good";
+          const availability = qty > 1 ? "List as in Stock" : "List as Single Item";
+        
+          // 5) images from state (__photos), ordered: primary first, then sort_order
+          const ordered = (__photos || [])
+            .slice()
+            .sort((a, b) => {
+              const pa = a.is_primary ? -1 : 0;
+              const pb = b.is_primary ? -1 : 0;
+              if (pa !== pb) return pa - pb;
+              return (a.sort_order ?? 0) - (b.sort_order ?? 0);
+            })
+            .map(x => String(x.cdn_url || ""))
+            .filter(Boolean);
+        
+          const payload = {
+            title, price, qty, availability, category, condition, description,
+            images: ordered,
+            item_id: __currentItemId || null,
+            created_at: Date.now()
+          };
+        
+          // ✅ FULL payload log for debugging
+          try {
+            console.log("[intake.js] facebook payload", JSON.parse(JSON.stringify(payload)));
+          } catch {
+            console.log("[intake.js] facebook payload", payload);
+          }
+        
+          return payload;
+        }; // <-- end rpBuildFacebookPayload (removed the extra closing brace)
 
-    
-    // MARKETPLACE — required only when active
-    let marketOk = true;
-    if (marketplaceActive()) {
-      const marketControls = getMarketplaceRequiredControls();
-      marketOk = markBatchValidity(marketControls, hasValue);
+        
+        // Only fire when: Active save, photos flushed, all publish jobs are settled,
+        // AND the Facebook tile is selected, AND the Facebook listing is not already live.
+        async function __emitFacebookReadyIfSafe({ saveStatus, jobIds }) {
+          console.groupCollapsed("[intake.js] facebook:gate");
+          console.log("preconditions", {
+            saveStatus,
+            pendingFiles: (__pendingFiles && __pendingFiles.length) || 0,
+            jobIdsCount: Array.isArray(jobIds) ? jobIds.length : 0
+          });
+        
+          if (String(saveStatus || "").toLowerCase() !== "active") {
+            console.log("skip: saveStatus is not 'active'");
+            console.groupEnd?.();
+            return;
+          }
+        
+          // photos flushed?
+          if (__pendingFiles && __pendingFiles.length > 0) {
+            console.log("skip: pending photos not flushed yet");
+            console.groupEnd?.();
+            return;
+          }
+        
+          // runner quiet?
+          if (Array.isArray(jobIds) && jobIds.length > 0) {
+            const anyRunning = document.querySelector('[data-status-text]')?.textContent?.match(/Publishing|Deleting/i);
+            if (anyRunning) {
+              console.log("skip: publish runner still active");
+              console.groupEnd?.();
+              return;
+            }
+          }
+        
+          // is Facebook selected?
+          const isFacebookSelected = (() => {
+            // use the cached meta to map selected ids → slug
+            const rows = (__metaCache?.marketplaces || []);
+            const byId = new Map(rows.map(r => [Number(r.id), String(r.slug || "").toLowerCase()]));
+            for (const id of selectedMarketplaceIds) {
+              if (byId.get(Number(id)) === "facebook") return true;
+            }
+            return false;
+          })();
+          if (!isFacebookSelected) {
+            console.log("skip: Facebook tile not selected");
+            console.groupEnd?.();
+            return;
+          }
+        
+          // not already live?
+          if (__currentItemId) {
+            try {
+              const snap = await api(`/api/inventory/intake?item_id=${encodeURIComponent(__currentItemId)}`, { method: "GET" });
+              const live = String(snap?.marketplace_listing?.facebook?.status || "").toLowerCase() === "live";
+              console.log("existing fb status", { live, status: snap?.marketplace_listing?.facebook?.status });
+              if (live) { console.log("skip: already live"); console.groupEnd?.(); return; }
+            } catch (e) {
+              console.warn("fb status check failed", e);
+            }
+          }
+        
+          const payload = window.rpBuildFacebookPayload();
+            console.log("dispatch intake:facebook-ready", {
+              item_id: __currentItemId || null,
+              title: payload?.title,
+              images: (payload?.images || []).length
+            });
+            document.dispatchEvent(new CustomEvent("intake:facebook-ready", {
+              detail: { item_id: __currentItemId || null, payload }
+            }));
+            console.groupEnd?.();
+          }
+      
+          document.addEventListener("intake:facebook-ready", (ev) => {
+            const __t0 = performance.now();
+            const payload =
+              ev?.detail?.payload ||
+              (typeof window.rpBuildFacebookPayload === "function" ? window.rpBuildFacebookPayload() : null);
+            if (!payload) return;
+        
+            console.groupCollapsed("[intake.js] facebook:intake → begin");
+            console.log("[intake.js] payload echo", payload);   // keep an echo here too
 
-      // Require ≥1 selected marketplace tile when marketplace flow is active
-      if (marketOk) {
-        const hasAny = selectedMarketplaceIds.size >= 1;
-        marketOk = marketOk && hasAny;
-        showMarketplaceTilesError(!hasAny);
-      } else {
-        showMarketplaceTilesError(false);
-      }
-    } else {
-      // clear invalid state for marketplace when not required
-      getMarketplaceRequiredControls().forEach(n => n.setAttribute("aria-invalid", "false"));
-      showMarketplaceTilesError(false);
-    }
+          // 1) Same-origin handoff for Tampermonkey cache
+          try {
+            window.postMessage({ type: "RP_FACEBOOK_CREATE", payload }, location.origin);
+            console.log("[intake.js] postMessage → same-origin (RP_FACEBOOK_CREATE cached)");
+          } catch (e) {
+            console.warn("[intake.js] failed to send RP_FACEBOOK_CREATE", e);
+          }
 
-    // ⬅️ photos are part of the gate
-    const allOk = basicOk && photosOk && marketOk;
-    setCtasEnabled(allOk);
-    document.dispatchEvent(new CustomEvent("intake:validity-changed", { detail: { valid: allOk } }));
-    return allOk;
-  }
+          // 2) Window handling — prefer the user-gesture stub, otherwise open now
+          let fbWin = window.__rpFbWin || null;
+          const FB_URL = "https://www.facebook.com/marketplace/create/item";
+          console.log("[intake.js] fbWin.stub", { hasStub: !!fbWin, closed: !!fbWin?.closed });
 
+          if (!fbWin || fbWin.closed) {
+            // No stub available: try to open now (still may be blocked without a user gesture)
+            fbWin = window.open(FB_URL, "_blank", "popup=1");  // no 'noopener'
+            const opened = !!fbWin && !fbWin.closed;
+            console.log("[intake.js] open.fb →", { opened });
+          
+            if (!opened) {
+              console.warn("[intake.js] popup blocked — allow popups for resellpros.com to auto-open Facebook.");
+              if (typeof window.uiToast === "function") {
+                window.uiToast("Popup blocked — please allow popups for resellpros.com, then click Save again to open Facebook.");
+              } else {
+                // fall back to non-blocking console notice instead of alert
+                console.log("Popup blocked — please allow popups for resellpros.com, then click Save again to open Facebook.");
+              }
+              console.groupEnd?.();
+              return;
+            }
+          } else {
+            // Reuse the stub we opened on the user click
+            console.log("reuse.stubWindow → navigate", FB_URL);
+            try { fbWin.location.href = FB_URL; } catch (e) { console.warn("nav to FB_URL failed", e); }
+          }
+
+          // 3) (Optional secondary path) also try direct cross-origin postMessage to facebook.com
+          const post = () => {
+            try {
+              fbWin.postMessage({ source: "resellpro", type: "facebook:intake", payload }, "https://www.facebook.com");
+              console.log("[intake.js] postMessage → facebook.com (queued)");
+            } catch (e) {
+              console.warn("[intake.js] postMessage failed (retrying)", e);
+            }
+          };
+
+          console.log("[intake.js] post.start");
+          post();
+          const t = setInterval(post, 1000);
+
+          setTimeout(() => {
+            clearInterval(t);
+            const __t1 = performance.now();
+            console.log("[intake.js] facebook:intake → done", { ms: Math.round(__t1 - __t0) });
+            console.groupEnd?.();
+          }, 8000);
+        });
+  
 // --- Drafts refresh bus + helpers (anchored insert) ---
 let __draftsRefreshTimer = null;
 
@@ -2170,6 +2402,25 @@ document.addEventListener("intake:item-changed", () => refreshInventory({ force:
           e.preventDefault();
           try {
             btn.disabled = true;
+      
+            // If Facebook tile is selected, open a stub window now (user gesture) to avoid popup blocking.
+            try {
+              const rows = (__metaCache?.marketplaces || []);
+              const byId = new Map(rows.map(r => [Number(r.id), String(r.slug || "").toLowerCase()]));
+              const wantsFacebook = Array.from(selectedMarketplaceIds).some(id => byId.get(Number(id)) === "facebook");
+              if (wantsFacebook) {
+                window.__rpFbWin = window.open("about:blank", "_blank", "popup=1");  // no 'noopener' so we keep a handle
+                try {
+                  const d = window.__rpFbWin && window.__rpFbWin.document;
+                  if (d) {
+                    d.title = "Preparing Facebook…";
+                    d.body.innerHTML = "<p style='font-family:sans-serif;padding:16px'>Preparing Facebook…</p>";
+                  }
+                } catch {}
+                console.log("[intake.js] opened stub FB window", !!window.__rpFbWin);
+              }
+            } catch {}
+      
             await submitIntake("active");
           } catch (err) {
             console.error("intake:submit:error", err);
@@ -2631,7 +2882,21 @@ document.addEventListener("intake:item-changed", () => refreshInventory({ force:
           const msg = mode === "draft"
             ? `Saved draft (#${res?.item_id || "?"}).`
             : `Saved item ${skuPart} (#${res?.item_id || "?"}).`;
-          alert(msg);
+          
+          // Use a non-blocking toast/banner so the Facebook handoff isn't paused
+          if (typeof window.uiToast === "function") {
+            window.uiToast(msg);
+          } else {
+            const id = "intake-save-banner";
+            let b = document.getElementById(id);
+            if (!b) {
+              b = document.createElement("div");
+              b.id = id;
+              b.className = "alert alert-success mb-2";
+              document.body.appendChild(b);
+            }
+            b.textContent = msg;
+          }
           // Remember the item id for subsequent edits/saves
           __currentItemId = res?.item_id || __currentItemId;
           // Also stash on the form for resilience (not strictly required)
@@ -2645,11 +2910,11 @@ document.addEventListener("intake:item-changed", () => refreshInventory({ force:
           try {
             document.dispatchEvent(
               new CustomEvent("intake:item-saved", {
-                // pass save mode and the job_ids we got back from the server
                 detail: {
                   item_id: __currentItemId,
-                  save_status: mode,                 // "active" | "draft"
-                  job_ids: Array.isArray(res?.job_ids) ? res.job_ids : [] // use the real response variable
+                  action: "save",
+                  save_status: (mode === "draft" ? "draft" : "active"),
+                  job_ids: Array.isArray(res?.job_ids) ? res.job_ids : []
                 }
               })
             );
