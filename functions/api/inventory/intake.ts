@@ -751,7 +751,8 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
                 shipbx_height    = EXCLUDED.shipbx_height
             `;
   
-            // Upsert selected marketplaces (prototype). Only eBay has field data today.
+            // Upsert selected marketplaces (prototype).
+            // eBay gets the rich field set; all other selected marketplaces (e.g., Facebook) get a stub row.
             {
               const mpIds: number[] = Array.isArray(body?.marketplaces_selected)
                 ? body.marketplaces_selected.map((n: any) => Number(n)).filter((n) => !Number.isNaN(n))
@@ -761,8 +762,8 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
               const e = ebay ? normalizeEbay(ebay) : null;
 
               for (const mpId of mpIds) {
-                // Only write the rich field set for eBay
                 if (mpId === EBAY_MARKETPLACE_ID && e) {
+                  // eBay: full field upsert (existing behavior)
                   await sql/*sql*/`
                     INSERT INTO app.item_marketplace_listing
                       (item_id, tenant_id, marketplace_id, status,
@@ -794,25 +795,37 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
                       updated_at = now()
                   `;
                   await sql/*sql*/`
-                INSERT INTO app.user_marketplace_defaults
-                  (tenant_id, user_id, marketplace_id,
-                   shipping_policy, payment_policy, return_policy, shipping_zip, pricing_format,
-                   allow_best_offer, promote)
-                VALUES
-                  (${tenant_id}, ${actor_user_id}, ${EBAY_MARKETPLACE_ID},
-                   ${e.shipping_policy}, ${e.payment_policy}, ${e.return_policy}, ${e.shipping_zip}, ${e.pricing_format},
-                   ${e.allow_best_offer}, ${e.promote})
-                ON CONFLICT (tenant_id, user_id, marketplace_id)
-                DO UPDATE SET
-                  shipping_policy = EXCLUDED.shipping_policy,
-                  payment_policy  = EXCLUDED.payment_policy,
-                  return_policy   = EXCLUDED.return_policy,
-                  shipping_zip    = EXCLUDED.shipping_zip,
-                  pricing_format  = EXCLUDED.pricing_format,
-                  allow_best_offer = EXCLUDED.allow_best_offer,
-                  promote          = EXCLUDED.promote,
-                  updated_at       = now()
-              `;
+                    INSERT INTO app.user_marketplace_defaults
+                      (tenant_id, user_id, marketplace_id,
+                       shipping_policy, payment_policy, return_policy, shipping_zip, pricing_format,
+                       allow_best_offer, promote)
+                    VALUES
+                      (${tenant_id}, ${actor_user_id}, ${EBAY_MARKETPLACE_ID},
+                       ${e.shipping_policy}, ${e.payment_policy}, ${e.return_policy}, ${e.shipping_zip}, ${e.pricing_format},
+                       ${e.allow_best_offer}, ${e.promote})
+                    ON CONFLICT (tenant_id, user_id, marketplace_id)
+                    DO UPDATE SET
+                      shipping_policy = EXCLUDED.shipping_policy,
+                      payment_policy  = EXCLUDED.payment_policy,
+                      return_policy   = EXCLUDED.return_policy,
+                      shipping_zip    = EXCLUDED.shipping_zip,
+                      pricing_format  = EXCLUDED.pricing_format,
+                      allow_best_offer = EXCLUDED.allow_best_offer,
+                      promote          = EXCLUDED.promote,
+                      updated_at       = now()
+                  `;
+                } else {
+                  // Non-eBay (e.g., Facebook): ensure a stub listing row exists with 'publishing'
+                  await sql/*sql*/`
+                    INSERT INTO app.item_marketplace_listing
+                      (item_id, tenant_id, marketplace_id, status)
+                    VALUES
+                      (${item_id}, ${tenant_id}, ${mpId}, 'publishing')
+                    ON CONFLICT (item_id, marketplace_id)
+                    DO UPDATE SET
+                      status = 'publishing',
+                      updated_at = now()
+                  `;
                 }
               }
             }
