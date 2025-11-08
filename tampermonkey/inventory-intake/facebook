@@ -71,6 +71,17 @@
   // --------------------------------------------------------------------
   // Branch B: Facebook create page — consume payload and autofill
   // --------------------------------------------------------------------
+  // Optional: accept a direct postMessage from opener as a second path
+  window.addEventListener("message", (ev) => {
+    try {
+      const data = ev.data || {};
+      if (data.type === "facebook:intake" && data.payload) {
+        savePayload(data.payload); // refresh cache in case we arrived early
+        console.log("[tm] facebook.com message → payload cached");
+      }
+    } catch {}
+  });
+
   (async function facebookAutofill() {
     const payload = takePayload();
     if (!payload) return; // nothing to do
