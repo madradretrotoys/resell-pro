@@ -269,14 +269,35 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
         };
 
         for (const r of rows) {
-          // TEMP: skip Facebook until its adapter is implemented
-          if (String(r.slug || "").toLowerCase() === "facebook") {
-            console.log("[intake] enqueue.skip_no_adapter", { marketplace_id: r.id, slug: r.slug });
+          const slug = String(r.slug || "").toLowerCase();
+          if (slug === "facebook") {
+            // Ensure stub exists so UI reflects progress
+            await sql/*sql*/`
+              INSERT INTO app.item_marketplace_listing
+                (item_id, tenant_id, marketplace_id, status)
+              VALUES
+                (${item_id}, ${tenant_id}, ${r.id}, 'publishing')
+              ON CONFLICT (item_id, marketplace_id)
+              DO UPDATE SET
+                status = 'publishing',
+                updated_at = now()
+            `;
+
+            // Emit a progress event (no server-runner for FB; browser/Tampermonkey will finish)
+            await sql/*sql*/`
+              INSERT INTO app.item_marketplace_events
+                (item_id, tenant_id, marketplace_id, kind, payload)
+              VALUES
+                (${item_id}, ${tenant_id}, ${r.id}, 'publish_started', jsonb_build_object('source','enqueue'))
+            `;
+
             continue;
           }
           
           // Pull the marketplace row (if present) to know current identifiers/status
           const iml = Array.isArray(imlRows) ? imlRows.find((x:any) => x.marketplace_id === r.id) : null;
+
+
 
           // Build canonical snapshot for this marketplace
           const snapshot = {
