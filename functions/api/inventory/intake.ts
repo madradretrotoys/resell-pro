@@ -625,7 +625,7 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
                   starting_bid = EXCLUDED.starting_bid,
                   reserve_price = EXCLUDED.reserve_price,
                   updated_at = now()
-              `    `;
+                  `;
                 }
               }
 
