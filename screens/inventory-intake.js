@@ -1677,7 +1677,8 @@ function setMarketplaceVisibility() {
             const __t1 = performance.now();
             console.log("[intake.js] facebook:intake → done", { ms: Math.round(__t1 - __t0) });
             console.groupEnd?.();
-          });
+          }, 8000);
+        });
   
 // --- Drafts refresh bus + helpers (anchored insert) ---
 let __draftsRefreshTimer = null;
