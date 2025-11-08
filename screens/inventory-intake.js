@@ -1607,33 +1607,39 @@ function setMarketplaceVisibility() {
             console.groupEnd?.();
           }
       
-        // Facebook intake flow: open FB tab and send payload to it
         document.addEventListener("intake:facebook-ready", (ev) => {
           const __t0 = performance.now();
           const payload =
             ev?.detail?.payload ||
             (typeof window.rpBuildFacebookPayload === "function" ? window.rpBuildFacebookPayload() : null);
           if (!payload) return;
-        
+
           console.groupCollapsed("[intake.js] facebook:intake → begin");
           console.log("item_id", payload.item_id);
           console.log("title", payload.title);
           console.log("images", (payload.images || []).length);
-      
-          // Try to use a stub window opened earlier (see Patch B), otherwise open now.
+
+          // 1) Same-origin handoff for Tampermonkey cache
+          try {
+            window.postMessage({ type: "RP_FACEBOOK_CREATE", payload }, location.origin);
+            console.log("[intake.js] postMessage → same-origin (RP_FACEBOOK_CREATE cached)");
+          } catch (e) {
+            console.warn("[intake.js] failed to send RP_FACEBOOK_CREATE", e);
+          }
+
+          // 2) Window handling — prefer the user-gesture stub, otherwise open now
           let fbWin = window.__rpFbWin || null;
           const FB_URL = "https://www.facebook.com/marketplace/create/item";
           console.log("[intake.js] fbWin.stub", { hasStub: !!fbWin, closed: !!fbWin?.closed });
-        
-          // If we don't have a stub, open a real tab now (may be blocked if not user-gesture)
+
           if (!fbWin || fbWin.closed) {
+            // No stub available: open now (can be blocked if not from user gesture)
             fbWin = window.open(FB_URL, "_blank", "noopener");
             const opened = !!fbWin && !fbWin.closed;
             console.log("[intake.js] open.fb →", { opened });
-        
+
             if (!opened) {
               console.warn("[intake.js] popup blocked — allow popups for resellpros.com to auto-open Facebook.");
-              // Prefer a non-blocking UI toast if available; fall back to alert as last resort.
               if (typeof window.uiToast === "function") {
                 window.uiToast("Popup blocked — please allow popups for resellpros.com, then click Save again to open Facebook.");
               } else {
@@ -1643,12 +1649,12 @@ function setMarketplaceVisibility() {
               return;
             }
           } else {
-            // Navigate the stub to the final URL
+            // Reuse the stub: navigate it after the same-origin cache is set
             console.log("reuse.stubWindow → navigate", FB_URL);
             try { fbWin.location.href = FB_URL; } catch (e) { console.warn("nav to FB_URL failed", e); }
           }
-        
-          // Send the payload to facebook.com. We’ll send a few times in case the page is still loading.
+
+          // 3) (Optional secondary path) also try direct cross-origin postMessage to facebook.com
           const post = () => {
             try {
               fbWin.postMessage({ source: "resellpro", type: "facebook:intake", payload }, "https://www.facebook.com");
@@ -1657,13 +1663,11 @@ function setMarketplaceVisibility() {
               console.warn("[intake.js] postMessage failed (retrying)", e);
             }
           };
-        
-          // initial send + retries while FB boots
+
           console.log("[intake.js] post.start");
           post();
           const t = setInterval(post, 1000);
-        
-          // Finish after retries, then close the console group and the handler
+
           setTimeout(() => {
             clearInterval(t);
             const __t1 = performance.now();
@@ -2398,6 +2402,13 @@ document.addEventListener("intake:item-changed", () => refreshInventory({ force:
               const wantsFacebook = Array.from(selectedMarketplaceIds).some(id => byId.get(Number(id)) === "facebook");
               if (wantsFacebook) {
                 window.__rpFbWin = window.open("about:blank", "_blank", "noopener");
+                try {
+                  const d = window.__rpFbWin?.document;
+                  if (d) {
+                    d.title = "Preparing Facebook…";
+                    d.body.innerHTML = "<p style='font-family:sans-serif;padding:16px'>Preparing Facebook…</p>";
+                  }
+                } catch {}
                 console.log("[intake.js] opened stub FB window", !!window.__rpFbWin);
               }
             } catch {}
