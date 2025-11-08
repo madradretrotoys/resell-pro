@@ -269,30 +269,12 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
         };
 
         for (const r of rows) {
-          const slug = String(r.slug || "").toLowerCase();
-        
-          if (slug === "facebook") {
-            // Ensure the stub exists (publishing) — harmless if already inserted above
-            await sql/*sql*/`
-              INSERT INTO app.item_marketplace_listing
-                (item_id, tenant_id, marketplace_id, status)
-              VALUES
-                (${item_id}, ${tenant_id}, ${r.id}, 'publishing')
-              ON CONFLICT (item_id, marketplace_id)
-              DO UPDATE SET status = 'publishing', updated_at = now()
-            `;
-        
-            // Emit a progress event so UI can reflect "in progress"
-            await sql/*sql*/`
-              INSERT INTO app.item_marketplace_events
-                (item_id, tenant_id, marketplace_id, kind, payload)
-              VALUES
-                (${item_id}, ${tenant_id}, ${r.id}, 'publish_started', jsonb_build_object('source','enqueue'))
-            `;
-        
-            // No adapter-run here (Tampermonkey handles publishing); proceed to next marketplace
+          // TEMP: skip Facebook until its adapter is implemented
+          if (String(r.slug || "").toLowerCase() === "facebook") {
+            console.log("[intake] enqueue.skip_no_adapter", { marketplace_id: r.id, slug: r.slug });
             continue;
           }
+          
           // Pull the marketplace row (if present) to know current identifiers/status
           const iml = Array.isArray(imlRows) ? imlRows.find((x:any) => x.marketplace_id === r.id) : null;
 
@@ -625,50 +607,32 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
                   starting_bid = EXCLUDED.starting_bid,
                   reserve_price = EXCLUDED.reserve_price,
                   updated_at = now()
-                `;
-
-                  await sql/*sql*/`
-                    INSERT INTO app.user_marketplace_defaults
-                      (tenant_id, user_id, marketplace_id,
-                       shipping_policy, payment_policy, return_policy, shipping_zip, pricing_format,
-                       allow_best_offer, promote)
-                    VALUES
-                      (${tenant_id}, ${actor_user_id}, ${EBAY_MARKETPLACE_ID},
-                       ${e.shipping_policy}, ${e.payment_policy}, ${e.return_policy}, ${e.shipping_zip}, ${e.pricing_format},
-                       ${e.allow_best_offer}, ${e.promote})
-                    ON CONFLICT (tenant_id, user_id, marketplace_id)
-                    DO UPDATE SET
-                      shipping_policy = EXCLUDED.shipping_policy,
-                      payment_policy  = EXCLUDED.payment_policy,
-                      return_policy   = EXCLUDED.return_policy,
-                      shipping_zip    = EXCLUDED.shipping_zip,
-                      pricing_format  = EXCLUDED.pricing_format,
-                      allow_best_offer = EXCLUDED.allow_best_offer,
-                      promote          = EXCLUDED.promote,
-                      updated_at       = now()
-                  `;
-                }
-              }
-
-              // NEW: Upsert Facebook listing stub when present (draft update)
-              // Expect either payload.marketplaces_selected includes "facebook" or payload.marketplace_listing.facebook present
-              if (FACEBOOK_MARKETPLACE_ID && (body?.marketplaces_selected?.includes?.("facebook") || body?.marketplace_listing?.facebook)) {
-                await sql/*sql*/`
-                  INSERT INTO app.item_marketplace_listing
-                    (item_id, tenant_id, marketplace_id, status)
-                  VALUES
-                    (${item_id}, ${tenant_id}, ${FACEBOOK_MARKETPLACE_ID}, 'publishing')
-                  ON CONFLICT (item_id, marketplace_id)
-                  DO UPDATE SET
-                    status = 'publishing',
-                    updated_at = now()
-                `;
-              }
+              `;
+              await sql/*sql*/`
+                INSERT INTO app.user_marketplace_defaults
+                  (tenant_id, user_id, marketplace_id,
+                   shipping_policy, payment_policy, return_policy, shipping_zip, pricing_format,
+                   allow_best_offer, promote)
+                VALUES
+                  (${tenant_id}, ${actor_user_id}, ${EBAY_MARKETPLACE_ID},
+                   ${e.shipping_policy}, ${e.payment_policy}, ${e.return_policy}, ${e.shipping_zip}, ${e.pricing_format},
+                   ${e.allow_best_offer}, ${e.promote})
+                ON CONFLICT (tenant_id, user_id, marketplace_id)
+                DO UPDATE SET
+                  shipping_policy = EXCLUDED.shipping_policy,
+                  payment_policy  = EXCLUDED.payment_policy,
+                  return_policy   = EXCLUDED.return_policy,
+                  shipping_zip    = EXCLUDED.shipping_zip,
+                  pricing_format  = EXCLUDED.pricing_format,
+                  allow_best_offer = EXCLUDED.allow_best_offer,
+                  promote          = EXCLUDED.promote,
+                  updated_at       = now()
+              `;
             }
           }
           
           return json({ ok: true, item_id, sku: updInv[0].sku, status, ms: Date.now() - t0 }, 200);
-        }else {
+        }
 
 
           
@@ -876,7 +840,7 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
             job_ids: job_ids_upd,
             ms: Date.now() - t0
           }, 200);
-        }}
+        }
 
 
     
