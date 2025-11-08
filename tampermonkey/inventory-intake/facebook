@@ -100,47 +100,82 @@
       return null;
     }
 
-    async function typeSlow(el, text) {
-      el.focus();
-      el.value = "";
-      el.dispatchEvent(new Event("input", { bubbles: true }));
-      for (const ch of String(text)) {
-        el.value += ch;
-        el.dispatchEvent(new Event("input", { bubbles: true }));
-        await humanPause(20, 40);
-      }
-      el.blur();
-      el.dispatchEvent(new Event("change", { bubbles: true }));
-      await humanPause(200, 400);
+    /** Write into React-controlled inputs safely */
+    function setNativeValue(el, value) {
+      const { set } = Object.getOwnPropertyDescriptor(el.__proto__, "value") || {};
+      if (set) { set.call(el, value); }
+      else { el.value = value; }
+      el.dispatchEvent(new Event("input", { bubbles: true, composed: true }));
     }
 
-    // ------- 1) upload photos -------
+    async function typeReliable(el, text) {
+      if (!el) return;
+      el.focus();
+      setNativeValue(el, "");
+      await humanPause(40, 80);
+      setNativeValue(el, String(text));
+      el.blur();
+      await humanPause(120, 200);
+    }
+
+    // Log the FULL incoming payload for debugging
+    try { console.log("[tm] incoming payload", JSON.parse(JSON.stringify(payload))); }
+    catch { console.log("[tm] incoming payload", payload); }
+
+     // ------- 1) upload photos (CORS-safe via GM_xmlhttpRequest) -------
     const fileInput =
       $('input[type="file"][accept*="image"]') ||
-      $('form input[type="file"]') ||
-      await waitFor('input[type="file"]', { timeout: 8000 });
+      await waitFor('input[type="file"][accept*="image"]', { timeout: 12000 });
+
+    // Helper: download an image blob via GM_xmlhttpRequest (bypasses page CORS)
+    function xhrBlob(url) {
+      return new Promise((resolve) => {
+        try {
+          GM_xmlhttpRequest({
+            method: "GET",
+            url,
+            responseType: "blob",
+            onload: (res) => resolve(res.response || null),
+            onerror: () => resolve(null),
+            ontimeout: () => resolve(null),
+          });
+        } catch {
+          resolve(null);
+        }
+      });
+    }
 
     if (fileInput && Array.isArray(payload.images) && payload.images.length) {
       const files = [];
-      for (const url of payload.images.slice(0, 10)) { // FB caps around 10
-        try {
-          const res = await fetch(url, { mode: "cors" }).catch(() => null);
-          if (!res || !res.ok) continue;
-          const blob = await res.blob();
-          const ext = /\.jpe?g$/i.test(url) ? "jpg" : (/\.png$/i.test(url) ? "png" : "webp");
-          const f = new File([blob], `photo_${files.length + 1}.${ext}`, { type: blob.type || `image/${ext}` });
-          files.push(f);
-          await humanPause(120, 220);
-        } catch {}
+      for (const url of payload.images.slice(0, 10)) {
+        const blob = await xhrBlob(url);
+        if (!blob) continue;
+        const ext = /\.jpe?g$/i.test(url)
+          ? "jpg"
+          : /\.png$/i.test(url)
+          ? "png"
+          : "webp";
+        const f = new File([blob], `photo_${files.length + 1}.${ext}`, {
+          type: blob.type || `image/${ext}`,
+        });
+        files.push(f);
+        await humanPause(100, 180);
       }
+
       if (files.length) {
         const dt = new DataTransfer();
         files.forEach((f) => dt.items.add(f));
         fileInput.files = dt.files;
         fileInput.dispatchEvent(new Event("change", { bubbles: true }));
-        await delay(1500); // let the previews render
+        console.log("[tm] photos attached:", files.length);
+        await delay(2000); // allow previews to render
+      } else {
+        console.warn("[tm] no photos attached (download/CORS failure)");
       }
+    } else {
+      console.warn("[tm] no fileInput or empty payload.images");
     }
+
 
     // ------- 2) title / price / description -------
     const titleBox =
