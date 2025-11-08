@@ -1157,6 +1157,26 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
       }
     }
 
+    // NEW: For any other selected marketplaces (e.g., Facebook), create a stub row now
+    {
+      const selIds: number[] = Array.isArray(body?.marketplaces_selected)
+        ? body.marketplaces_selected.map((n: any) => Number(n)).filter((n) => !Number.isNaN(n))
+        : [];
+      const otherIds = selIds.filter((id) => id !== EBAY_MARKETPLACE_ID);
+      for (const mpId of otherIds) {
+        await sql/*sql*/`
+          INSERT INTO app.item_marketplace_listing
+            (item_id, tenant_id, marketplace_id, status)
+          VALUES
+            (${item_id}, ${tenant_id}, ${mpId}, 'publishing')
+          ON CONFLICT (item_id, marketplace_id)
+          DO UPDATE SET
+            status = 'publishing',
+            updated_at = now()
+        `;
+      }
+    }
+    
    //calling the enqueue process to prepare for the marketplace publish 
    await enqueuePublishJobs(tenant_id, item_id, body, status);
     
