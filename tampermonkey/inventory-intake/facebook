@@ -53,20 +53,20 @@
   // Branch A: Intake page — listen for payload and open Facebook
   // --------------------------------------------------------------------
   if (!onFacebook) {
-    window.addEventListener("message", (ev) => {
-      try {
-        if (ev.origin !== location.origin) return;
-        const data = ev.data || {};
-        if (data.type !== "RP_FACEBOOK_CREATE" || !data.payload) return;
-        // cache for the FB tab
-        savePayload(data.payload);
-        window.open("https://www.facebook.com/marketplace/create/item", "_blank", "noopener,noreferrer");
-      } catch {}
-    });
-    return;
+      window.addEventListener("message", (ev) => {
+          try {
+              if (ev.origin !== location.origin) return;
+              const data = ev.data || {};
+              if (data.type !== "RP_FACEBOOK_CREATE" || !data.payload) return;
+              // cache for the FB tab; Intake will open the window
+              savePayload(data.payload);
+              console.log("[tm] intake message → payload cached; Intake is responsible for opening Facebook.");
+          } catch {}
+      });
+      return;
   }
-  
-    
+
+
 
   // --------------------------------------------------------------------
   // Branch B: Facebook create page — consume payload and autofill
