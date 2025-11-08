@@ -36,11 +36,12 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
       WHERE slug = 'facebook' LIMIT 1
     `;
     const FACEBOOK_ID = mprow[0]?.id ?? null;
+    console.log("[fb.callback] resolved_marketplace_id", { FACEBOOK_ID });
     if (!FACEBOOK_ID) return json({ ok:false, error:"facebook_marketplace_missing" }, 500);
-
+    
     // Upsert the listing row and set status
     if (statusIn === "live") {
-      await sql/*sql*/`
+      const res = await sql/*sql*/`
         INSERT INTO app.item_marketplace_listing
           (tenant_id, item_id, marketplace_id, status, mp_item_url, last_error, last_synced_at, updated_at, published_at)
         VALUES
@@ -53,6 +54,7 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
               updated_at = now(),
               published_at = COALESCE(app.item_marketplace_listing.published_at, now())
       `;
+      console.log("[fb.callback] upsert_live_done", { affected: Array.isArray(res) ? res.length : undefined });
       await sql/*sql*/`
         INSERT INTO app.item_marketplace_events
           (item_id, tenant_id, marketplace_id, kind, payload)
@@ -61,6 +63,7 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
       `;
       return json({ ok:true, state:"live" });
     }
+
 
     // error case
     await sql/*sql*/`
