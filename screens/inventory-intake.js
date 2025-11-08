@@ -485,11 +485,20 @@ export async function init() {
   
       document.addEventListener("intake:item-saved", async (ev) => {
       try {
+
+        console.groupCollapsed("[intake.js] intake:item-saved");
+        console.log("detail", {
+          item_id: ev?.detail?.item_id,
+          action: ev?.detail?.action,
+          save_status: ev?.detail?.save_status,
+          job_ids: ev?.detail?.job_ids
+        });
+        
         const id         = ev?.detail?.item_id;
         const saveStatus = String(ev?.detail?.save_status || "").toLowerCase(); // "active" | "draft" | "delete"
         const action     = String(ev?.detail?.action || (saveStatus === "delete" ? "delete" : "save")).toLowerCase();
         const jobIds     = Array.isArray(ev?.detail?.job_ids) ? ev.detail.job_ids : [];
-        if (!id) return;
+        if (!id) { console.warn("[intake.js] intake:item-saved missing item_id"); console.groupEnd?.(); return; }
         __currentItemId = id;
         
         
@@ -533,6 +542,8 @@ export async function init() {
 
       } catch (e) {
         console.error("photos:flush:error", e);
+      } finally {
+        console.groupEnd?.();
       }
     });
   }
@@ -1526,15 +1537,34 @@ function setMarketplaceVisibility() {
         // Only fire when: Active save, photos flushed, all publish jobs are settled,
         // AND the Facebook tile is selected, AND the Facebook listing is not already live.
         async function __emitFacebookReadyIfSafe({ saveStatus, jobIds }) {
-          if (String(saveStatus || "").toLowerCase() !== "active") return;
+          console.groupCollapsed("[intake.js] facebook:gate");
+          console.log("preconditions", {
+            saveStatus,
+            pendingFiles: (__pendingFiles && __pendingFiles.length) || 0,
+            jobIdsCount: Array.isArray(jobIds) ? jobIds.length : 0
+          });
+        
+          if (String(saveStatus || "").toLowerCase() !== "active") {
+            console.log("skip: saveStatus is not 'active'");
+            console.groupEnd?.();
+            return;
+          }
         
           // photos flushed?
-          if (__pendingFiles && __pendingFiles.length > 0) return;
+          if (__pendingFiles && __pendingFiles.length > 0) {
+            console.log("skip: pending photos not flushed yet");
+            console.groupEnd?.();
+            return;
+          }
         
           // runner quiet?
           if (Array.isArray(jobIds) && jobIds.length > 0) {
             const anyRunning = document.querySelector('[data-status-text]')?.textContent?.match(/Publishing|Deleting/i);
-            if (anyRunning) return;
+            if (anyRunning) {
+              console.log("skip: publish runner still active");
+              console.groupEnd?.();
+              return;
+            }
           }
         
           // is Facebook selected?
@@ -1547,47 +1577,93 @@ function setMarketplaceVisibility() {
             }
             return false;
           })();
-          if (!isFacebookSelected) return;
+          if (!isFacebookSelected) {
+            console.log("skip: Facebook tile not selected");
+            console.groupEnd?.();
+            return;
+          }
         
           // not already live?
           if (__currentItemId) {
             try {
               const snap = await api(`/api/inventory/intake?item_id=${encodeURIComponent(__currentItemId)}`, { method: "GET" });
               const live = String(snap?.marketplace_listing?.facebook?.status || "").toLowerCase() === "live";
-              if (live) return; // nothing to do
-            } catch {}
+              console.log("existing fb status", { live, status: snap?.marketplace_listing?.facebook?.status });
+              if (live) { console.log("skip: already live"); console.groupEnd?.(); return; }
+            } catch (e) {
+              console.warn("fb status check failed", e);
+            }
           }
         
           const payload = window.rpBuildFacebookPayload();
-          document.dispatchEvent(new CustomEvent("intake:facebook-ready", {
-            detail: { item_id: __currentItemId || null, payload }
-          }));
-        }
-      
-        // Bridge the CustomEvent to Tampermonkey via postMessage (Facebook fill flow)
-      document.addEventListener("intake:facebook-ready", (ev) => {
-        try {
-          const payload = ev?.detail?.payload || (typeof window.rpBuildFacebookPayload === "function" ? window.rpBuildFacebookPayload() : null);
-          if (!payload) return;
-      
-          // Consumed by the Facebook userscript (@match .../main/...).
-          window.postMessage(
-            { source: "resellpro", type: "facebook:intake", payload },
-            "*"
-          );
-      
-          // Helpful diagnostics in DevTools
-          try {
-            console.groupCollapsed("[intake.js] posted facebook:intake");
-            console.log("item_id", payload.item_id);
-            console.log("title", payload.title);
-            console.log("images", (payload.images || []).length);
+            console.log("dispatch intake:facebook-ready", {
+              item_id: __currentItemId || null,
+              title: payload?.title,
+              images: (payload?.images || []).length
+            });
+            document.dispatchEvent(new CustomEvent("intake:facebook-ready", {
+              detail: { item_id: __currentItemId || null, payload }
+            }));
             console.groupEnd?.();
-          } catch {}
-        } catch (e) {
-          console.warn("facebook:postMessage:failed", e);
-        }
-      });
+          }
+      
+        // Facebook intake flow: open FB tab and send payload to it
+        document.addEventListener("intake:facebook-ready", (ev) => {
+          const payload =
+            ev?.detail?.payload ||
+            (typeof window.rpBuildFacebookPayload === "function" ? window.rpBuildFacebookPayload() : null);
+          if (!payload) { console.warn("[intake.js] facebook:intake → missing payload"); return; }
+        
+          console.groupCollapsed("[intake.js] facebook:intake → begin");
+          console.log("payload.summary", {
+            item_id: payload.item_id,
+            title: payload.title,
+            images: (payload.images || []).length,
+            created_at: payload.created_at
+          });
+          try { window.__rpFbLastPayload = payload; } catch {}
+        
+          // Try to use a stub window opened earlier (see Patch B), otherwise open now.
+          let fbWin = window.__rpFbWin || null;
+          const FB_URL = "https://www.facebook.com/marketplace/create/item";
+        
+          // If we don't have a stub, open a real tab now (may be blocked if not user-gesture)
+          if (!fbWin || fbWin.closed) {
+            fbWin = window.open(FB_URL, "_blank", "noopener");
+            console.log("open.fbWin", { opened: !!fbWin });
+            if (!fbWin) {
+              console.warn("[intake.js] popup blocked — user must allow popups for this site.");
+              console.groupEnd?.();
+              alert("Your browser blocked the Facebook tab. Please allow popups for resellpros.com and try again.");
+              return;
+            }
+          } else {
+            // Navigate the stub to the final URL
+            console.log("reuse.stubWindow → navigate", FB_URL);
+            try { fbWin.location.href = FB_URL; } catch (e) { console.warn("nav to FB_URL failed", e); }
+          }
+        
+          // Send the payload to facebook.com. We’ll send a few times in case the page is still loading.
+          const post = () => {
+            try {
+              fbWin.postMessage({ source: "resellpro", type: "facebook:intake", payload }, "https://www.facebook.com");
+              console.log("[intake.js] postMessage → facebook.com (queued)");
+            } catch (e) {
+              console.warn("[intake.js] postMessage failed (retrying)", e);
+            }
+          };
+        
+          // initial send + retries while FB boots
+          let attempts = 0;
+          const send = () => { attempts += 1; post(); };
+          send();
+          const t = setInterval(send, 1000);
+          setTimeout(() => {
+            clearInterval(t);
+            console.log("[intake.js] postMessage retries complete", { attempts });
+            console.groupEnd?.();
+          }, 8000);
+        });
   
 // --- Drafts refresh bus + helpers (anchored insert) ---
 let __draftsRefreshTimer = null;
@@ -2307,6 +2383,18 @@ document.addEventListener("intake:item-changed", () => refreshInventory({ force:
           e.preventDefault();
           try {
             btn.disabled = true;
+      
+            // If Facebook tile is selected, open a stub window now (user gesture) to avoid popup blocking.
+            try {
+              const rows = (__metaCache?.marketplaces || []);
+              const byId = new Map(rows.map(r => [Number(r.id), String(r.slug || "").toLowerCase()]));
+              const wantsFacebook = Array.from(selectedMarketplaceIds).some(id => byId.get(Number(id)) === "facebook");
+              if (wantsFacebook) {
+                window.__rpFbWin = window.open("about:blank", "_blank", "noopener");
+                console.log("[intake.js] opened stub FB window", !!window.__rpFbWin);
+              }
+            } catch {}
+      
             await submitIntake("active");
           } catch (err) {
             console.error("intake:submit:error", err);
