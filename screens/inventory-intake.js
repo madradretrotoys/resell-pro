@@ -1662,11 +1662,13 @@ function setMarketplaceVisibility() {
           console.log("[intake.js] post.start");
           post();
           const t = setInterval(post, 1000);
-          setTimeout(() => clearInterval(t), 8000);
         
-          const __t1 = performance.now();
-          console.log("[intake.js] facebook:intake → done", { ms: Math.round(__t1 - __t0) });
-          console.groupEnd?.
+          // Finish after retries, then close the console group and the handler
+          setTimeout(() => {
+            clearInterval(t);
+            const __t1 = performance.now();
+            console.log("[intake.js] facebook:intake → done", { ms: Math.round(__t1 - __t0) });
+            console.groupEnd?.();
           }, 8000);
         });
   
