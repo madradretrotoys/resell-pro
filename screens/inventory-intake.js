@@ -1609,32 +1609,37 @@ function setMarketplaceVisibility() {
       
         // Facebook intake flow: open FB tab and send payload to it
         document.addEventListener("intake:facebook-ready", (ev) => {
+          const __t0 = performance.now();
           const payload =
             ev?.detail?.payload ||
             (typeof window.rpBuildFacebookPayload === "function" ? window.rpBuildFacebookPayload() : null);
-          if (!payload) { console.warn("[intake.js] facebook:intake → missing payload"); return; }
+          if (!payload) return;
         
           console.groupCollapsed("[intake.js] facebook:intake → begin");
-          console.log("payload.summary", {
-            item_id: payload.item_id,
-            title: payload.title,
-            images: (payload.images || []).length,
-            created_at: payload.created_at
-          });
-          try { window.__rpFbLastPayload = payload; } catch {}
-        
+          console.log("item_id", payload.item_id);
+          console.log("title", payload.title);
+          console.log("images", (payload.images || []).length);
+      
           // Try to use a stub window opened earlier (see Patch B), otherwise open now.
           let fbWin = window.__rpFbWin || null;
           const FB_URL = "https://www.facebook.com/marketplace/create/item";
+          console.log("[intake.js] fbWin.stub", { hasStub: !!fbWin, closed: !!fbWin?.closed });
         
           // If we don't have a stub, open a real tab now (may be blocked if not user-gesture)
           if (!fbWin || fbWin.closed) {
             fbWin = window.open(FB_URL, "_blank", "noopener");
-            console.log("open.fbWin", { opened: !!fbWin });
-            if (!fbWin) {
-              console.warn("[intake.js] popup blocked — user must allow popups for this site.");
+            const opened = !!fbWin && !fbWin.closed;
+            console.log("[intake.js] open.fb →", { opened });
+        
+            if (!opened) {
+              console.warn("[intake.js] popup blocked — allow popups for resellpros.com to auto-open Facebook.");
+              // Prefer a non-blocking UI toast if available; fall back to alert as last resort.
+              if (typeof window.uiToast === "function") {
+                window.uiToast("Popup blocked — please allow popups for resellpros.com, then click Save again to open Facebook.");
+              } else {
+                alert("Popup blocked — please allow popups for resellpros.com, then click Save again to open Facebook.");
+              }
               console.groupEnd?.();
-              alert("Your browser blocked the Facebook tab. Please allow popups for resellpros.com and try again.");
               return;
             }
           } else {
@@ -1654,14 +1659,14 @@ function setMarketplaceVisibility() {
           };
         
           // initial send + retries while FB boots
-          let attempts = 0;
-          const send = () => { attempts += 1; post(); };
-          send();
-          const t = setInterval(send, 1000);
-          setTimeout(() => {
-            clearInterval(t);
-            console.log("[intake.js] postMessage retries complete", { attempts });
-            console.groupEnd?.();
+          console.log("[intake.js] post.start");
+          post();
+          const t = setInterval(post, 1000);
+          setTimeout(() => clearInterval(t), 8000);
+        
+          const __t1 = performance.now();
+          console.log("[intake.js] facebook:intake → done", { ms: Math.round(__t1 - __t0) });
+          console.groupEnd?.
           }, 8000);
         });
   
