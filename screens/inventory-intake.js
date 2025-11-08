@@ -1524,13 +1524,18 @@ function setMarketplaceVisibility() {
             })
             .map(x => String(x.cdn_url || ""))     // cdn_url persisted by server
             .filter(Boolean);
-        
-          return {
+          
+          const payload = {
             title, price, qty, availability, category, condition, description,
             images: ordered,
-            // include an id for traceability + basic sanity info for the userscript
             item_id: __currentItemId || null,
             created_at: Date.now()
+          };
+          
+          // ✅ FULL payload log for debugging
+            try { console.log("[intake.js] facebook payload", JSON.parse(JSON.stringify(payload))); } catch { console.log("[intake.js] facebook payload", payload); }
+          
+            return payload;
           };
         };
         
@@ -1607,17 +1612,15 @@ function setMarketplaceVisibility() {
             console.groupEnd?.();
           }
       
-        document.addEventListener("intake:facebook-ready", (ev) => {
-          const __t0 = performance.now();
-          const payload =
-            ev?.detail?.payload ||
-            (typeof window.rpBuildFacebookPayload === "function" ? window.rpBuildFacebookPayload() : null);
-          if (!payload) return;
-
-          console.groupCollapsed("[intake.js] facebook:intake → begin");
-          console.log("item_id", payload.item_id);
-          console.log("title", payload.title);
-          console.log("images", (payload.images || []).length);
+          document.addEventListener("intake:facebook-ready", (ev) => {
+            const __t0 = performance.now();
+            const payload =
+              ev?.detail?.payload ||
+              (typeof window.rpBuildFacebookPayload === "function" ? window.rpBuildFacebookPayload() : null);
+            if (!payload) return;
+        
+            console.groupCollapsed("[intake.js] facebook:intake → begin");
+            console.log("[intake.js] payload echo", payload);   // keep an echo here too
 
           // 1) Same-origin handoff for Tampermonkey cache
           try {
