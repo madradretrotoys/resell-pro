@@ -269,12 +269,30 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
         };
 
         for (const r of rows) {
-          // TEMP: skip Facebook until its adapter is implemented
-          if (String(r.slug || "").toLowerCase() === "facebook") {
-            console.log("[intake] enqueue.skip_no_adapter", { marketplace_id: r.id, slug: r.slug });
+          const slug = String(r.slug || "").toLowerCase();
+        
+          if (slug === "facebook") {
+            // Ensure the stub exists (publishing) — harmless if already inserted above
+            await sql/*sql*/`
+              INSERT INTO app.item_marketplace_listing
+                (item_id, tenant_id, marketplace_id, status)
+              VALUES
+                (${item_id}, ${tenant_id}, ${r.id}, 'publishing')
+              ON CONFLICT (item_id, marketplace_id)
+              DO UPDATE SET status = 'publishing', updated_at = now()
+            `;
+        
+            // Emit a progress event so UI can reflect "in progress"
+            await sql/*sql*/`
+              INSERT INTO app.item_marketplace_events
+                (item_id, tenant_id, marketplace_id, event_type, meta)
+              VALUES
+                (${item_id}, ${tenant_id}, ${r.id}, 'publish_started', jsonb_build_object('source','enqueue'))
+            `;
+        
+            // No adapter-run here (Tampermonkey handles publishing); proceed to next marketplace
             continue;
           }
-          
           // Pull the marketplace row (if present) to know current identifiers/status
           const iml = Array.isArray(imlRows) ? imlRows.find((x:any) => x.marketplace_id === r.id) : null;
 
@@ -607,7 +625,24 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
                   starting_bid = EXCLUDED.starting_bid,
                   reserve_price = EXCLUDED.reserve_price,
                   updated_at = now()
-              `;
+              `    `;
+                }
+              }
+
+              // NEW: Upsert Facebook listing stub when present (draft create)
+              // Expect either payload.marketplaces_selected includes "facebook" or payload.marketplace_listing.facebook present
+              if (FACEBOOK_MARKETPLACE_ID && (body?.marketplaces_selected?.includes?.("facebook") || body?.marketplace_listing?.facebook)) {
+                await sql/*sql*/`
+                  INSERT INTO app.item_marketplace_listing
+                    (item_id, tenant_id, marketplace_id, status)
+                  VALUES
+                    (${item_id}, ${tenant_id}, ${FACEBOOK_MARKETPLACE_ID}, 'publishing')
+                  ON CONFLICT (item_id, marketplace_id)
+                  DO UPDATE SET
+                    status = 'publishing',
+                    updated_at = now()
+                `;
+              }
               await sql/*sql*/`
                 INSERT INTO app.user_marketplace_defaults
                   (tenant_id, user_id, marketplace_id,
