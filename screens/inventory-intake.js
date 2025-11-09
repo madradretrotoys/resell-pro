@@ -1544,18 +1544,58 @@ function setMarketplaceVisibility() {
 
         // Build the payload the Tampermonkey script will send to Facebook.
         window.rpBuildFacebookPayload = function rpBuildFacebookPayload() {
+
+          // 0) Resolve tenant (stashed during init)
+          const tenant_id =
+            (typeof window.__tenantId === "string" && window.__tenantId) ||
+            (typeof window.ACTIVE_TENANT_ID === "string" && window.ACTIVE_TENANT_ID) ||
+            "";
+          
           // 1) title / price / qty
           const titleEl = document.getElementById("titleInput") || findControlByLabel("Item Name / Description");
           const priceEl = document.getElementById("priceInput") || findControlByLabel("Price (USD)");
           const qtyEl   = document.getElementById("qtyInput")   || findControlByLabel("Qty");
-        
+          
           const title = String(titleEl?.value || "").trim();
           const price = Number(priceEl?.value || 0) || 0;
           const qty   = Math.max(0, parseInt(qtyEl?.value || "0", 10) || 0);
+
+          // 2) Prefer the server snapshot’s composed description
+          let composed = "";
+          try {
+            if (__currentItemId) {
+              const snap = await api(`/api/inventory/intake?item_id=${encodeURIComponent(__currentItemId)}`, { method: "GET" });
+              const fromDb = String(snap?.item_listing_profile?.product_description || "");
+              if (fromDb) composed = fromDb;
+            }
+          } catch { /* fallback below */ }
         
-          // 2) long description (listing profile field on the screen)
-          const descEl = document.getElementById("longDescriptionTextarea") || findControlByLabel("Long Description");
-          let description = String(descEl?.value || "").trim();
+          // 2b) Fallback: reconstruct locally to match server rules if needed
+          if (!composed) {
+            const BASE_SENTENCE =
+              "The photos are part of the description. Be sure to look them over for condition and details. This is sold as is, and it's ready for a new home.";
+        
+            const ensureBaseOnce = (t) => {
+              const v = String(t || "").trim();
+              if (!v) return BASE_SENTENCE;
+              return v.includes(BASE_SENTENCE) ? v : `${BASE_SENTENCE}${v ? "\n\n" + v : ""}`;
+            };
+        
+            const descEl = document.getElementById("longDescriptionTextarea") || findControlByLabel("Long Description");
+            const raw = String(descEl?.value || "").trim();
+            let body = ensureBaseOnce(raw);
+            if (title && !body.startsWith(title)) body = `${title}\n\n${body}`;
+        
+            // Best-effort footer from visible fields (server guarantees this when Active)
+            const sku = (window.__lastKnownSku || "").trim(); // optional (if you stash it elsewhere)
+            const loc = (findControlByLabel("Store Location")?.value || "").trim();
+            const cbs = (findControlByLabel("Case#/Bin#/Shelf#")?.value || "").trim();
+            if (sku) {
+              const footerLine = `SKU: ${sku} • Location: ${loc || "—"} • Case/Bin/Shelf: ${cbs || "—"}`;
+              body = `${body}\n\n${footerLine}`;
+            }
+            composed = body;
+          }
         
           // 3) append store footer lines (Facebook-specific)
           const footer =
@@ -1585,7 +1625,7 @@ function setMarketplaceVisibility() {
             .filter(Boolean);
         
           const payload = {
-            title, price, qty, availability, category, condition, description,
+            tenant_id, title, price, qty, availability, category, condition, description,
             images: ordered,
             item_id: __currentItemId || null,
             created_at: Date.now()
