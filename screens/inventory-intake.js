@@ -1543,7 +1543,7 @@ function setMarketplaceVisibility() {
         /* === Facebook handoff helpers (NEW) === */
 
         // Build the payload the Tampermonkey script will send to Facebook.
-        window.rpBuildFacebookPayload = function rpBuildFacebookPayload() {
+        window.rpBuildFacebookPayload = async function rpBuildFacebookPayload() {
 
           // 0) Resolve tenant (stashed during init)
           const tenant_id =
