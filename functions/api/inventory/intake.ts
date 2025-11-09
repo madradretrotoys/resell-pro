@@ -1072,7 +1072,15 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
         }
       }
       
-      return json({ ok: true, item_id, sku: null, status: 'draft', ms: Date.now() - t0 }, 200);
+      const token = await signCallbackToken(tenant_id, item_id, String(env.JWT_SECRET));
+      return json({
+        ok: true,
+        item_id,
+        sku: null,
+        status: 'draft',
+        facebook_callback_token: token,
+        ms: Date.now() - t0
+      }, 200);
     }
 
 
@@ -1239,6 +1247,7 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
 
     const job_ids = Array.isArray(enqueued) ? enqueued.map((r: any) => String(r.job_id)) : [];
 
+    const token = await signCallbackToken(tenant_id, item_id, String(env.JWT_SECRET));
     return json({
       ok: true,
       item_id,
@@ -1246,6 +1255,7 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
       status,
       published: false,
       job_ids,
+      facebook_callback_token: token,
       ms: Date.now() - t0
     }, 200);
 
