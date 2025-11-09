@@ -18,6 +18,21 @@ function readCookie(header: string, name: string): string | null {
   return null;
 }
 
+// --- Facebook callback token (HS256, short-lived) ---
+async function signCallbackToken(tenant: string, item: string, secret: string) {
+  const enc = new TextEncoder();
+  const header  = btoa(JSON.stringify({ alg:"HS256", typ:"JWT" }))
+    .replace(/\+/g,"-").replace(/\//g,"_").replace(/=+$/,"");
+  const payload = btoa(JSON.stringify({ t: tenant, i: item, x: Date.now() + (10 * 60 * 1000) })) // 10 min
+    .replace(/\+/g,"-").replace(/\//g,"_").replace(/=+$/,"");
+  const toSign = `${header}.${payload}`;
+  const key = await crypto.subtle.importKey("raw", enc.encode(secret), { name:"HMAC", hash:"SHA-256" }, false, ["sign"]);
+  const sig = await crypto.subtle.sign("HMAC", key, enc.encode(toSign));
+  const b = Array.from(new Uint8Array(sig)).map(x => String.fromCharCode(x)).join("");
+  const s = btoa(b).replace(/\+/g,"-").replace(/\//g,"_").replace(/=+$/,"");
+  return `${toSign}.${s}`;
+}
+
 // Minimal HS256 verify (same pattern as other API files)
 async function verifyJwt(token: string, secret: string): Promise<any> {
   const enc = new TextEncoder();
@@ -652,7 +667,15 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
             }
           }
           
-          return json({ ok: true, item_id, sku: updInv[0].sku, status, ms: Date.now() - t0 }, 200);
+          const token = await signCallbackToken(tenant_id, item_id, String(env.JWT_SECRET));
+          return json({
+            ok: true,
+            item_id,
+            sku: updInv[0].sku,
+            status,
+            facebook_callback_token: token,
+            ms: Date.now() - t0
+          }, 200);
         }
 
 
@@ -865,6 +888,7 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
           `;
           const job_ids_upd = Array.isArray(enqueuedUpd) ? enqueuedUpd.map((r: any) => String(r.job_id)) : [];
 
+          const token = await signCallbackToken(tenant_id, item_id, String(env.JWT_SECRET));
           return json({
             ok: true,
             item_id,
@@ -872,6 +896,7 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
             status,
             published: false,
             job_ids: job_ids_upd,
+            facebook_callback_token: token,
             ms: Date.now() - t0
           }, 200);
         }
