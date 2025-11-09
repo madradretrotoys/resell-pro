@@ -1627,11 +1627,17 @@ function setMarketplaceVisibility() {
             .map(x => String(x.cdn_url || ""))
             .filter(Boolean);
         
+          if (!tenant_id) {
+            console.warn("[intake.js] facebook handoff blocked: missing tenant_id");
+            return null; // upstream caller should no-op when null
+          }
+          
           const payload = {
             tenant_id, title, price, qty, availability, category, condition, description,
             images: ordered,
             item_id: __currentItemId || null,
-            created_at: Date.now()
+            created_at: Date.now(),
+            token: window.__fbCallbackToken || "" // NEW: short-lived server-signed token
           };
         
           // ✅ FULL payload log for debugging
@@ -2447,10 +2453,13 @@ document.addEventListener("intake:item-changed", () => refreshInventory({ force:
         headers: { "content-type": "application/json" },
       });
       
-      // DEBUG (short): confirm server accepted and returned item_id/status
       if (res?.ok) {
         console.log("[intake] server.ok item_id=", res.item_id, "status=", res.status);
+        if (res.facebook_callback_token) {
+          window.__fbCallbackToken = String(res.facebook_callback_token);
+        }
       }
+       
       // Log non-OK responses with full context before throwing
       if (!res || res.ok === false) {
         try {
