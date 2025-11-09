@@ -1543,7 +1543,7 @@ function setMarketplaceVisibility() {
         /* === Facebook handoff helpers (NEW) === */
 
         // Build the payload the Tampermonkey script will send to Facebook.
-        window.rpBuildFacebookPayload = async function rpBuildFacebookPayload() {
+        window.rpBuildFacebookPayload = function rpBuildFacebookPayload() {
 
           // 0) Resolve tenant (stashed during init)
           const tenant_id =
@@ -1564,7 +1564,7 @@ function setMarketplaceVisibility() {
           let composed = "";
           try {
             if (__currentItemId) {
-              const snap = await api(`/api/inventory/intake?item_id=${encodeURIComponent(__currentItemId)}`, { method: "GET" });
+              const snap = api(`/api/inventory/intake?item_id=${encodeURIComponent(__currentItemId)}`, { method: "GET" });
               const fromDb = String(snap?.item_listing_profile?.product_description || "");
               if (fromDb) composed = fromDb;
             }
