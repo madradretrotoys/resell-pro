@@ -1545,11 +1545,13 @@ function setMarketplaceVisibility() {
         // Build the payload the Tampermonkey script will send to Facebook.
         window.rpBuildFacebookPayload = function rpBuildFacebookPayload() {
 
-          // 0) Resolve tenant (stashed during init)
-          const tenant_id =
+          // 0) Resolve tenant (stashed during init) with robust fallbacks
+          const tenant_id = 
             (typeof window.__tenantId === "string" && window.__tenantId) ||
             (typeof window.ACTIVE_TENANT_ID === "string" && window.ACTIVE_TENANT_ID) ||
-            "";
+            (document.querySelector('meta[name="x-tenant-id"]')?.getAttribute?.("content") || "") ||
+            (document.documentElement.getAttribute("data-tenant-id") || "") ||
+            (localStorage.getItem("rp:tenant_id") || "");
           
           // 1) title / price / qty
           const titleEl = document.getElementById("titleInput") || findControlByLabel("Item Name / Description");
@@ -1560,36 +1562,36 @@ function setMarketplaceVisibility() {
           const price = Number(priceEl?.value || 0) || 0;
           const qty   = Math.max(0, parseInt(qtyEl?.value || "0", 10) || 0);
 
-          // 2) Prefer the server snapshot’s composed description
+          // 2) Prefer the server snapshot’s composed description (cached by __emitFacebookReadyIfSafe)
           let composed = "";
           try {
-            if (__currentItemId) {
-              const snap = api(`/api/inventory/intake?item_id=${encodeURIComponent(__currentItemId)}`, { method: "GET" });
-              const fromDb = String(snap?.item_listing_profile?.product_description || "");
-              if (fromDb) composed = fromDb;
-            }
+            const snap = (window && window.__intakeSnap) || null;
+            const fromDb = String(snap?.item_listing_profile?.product_description || "");
+            if (fromDb) composed = fromDb;
           } catch { /* fallback below */ }
         
           // 2b) Fallback: reconstruct locally to match server rules if needed
           if (!composed) {
             const BASE_SENTENCE =
               "The photos are part of the description. Be sure to look them over for condition and details. This is sold as is, and it's ready for a new home.";
-        
+          
             const ensureBaseOnce = (t) => {
               const v = String(t || "").trim();
               if (!v) return BASE_SENTENCE;
               return v.includes(BASE_SENTENCE) ? v : `${BASE_SENTENCE}${v ? "\n\n" + v : ""}`;
             };
-        
+          
             const descEl = document.getElementById("longDescriptionTextarea") || findControlByLabel("Long Description");
             const raw = String(descEl?.value || "").trim();
             let body = ensureBaseOnce(raw);
             if (title && !body.startsWith(title)) body = `${title}\n\n${body}`;
-        
-            // Best-effort footer from visible fields (server guarantees this when Active)
-            const sku = (window.__lastKnownSku || "").trim(); // optional (if you stash it elsewhere)
-            const loc = (findControlByLabel("Store Location")?.value || "").trim();
-            const cbs = (findControlByLabel("Case#/Bin#/Shelf#")?.value || "").trim();
+          
+            // Footer from cached snapshot or visible fields
+            const snap = (window && window.__intakeSnap) || null;
+            const sku = String((snap?.inventory?.sku ?? window.__lastKnownSku ?? "") || "").trim();
+            const loc = String((snap?.inventory?.instore_loc ?? findControlByLabel("Store Location")?.value ?? "") || "").trim();
+            const cbs = String((snap?.inventory?.case_bin_shelf ?? findControlByLabel("Case#/Bin#/Shelf#")?.value ?? "") || "").trim();
+          
             if (sku) {
               const footerLine = `SKU: ${sku} • Location: ${loc || "—"} • Case/Bin/Shelf: ${cbs || "—"}`;
               body = `${body}\n\n${footerLine}`;
@@ -1696,6 +1698,10 @@ function setMarketplaceVisibility() {
           if (__currentItemId) {
             try {
               const snap = await api(`/api/inventory/intake?item_id=${encodeURIComponent(__currentItemId)}`, { method: "GET" });
+              // cache the full snapshot so rpBuildFacebookPayload can read description synchronously
+              window.__intakeSnap = snap;
+              // keep a last-known SKU around for local fallback builders
+              try { window.__lastKnownSku = String(snap?.inventory?.sku || ""); } catch {}
               const live = String(snap?.marketplace_listing?.facebook?.status || "").toLowerCase() === "live";
               console.log("existing fb status", { live, status: snap?.marketplace_listing?.facebook?.status });
               if (live) { console.log("skip: already live"); console.groupEnd?.(); return; }
