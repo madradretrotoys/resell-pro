@@ -1598,6 +1598,7 @@ function setMarketplaceVisibility() {
           }
         
           // 3) append store footer lines (Facebook-specific)
+          let description = composed;
           const footer =
             "Mad Rad Retro Toys\n" +
             "5026 Kipling Street\n" +
