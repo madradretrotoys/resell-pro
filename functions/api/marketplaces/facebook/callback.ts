@@ -9,6 +9,7 @@ const json = (data: any, status = 200) =>
       "cache-control": "no-store",
       // Lightweight CORS so Tampermonkey on facebook.com can POST here
       "access-control-allow-origin": "*",
+      "access-control-allow-headers": "content-type, authorization",
     },
   });
 
@@ -23,9 +24,42 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
     const statusIn    = String(body?.status || "").trim().toLowerCase(); // 'live' | 'error'
     const remote_url  = (body?.remote_url ? String(body.remote_url) : null);
     const error_msg   = (body?.message ? String(body.message).slice(0, 500) : null);
+    const tokenIn     = String(body?.token || "").trim(); // NEW: HMAC/JWT-style callback token
 
     if (!tenant_id || !item_id || !statusIn || !["live","error"].includes(statusIn)) {
       return json({ ok:false, error:"bad_payload" }, 400);
+    }
+
+    // Soft-tolerant verification: if token is provided, verify; if missing, allow but tag as 'unauth'
+    if (tokenIn) {
+      try {
+        const enc = new TextEncoder();
+        const [h, p, s] = tokenIn.split(".");
+        if (!h || !p || !s) throw new Error("bad_token");
+        const b64urlToBytes = (str: string) => {
+          const pad = "=".repeat((4 - (str.length % 4)) % 4);
+          const b64 = (str + pad).replace(/-/g, "+").replace(/_/g, "/");
+          const bin = atob(b64);
+          return Uint8Array.from(bin, (c) => c.charCodeAt(0));
+        };
+        const data = `${h}.${p}`;
+        const key  = await crypto.subtle.importKey(
+          "raw",
+          enc.encode(String(env.JWT_SECRET)),
+          { name: "HMAC", hash: "SHA-256" },
+          false,
+          ["verify"]
+        );
+        const ok = await crypto.subtle.verify("HMAC", key, b64urlToBytes(s), new TextEncoder().encode(data));
+        if (!ok) throw new Error("bad_sig");
+        const payload = JSON.parse(new TextDecoder().decode(b64urlToBytes(p)));
+        if (!payload || payload.t !== tenant_id || payload.i !== item_id) throw new Error("mismatch");
+        if (payload.x && Date.now() > Number(payload.x)) throw new Error("expired");
+      } catch (e) {
+        return json({ ok:false, error:"invalid_token" }, 401);
+      }
+    } else {
+      console.warn("[fb.callback] no token provided — accepting for now (unauth path)");
     }
 
     const sql = neon(String(env.DATABASE_URL));
