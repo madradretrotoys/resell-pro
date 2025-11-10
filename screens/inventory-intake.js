@@ -1683,8 +1683,21 @@ function setMarketplaceVisibility() {
             .map(x => String(x.cdn_url || ""))
             .filter(Boolean);
         
+          // Resolve SKU from the server snapshot first; fall back to any visible UI echo.
+          const sku = (() => {
+            try {
+              const snap = (window && window.__intakeSnap) || null;
+              const v = snap?.inventory?.sku;
+              if (v) return String(v).trim();
+            } catch {}
+            const out = document.querySelector("[data-sku-out]")?.textContent;
+            if (out) return String(out).trim();
+            return String(window.__lastKnownSku || "").trim();
+          })();
+          
           const payload = {
             tenant_id, title, price, qty, availability, category, condition, description,
+            sku, // <-- added
             images: ordered,
             item_id: __currentItemId || null,
             created_at: Date.now()
