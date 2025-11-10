@@ -1732,64 +1732,101 @@ function setMarketplaceVisibility() {
               console.groupCollapsed("[intake.js] facebook:intake → begin");
               setFacebookStatus("Publishing…", { tone: "info" });
               console.log("[intake.js] payload echo", payload);   // keep an echo here too
-
-          // 1) Same-origin handoff for Tampermonkey cache
-          try {
-            window.postMessage({ type: "RP_FACEBOOK_CREATE", payload }, location.origin);
-            console.log("[intake.js] postMessage → same-origin (RP_FACEBOOK_CREATE cached)");
-          } catch (e) {
-            console.warn("[intake.js] failed to send RP_FACEBOOK_CREATE", e);
-          }
-
-          // 2) Window handling — prefer the user-gesture stub, otherwise open now
-          let fbWin = window.__rpFbWin || null;
-          const FB_URL = "https://www.facebook.com/marketplace/create/item";
-          console.log("[intake.js] fbWin.stub", { hasStub: !!fbWin, closed: !!fbWin?.closed });
-
-          if (!fbWin || fbWin.closed) {
-            // No stub available: try to open now (still may be blocked without a user gesture)
-            fbWin = window.open(FB_URL, "_blank", "popup=1");  // no 'noopener'
-            const opened = !!fbWin && !fbWin.closed;
-            console.log("[intake.js] open.fb →", { opened });
-          
-            if (!opened) {
-              console.warn("[intake.js] popup blocked — allow popups for resellpros.com to auto-open Facebook.");
-              if (typeof window.uiToast === "function") {
-                window.uiToast("Popup blocked — please allow popups for resellpros.com, then click Save again to open Facebook.");
-              } else {
-                // fall back to non-blocking console notice instead of alert
-                console.log("Popup blocked — please allow popups for resellpros.com, then click Save again to open Facebook.");
-              }
-              console.groupEnd?.();
-              return;
-            }
-          } else {
-            // Reuse the stub we opened on the user click
-            console.log("reuse.stubWindow → navigate", FB_URL);
-            try { fbWin.location.href = FB_URL; } catch (e) { console.warn("nav to FB_URL failed", e); }
-          }
-
-          // 3) (Optional secondary path) also try direct cross-origin postMessage to facebook.com
-          const post = () => {
+              // Kick a short, one-time poll while the FB tab runs (max ~15s)
+              (function pollForFlipOnce() {
+                let ticks = 0;
+                const t = setInterval(async () => {
+                  try { await refreshFacebookTile(); } catch {}
+                  if (++ticks >= 15) clearInterval(t);
+                }, 1000);
+              })();
+            // 1) Same-origin handoff for Tampermonkey cache
             try {
-              fbWin.postMessage({ source: "resellpro", type: "facebook:intake", payload }, "https://www.facebook.com");
-              console.log("[intake.js] postMessage → facebook.com (queued)");
+              window.postMessage({ type: "RP_FACEBOOK_CREATE", payload }, location.origin);
+              console.log("[intake.js] postMessage → same-origin (RP_FACEBOOK_CREATE cached)");
             } catch (e) {
-              console.warn("[intake.js] postMessage failed (retrying)", e);
+              console.warn("[intake.js] failed to send RP_FACEBOOK_CREATE", e);
             }
-          };
 
-          console.log("[intake.js] post.start");
-          post();
-          const t = setInterval(post, 1000);
-
-          setTimeout(() => {
-            clearInterval(t);
-            const __t1 = performance.now();
-            console.log("[intake.js] facebook:intake → done", { ms: Math.round(__t1 - __t0) });
-            console.groupEnd?.();
-          }, 8000);
+            // 2) Window handling — prefer the user-gesture stub, otherwise open now
+            let fbWin = window.__rpFbWin || null;
+            const FB_URL = "https://www.facebook.com/marketplace/create/item";
+            console.log("[intake.js] fbWin.stub", { hasStub: !!fbWin, closed: !!fbWin?.closed });
+  
+            if (!fbWin || fbWin.closed) {
+              // No stub available: try to open now (still may be blocked without a user gesture)
+              fbWin = window.open(FB_URL, "_blank", "popup=1");  // no 'noopener'
+              const opened = !!fbWin && !fbWin.closed;
+              console.log("[intake.js] open.fb →", { opened });
+            
+              if (!opened) {
+                console.warn("[intake.js] popup blocked — allow popups for resellpros.com to auto-open Facebook.");
+                if (typeof window.uiToast === "function") {
+                  window.uiToast("Popup blocked — please allow popups for resellpros.com, then click Save again to open Facebook.");
+                } else {
+                  // fall back to non-blocking console notice instead of alert
+                  console.log("Popup blocked — please allow popups for resellpros.com, then click Save again to open Facebook.");
+                }
+                console.groupEnd?.();
+                return;
+              }
+            } else {
+              // Reuse the stub we opened on the user click
+              console.log("reuse.stubWindow → navigate", FB_URL);
+              try { fbWin.location.href = FB_URL; } catch (e) { console.warn("nav to FB_URL failed", e); }
+            }
+  
+            // 3) (Optional secondary path) also try direct cross-origin postMessage to facebook.com
+            const post = () => {
+              try {
+                fbWin.postMessage({ source: "resellpro", type: "facebook:intake", payload }, "https://www.facebook.com");
+                console.log("[intake.js] postMessage → facebook.com (queued)");
+              } catch (e) {
+                console.warn("[intake.js] postMessage failed (retrying)", e);
+              }
+            };
+  
+            console.log("[intake.js] post.start");
+            post();
+            const t = setInterval(post, 1000);
+  
+            setTimeout(() => {
+              clearInterval(t);
+              const __t1 = performance.now();
+              console.log("[intake.js] facebook:intake → done", { ms: Math.round(__t1 - __t0) });
+              console.groupEnd?.();
+            }, 8000);
         });
+
+
+document.addEventListener("intake:facebook-ready", (ev) => {
+  const __t0 = performance.now();
+  const payload =
+    ev?.detail?.payload ||
+    (typeof window.rpBuildFacebookPayload === "function" ? window.rpBuildFacebookPayload() : null);
+  if (!payload) return;
+
+  console.groupCollapsed("[intake.js] facebook:intake → begin");
+  setFacebookStatus("Publishing…", { tone: "info" });
+  console.log("[intake.js] payload echo", payload);
+  // … existing code in this handler …
+});
+
+/** Refresh when the FB tab signals it’s done (dry-run or real) */
+window.addEventListener("message", (ev) => {
+  try {
+    if (ev.origin !== location.origin) return;
+    if (ev.data && ev.data.type === "facebook:create:done") {
+      refreshFacebookTile();
+    }
+  } catch {}
+});
+
+/** Also refresh when user returns focus from the FB window */
+window.addEventListener("focus", () => {
+  setTimeout(() => { try { refreshFacebookTile(); } catch {} }, 300);
+});
+
   
 // --- Drafts refresh bus + helpers (anchored insert) ---
 let __draftsRefreshTimer = null;
