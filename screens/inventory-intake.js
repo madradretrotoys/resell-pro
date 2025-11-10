@@ -2072,6 +2072,8 @@ document.addEventListener("intake:item-changed", () => refreshInventory({ force:
     renderMarketplaceTiles(meta);
     // Render placeholder cards for any preselected tiles (from defaults)
     try { renderMarketplaceCards(__metaCache); } catch {}
+      // Ensure the Facebook card reflects whatever Neon already knows on first paint
+      try { await refreshFacebookTile(); } catch {}
       // === Hydrate per-user marketplace defaults (eBay) ===
       async function hydrateUserDefaults() {
         try {
