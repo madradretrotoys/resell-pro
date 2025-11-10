@@ -539,7 +539,8 @@ export async function init() {
         // this will emit `intake:facebook-ready` ONLY if Facebook is selected
         // and not already live for this item.
         await __emitFacebookReadyIfSafe({ saveStatus, jobIds });
-
+        // Immediately reconcile the Facebook card with the DB snapshot
+        try { await refreshFacebookTile(); } catch {}
       } catch (e) {
         console.error("photos:flush:error", e);
       } finally {
@@ -1086,8 +1087,21 @@ function setMarketplaceVisibility() {
   function renderMarketplaceCards(meta) {
     const host = document.getElementById(MP_CARDS_ID);
     if (!host) return;
+  
+    // Capture existing per-card statuses before we wipe the DOM
+    const prevStatuses = new Map();
+    try {
+      for (const card of Array.from(host.querySelectorAll(".card"))) {
+        const name = (card.querySelector(".font-semibold")?.textContent || "")
+          .trim()
+          .toLowerCase();
+        const node = card.querySelector("[data-status-text]");
+        if (name && node) prevStatuses.set(name, node.innerHTML || node.textContent || "");
+      }
+    } catch {}
+  
     host.innerHTML = "";
-
+  
     // Install delegated listeners once so any field edit re-checks validity
     if (!host.dataset.validHook) {
       const safeRecheck = () => { try { computeValidity(); } catch {} };
@@ -1115,20 +1129,29 @@ function setMarketplaceVisibility() {
   
       // --- Header ---
       const header = document.createElement("div");
-      header.className = "flex items-center justify-between mb-2";
-      header.innerHTML = `
-        <div class="flex items-center gap-2">
-          <span class="font-semibold">${name}</span>
-          <span class="text-xs px-2 py-1 rounded ${connected ? "bg-green-100 text-green-700" : "bg-gray-100 text-gray-600"}">
-            ${connected ? "Connected" : "Not connected"}
-          </span>
-        </div>
-        <div class="text-sm" data-card-status>
-          <strong>Status:</strong> <span class="mono" data-status-text>Not Listed</span>
-          <button type="button" class="btn btn-ghost btn-xs ml-2 hidden" data-delist>Delist</button>
-        </div>
-      `;
-      card.appendChild(header);
+        header.className = "flex items-center justify-between mb-2";
+        header.innerHTML = `
+          <div class="flex items-center gap-2">
+            <span class="font-semibold">${name}</span>
+            <span class="text-xs px-2 py-1 rounded ${connected ? "bg-green-100 text-green-700" : "bg-gray-100 text-gray-600"}">
+              ${connected ? "Connected" : "Not connected"}
+            </span>
+          </div>
+          <div class="text-sm" data-card-status>
+            <strong>Status:</strong> <span class="mono" data-status-text>Not Listed</span>
+            <button type="button" class="btn btn-ghost btn-xs ml-2 hidden" data-delist>Delist</button>
+          </div>
+        `;
+        card.appendChild(header);
+  
+        // Restore any previously displayed status for this marketplace card
+        try {
+          const prev = prevStatuses.get(String(name || "").trim().toLowerCase());
+          if (prev) {
+            const node = header.querySelector("[data-status-text]");
+            if (node) node.innerHTML = prev;
+          }
+        } catch {}
   
       // --- Body (placeholder fields) ---
       const body = document.createElement("div");
@@ -1802,18 +1825,7 @@ function setMarketplaceVisibility() {
         });
 
 
-document.addEventListener("intake:facebook-ready", (ev) => {
-  const __t0 = performance.now();
-  const payload =
-    ev?.detail?.payload ||
-    (typeof window.rpBuildFacebookPayload === "function" ? window.rpBuildFacebookPayload() : null);
-  if (!payload) return;
 
-  console.groupCollapsed("[intake.js] facebook:intake → begin");
-  setFacebookStatus("Publishing…", { tone: "info" });
-  console.log("[intake.js] payload echo", payload);
-  // … existing code in this handler …
-});
 
 /** Refresh when the FB tab signals it’s done (dry-run or real) */
 window.addEventListener("message", (ev) => {
