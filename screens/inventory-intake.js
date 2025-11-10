@@ -1627,17 +1627,11 @@ function setMarketplaceVisibility() {
             .map(x => String(x.cdn_url || ""))
             .filter(Boolean);
         
-          if (!tenant_id) {
-            console.warn("[intake.js] facebook handoff blocked: missing tenant_id");
-            return null; // upstream caller should no-op when null
-          }
-          
           const payload = {
             tenant_id, title, price, qty, availability, category, condition, description,
             images: ordered,
             item_id: __currentItemId || null,
-            created_at: Date.now(),
-            token: window.__fbCallbackToken || "" // NEW: short-lived server-signed token
+            created_at: Date.now()
           };
         
           // ✅ FULL payload log for debugging
@@ -1903,28 +1897,10 @@ document.addEventListener("intake:item-changed", () => refreshInventory({ force:
     
       const resolved = String((fromMeta || fromDom || fromStore || "")).trim();
     
-      // ✅ write once for the page lifetime
-      window.__tenantId = resolved;                 // used by multipart upload fetch
-      window.ACTIVE_TENANT_ID = resolved;           // used by centralized api() helper
-    
-      // ✅ persist immediately so any early listeners/helpers can read it
-      try { localStorage.setItem("rp:tenant_id", resolved); } catch {}
-      try { document.documentElement.setAttribute("data-tenant-id", resolved); } catch {}
-    
-      // ✅ ensure <meta name="x-tenant-id"> exists and is in sync (for selectors that read it)
-      try {
-        let m = document.querySelector('meta[name="x-tenant-id"]');
-        if (!m) {
-          m = document.createElement("meta");
-          m.setAttribute("name", "x-tenant-id");
-          document.head.appendChild(m);
-        }
-        m.setAttribute("content", resolved);
-      } catch {}
-    
-      console.log("[intake.js] tenant_id stored early:", resolved);
+      // write once for the page lifetime
+      window.__tenantId = resolved;            // used by the multipart upload fetch
+      window.ACTIVE_TENANT_ID = resolved;      // used by the centralized api() helper
     })();
-
     
     // (your existing code continues here…)
 
@@ -2471,13 +2447,10 @@ document.addEventListener("intake:item-changed", () => refreshInventory({ force:
         headers: { "content-type": "application/json" },
       });
       
+      // DEBUG (short): confirm server accepted and returned item_id/status
       if (res?.ok) {
         console.log("[intake] server.ok item_id=", res.item_id, "status=", res.status);
-        if (res.facebook_callback_token) {
-          window.__fbCallbackToken = String(res.facebook_callback_token);
-        }
       }
-       
       // Log non-OK responses with full context before throwing
       if (!res || res.ok === false) {
         try {
