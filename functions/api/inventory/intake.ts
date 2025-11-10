@@ -1351,6 +1351,26 @@ export const onRequestGet: PagesFunction = async ({ request, env }) => {
       if (rows.length) ebayListing = rows[0];
     }
 
+    // Load the Facebook marketplace listing row (if any) to hydrate the UI
+    // Neon uses marketplace_id = 2 for Facebook; also try slug for portability.
+    const facebookIdRows = await sql<{ id: number }[]>`
+      SELECT id FROM app.marketplaces_available WHERE slug = 'facebook' LIMIT 1
+    `;
+    const FACEBOOK_ID = facebookIdRows[0]?.id ?? 2;
+
+    let facebookListing: any = null;
+    if (FACEBOOK_ID != null) {
+      const rows = await sql<any[]>`
+        SELECT
+          status,
+          mp_item_url
+        FROM app.item_marketplace_listing
+        WHERE item_id = ${item_id} AND tenant_id = ${tenant_id} AND marketplace_id = ${FACEBOOK_ID}
+        LIMIT 1
+      `;
+      if (rows.length) facebookListing = rows[0];
+    }
+
     // ---- Long Description default (GET fallback so UI shows something helpful) ----
     const BASE_SENTENCE_GET =
       "The photos are part of the description. Be sure to look them over for condition and details. This is sold as is, and it's ready for a new home.";
@@ -1364,7 +1384,12 @@ export const onRequestGet: PagesFunction = async ({ request, env }) => {
       inventory: invRows[0],
       listing: listingOut,
       images: imgRows,
-      marketplace_listing: { ebay: ebayListing, ebay_marketplace_id: EBAY_ID }
+      marketplace_listing: {
+        ebay: ebayListing,
+        ebay_marketplace_id: EBAY_ID,
+        facebook: facebookListing,
+        facebook_marketplace_id: FACEBOOK_ID
+      }
     }), { status: 200, headers: { "content-type": "application/json", "cache-control": "no-store" } });
 
 
