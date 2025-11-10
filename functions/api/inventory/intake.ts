@@ -1247,7 +1247,7 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
 
     const job_ids = Array.isArray(enqueued) ? enqueued.map((r: any) => String(r.job_id)) : [];
 
-    token = await signCallbackToken(tenant_id, item_id, String(env.JWT_SECRET));
+    const token = await signCallbackToken(tenant_id, item_id, String(env.JWT_SECRET));
     return json({
       ok: true,
       item_id,
