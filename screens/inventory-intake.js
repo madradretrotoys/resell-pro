@@ -1326,11 +1326,14 @@ function setMarketplaceVisibility() {
         card.appendChild(body);
       }
   
-      host.appendChild(card);
+       host.appendChild(card);
     }
-  
-    // If no marketplaces selected, nothing renders here by design.
-  }
+    
+    // After rendering marketplace cards, sync the FB status once
+    try { await refreshFacebookTile(); } catch {}
+    
+     // If no marketplaces selected, nothing renders here by design.
+    }
 
   // === END NEW ===
 
@@ -1348,7 +1351,7 @@ function setMarketplaceVisibility() {
     const { textEl, wrap } = getFacebookStatusNodes();
     if (!textEl) return;
     const classes = ['text-gray-600','text-blue-700','text-green-700','text-red-700'];
-    wrap.classList.remove(...classes);
+    try { wrap.classList.remove(...classes); } catch {}
     if (tone === 'info')  wrap.classList.add('text-blue-700');
     if (tone === 'ok')    wrap.classList.add('text-green-700');
     if (tone === 'error') wrap.classList.add('text-red-700');
@@ -1368,7 +1371,7 @@ function setMarketplaceVisibility() {
       if (!__currentItemId) return;
       const snap = await api(`/api/inventory/intake?item_id=${encodeURIComponent(__currentItemId)}`, { method: "GET" });
       const row = snap?.marketplace_listing?.facebook || null;
-      const st = String(row?.status || "").toLowerCase();
+      const st = String(row?.status ?? "").trim().toLowerCase();
       if (!st || st === "draft" || st === "not_listed") {
         setFacebookStatus("Not Listed", { tone: "muted" });
         return;
