@@ -1903,10 +1903,28 @@ document.addEventListener("intake:item-changed", () => refreshInventory({ force:
     
       const resolved = String((fromMeta || fromDom || fromStore || "")).trim();
     
-      // write once for the page lifetime
-      window.__tenantId = resolved;            // used by the multipart upload fetch
-      window.ACTIVE_TENANT_ID = resolved;      // used by the centralized api() helper
+      // ✅ write once for the page lifetime
+      window.__tenantId = resolved;                 // used by multipart upload fetch
+      window.ACTIVE_TENANT_ID = resolved;           // used by centralized api() helper
+    
+      // ✅ persist immediately so any early listeners/helpers can read it
+      try { localStorage.setItem("rp:tenant_id", resolved); } catch {}
+      try { document.documentElement.setAttribute("data-tenant-id", resolved); } catch {}
+    
+      // ✅ ensure <meta name="x-tenant-id"> exists and is in sync (for selectors that read it)
+      try {
+        let m = document.querySelector('meta[name="x-tenant-id"]');
+        if (!m) {
+          m = document.createElement("meta");
+          m.setAttribute("name", "x-tenant-id");
+          document.head.appendChild(m);
+        }
+        m.setAttribute("content", resolved);
+      } catch {}
+    
+      console.log("[intake.js] tenant_id stored early:", resolved);
     })();
+
     
     // (your existing code continues here…)
 
