@@ -1818,7 +1818,9 @@ document.addEventListener("intake:facebook-ready", (ev) => {
 /** Refresh when the FB tab signals it’s done (dry-run or real) */
 window.addEventListener("message", (ev) => {
   try {
-    if (ev.origin !== location.origin) return;
+    const okOrigin =
+      ev.origin === location.origin || ev.origin === "https://www.facebook.com";
+    if (!okOrigin) return;
     if (ev.data && ev.data.type === "facebook:create:done") {
       refreshFacebookTile();
     }
