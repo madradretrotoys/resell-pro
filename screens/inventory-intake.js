@@ -1330,7 +1330,7 @@ function setMarketplaceVisibility() {
     }
     
     // After rendering marketplace cards, sync the FB status once
-    try { await refreshFacebookTile(); } catch {}
+    try {refreshFacebookTile(); } catch {}
     
      // If no marketplaces selected, nothing renders here by design.
     }
