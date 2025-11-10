@@ -9,8 +9,11 @@ export const onRequestPost = async ({ request, env }) => {
   const item_id = String(body?.item_id || "").trim();
   const status  = String(body?.status || "").trim().toLowerCase();
   const message = String(body?.message || "").trim() || null;
+  const offer_id = body?.offer_id ? String(body.offer_id).trim() : null; // <— NEW
+  const remote_url = body?.remote_url ? String(body.remote_url).trim() : null; // optional: keep URL in sync
 
-  console.log("[fb.callback] parsed →", { item_id, status, message });
+  console.log("[fb.callback] parsed →", { item_id, status, message, offer_id, remote_url });
+  
 
   if (!item_id || !["live", "error"].includes(status)) {
     console.warn("[fb.callback] bad payload — skipping DB write");
