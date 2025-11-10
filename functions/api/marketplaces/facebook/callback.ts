@@ -26,12 +26,15 @@ export const onRequestPost = async ({ request, env }) => {
   const marketplace_id = 2; // Facebook
 
   try {
-    console.log("[fb.callback] updating DB →", { item_id, marketplace_id, status });
+    console.log("[fb.callback] updating DB →", { item_id, marketplace_id, status, offer_id, remote_url });
+
     // 1) Update the existing stub row created earlier (status: 'publishing')
     const result = await sql`
       UPDATE app.item_marketplace_listing
          SET status = ${status},
              last_error = ${message},
+             mp_offer_id = COALESCE(${offer_id}, app.item_marketplace_listing.mp_offer_id),
+             mp_item_url = COALESCE(${remote_url}, app.item_marketplace_listing.mp_item_url),
              updated_at = NOW()
        WHERE item_id = ${item_id}
          AND marketplace_id = ${marketplace_id};
