@@ -58,9 +58,9 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
   try {
     // AuthN
     const cookieHeader = request.headers.get("cookie") || "";
-    const token = readCookie(cookieHeader, "__Host-rp_session");
-    if (!token) return json({ ok: false, error: "no_cookie" }, 401);
-    const payload = await verifyJwt(token, String(env.JWT_SECRET));
+    const sessionToken = readCookie(cookieHeader, "__Host-rp_session");
+    if (!sessionToken) return json({ ok: false, error: "no_cookie" }, 401);
+    const payload = await verifyJwt(sessionToken, String(env.JWT_SECRET));
     const actor_user_id = String((payload as any).sub || "");
     if (!actor_user_id) return json({ ok: false, error: "bad_token" }, 401);
 
@@ -667,13 +667,13 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
             }
           }
           
-          const token = await signCallbackToken(tenant_id, item_id, String(env.JWT_SECRET));
+          const fbToken = await signCallbackToken(tenant_id, item_id, String(env.JWT_SECRET));
           return json({
             ok: true,
             item_id,
             sku: updInv[0].sku,
             status,
-            facebook_callback_token: token,
+            facebook_callback_token: fbToken,
             ms: Date.now() - t0
           }, 200);
         }
@@ -888,7 +888,7 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
           `;
           const job_ids_upd = Array.isArray(enqueuedUpd) ? enqueuedUpd.map((r: any) => String(r.job_id)) : [];
 
-          const token = await signCallbackToken(tenant_id, item_id, String(env.JWT_SECRET));
+          const fbToken = await signCallbackToken(tenant_id, item_id, String(env.JWT_SECRET));
           return json({
             ok: true,
             item_id,
@@ -896,7 +896,7 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
             status,
             published: false,
             job_ids: job_ids_upd,
-            facebook_callback_token: token,
+            facebook_callback_token: fbToken,
             ms: Date.now() - t0
           }, 200);
         }
@@ -1072,13 +1072,13 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
         }
       }
       
-      const token = await signCallbackToken(tenant_id, item_id, String(env.JWT_SECRET));
+      const fbToken = await signCallbackToken(tenant_id, item_id, String(env.JWT_SECRET));
       return json({
         ok: true,
         item_id,
         sku: null,
         status: 'draft',
-        facebook_callback_token: token,
+        facebook_callback_token: fbToken,
         ms: Date.now() - t0
       }, 200);
     }
@@ -1247,7 +1247,7 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
 
     const job_ids = Array.isArray(enqueued) ? enqueued.map((r: any) => String(r.job_id)) : [];
 
-    const token = await signCallbackToken(tenant_id, item_id, String(env.JWT_SECRET));
+    const fbToken = await signCallbackToken(tenant_id, item_id, String(env.JWT_SECRET));
     return json({
       ok: true,
       item_id,
@@ -1255,7 +1255,7 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
       status,
       published: false,
       job_ids,
-      facebook_callback_token: token,
+      facebook_callback_token: fbToken,
       ms: Date.now() - t0
     }, 200);
 
