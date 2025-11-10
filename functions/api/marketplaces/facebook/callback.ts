@@ -1,6 +1,5 @@
 // /functions/api/marketplaces/facebook/callback.ts
 import { neon } from "@neondatabase/serverless";
-import { json } from "itty-router-extras";
 
 export const onRequestPost = async ({ request, env }) => {
   const sql = neon(env.DATABASE_URL);
@@ -11,11 +10,13 @@ export const onRequestPost = async ({ request, env }) => {
   const message = String(body?.message || "").trim() || null;
 
   if (!item_id || !["live", "error"].includes(status)) {
-    return json({ ok: false, error: "bad_payload" }, 400);
+    return new Response(JSON.stringify({ ok: false, error: "bad_payload" }), {
+      status: 400,
+      headers: { "content-type": "application/json" },
+    });
   }
 
-  // Hardcode Facebook marketplace_id (usually 2)
-  const marketplace_id = 2;
+  const marketplace_id = 2; // Facebook
 
   try {
     await sql`
@@ -28,9 +29,14 @@ export const onRequestPost = async ({ request, env }) => {
         updated_at = NOW();
     `;
 
-    return json({ ok: true });
+    return new Response(JSON.stringify({ ok: true }), {
+      headers: { "content-type": "application/json" },
+    });
   } catch (err) {
     console.error("FB callback update failed", err);
-    return json({ ok: false, error: "db_error" }, 500);
+    return new Response(JSON.stringify({ ok: false, error: "db_error" }), {
+      status: 500,
+      headers: { "content-type": "application/json" },
+    });
   }
 };
