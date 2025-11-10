@@ -1389,35 +1389,65 @@ function setMarketplaceVisibility() {
     }
   }
 
-  async function refreshFacebookTile() {
-    try {
-      if (!__currentItemId) return;
-      const snap = await api(`/api/inventory/intake?item_id=${encodeURIComponent(__currentItemId)}`, { method: "GET" });
-      const row = snap?.marketplace_listing?.facebook || null;
-      const st = String(row?.status ?? "").trim().toLowerCase();
-      if (!st || st === "draft" || st === "not_listed") {
-        setFacebookStatus("Not Listed", { tone: "muted" });
-        return;
-      }
-      if (st === "publishing" || st === "pending_external") {
-        setFacebookStatus("Publishing…", { tone: "info" });
-        return;
-      }
-      if (st === "live") {
-        const url = row?.mp_item_url || null;
-        setFacebookStatus("Listed", { tone: "ok", link: url || null });
-        return;
-      }
-      if (st === "error" || st === "create_failed") {
-        const msg = (row?.last_error ? String(row.last_error).slice(0, 120) : "");
-        setFacebookStatus(msg ? `Error — ${msg}` : "Error", { tone: "error" });
-        return;
-      }
-      setFacebookStatus("Unknown", { tone: "muted" });
-    } catch (e) {
-      console.warn("[intake.js] refreshFacebookTile failed", e);
+ async function refreshFacebookTile() {
+  try {
+    if (!__currentItemId) return;
+
+    const snap = await api(
+      `/api/inventory/intake?item_id=${encodeURIComponent(__currentItemId)}`,
+      { method: "GET" }
+    );
+
+    // Be tolerant to server response shapes:
+    // - marketplace_listing vs marketplace_listings
+    // - keyed by slug ("facebook") OR marketplace_id (2)
+    const mp = snap?.marketplace_listing || snap?.marketplace_listings || {};
+    const fbRow =
+      mp?.facebook ??
+      mp?.Facebook ??
+      mp?.["2"] ??
+      null;
+
+    const rawStatus =
+      fbRow?.status ??
+      fbRow?.listing_status ??
+      fbRow?.state ??
+      "";
+
+    const st = String(rawStatus).trim().toLowerCase();
+
+    if (!st || st === "draft" || st === "not_listed") {
+      setFacebookStatus("Not Listed", { tone: "muted" });
+      return;
     }
+
+    if (st === "publishing" || st === "pending_external" || st === "processing") {
+      setFacebookStatus("Publishing…", { tone: "info" });
+      return;
+    }
+
+    if (st === "live" || st === "listed") {
+      const url =
+        fbRow?.mp_item_url ??
+        fbRow?.remote_url ??
+        fbRow?.url ??
+        null;
+      setFacebookStatus("Listed", { tone: "ok", link: url || null });
+      return;
+    }
+
+    if (st === "error" || st === "create_failed" || st === "failed") {
+      const msg = (fbRow?.last_error ? String(fbRow.last_error).slice(0, 120) : "");
+      setFacebookStatus(msg ? `Error — ${msg}` : "Error", { tone: "error" });
+      return;
+    }
+
+    setFacebookStatus("Unknown", { tone: "muted" });
+  } catch (e) {
+    console.warn("[intake.js] refreshFacebookTile failed", e);
   }
+}
+
   
   // ===== Marketplace Status UI helpers (eBay) =====
   function getEbayStatusNodes() {
