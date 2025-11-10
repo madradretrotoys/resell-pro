@@ -18,21 +18,6 @@ function readCookie(header: string, name: string): string | null {
   return null;
 }
 
-// --- Facebook callback token (HS256, short-lived) ---
-async function signCallbackToken(tenant: string, item: string, secret: string) {
-  const enc = new TextEncoder();
-  const header  = btoa(JSON.stringify({ alg:"HS256", typ:"JWT" }))
-    .replace(/\+/g,"-").replace(/\//g,"_").replace(/=+$/,"");
-  const payload = btoa(JSON.stringify({ t: tenant, i: item, x: Date.now() + (10 * 60 * 1000) })) // 10 min
-    .replace(/\+/g,"-").replace(/\//g,"_").replace(/=+$/,"");
-  const toSign = `${header}.${payload}`;
-  const key = await crypto.subtle.importKey("raw", enc.encode(secret), { name:"HMAC", hash:"SHA-256" }, false, ["sign"]);
-  const sig = await crypto.subtle.sign("HMAC", key, enc.encode(toSign));
-  const b = Array.from(new Uint8Array(sig)).map(x => String.fromCharCode(x)).join("");
-  const s = btoa(b).replace(/\+/g,"-").replace(/\//g,"_").replace(/=+$/,"");
-  return `${toSign}.${s}`;
-}
-
 // Minimal HS256 verify (same pattern as other API files)
 async function verifyJwt(token: string, secret: string): Promise<any> {
   const enc = new TextEncoder();
@@ -58,9 +43,9 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
   try {
     // AuthN
     const cookieHeader = request.headers.get("cookie") || "";
-    const sessionToken = readCookie(cookieHeader, "__Host-rp_session");
-    if (!sessionToken) return json({ ok: false, error: "no_cookie" }, 401);
-    const payload = await verifyJwt(sessionToken, String(env.JWT_SECRET));
+    const token = readCookie(cookieHeader, "__Host-rp_session");
+    if (!token) return json({ ok: false, error: "no_cookie" }, 401);
+    const payload = await verifyJwt(token, String(env.JWT_SECRET));
     const actor_user_id = String((payload as any).sub || "");
     if (!actor_user_id) return json({ ok: false, error: "bad_token" }, 401);
 
@@ -667,15 +652,7 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
             }
           }
           
-          const fbToken = await signCallbackToken(tenant_id, item_id, String(env.JWT_SECRET));
-          return json({
-            ok: true,
-            item_id,
-            sku: updInv[0].sku,
-            status,
-            facebook_callback_token: fbToken,
-            ms: Date.now() - t0
-          }, 200);
+          return json({ ok: true, item_id, sku: updInv[0].sku, status, ms: Date.now() - t0 }, 200);
         }
 
 
@@ -888,7 +865,6 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
           `;
           const job_ids_upd = Array.isArray(enqueuedUpd) ? enqueuedUpd.map((r: any) => String(r.job_id)) : [];
 
-          const fbToken = await signCallbackToken(tenant_id, item_id, String(env.JWT_SECRET));
           return json({
             ok: true,
             item_id,
@@ -896,7 +872,6 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
             status,
             published: false,
             job_ids: job_ids_upd,
-            facebook_callback_token: fbToken,
             ms: Date.now() - t0
           }, 200);
         }
@@ -1072,15 +1047,7 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
         }
       }
       
-      const fbToken = await signCallbackToken(tenant_id, item_id, String(env.JWT_SECRET));
-      return json({
-        ok: true,
-        item_id,
-        sku: null,
-        status: 'draft',
-        facebook_callback_token: fbToken,
-        ms: Date.now() - t0
-      }, 200);
+      return json({ ok: true, item_id, sku: null, status: 'draft', ms: Date.now() - t0 }, 200);
     }
 
 
@@ -1247,7 +1214,6 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
 
     const job_ids = Array.isArray(enqueued) ? enqueued.map((r: any) => String(r.job_id)) : [];
 
-    const fbToken = await signCallbackToken(tenant_id, item_id, String(env.JWT_SECRET));
     return json({
       ok: true,
       item_id,
@@ -1255,7 +1221,6 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
       status,
       published: false,
       job_ids,
-      facebook_callback_token: fbToken,
       ms: Date.now() - t0
     }, 200);
 
