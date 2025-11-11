@@ -110,6 +110,32 @@ async function finalizePendingSale(env: Env, tenantId: string, sess: any) {
        LIMIT 1
     `;
   }
+   // PHASE 1 INVENTORY UPDATE (simple): decrement app.inventory.qty and set item_status='sold' when qty hits 0.
+  // Only run when we successfully wrote the sale. Uses the POS snapshot items from the session.
+  // TODO(Phase 2): idempotency & ledger; trigger marketplace jobs for qty=0.
+  if (saleId) {
+    try {
+      const perSku = new Map<string, number>();
+      for (const it of Array.isArray(items) ? items : []) {
+        const sku = (it && it.sku) ? String(it.sku) : '';
+        const q = Number(it?.qty || 0);
+        if (!sku || !(q > 0)) continue; // skip MISC or invalid
+        perSku.set(sku, (perSku.get(sku) || 0) + q);
+      }
+      for (const [sku, sold] of perSku.entries()) {
+        await sql/*sql*/`
+          UPDATE app.inventory
+             SET qty = GREATEST(0, qty - ${sold}::integer),
+                 item_status = CASE WHEN GREATEST(0, qty - ${sold}::integer) = 0 THEN 'sold' ELSE item_status END
+           WHERE tenant_id = ${tenantId}::uuid
+             AND sku = ${sku}
+        `;
+      }
+    } catch (e) {
+      console.error('inventory-update-failed', { tenantId, error: String(e) });
+    }
+  }
+
   return saleId;
 }
 
@@ -146,6 +172,30 @@ async function finalizeSale(
     )
     RETURNING sale_id
   `;
+  // PHASE 1 INVENTORY UPDATE (simple): decrement app.inventory.qty and set item_status='sold' when qty hits 0.
+  // NOTE: This is intentionally minimal. No idempotency or ledger yet.
+  // TODO(Phase 2): add idempotency mark and audit ledger; trigger marketplace jobs when qty=0.
+  try {
+    const perSku = new Map<string, number>();
+    for (const it of Array.isArray(args.items) ? args.items : []) {
+      const sku = (it && it.sku) ? String(it.sku) : '';
+      const q = Number(it?.qty || 0);
+      if (!sku || !(q > 0)) continue; // skip MISC or invalid
+      perSku.set(sku, (perSku.get(sku) || 0) + q);
+    }
+    for (const [sku, sold] of perSku.entries()) {
+      await sql/*sql*/`
+        UPDATE app.inventory
+           SET qty = GREATEST(0, qty - ${sold}::integer),
+               item_status = CASE WHEN GREATEST(0, qty - ${sold}::integer) = 0 THEN 'sold' ELSE item_status END
+         WHERE tenant_id = ${tenantId}::uuid
+           AND sku = ${sku}
+      `;
+    }
+  } catch (e) {
+    console.error('inventory-update-failed', { tenantId, error: String(e) });
+  }
+
   return rows[0]?.sale_id || null;
 }
 // --- /anchor: force-finalize local finalizeSale ---
