@@ -344,8 +344,10 @@ export async function init(ctx) {
         (it.case_bin_shelf || "")
       ].filter(Boolean).join(" · ");
 
-      const img = it.image_url ? `<img class="pos-thumb" src="${escapeHtml(it.image_url)}" alt="">` :
-                                 `<div class="pos-thumb pos-thumb--ph"></div>`;
+       // Normalize thumbnails: fixed box + object-fit cover
+      const img = it.image_url
+        ? `<img class="pos-thumb" src="${escapeHtml(it.image_url)}" alt="" width="96" height="96" loading="lazy">`
+        : `<div class="pos-thumb pos-thumb--ph" style="width:96px;height:96px;"></div>`;
 
       return `
         <div class="pos-result-row">
