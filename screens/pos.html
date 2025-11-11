@@ -11,8 +11,26 @@
   </div>
 
   <div id="screen-content" class="hidden">
-    <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
 
+    <!-- POS (search) local styles: consistent thumbnails + tidy result rows) -->
+    <style>
+      /* result row shell */
+      .pos-result-row {
+        display: flex; align-items: center; justify-content: space-between;
+        gap: 0.75rem; padding: 0.5rem; border: 1px solid #e5e7eb; border-radius: 0.5rem;
+      }
+      .pos-result-left { display: flex; align-items: center; gap: 0.75rem; min-width: 0; }
+      /* normalized thumbnail box */
+      .pos-thumb {
+        width: 96px; height: 96px; object-fit: cover; border-radius: 0.5rem; flex: 0 0 auto;
+        background: #f3f4f6;
+      }
+      .pos-thumb--ph { display: inline-block; }
+      .muted { color: #6b7280; }
+    </style>
+
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+    
     <!-- LEFT: Search / Results -->
     <div class="card p-3">
       <div class="flex items-center justify-between mb-2">
