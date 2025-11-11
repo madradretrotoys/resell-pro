@@ -216,7 +216,13 @@ export async function init(ctx) {
       el.banner.classList.add("hidden");
       el.banner.innerHTML = "";
     }
-  
+
+    // 🔹 PHASE-1: also clear the Search pane so the next sale starts clean
+    if (el.q) el.q.value = "";
+    if (el.results) el.results.innerHTML = "";
+    // return focus to the search box for fast scanning/entry
+    setTimeout(() => el.q?.focus?.(), 0);
+    
     // Clear cart & state
     state.items = [];
     state.payment = null;
