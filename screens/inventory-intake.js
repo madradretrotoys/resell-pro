@@ -511,6 +511,8 @@ export async function init() {
             draftBtn.classList.add("opacity-60", "cursor-not-allowed");
             draftBtn.title = "Draft save is disabled for Active listings.";
           }
+          // Enable the Xeasy copy button once the listing is Active
+          try { enableCopyXeasy(true); } catch {}
         }
         
         
@@ -1594,7 +1596,82 @@ function setMarketplaceVisibility() {
           document.dispatchEvent(new CustomEvent("intake:validity-changed", { detail: { valid: allOk } }));
           return allOk;
         }
-      
+
+        // --- Copy for Xeasy: helpers & click handler (anchored insert) ---
+        function enableCopyXeasy(enabled = true) {
+          const btn = document.getElementById("copyXeasyBtn");
+          if (!btn) return;
+          btn.disabled = !enabled;
+          btn.classList.toggle("opacity-60", !enabled);
+          btn.classList.toggle("cursor-not-allowed", !enabled);
+          btn.title = enabled ? "Copy for Xeasy" : "Enabled in Phase 2";
+        }
+        
+        function buildXeasyText() {
+          // Title
+          const titleEl = document.getElementById("titleInput") || findControlByLabel("Item Name / Description");
+          const title = String(titleEl?.value || "").trim();
+        
+          // Price
+          const priceCtrl = document.getElementById("priceInput") || findControlByLabel("Price (USD)");
+          const rawPrice = String(priceCtrl?.value ?? "").trim();
+          const price = rawPrice; // keep exactly what the user entered
+        
+          // SKU (from the visible summary if present)
+          let sku = "";
+          try {
+            const skuOut = document.getElementById("skuOut");
+            if (skuOut) {
+              const t = String(skuOut.textContent || "");
+              // skuOut renders like "SKU ABC-12345" → keep the alphanum piece
+              const m = t.match(/SKU\s*(.+)$/i);
+              sku = (m ? m[1] : t).trim();
+            }
+          } catch {}
+        
+          // Store location & Case #
+          const storeSel = document.getElementById("storeLocationSelect");
+          const storeLoc = String(storeSel?.value || "").trim();
+          const caseEl = document.getElementById("caseShelfInput") || findControlByLabel("Case #");
+          const caseNo = String(caseEl?.value || "").trim();
+        
+          // Line 1: Price and SKU
+          const line1 = `${price} ${sku}`.trim();
+        
+          // Line 2: R{StoreLoc}-C{Case} + first 14 chars of title
+          const first14 = title.slice(0, 14);
+          const rc = `R${storeLoc}-C${caseNo}`.trim();
+          const line2 = `${rc} ${first14}`.trim();
+        
+          // Line 3: If title longer than 14 chars, continue up to 23 more chars
+          let line3 = "";
+          if (title.length > 14) {
+            line3 = title.slice(14, 14 + 23);
+          }
+        
+          return [line1, line2, line3].filter(Boolean).join("\n");
+        }
+        
+        function wireCopyXeasy() {
+          const btn = document.getElementById("copyXeasyBtn");
+          if (!btn) return;
+          btn.addEventListener("click", async (e) => {
+            e.preventDefault();
+            try {
+              const text = buildXeasyText();
+              await navigator.clipboard.writeText(text);
+              if (typeof window.uiToast === "function") {
+                window.uiToast("Copied for Xeasy.");
+              } else {
+                alert("Copied for Xeasy.");
+              }
+            } catch (err) {
+              console.error("copy:xeasy:error", err);
+              alert("Failed to copy Xeasy text.");
+            }
+          });
+        }
+        // --- end Copy for Xeasy insert ---
       
         /* === Facebook handoff helpers (NEW) === */
 
@@ -3077,7 +3154,7 @@ document.addEventListener("intake:item-changed", () => refreshInventory({ force:
       try { window.__loadInventory = loadInventory; } catch {}
       
       wireCtas();
-
+      wireCopyXeasy();  // enable/wire the Xeasy copy button
     // NEW: Photos bootstrap
     wirePhotoPickers();
     renderPhotosGrid();
@@ -3114,7 +3191,10 @@ document.addEventListener("intake:item-changed", () => refreshInventory({ force:
           const msg = mode === "draft"
             ? `Saved draft (#${res?.item_id || "?"}).`
             : `Saved item ${skuPart} (#${res?.item_id || "?"}).`;
-          
+          // Also enable the Xeasy copy button when this is an Active (non-draft) save
+          if (mode !== "draft") {
+            try { enableCopyXeasy(true); } catch {}
+          }
           // Use a non-blocking toast/banner so the Facebook handoff isn't paused
           if (typeof window.uiToast === "function") {
             window.uiToast(msg);
