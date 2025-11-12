@@ -83,32 +83,24 @@ export const onRequestGet: PagesFunction = async ({ request, env }) => {
       image_url: string | null;
     }[]>`
       WITH imgs AS (
-        SELECT
-          im.item_id,
-          im.cdn_url,
-          ROW_NUMBER() OVER (
-            PARTITION BY im.item_id
-            ORDER BY im.is_primary DESC, im.sort_order ASC, im.created_at ASC
-          ) AS rn
-        FROM app.item_images im
-        WHERE im.tenant_id = ${tenant_id}
+        SELECT item_id, cdn_url AS image_url
+        FROM app.item_images
+        WHERE tenant_id = ${tenant_id} AND is_primary = TRUE
       )
       SELECT
         i.item_id,
         i.updated_at AS saved_at,
-        i.sku,
         i.product_short_title,
         i.price,
         i.qty,
         i.category_nm,
-        (SELECT cdn_url FROM imgs WHERE imgs.item_id = i.item_id AND rn = 1) AS image_url
+        imgs.image_url
       FROM app.inventory i
-      INNER JOIN app.item_listing_profile lp
-        ON lp.item_id = i.item_id
-       AND lp.tenant_id = ${tenant_id}
-      WHERE i.item_status = 'active'
+      LEFT JOIN imgs ON imgs.item_id = i.item_id
+      WHERE i.tenant_id = ${tenant_id}
+        AND i.item_status = 'active'
       ORDER BY i.updated_at DESC
-      LIMIT ${limit};
+      LIMIT ${limit}
     `;
      
     return json({ ok: true, rows }, 200);
