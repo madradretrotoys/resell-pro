@@ -2645,19 +2645,6 @@ document.addEventListener("intake:item-changed", () => refreshInventory({ force:
           // Reflect persisted listing status on the card
           // app.item_marketplace_listing(status, mp_item_url) -> ebay.status, ebay.mp_item_url
           // Map: live -> "Listed" (green, linkable); publishing -> "Publishing…"; error -> "Error"; else -> "Not Listed"
-          
-          // Ensure the eBay tile/card is visible and rendered
-          try {
-            if (ebayMarketplaceId && typeof ebayMarketplaceId === "number") {
-              selectedMarketplaceIds.add(Number(ebayMarketplaceId));
-            } else if (__metaCache?.marketplaces) {
-              const row = (__metaCache.marketplaces || []).find(m => String(m.slug || "").toLowerCase() === "ebay");
-              if (row && row.id != null) selectedMarketplaceIds.add(Number(row.id));
-            }
-            renderMarketplaceTiles(__metaCache);
-            renderMarketplaceCards(__metaCache);
-          } catch {}
-          
           try {
             const raw = String(ebay.status || "").toLowerCase();
             const url = ebay.mp_item_url || null;
@@ -2672,12 +2659,16 @@ document.addEventListener("intake:item-changed", () => refreshInventory({ force:
             }
           } catch {}
         
-          
-    
           // Now set values inside the eBay card
           const setVal = (sel, v) => { if (sel) sel.value = v ?? ""; };
-          const setNum = (id, v) => { const el = document.getElementById(id); if (el) el.value = (v ?? "") === "" ? "" : String(v); };
-          const setChk = (id, v) => { const el = document.getElementById(id); if (el) el.checked = !!v; };
+          const setNum = (id, v) => {
+            const el = document.getElementById(id);
+            if (el) el.value = (v ?? "") === "" ? "" : String(v);
+          };
+          const setChk = (id, v) => {
+            const el = document.getElementById(id);
+            if (el) el.checked = !!v;
+          };
     
           // Policies: attempt immediate set (may be overridden by async loader; Patch 1 will re-apply)
           setVal(document.getElementById("ebay_shippingPolicy"), ebay.shipping_policy);
@@ -2713,7 +2704,6 @@ document.addEventListener("intake:item-changed", () => refreshInventory({ force:
           // Also re-validate the whole form
           try { computeValidity(); } catch {}
         }
-
 
     
        function buildPayload(isDraft = false) {
@@ -3176,7 +3166,7 @@ document.addEventListener("intake:item-changed", () => refreshInventory({ force:
       } catch {}
     }
     
-    /** Click handler: Load a draft into the form and switch to edit path */
+     /** Click handler: Load a draft into the form and switch to edit path */
     async function handleLoadDraft(item_id) {
       try {
         const res = await api(`/api/inventory/intake?item_id=${encodeURIComponent(item_id)}`, { method: "GET" });
@@ -3185,7 +3175,12 @@ document.addEventListener("intake:item-changed", () => refreshInventory({ force:
         // Basic + listing fields (now includes Long Description)
         populateFromSaved(res.inventory || {}, res.listing || null);
 
-        // If the draft has an eBay listing row, auto-select the eBay tile and hydrate the card
+        // Apply per-item marketplace selection from Neon (eBay, Facebook, etc.)
+        try {
+          applyMarketplaceSelectionForItem(__metaCache, res.marketplace_listing || null);
+        } catch {}
+
+        // If the draft has an eBay listing row, hydrate the eBay card fields/status
         try {
           const ebaySaved = res?.marketplace_listing?.ebay || null;
           const ebayId    = res?.marketplace_listing?.ebay_marketplace_id || null;
