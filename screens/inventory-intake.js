@@ -998,7 +998,6 @@ function setMarketplaceVisibility() {
     host.innerHTML = "";
 
     const rows = (meta?.marketplaces || []).filter(m => m.is_active !== false);
-    const defaults = readDefaults();
 
     // PROTOTYPE RULE:
     // If ZERO marketplaces are connected for this tenant, allow selecting ALL active marketplaces.
@@ -1023,8 +1022,6 @@ function setMarketplaceVisibility() {
       // Baseline styling
       btn.className = "btn btn-sm rounded-2xl";
 
-      
-
       if (enabledSelectable) {
         // Enabled tiles start as ghost (pale) until selected
         btn.classList.add("btn-ghost");
@@ -1038,9 +1035,9 @@ function setMarketplaceVisibility() {
       // label
       btn.textContent = m.marketplace_name || m.slug || `#${m.id}`;
 
-      // preselect from defaults (only if still selectable)
-      if (enabledSelectable && defaults.includes(m.id)) {
-        selectedMarketplaceIds.add(m.id);
+      // initial pressed state comes only from selectedMarketplaceIds
+      const isSelected = selectedMarketplaceIds.has(Number(m.id));
+      if (enabledSelectable && isSelected) {
         btn.classList.remove("btn-ghost");
         btn.classList.add("btn-primary");
         btn.setAttribute("aria-pressed", "true");
@@ -1084,6 +1081,56 @@ function setMarketplaceVisibility() {
     if (!el) return;
     el.classList.toggle("hidden", !show);
   }
+
+  // Apply per-item marketplace selection (e.g., when loading an existing item).
+  // meta: inventory meta (usually __metaCache)
+  // marketplaceListing: res.marketplace_listing from GET /api/inventory/intake
+  function applyMarketplaceSelectionForItem(meta, marketplaceListing) {
+    try {
+      const rows = (meta?.marketplaces || []);
+      const bySlug = new Map(
+        rows.map(r => [String(r.slug || "").toLowerCase(), r])
+      );
+
+      selectedMarketplaceIds.clear();
+
+      if (marketplaceListing) {
+        const ids = [];
+
+        // eBay row present -> include eBay marketplace id
+        if (marketplaceListing.ebay) {
+          const rawId =
+            marketplaceListing.ebay_marketplace_id ??
+            (bySlug.get("ebay") && bySlug.get("ebay").id);
+          if (rawId != null) {
+            const id = Number(rawId);
+            if (!Number.isNaN(id)) ids.push(id);
+          }
+        }
+
+        // Facebook row present -> include Facebook marketplace id
+        if (marketplaceListing.facebook) {
+          const rawId =
+            marketplaceListing.facebook_marketplace_id ??
+            (bySlug.get("facebook") && bySlug.get("facebook").id);
+          if (rawId != null) {
+            const id = Number(rawId);
+            if (!Number.isNaN(id)) ids.push(id);
+          }
+        }
+
+        for (const id of ids) {
+          selectedMarketplaceIds.add(id);
+        }
+      }
+
+      renderMarketplaceTiles(meta);
+      try { renderMarketplaceCards(meta); } catch {}
+    } catch (e) {
+      console.error("marketplaces:applySelection:error", e);
+    }
+  }
+
 
   // Render placeholder cards for each selected marketplace (UI-only; no API calls)
   function renderMarketplaceCards(meta) {
