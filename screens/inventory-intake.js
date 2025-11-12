@@ -2265,9 +2265,28 @@ document.addEventListener("intake:item-changed", () => refreshInventory({ force:
 
     //Render marketplace tiles (below Shipping)
     __metaCache = meta;
+
+    // Seed selection from per-user defaults for brand NEW items.
+    // When loading an existing item, we override this with applyMarketplaceSelectionForItem().
+    try {
+      const defaults = readDefaults();
+      selectedMarketplaceIds.clear();
+      if (Array.isArray(defaults)) {
+        for (const raw of defaults) {
+          const id = Number(raw);
+          if (!Number.isNaN(id)) {
+            selectedMarketplaceIds.add(id);
+          }
+        }
+      }
+    } catch {}
+
     renderMarketplaceTiles(meta);
     // Render placeholder cards for any preselected tiles (from defaults)
     try { renderMarketplaceCards(__metaCache); } catch {}
+      // Ensure the Facebook card reflects whatever Neon already knows on first paint
+      try { await refreshFacebookTile(); } catch {}
+
       // Ensure the Facebook card reflects whatever Neon already knows on first paint
       try { await refreshFacebookTile(); } catch {}
       // === Hydrate per-user marketplace defaults (eBay) ===
