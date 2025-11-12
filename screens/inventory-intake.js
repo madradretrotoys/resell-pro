@@ -2346,13 +2346,15 @@ document.addEventListener("intake:item-changed", () => refreshInventory({ force:
       }
 
       // Click behavior
-      tabDrafts?.addEventListener("click", async () => {
+      tabDrafts?.addEventListener("click", async (e) => {
+        e.preventDefault();
         activate(tabDrafts, paneDrafts);
         // Ensure drafts render whenever the Drafts tab is shown
         await (typeof loadDrafts === "function" ? loadDrafts() : Promise.resolve());
       });
-
-      tabInventory?.addEventListener("click", async () => {
+      
+      tabInventory?.addEventListener("click", async (e) => {
+        e.preventDefault();
         activate(tabInventory, paneInventory);
         // Lazy-load inventory on demand
         await (typeof loadInventory === "function" ? loadInventory() : Promise.resolve());
