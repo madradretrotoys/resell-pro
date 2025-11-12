@@ -2579,6 +2579,19 @@ document.addEventListener("intake:item-changed", () => refreshInventory({ force:
           // Reflect persisted listing status on the card
           // app.item_marketplace_listing(status, mp_item_url) -> ebay.status, ebay.mp_item_url
           // Map: live -> "Listed" (green, linkable); publishing -> "Publishing…"; error -> "Error"; else -> "Not Listed"
+          
+          // Ensure the eBay tile/card is visible and rendered
+          try {
+            if (ebayMarketplaceId && typeof ebayMarketplaceId === "number") {
+              selectedMarketplaceIds.add(Number(ebayMarketplaceId));
+            } else if (__metaCache?.marketplaces) {
+              const row = (__metaCache.marketplaces || []).find(m => String(m.slug || "").toLowerCase() === "ebay");
+              if (row && row.id != null) selectedMarketplaceIds.add(Number(row.id));
+            }
+            renderMarketplaceTiles(__metaCache);
+            renderMarketplaceCards(__metaCache);
+          } catch {}
+          
           try {
             const raw = String(ebay.status || "").toLowerCase();
             const url = ebay.mp_item_url || null;
@@ -2593,17 +2606,7 @@ document.addEventListener("intake:item-changed", () => refreshInventory({ force:
             }
           } catch {}
         
-          // Ensure the eBay tile/card is visible and rendered
-          try {
-            if (ebayMarketplaceId && typeof ebayMarketplaceId === "number") {
-              selectedMarketplaceIds.add(Number(ebayMarketplaceId));
-            } else if (__metaCache?.marketplaces) {
-              const row = (__metaCache.marketplaces || []).find(m => String(m.slug || "").toLowerCase() === "ebay");
-              if (row && row.id != null) selectedMarketplaceIds.add(Number(row.id));
-            }
-            renderMarketplaceTiles(__metaCache);
-            renderMarketplaceCards(__metaCache);
-          } catch {}
+          
     
           // Now set values inside the eBay card
           const setVal = (sel, v) => { if (sel) sel.value = v ?? ""; };
