@@ -2018,21 +2018,30 @@ function isDraftsTabVisible() {
 }
 
 async function refreshDrafts({ force = false } = {}) {
-  if (!force && !isDraftsTabVisible()) return;
-  if (__draftsRefreshTimer) window.clearTimeout(__draftsRefreshTimer);
-  __draftsRefreshTimer = window.setTimeout(async () => {
-    try {
-      const header = document.querySelector('#recentDraftsHeader, [data-recent-drafts-header]');
-      if (header) header.classList.add("loading");
-      // Support scope where loadDrafts is defined later/inside try{}
-      const __callLoadDrafts = (window && window.__loadDrafts) || (typeof loadDrafts === "function" ? loadDrafts : null);
-      if (__callLoadDrafts) { await __callLoadDrafts(); }
-    } finally {
-      const header = document.querySelector('#recentDraftsHeader, [data-recent-drafts-header]');
-      if (header) header.classList.remove("loading");
-      __draftsRefreshTimer = null;
-    }
-  }, 300);
+  console.groupCollapsed("[intake.debug] refreshDrafts()", { force, tabVisible: isDraftsTabVisible() });
+  try {
+    if (!force && !isDraftsTabVisible()) { console.log("skip: drafts tab hidden"); return; }
+    if (__draftsRefreshTimer) window.clearTimeout(__draftsRefreshTimer);
+    __draftsRefreshTimer = window.setTimeout(async () => {
+      const t0 = performance.now();
+      try {
+        const header = document.querySelector('#recentDraftsHeader, [data-recent-drafts-header]');
+        if (header) header.classList.add("loading");
+        const fn = (window && window.__loadDrafts) || (typeof loadDrafts === "function" ? loadDrafts : null);
+        console.log("call loadDrafts()", { hasWrapper: !!window.__loadDrafts, found: !!fn });
+        if (fn) { await fn(); }
+        console.log("loadDrafts() done", { elapsed_ms: Math.round(performance.now() - t0) });
+      } catch (e) {
+        console.error("refreshDrafts.error", e);
+      } finally {
+        const header = document.querySelector('#recentDraftsHeader, [data-recent-drafts-header]');
+        if (header) header.classList.remove("loading");
+        __draftsRefreshTimer = null;
+      }
+    }, 300);
+  } finally {
+    console.groupEnd?.();
+  }
 }
 
 // Central event to refresh Drafts after successful add/save/delete
@@ -2051,20 +2060,30 @@ function isInventoryTabVisible() {
 }
 
 async function refreshInventory({ force = false } = {}) {
-  if (!force && !isInventoryTabVisible()) return;
-  if (__inventoryRefreshTimer) window.clearTimeout(__inventoryRefreshTimer);
-  __inventoryRefreshTimer = window.setTimeout(async () => {
-    try {
-      const header = document.querySelector('#recentInventoryHeader, [data-recent-inventory-header]');
-      if (header) header.classList.add("loading");
-      const __callLoadInventory = (window && window.__loadInventory) || (typeof loadInventory === "function" ? loadInventory : null);
-      if (__callLoadInventory) { await __callLoadInventory(); }
-    } finally {
-      const header = document.querySelector('#recentInventoryHeader, [data-recent-inventory-header]');
-      if (header) header.classList.remove("loading");
-      __inventoryRefreshTimer = null;
-    }
-  }, 300);
+  console.groupCollapsed("[intake.debug] refreshInventory()", { force, tabVisible: isInventoryTabVisible() });
+  try {
+    if (!force && !isInventoryTabVisible()) { console.log("skip: inventory pane hidden"); return; }
+    if (__inventoryRefreshTimer) window.clearTimeout(__inventoryRefreshTimer);
+    __inventoryRefreshTimer = window.setTimeout(async () => {
+      const t0 = performance.now();
+      try {
+        const header = document.querySelector('#recentInventoryHeader, [data-recent-inventory-header]');
+        if (header) header.classList.add("loading");
+        const fn = (window && window.__loadInventory) || (typeof loadInventory === "function" ? loadInventory : null);
+        console.log("call loadInventory()", { hasWrapper: !!window.__loadInventory, found: !!fn });
+        if (fn) { await fn(); }
+        console.log("loadInventory() done", { elapsed_ms: Math.round(performance.now() - t0) });
+      } catch (e) {
+        console.error("refreshInventory.error", e);
+      } finally {
+        const header = document.querySelector('#recentInventoryHeader, [data-recent-inventory-header]');
+        if (header) header.classList.remove("loading");
+        __inventoryRefreshTimer = null;
+      }
+    }, 300);
+  } finally {
+    console.groupEnd?.();
+  }
 }
 
 // Refresh inventory after add/save/delete when the Inventory tab is open
@@ -2301,7 +2320,21 @@ document.addEventListener("intake:item-changed", () => refreshInventory({ force:
     computeValidity();
     
     // Auto-load drafts into the Drafts tab on screen load (does not auto-switch the tab)
-    await loadDrafts?.();
+    console.groupCollapsed("[intake.debug] init → loadDrafts (first paint)");
+    try {
+      const t0 = performance.now();
+      if (typeof loadDrafts === "function") {
+        const out = await loadDrafts();
+        console.log("loadDrafts() resolved", { type: typeof out });
+      } else {
+        console.log("loadDrafts() not found at init");
+      }
+      console.log("elapsed_ms", Math.round(performance.now() - t0));
+    } catch (e) {
+      console.error("loadDrafts.init.error", e);
+    } finally {
+      console.groupEnd?.();
+    }
     
     // True tab wiring (ARIA tabs + lazy-load for Inventory)
     (function wireIntakeTabs() {
@@ -2348,16 +2381,36 @@ document.addEventListener("intake:item-changed", () => refreshInventory({ force:
       // Click behavior
       tabDrafts?.addEventListener("click", async (e) => {
         e.preventDefault();
-        activate(tabDrafts, paneDrafts);
-        // Ensure drafts render whenever the Drafts tab is shown
-        await (typeof loadDrafts === "function" ? loadDrafts() : Promise.resolve());
+        console.groupCollapsed("[intake.debug] CLICK → Drafts tab");
+        try {
+          activate(tabDrafts, paneDrafts);
+          const t0 = performance.now();
+          const fn = (typeof loadDrafts === "function") ? loadDrafts : null;
+          console.log("activate(drafts) + call loadDrafts()", { found: !!fn });
+          if (fn) { await fn(); }
+          console.log("loadDrafts() completed", { elapsed_ms: Math.round(performance.now() - t0) });
+        } catch (err) {
+          console.error("tabDrafts.click.error", err);
+        } finally {
+          console.groupEnd?.();
+        }
       });
       
       tabInventory?.addEventListener("click", async (e) => {
         e.preventDefault();
-        activate(tabInventory, paneInventory);
-        // Lazy-load inventory on demand
-        await (typeof loadInventory === "function" ? loadInventory() : Promise.resolve());
+        console.groupCollapsed("[intake.debug] CLICK → Inventory tab");
+        try {
+          activate(tabInventory, paneInventory);
+          const t0 = performance.now();
+          const fn = (typeof loadInventory === "function") ? loadInventory : null;
+          console.log("activate(inventory) + call loadInventory()", { found: !!fn });
+          if (fn) { await fn(); }
+          console.log("loadInventory() completed", { elapsed_ms: Math.round(performance.now() - t0) });
+        } catch (err) {
+          console.error("tabInventory.click.error", err);
+        } finally {
+          console.groupEnd?.();
+        }
       });
 
       // Bulk is disabled/placeholder for now
@@ -2387,6 +2440,51 @@ document.addEventListener("intake:item-changed", () => refreshInventory({ force:
       activate(tabDrafts, paneDrafts);
     })();
 
+    // [intake.debug] Targeted fetch logger for /api/inventory/{drafts|recent}
+    (function rpInstrumentFetchOnce() {
+      try {
+        const g = window;
+        if (!g || !g.fetch || g.fetch.__rpInventoryWrapped) return;
+        const orig = g.fetch.bind(g);
+        g.fetch = async function(input, init) {
+          const url = (typeof input === "string") ? input : (input && input.url) || "";
+          const isDrafts = /\/api\/inventory\/drafts?/i.test(url);
+          const isRecent = /\/api\/inventory\/recent/i.test(url);
+          const watch = isDrafts || isRecent;
+    
+          if (!watch) return orig(input, init);
+    
+          const t0 = performance.now();
+          console.groupCollapsed("[intake.debug] fetch →", url);
+          try {
+            console.log("request", { method: (init && init.method) || "GET", headers: (init && init.headers) || undefined });
+            const res = await orig(input, init);
+            console.log("response", { status: res.status, ok: res.ok, type: res.type });
+            try {
+              const clone = res.clone();
+              const text = await clone.text();
+              let rows = null, ok = null, parsed = null;
+              try { parsed = JSON.parse(text); } catch {}
+              if (parsed && parsed.rows) rows = Array.isArray(parsed.rows) ? parsed.rows.length : null;
+              if (parsed && typeof parsed.ok !== "undefined") ok = parsed.ok;
+              console.log("body.peek", { ok, rows, bytes: text.length });
+            } catch (e) {
+              console.warn("peek.body.failed", String(e));
+            }
+            return res;
+          } catch (err) {
+            console.error("fetch.error", err);
+            throw err;
+          } finally {
+            console.log("elapsed_ms", Math.round(performance.now() - t0));
+            console.groupEnd?.();
+          }
+        };
+        g.fetch.__rpInventoryWrapped = true;
+      } catch (e) {
+        console.warn("rpInstrumentFetchOnce.failed", e);
+      }
+    })();
     
     // --- [NEW] Submission wiring: both buttons call POST /api/inventory/intake ---
     function valByIdOrLabel(id, label) {
