@@ -269,14 +269,35 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
         };
 
         for (const r of rows) {
-          // TEMP: skip Facebook until its adapter is implemented
-          if (String(r.slug || "").toLowerCase() === "facebook") {
-            console.log("[intake] enqueue.skip_no_adapter", { marketplace_id: r.id, slug: r.slug });
+          const slug = String(r.slug || "").toLowerCase();
+          if (slug === "facebook") {
+            // Ensure stub exists so UI reflects progress
+            await sql/*sql*/`
+              INSERT INTO app.item_marketplace_listing
+                (item_id, tenant_id, marketplace_id, status)
+              VALUES
+                (${item_id}, ${tenant_id}, ${r.id}, 'publishing')
+              ON CONFLICT (item_id, marketplace_id)
+              DO UPDATE SET
+                status = 'publishing',
+                updated_at = now()
+            `;
+
+            // Emit a progress event (no server-runner for FB; browser/Tampermonkey will finish)
+            await sql/*sql*/`
+              INSERT INTO app.item_marketplace_events
+                (item_id, tenant_id, marketplace_id, kind, payload)
+              VALUES
+                (${item_id}, ${tenant_id}, ${r.id}, 'publish_started', jsonb_build_object('source','enqueue'))
+            `;
+
             continue;
           }
           
           // Pull the marketplace row (if present) to know current identifiers/status
           const iml = Array.isArray(imlRows) ? imlRows.find((x:any) => x.marketplace_id === r.id) : null;
+
+
 
           // Build canonical snapshot for this marketplace
           const snapshot = {
@@ -751,7 +772,8 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
                 shipbx_height    = EXCLUDED.shipbx_height
             `;
   
-            // Upsert selected marketplaces (prototype). Only eBay has field data today.
+            // Upsert selected marketplaces (prototype).
+            // eBay gets the rich field set; all other selected marketplaces (e.g., Facebook) get a stub row.
             {
               const mpIds: number[] = Array.isArray(body?.marketplaces_selected)
                 ? body.marketplaces_selected.map((n: any) => Number(n)).filter((n) => !Number.isNaN(n))
@@ -761,8 +783,8 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
               const e = ebay ? normalizeEbay(ebay) : null;
 
               for (const mpId of mpIds) {
-                // Only write the rich field set for eBay
                 if (mpId === EBAY_MARKETPLACE_ID && e) {
+                  // eBay: full field upsert (existing behavior)
                   await sql/*sql*/`
                     INSERT INTO app.item_marketplace_listing
                       (item_id, tenant_id, marketplace_id, status,
@@ -794,25 +816,37 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
                       updated_at = now()
                   `;
                   await sql/*sql*/`
-                INSERT INTO app.user_marketplace_defaults
-                  (tenant_id, user_id, marketplace_id,
-                   shipping_policy, payment_policy, return_policy, shipping_zip, pricing_format,
-                   allow_best_offer, promote)
-                VALUES
-                  (${tenant_id}, ${actor_user_id}, ${EBAY_MARKETPLACE_ID},
-                   ${e.shipping_policy}, ${e.payment_policy}, ${e.return_policy}, ${e.shipping_zip}, ${e.pricing_format},
-                   ${e.allow_best_offer}, ${e.promote})
-                ON CONFLICT (tenant_id, user_id, marketplace_id)
-                DO UPDATE SET
-                  shipping_policy = EXCLUDED.shipping_policy,
-                  payment_policy  = EXCLUDED.payment_policy,
-                  return_policy   = EXCLUDED.return_policy,
-                  shipping_zip    = EXCLUDED.shipping_zip,
-                  pricing_format  = EXCLUDED.pricing_format,
-                  allow_best_offer = EXCLUDED.allow_best_offer,
-                  promote          = EXCLUDED.promote,
-                  updated_at       = now()
-              `;
+                    INSERT INTO app.user_marketplace_defaults
+                      (tenant_id, user_id, marketplace_id,
+                       shipping_policy, payment_policy, return_policy, shipping_zip, pricing_format,
+                       allow_best_offer, promote)
+                    VALUES
+                      (${tenant_id}, ${actor_user_id}, ${EBAY_MARKETPLACE_ID},
+                       ${e.shipping_policy}, ${e.payment_policy}, ${e.return_policy}, ${e.shipping_zip}, ${e.pricing_format},
+                       ${e.allow_best_offer}, ${e.promote})
+                    ON CONFLICT (tenant_id, user_id, marketplace_id)
+                    DO UPDATE SET
+                      shipping_policy = EXCLUDED.shipping_policy,
+                      payment_policy  = EXCLUDED.payment_policy,
+                      return_policy   = EXCLUDED.return_policy,
+                      shipping_zip    = EXCLUDED.shipping_zip,
+                      pricing_format  = EXCLUDED.pricing_format,
+                      allow_best_offer = EXCLUDED.allow_best_offer,
+                      promote          = EXCLUDED.promote,
+                      updated_at       = now()
+                  `;
+                } else {
+                  // Non-eBay (e.g., Facebook): ensure a stub listing row exists with 'publishing'
+                  await sql/*sql*/`
+                    INSERT INTO app.item_marketplace_listing
+                      (item_id, tenant_id, marketplace_id, status)
+                    VALUES
+                      (${item_id}, ${tenant_id}, ${mpId}, 'publishing')
+                    ON CONFLICT (item_id, marketplace_id)
+                    DO UPDATE SET
+                      status = 'publishing',
+                      updated_at = now()
+                  `;
                 }
               }
             }
@@ -901,9 +935,9 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
           SELECT set_config('app.actor_user_id', ${actor_user_id}, true)
         )
         INSERT INTO app.inventory
-          (sku, product_short_title, price, qty, cost_of_goods, category_nm, instore_loc, case_bin_shelf, instore_online, item_status)
+          (tenant_id, sku, product_short_title, price, qty, cost_of_goods, category_nm, instore_loc, case_bin_shelf, instore_online, item_status)
         VALUES
-          (NULL, ${inv.product_short_title}, ${inv.price}, ${inv.qty}, ${inv.cost_of_goods},
+          (${tenant_id}, NULL, ${inv.product_short_title}, ${inv.price}, ${inv.qty}, ${inv.cost_of_goods},
            ${inv.category_nm}, ${inv.instore_loc}, ${inv.case_bin_shelf}, ${inv.instore_online}, 'draft')
         RETURNING item_id
       `;
@@ -1027,9 +1061,9 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
         SELECT set_config('app.actor_user_id', ${actor_user_id}, true)
       )
       INSERT INTO app.inventory
-        (sku, product_short_title, price, qty, cost_of_goods, category_nm, instore_loc, case_bin_shelf, instore_online, item_status)
+        (tenant_id, sku, product_short_title, price, qty, cost_of_goods, category_nm, instore_loc, case_bin_shelf, instore_online, item_status)
       VALUES
-        (${sku}, ${inv.product_short_title}, ${inv.price}, ${inv.qty}, ${inv.cost_of_goods},
+        (${tenant_id}, ${sku}, ${inv.product_short_title}, ${inv.price}, ${inv.qty}, ${inv.cost_of_goods},
          ${inv.category_nm}, ${inv.instore_loc}, ${inv.case_bin_shelf}, ${inv.instore_online}, 'active')
       RETURNING item_id
     `;
@@ -1144,6 +1178,26 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
       }
     }
 
+    // NEW: For any other selected marketplaces (e.g., Facebook), create a stub row now
+    {
+      const selIds: number[] = Array.isArray(body?.marketplaces_selected)
+        ? body.marketplaces_selected.map((n: any) => Number(n)).filter((n) => !Number.isNaN(n))
+        : [];
+      const otherIds = selIds.filter((id) => id !== EBAY_MARKETPLACE_ID);
+      for (const mpId of otherIds) {
+        await sql/*sql*/`
+          INSERT INTO app.item_marketplace_listing
+            (item_id, tenant_id, marketplace_id, status)
+          VALUES
+            (${item_id}, ${tenant_id}, ${mpId}, 'publishing')
+          ON CONFLICT (item_id, marketplace_id)
+          DO UPDATE SET
+            status = 'publishing',
+            updated_at = now()
+        `;
+      }
+    }
+    
    //calling the enqueue process to prepare for the marketplace publish 
    await enqueuePublishJobs(tenant_id, item_id, body, status);
     
@@ -1297,6 +1351,26 @@ export const onRequestGet: PagesFunction = async ({ request, env }) => {
       if (rows.length) ebayListing = rows[0];
     }
 
+    // Load the Facebook marketplace listing row (if any) to hydrate the UI
+    // Neon uses marketplace_id = 2 for Facebook; also try slug for portability.
+    const facebookIdRows = await sql<{ id: number }[]>`
+      SELECT id FROM app.marketplaces_available WHERE slug = 'facebook' LIMIT 1
+    `;
+    const FACEBOOK_ID = facebookIdRows[0]?.id ?? 2;
+
+    let facebookListing: any = null;
+    if (FACEBOOK_ID != null) {
+      const rows = await sql<any[]>`
+        SELECT
+          status,
+          mp_item_url
+        FROM app.item_marketplace_listing
+        WHERE item_id = ${item_id} AND tenant_id = ${tenant_id} AND marketplace_id = ${FACEBOOK_ID}
+        LIMIT 1
+      `;
+      if (rows.length) facebookListing = rows[0];
+    }
+
     // ---- Long Description default (GET fallback so UI shows something helpful) ----
     const BASE_SENTENCE_GET =
       "The photos are part of the description. Be sure to look them over for condition and details. This is sold as is, and it's ready for a new home.";
@@ -1310,7 +1384,12 @@ export const onRequestGet: PagesFunction = async ({ request, env }) => {
       inventory: invRows[0],
       listing: listingOut,
       images: imgRows,
-      marketplace_listing: { ebay: ebayListing, ebay_marketplace_id: EBAY_ID }
+      marketplace_listing: {
+        ebay: ebayListing,
+        ebay_marketplace_id: EBAY_ID,
+        facebook: facebookListing,
+        facebook_marketplace_id: FACEBOOK_ID
+      }
     }), { status: 200, headers: { "content-type": "application/json", "cache-control": "no-store" } });
 
 

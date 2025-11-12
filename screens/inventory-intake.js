@@ -511,6 +511,8 @@ export async function init() {
             draftBtn.classList.add("opacity-60", "cursor-not-allowed");
             draftBtn.title = "Draft save is disabled for Active listings.";
           }
+          // Also enable the Xeasy copy button after successful Active save (create/update)
+          try { enableCopyXeasy(true); } catch {}
         }
         
         
@@ -539,7 +541,8 @@ export async function init() {
         // this will emit `intake:facebook-ready` ONLY if Facebook is selected
         // and not already live for this item.
         await __emitFacebookReadyIfSafe({ saveStatus, jobIds });
-
+        // Immediately reconcile the Facebook card with the DB snapshot
+        try { await refreshFacebookTile(); } catch {}
       } catch (e) {
         console.error("photos:flush:error", e);
       } finally {
@@ -1086,8 +1089,21 @@ function setMarketplaceVisibility() {
   function renderMarketplaceCards(meta) {
     const host = document.getElementById(MP_CARDS_ID);
     if (!host) return;
+  
+    // Capture existing per-card statuses before we wipe the DOM
+    const prevStatuses = new Map();
+    try {
+      for (const card of Array.from(host.querySelectorAll(".card"))) {
+        const name = (card.querySelector(".font-semibold")?.textContent || "")
+          .trim()
+          .toLowerCase();
+        const node = card.querySelector("[data-status-text]");
+        if (name && node) prevStatuses.set(name, node.innerHTML || node.textContent || "");
+      }
+    } catch {}
+  
     host.innerHTML = "";
-
+  
     // Install delegated listeners once so any field edit re-checks validity
     if (!host.dataset.validHook) {
       const safeRecheck = () => { try { computeValidity(); } catch {} };
@@ -1115,20 +1131,29 @@ function setMarketplaceVisibility() {
   
       // --- Header ---
       const header = document.createElement("div");
-      header.className = "flex items-center justify-between mb-2";
-      header.innerHTML = `
-        <div class="flex items-center gap-2">
-          <span class="font-semibold">${name}</span>
-          <span class="text-xs px-2 py-1 rounded ${connected ? "bg-green-100 text-green-700" : "bg-gray-100 text-gray-600"}">
-            ${connected ? "Connected" : "Not connected"}
-          </span>
-        </div>
-        <div class="text-sm" data-card-status>
-          <strong>Status:</strong> <span class="mono" data-status-text>Not Listed</span>
-          <button type="button" class="btn btn-ghost btn-xs ml-2 hidden" data-delist>Delist</button>
-        </div>
-      `;
-      card.appendChild(header);
+        header.className = "flex items-center justify-between mb-2";
+        header.innerHTML = `
+          <div class="flex items-center gap-2">
+            <span class="font-semibold">${name}</span>
+            <span class="text-xs px-2 py-1 rounded ${connected ? "bg-green-100 text-green-700" : "bg-gray-100 text-gray-600"}">
+              ${connected ? "Connected" : "Not connected"}
+            </span>
+          </div>
+          <div class="text-sm" data-card-status>
+            <strong>Status:</strong> <span class="mono" data-status-text>Not Listed</span>
+            <button type="button" class="btn btn-ghost btn-xs ml-2 hidden" data-delist>Delist</button>
+          </div>
+        `;
+        card.appendChild(header);
+  
+        // Restore any previously displayed status for this marketplace card
+        try {
+          const prev = prevStatuses.get(String(name || "").trim().toLowerCase());
+          if (prev) {
+            const node = header.querySelector("[data-status-text]");
+            if (node) node.innerHTML = prev;
+          }
+        } catch {}
   
       // --- Body (placeholder fields) ---
       const body = document.createElement("div");
@@ -1326,14 +1351,106 @@ function setMarketplaceVisibility() {
         card.appendChild(body);
       }
   
-      host.appendChild(card);
+       host.appendChild(card);
     }
-  
-    // If no marketplaces selected, nothing renders here by design.
-  }
+    
+    // After rendering marketplace cards, sync the FB status once
+    try {refreshFacebookTile(); } catch {}
+    
+     // If no marketplaces selected, nothing renders here by design.
+    }
 
   // === END NEW ===
 
+  // ===== Marketplace Status UI helpers (Facebook) =====
+  function getFacebookStatusNodes() {
+    const card = Array.from(document.querySelectorAll('#marketplaceCards .card'))
+      .find(c => /facebook/i.test((c.querySelector('.font-semibold')?.textContent || '')));
+    if (!card) return { textEl: null, wrap: null };
+    const wrap = card.querySelector('[data-card-status]') || card;
+    const textEl = card.querySelector('[data-status-text]') || wrap.querySelector('.mono') || wrap;
+    return { textEl, wrap };
+  }
+
+  function setFacebookStatus(label, { link = null, tone = 'muted' } = {}) {
+    const { textEl, wrap } = getFacebookStatusNodes();
+    if (!textEl) return;
+    const classes = ['text-gray-600','text-blue-700','text-green-700','text-red-700'];
+    try { wrap.classList.remove(...classes); } catch {}
+    if (tone === 'info')  wrap.classList.add('text-blue-700');
+    if (tone === 'ok')    wrap.classList.add('text-green-700');
+    if (tone === 'error') wrap.classList.add('text-red-700');
+    if (link) {
+      textEl.innerHTML = '';
+      const a = document.createElement('a');
+      a.href = link; a.target = '_blank'; a.rel = 'noopener';
+      a.textContent = label;
+      textEl.appendChild(a);
+    } else {
+      textEl.textContent = label;
+    }
+  }
+
+ async function refreshFacebookTile() {
+  try {
+    if (!__currentItemId) return;
+
+    const snap = await api(
+      `/api/inventory/intake?item_id=${encodeURIComponent(__currentItemId)}`,
+      { method: "GET" }
+    );
+
+    // Be tolerant to server response shapes:
+    // - marketplace_listing vs marketplace_listings
+    // - keyed by slug ("facebook") OR marketplace_id (2)
+    const mp = snap?.marketplace_listing || snap?.marketplace_listings || {};
+    const fbRow =
+      mp?.facebook ??
+      mp?.Facebook ??
+      mp?.["2"] ??
+      null;
+
+    const rawStatus =
+      fbRow?.status ??
+      fbRow?.listing_status ??
+      fbRow?.state ??
+      "";
+
+    const st = String(rawStatus).trim().toLowerCase();
+
+    if (!st || st === "draft" || st === "not_listed") {
+      setFacebookStatus("Not Listed", { tone: "muted" });
+      return;
+    }
+
+    if (st === "publishing" || st === "pending_external" || st === "processing") {
+      setFacebookStatus("Publishing…", { tone: "info" });
+      return;
+    }
+
+    if (st === "live" || st === "listed") {
+      const url =
+        fbRow?.mp_item_url ??
+        fbRow?.remote_url ??
+        fbRow?.url ??
+        null;
+      setFacebookStatus("Listed", { tone: "ok", link: url || null });
+      return;
+    }
+
+    if (st === "error" || st === "create_failed" || st === "failed") {
+      const msg = (fbRow?.last_error ? String(fbRow.last_error).slice(0, 120) : "");
+      setFacebookStatus(msg ? `Error — ${msg}` : "Error", { tone: "error" });
+      return;
+    }
+
+    setFacebookStatus("Unknown", { tone: "muted" });
+  } catch (e) {
+    console.warn("[intake.js] refreshFacebookTile failed", e);
+  }
+}
+
+  
   // ===== Marketplace Status UI helpers (eBay) =====
   function getEbayStatusNodes() {
     // Find the eBay card and its status span
@@ -1479,26 +1596,184 @@ function setMarketplaceVisibility() {
           document.dispatchEvent(new CustomEvent("intake:validity-changed", { detail: { valid: allOk } }));
           return allOk;
         }
+
+        // --- Copy for Xeasy: helpers & click handler (anchored insert) ---
+        function enableCopyXeasy(enabled = true) {
+          const btn = document.getElementById("copyXeasyBtn");
+          if (!btn) return;
+          btn.disabled = !enabled;
+          btn.classList.toggle("opacity-60", !enabled);
+          btn.classList.toggle("cursor-not-allowed", !enabled);
+          btn.title = enabled ? "Copy for Xeasy" : "Enabled in Phase 2";
+        }
+        
+        function buildXeasyText() {
+        // Title
+        const titleEl = document.getElementById("titleInput") || findControlByLabel("Item Name / Description");
+        const title = String(titleEl?.value || "").trim();
       
+        // Price → format with a leading $; integers show as $10, non-integers as $10.50
+        const priceCtrl = document.getElementById("priceInput") || findControlByLabel("Price (USD)");
+        const rawPrice = String(priceCtrl?.value ?? "").trim();
+        let price = rawPrice;
+        if (price) {
+          const n = Number(String(price).replace(/[$,]/g, ""));
+          if (!Number.isNaN(n)) {
+            price = Number.isInteger(n) ? `$${n}` : `$${n.toFixed(2)}`;
+          } else if (!price.startsWith("$")) {
+            price = `$${price}`;
+          }
+        }
+      
+        // SKU priority: server snapshot → [data-sku-out] / #skuOut → __lastKnownSku
+        let sku = "";
+        try {
+          const snapSku = String(window?.__intakeSnap?.inventory?.sku ?? "").trim();
+          if (snapSku) sku = snapSku;
+        } catch {}
+        if (!sku) {
+          try {
+            const el = document.querySelector("[data-sku-out]") || document.getElementById("skuOut");
+            if (el) {
+              const t = String(el.textContent || "");
+              const m = t.match(/SKU\s*(.+)$/i); // handles "SKU ABC-12345"
+              sku = (m ? m[1] : t).trim();
+            }
+          } catch {}
+        }
+        if (!sku) {
+          try { sku = String(window.__lastKnownSku || "").trim(); } catch {}
+        }
+      
+        // Store location & Case # (prefer the combined label "Case#/Bin#/Shelf#" if present)
+        const storeSel = document.getElementById("storeLocationSelect");
+        const storeLoc = String(storeSel?.value || "").trim();
+        const caseEl =
+          document.getElementById("caseShelfInput")
+          || findControlByLabel("Case#/Bin#/Shelf#")
+          || findControlByLabel("Case #");
+        const caseNo = String(caseEl?.value || "").trim();
+      
+        // Word-safe packing: first 14 chars (no mid-word) then next 23 chars (no mid-word)
+        const packWords = (s, limit) => {
+          const words = String(s || "").trim().split(/\s+/).filter(Boolean);
+          if (words.length === 0) return ["", ""];
+          let part = "";
+          let i = 0;
+          while (i < words.length) {
+            const next = part ? `${part} ${words[i]}` : words[i];
+            if (next.length <= limit) {
+              part = next;
+              i++;
+            } else {
+              break;
+            }
+          }
+          if (!part) { // if first word itself > limit, take it whole (no truncation)
+            part = words[0];
+            i = 1;
+          }
+          const rest = words.slice(i).join(" ");
+          return [part, rest];
+        };
+      
+        // Line 1: Price and SKU
+        const line1 = `${price} ${sku}`.trim();
+      
+        // Line 2/3: prepend RC, then title split across 14/23 without breaking words
+        const rc = `R${storeLoc}-C${caseNo}`.trim();
+        const [t1, tail] = packWords(title, 14);
+        const [t2] = packWords(tail, 23);
+      
+        const line2 = `${rc} ${t1}`.trim();
+        const line3 = String(t2 || "").trim();
+      
+        return [line1, line2, line3].filter(Boolean).join("\n");
+      }
+
+        
+        function wireCopyXeasy() {
+          const btn = document.getElementById("copyXeasyBtn");
+          if (!btn) return;
+          btn.addEventListener("click", async (e) => {
+            e.preventDefault();
+            try {
+              const text = buildXeasyText();
+              await navigator.clipboard.writeText(text);
+              if (typeof window.uiToast === "function") {
+                window.uiToast("Copied for Xeasy.");
+              } else {
+                alert("Copied for Xeasy.");
+              }
+            } catch (err) {
+              console.error("copy:xeasy:error", err);
+              alert("Failed to copy Xeasy text.");
+            }
+          });
+        }
+        // --- end Copy for Xeasy insert ---
       
         /* === Facebook handoff helpers (NEW) === */
 
         // Build the payload the Tampermonkey script will send to Facebook.
         window.rpBuildFacebookPayload = function rpBuildFacebookPayload() {
+
+          // 0) Resolve tenant (stashed during init) with robust fallbacks
+          const tenant_id = 
+            (typeof window.__tenantId === "string" && window.__tenantId) ||
+            (typeof window.ACTIVE_TENANT_ID === "string" && window.ACTIVE_TENANT_ID) ||
+            (document.querySelector('meta[name="x-tenant-id"]')?.getAttribute?.("content") || "") ||
+            (document.documentElement.getAttribute("data-tenant-id") || "") ||
+            (localStorage.getItem("rp:tenant_id") || "");
+          
           // 1) title / price / qty
           const titleEl = document.getElementById("titleInput") || findControlByLabel("Item Name / Description");
           const priceEl = document.getElementById("priceInput") || findControlByLabel("Price (USD)");
           const qtyEl   = document.getElementById("qtyInput")   || findControlByLabel("Qty");
-        
+          
           const title = String(titleEl?.value || "").trim();
           const price = Number(priceEl?.value || 0) || 0;
           const qty   = Math.max(0, parseInt(qtyEl?.value || "0", 10) || 0);
+
+          // 2) Prefer the server snapshot’s composed description (cached by __emitFacebookReadyIfSafe)
+          let composed = "";
+          try {
+            const snap = (window && window.__intakeSnap) || null;
+            const fromDb = String(snap?.item_listing_profile?.product_description || "");
+            if (fromDb) composed = fromDb;
+          } catch { /* fallback below */ }
         
-          // 2) long description (listing profile field on the screen)
-          const descEl = document.getElementById("longDescriptionTextarea") || findControlByLabel("Long Description");
-          let description = String(descEl?.value || "").trim();
+          // 2b) Fallback: reconstruct locally to match server rules if needed
+          if (!composed) {
+            const BASE_SENTENCE =
+              "The photos are part of the description. Be sure to look them over for condition and details. This is sold as is, and it's ready for a new home.";
+          
+            const ensureBaseOnce = (t) => {
+              const v = String(t || "").trim();
+              if (!v) return BASE_SENTENCE;
+              return v.includes(BASE_SENTENCE) ? v : `${BASE_SENTENCE}${v ? "\n\n" + v : ""}`;
+            };
+          
+            const descEl = document.getElementById("longDescriptionTextarea") || findControlByLabel("Long Description");
+            const raw = String(descEl?.value || "").trim();
+            let body = ensureBaseOnce(raw);
+            if (title && !body.startsWith(title)) body = `${title}\n\n${body}`;
+          
+            // Footer from cached snapshot or visible fields
+            const snap = (window && window.__intakeSnap) || null;
+            const sku = String((snap?.inventory?.sku ?? window.__lastKnownSku ?? "") || "").trim();
+            const loc = String((snap?.inventory?.instore_loc ?? findControlByLabel("Store Location")?.value ?? "") || "").trim();
+            const cbs = String((snap?.inventory?.case_bin_shelf ?? findControlByLabel("Case#/Bin#/Shelf#")?.value ?? "") || "").trim();
+          
+            if (sku) {
+              const footerLine = `SKU: ${sku} • Location: ${loc || "—"} • Case/Bin/Shelf: ${cbs || "—"}`;
+              body = `${body}\n\n${footerLine}`;
+            }
+            composed = body;
+          }
         
           // 3) append store footer lines (Facebook-specific)
+          let description = composed;
           const footer =
             "Mad Rad Retro Toys\n" +
             "5026 Kipling Street\n" +
@@ -1525,8 +1800,21 @@ function setMarketplaceVisibility() {
             .map(x => String(x.cdn_url || ""))
             .filter(Boolean);
         
+          // Resolve SKU from the server snapshot first; fall back to any visible UI echo.
+          const sku = (() => {
+            try {
+              const snap = (window && window.__intakeSnap) || null;
+              const v = snap?.inventory?.sku;
+              if (v) return String(v).trim();
+            } catch {}
+            const out = document.querySelector("[data-sku-out]")?.textContent;
+            if (out) return String(out).trim();
+            return String(window.__lastKnownSku || "").trim();
+          })();
+          
           const payload = {
-            title, price, qty, availability, category, condition, description,
+            tenant_id, title, price, qty, availability, category, condition, description,
+            sku, // <-- added
             images: ordered,
             item_id: __currentItemId || null,
             created_at: Date.now()
@@ -1596,6 +1884,10 @@ function setMarketplaceVisibility() {
           if (__currentItemId) {
             try {
               const snap = await api(`/api/inventory/intake?item_id=${encodeURIComponent(__currentItemId)}`, { method: "GET" });
+              // cache the full snapshot so rpBuildFacebookPayload can read description synchronously
+              window.__intakeSnap = snap;
+              // keep a last-known SKU around for local fallback builders
+              try { window.__lastKnownSku = String(snap?.inventory?.sku || ""); } catch {}
               const live = String(snap?.marketplace_listing?.facebook?.status || "").toLowerCase() === "live";
               console.log("existing fb status", { live, status: snap?.marketplace_listing?.facebook?.status });
               if (live) { console.log("skip: already live"); console.groupEnd?.(); return; }
@@ -1622,67 +1914,96 @@ function setMarketplaceVisibility() {
               ev?.detail?.payload ||
               (typeof window.rpBuildFacebookPayload === "function" ? window.rpBuildFacebookPayload() : null);
             if (!payload) return;
-        
-            console.groupCollapsed("[intake.js] facebook:intake → begin");
-            console.log("[intake.js] payload echo", payload);   // keep an echo here too
-
-          // 1) Same-origin handoff for Tampermonkey cache
-          try {
-            window.postMessage({ type: "RP_FACEBOOK_CREATE", payload }, location.origin);
-            console.log("[intake.js] postMessage → same-origin (RP_FACEBOOK_CREATE cached)");
-          } catch (e) {
-            console.warn("[intake.js] failed to send RP_FACEBOOK_CREATE", e);
-          }
-
-          // 2) Window handling — prefer the user-gesture stub, otherwise open now
-          let fbWin = window.__rpFbWin || null;
-          const FB_URL = "https://www.facebook.com/marketplace/create/item";
-          console.log("[intake.js] fbWin.stub", { hasStub: !!fbWin, closed: !!fbWin?.closed });
-
-          if (!fbWin || fbWin.closed) {
-            // No stub available: try to open now (still may be blocked without a user gesture)
-            fbWin = window.open(FB_URL, "_blank", "popup=1");  // no 'noopener'
-            const opened = !!fbWin && !fbWin.closed;
-            console.log("[intake.js] open.fb →", { opened });
           
-            if (!opened) {
-              console.warn("[intake.js] popup blocked — allow popups for resellpros.com to auto-open Facebook.");
-              if (typeof window.uiToast === "function") {
-                window.uiToast("Popup blocked — please allow popups for resellpros.com, then click Save again to open Facebook.");
-              } else {
-                // fall back to non-blocking console notice instead of alert
-                console.log("Popup blocked — please allow popups for resellpros.com, then click Save again to open Facebook.");
-              }
-              console.groupEnd?.();
-              return;
-            }
-          } else {
-            // Reuse the stub we opened on the user click
-            console.log("reuse.stubWindow → navigate", FB_URL);
-            try { fbWin.location.href = FB_URL; } catch (e) { console.warn("nav to FB_URL failed", e); }
-          }
-
-          // 3) (Optional secondary path) also try direct cross-origin postMessage to facebook.com
-          const post = () => {
+              console.groupCollapsed("[intake.js] facebook:intake → begin");
+              setFacebookStatus("Publishing…", { tone: "info" });
+              console.log("[intake.js] payload echo", payload);   // keep an echo here too
+              // Kick a short, one-time poll while the FB tab runs (max ~15s)
+              (function pollForFlipOnce() {
+                let ticks = 0;
+                const t = setInterval(async () => {
+                  try { await refreshFacebookTile(); } catch {}
+                  if (++ticks >= 15) clearInterval(t);
+                }, 1000);
+              })();
+            // 1) Same-origin handoff for Tampermonkey cache
             try {
-              fbWin.postMessage({ source: "resellpro", type: "facebook:intake", payload }, "https://www.facebook.com");
-              console.log("[intake.js] postMessage → facebook.com (queued)");
+              window.postMessage({ type: "RP_FACEBOOK_CREATE", payload }, location.origin);
+              console.log("[intake.js] postMessage → same-origin (RP_FACEBOOK_CREATE cached)");
             } catch (e) {
-              console.warn("[intake.js] postMessage failed (retrying)", e);
+              console.warn("[intake.js] failed to send RP_FACEBOOK_CREATE", e);
             }
-          };
 
-          console.log("[intake.js] post.start");
-          post();
-          const t = setInterval(post, 1000);
-
-          setTimeout(() => {
-            clearInterval(t);
-            const __t1 = performance.now();
-            console.log("[intake.js] facebook:intake → done", { ms: Math.round(__t1 - __t0) });
-            console.groupEnd?.();
-          }, 8000);
+            // 2) Window handling — prefer the user-gesture stub, otherwise open now
+            let fbWin = window.__rpFbWin || null;
+            const FB_URL = "https://www.facebook.com/marketplace/create/item";
+            console.log("[intake.js] fbWin.stub", { hasStub: !!fbWin, closed: !!fbWin?.closed });
+  
+            if (!fbWin || fbWin.closed) {
+              // No stub available: try to open now (still may be blocked without a user gesture)
+              fbWin = window.open(FB_URL, "_blank", "popup=1");  // no 'noopener'
+              const opened = !!fbWin && !fbWin.closed;
+              console.log("[intake.js] open.fb →", { opened });
+            
+              if (!opened) {
+                console.warn("[intake.js] popup blocked — allow popups for resellpros.com to auto-open Facebook.");
+                if (typeof window.uiToast === "function") {
+                  window.uiToast("Popup blocked — please allow popups for resellpros.com, then click Save again to open Facebook.");
+                } else {
+                  // fall back to non-blocking console notice instead of alert
+                  console.log("Popup blocked — please allow popups for resellpros.com, then click Save again to open Facebook.");
+                }
+                console.groupEnd?.();
+                return;
+              }
+            } else {
+              // Reuse the stub we opened on the user click
+              console.log("reuse.stubWindow → navigate", FB_URL);
+              try { fbWin.location.href = FB_URL; } catch (e) { console.warn("nav to FB_URL failed", e); }
+            }
+  
+            // 3) (Optional secondary path) also try direct cross-origin postMessage to facebook.com
+            const post = () => {
+              try {
+                fbWin.postMessage({ source: "resellpro", type: "facebook:intake", payload }, "https://www.facebook.com");
+                console.log("[intake.js] postMessage → facebook.com (queued)");
+              } catch (e) {
+                console.warn("[intake.js] postMessage failed (retrying)", e);
+              }
+            };
+  
+            console.log("[intake.js] post.start");
+            post();
+            const t = setInterval(post, 1000);
+  
+            setTimeout(() => {
+              clearInterval(t);
+              const __t1 = performance.now();
+              console.log("[intake.js] facebook:intake → done", { ms: Math.round(__t1 - __t0) });
+              console.groupEnd?.();
+            }, 8000);
         });
+
+
+
+
+/** Refresh when the FB tab signals it’s done (dry-run or real) */
+window.addEventListener("message", (ev) => {
+  try {
+    const okOrigin =
+      ev.origin === location.origin || ev.origin === "https://www.facebook.com";
+    if (!okOrigin) return;
+    if (ev.data && ev.data.type === "facebook:create:done") {
+      refreshFacebookTile();
+    }
+  } catch {}
+});
+
+/** Also refresh when user returns focus from the FB window */
+window.addEventListener("focus", () => {
+  setTimeout(() => { try { refreshFacebookTile(); } catch {} }, 300);
+});
+
   
 // --- Drafts refresh bus + helpers (anchored insert) ---
 let __draftsRefreshTimer = null;
@@ -1881,6 +2202,8 @@ document.addEventListener("intake:item-changed", () => refreshInventory({ force:
     renderMarketplaceTiles(meta);
     // Render placeholder cards for any preselected tiles (from defaults)
     try { renderMarketplaceCards(__metaCache); } catch {}
+      // Ensure the Facebook card reflects whatever Neon already knows on first paint
+      try { await refreshFacebookTile(); } catch {}
       // === Hydrate per-user marketplace defaults (eBay) ===
       async function hydrateUserDefaults() {
         try {
@@ -2272,15 +2595,33 @@ document.addEventListener("intake:item-changed", () => refreshInventory({ force:
         const inventory = prune(invAll);
         const listing   = prune(listingAll);
         const payload = { status: "draft", inventory };
-
+      
         if (Object.keys(listing).length > 0) payload.listing = listing;
+
+        // Ensure marketplaces_selected includes the UI selections (including Facebook)
+        try {
+          // Reuse whatever mechanism you already have for tile selection; fallback to data-attributes
+          const selected = new Set(Array.from(document.querySelectorAll('[data-mp-selected="true"]')).map(n => (n.dataset.mpSlug || "").toLowerCase()));
+          // If you store selected IDs elsewhere, merge them here
+          if (!Array.isArray(payload.marketplaces_selected)) payload.marketplaces_selected = [];
+          for (const s of selected) {
+            if (s && !payload.marketplaces_selected.includes(s)) payload.marketplaces_selected.push(s);
+          }
+        } catch { /* no-op */ }
+        
+        // eBay-specific fields (existing)
         if (Object.keys(ebayListing).length > 0) {
-          // Backend: upsert into app.item_marketplace_listing when present
-          payload.marketplace_listing = { ebay: ebayListing };
+          payload.marketplace_listing = { ...(payload.marketplace_listing || {}), ebay: ebayListing };
         }
-        // NOTE: we still omit marketplaces_selected for drafts for now
-        return payload;
-      }
+
+        // NEW: Facebook flag so the server upserts the stub row
+        if (payload.marketplaces_selected.includes("facebook")) {
+          payload.marketplace_listing = { ...(payload.marketplace_listing || {}), facebook: {} };
+        }
+
+          return payload;
+       }
+
     
       // Active/new items
       const salesChannel = valByIdOrLabel("salesChannelSelect", "Sales Channel");
@@ -2313,11 +2654,19 @@ document.addEventListener("intake:item-changed", () => refreshInventory({ force:
         payload.item_id = __currentItemId;
       }
       
+      // DEBUG (short): show marketplaces we’re asking for
+      console.log("[intake] marketplaces_selected", payload.marketplaces_selected, "has_fb=", payload?.marketplaces_selected?.includes?.("facebook"));
+      
       const res = await api("/api/inventory/intake", {
         method: "POST",
         body: JSON.stringify(payload),
         headers: { "content-type": "application/json" },
       });
+      
+      // DEBUG (short): confirm server accepted and returned item_id/status
+      if (res?.ok) {
+        console.log("[intake] server.ok item_id=", res.item_id, "status=", res.status);
+      }
       // Log non-OK responses with full context before throwing
       if (!res || res.ok === false) {
         try {
@@ -2845,7 +3194,7 @@ document.addEventListener("intake:item-changed", () => refreshInventory({ force:
       try { window.__loadInventory = loadInventory; } catch {}
       
       wireCtas();
-
+      wireCopyXeasy();  // enable/wire the Xeasy copy button
     // NEW: Photos bootstrap
     wirePhotoPickers();
     renderPhotosGrid();
@@ -2882,7 +3231,10 @@ document.addEventListener("intake:item-changed", () => refreshInventory({ force:
           const msg = mode === "draft"
             ? `Saved draft (#${res?.item_id || "?"}).`
             : `Saved item ${skuPart} (#${res?.item_id || "?"}).`;
-          
+          // Also enable the Xeasy copy button when this is an Active (non-draft) save
+          if (mode !== "draft") {
+            try { enableCopyXeasy(true); } catch {}
+          }
           // Use a non-blocking toast/banner so the Facebook handoff isn't paused
           if (typeof window.uiToast === "function") {
             window.uiToast(msg);

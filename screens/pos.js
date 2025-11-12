@@ -216,7 +216,13 @@ export async function init(ctx) {
       el.banner.classList.add("hidden");
       el.banner.innerHTML = "";
     }
-  
+
+    // 🔹 PHASE-1: also clear the Search pane so the next sale starts clean
+    if (el.q) el.q.value = "";
+    if (el.results) el.results.innerHTML = "";
+    // return focus to the search box for fast scanning/entry
+    setTimeout(() => el.q?.focus?.(), 0);
+    
     // Clear cart & state
     state.items = [];
     state.payment = null;
@@ -338,8 +344,10 @@ export async function init(ctx) {
         (it.case_bin_shelf || "")
       ].filter(Boolean).join(" · ");
 
-      const img = it.image_url ? `<img class="pos-thumb" src="${escapeHtml(it.image_url)}" alt="">` :
-                                 `<div class="pos-thumb pos-thumb--ph"></div>`;
+       // Normalize thumbnails: fixed box + object-fit cover
+      const img = it.image_url
+        ? `<img class="pos-thumb" src="${escapeHtml(it.image_url)}" alt="" width="96" height="96" loading="lazy">`
+        : `<div class="pos-thumb pos-thumb--ph" style="width:96px;height:96px;"></div>`;
 
       return `
         <div class="pos-result-row">
