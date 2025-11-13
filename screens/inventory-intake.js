@@ -977,9 +977,6 @@ function setMarketplaceVisibility() {
   
   // Cache latest meta so we can re-render cards on tile toggles
   let __metaCache = null;
-  // Snapshot of the current marketplace_listing rows for this item (from GET /api/inventory/intake)
-  // Used for warnings when deselecting marketplaces that are already live.
-  let __currentMarketplaceListing = null;
   /** currently selected marketplace IDs (from app.marketplaces_available.id) */
   const selectedMarketplaceIds = new Set();
 
@@ -1053,52 +1050,17 @@ function setMarketplaceVisibility() {
         btn.addEventListener("click", () => {
           const id = Number(btn.dataset.marketplaceId);
           const isSel = selectedMarketplaceIds.has(id);
-
           if (isSel) {
-            // If this tile corresponds to a marketplace that already has a live listing,
-            // warn the user that deselecting will end/delete the listing on save.
-            try {
-              const rows = (__metaCache?.marketplaces || []);
-              const row = rows.find(r => Number(r.id) === id);
-              const slug = String(row?.slug || "").toLowerCase();
-              const snap = __currentMarketplaceListing || null;
-
-              let hasLive = false;
-              if (snap) {
-                if (slug === "ebay" && snap.ebay && String(snap.ebay.status || "").toLowerCase() === "live") {
-                  hasLive = true;
-                }
-                if (slug === "facebook" && snap.facebook && String(snap.facebook.status || "").toLowerCase() === "live") {
-                  hasLive = true;
-                }
-              }
-
-              if (hasLive) {
-                const ok = window.confirm(
-                  "If you deselect this marketplace, the existing listing will be ended/deleted when you save. Continue?"
-                );
-                if (!ok) {
-                  // Do not toggle off; leave selection as-is.
-                  return;
-                }
-              }
-            } catch (e) {
-              console.warn("marketplace:deselect:warn_failed", e);
-            }
-
-            // Proceed with deselect
             selectedMarketplaceIds.delete(id);
             btn.classList.remove("btn-primary");
             btn.classList.add("btn-ghost");
             btn.setAttribute("aria-pressed", "false");
           } else {
-            // Selecting a tile
             selectedMarketplaceIds.add(id);
             btn.classList.remove("btn-ghost");
             btn.classList.add("btn-primary");
             btn.setAttribute("aria-pressed", "true");
           }
-
           // live-validate after any toggle
           computeValidity();
           // update marketplace cards to match current selection
@@ -1123,16 +1085,13 @@ function setMarketplaceVisibility() {
   // Apply per-item marketplace selection (e.g., when loading an existing item).
   // meta: inventory meta (usually __metaCache)
   // marketplaceListing: res.marketplace_listing from GET /api/inventory/intake
-    function applyMarketplaceSelectionForItem(meta, marketplaceListing) {
+  function applyMarketplaceSelectionForItem(meta, marketplaceListing) {
     try {
       const rows = (meta?.marketplaces || []);
       const bySlug = new Map(
         rows.map(r => [String(r.slug || "").toLowerCase(), r])
       );
-      // Save the full snapshot so tile toggles can see which marketplaces
-      // are already live (for delete warnings, etc.).
-      __currentMarketplaceListing = marketplaceListing || null;
-      
+
       selectedMarketplaceIds.clear();
 
       if (marketplaceListing) {
@@ -1166,109 +1125,87 @@ function setMarketplaceVisibility() {
       }
 
       renderMarketplaceTiles(meta);
-      // When hydrating an existing item, do a full rebuild of cards
-      try { renderMarketplaceCards(meta, { mode: "full" }); } catch {}
+      try { renderMarketplaceCards(meta); } catch {}
     } catch (e) {
       console.error("marketplaces:applySelection:error", e);
     }
   }
 
 
-
   // Render placeholder cards for each selected marketplace (UI-only; no API calls)
-    // Render placeholder cards for each selected marketplace (UI-only; no API calls)
-  // opts.mode: "full" | "delta"
-  //  - "full"  → rebuild all cards (used on initial load / item load)
-  //  - "delta" → add/remove cards without touching existing ones (used on tile clicks)
-  function renderMarketplaceCards(meta, opts) {
+  function renderMarketplaceCards(meta) {
     const host = document.getElementById(MP_CARDS_ID);
     if (!host) return;
-
-    const mode = (opts && opts.mode) || "full";
-
+  
+    // Capture existing per-card statuses before we wipe the DOM
+    const prevStatuses = new Map();
+    try {
+      for (const card of Array.from(host.querySelectorAll(".card"))) {
+        const name = (card.querySelector(".font-semibold")?.textContent || "")
+          .trim()
+          .toLowerCase();
+        const node = card.querySelector("[data-status-text]");
+        if (name && node) prevStatuses.set(name, node.innerHTML || node.textContent || "");
+      }
+    } catch {}
+  
+    host.innerHTML = "";
+  
     // Install delegated listeners once so any field edit re-checks validity
     if (!host.dataset.validHook) {
       const safeRecheck = () => { try { computeValidity(); } catch {} };
-      host.addEventListener("input", safeRecheck);
+      host.addEventListener("input",  safeRecheck);
       host.addEventListener("change", safeRecheck);
       host.dataset.validHook = "1";
     }
-
+  
     // Build a lookup of marketplaces by id (id, slug, marketplace_name, is_connected etc.)
     const rows = (meta?.marketplaces || []).filter(m => m.is_active !== false);
     const byId = new Map(rows.map(r => [Number(r.id), r]));
-    const desiredIds = Array.from(selectedMarketplaceIds).map(Number);
-
-    // Capture existing per-card statuses (by marketplace id) before a full rebuild
-    const prevStatuses = new Map();
-    if (mode === "full") {
-      try {
-        for (const card of Array.from(host.querySelectorAll("[data-marketplace-id]"))) {
-          const mid = Number(card.dataset.marketplaceId);
-          const node = card.querySelector("[data-status-text]");
-          if (!Number.isNaN(mid) && node) {
-            prevStatuses.set(mid, node.innerHTML || node.textContent || "");
-          }
-        }
-      } catch {}
-    }
-
-    // Track which ids already have a card we can keep (delta mode)
-    const realized = new Set();
-    if (mode === "delta") {
-      const existing = Array.from(host.querySelectorAll("[data-marketplace-id]"));
-      for (const card of existing) {
-        const mid = Number(card.dataset.marketplaceId);
-        if (!desiredIds.includes(mid)) {
-          card.remove(); // tile was deselected → drop its card
-          continue;
-        }
-        realized.add(mid); // keep this card (and its current field values) as-is
-      }
-    } else {
-      // full reset: start from a clean container
-      host.innerHTML = "";
-    }
-
-    function createMarketplaceCard(m, prevStatusHtml) {
+  
+    // For each selected marketplace, render a card
+    for (const id of selectedMarketplaceIds) {
+      const m = byId.get(Number(id));
+      if (!m) continue;
+  
       const slug = String(m.slug || "").toLowerCase();
       const name = m.marketplace_name || m.slug || `#${m.id}`;
       const connected = !!m.is_connected;
-
+  
       // Card wrapper
       const card = document.createElement("div");
       card.className = "card p-3";
-      card.dataset.marketplaceId = String(m.id);
-
+  
       // --- Header ---
       const header = document.createElement("div");
-      header.className = "flex items-center justify-between mb-2";
-      header.innerHTML = `
-        <div class="flex items-center gap-2">
-          <span class="font-semibold">${name}</span>
-          <span class="text-xs px-2 py-1 rounded ${connected ? "bg-green-100 text-green-700" : "bg-gray-100 text-gray-600"}">
-            ${connected ? "Connected" : "Not connected"}
-          </span>
-        </div>
-        <div class="text-sm" data-card-status>
-          <strong>Status:</strong> <span class="mono" data-status-text>Not Listed</span>
-          <button type="button" class="btn btn-ghost btn-xs ml-2 hidden" data-delist>Delist</button>
-        </div>
-      `;
-      card.appendChild(header);
-
-      // Restore any previously displayed status for this marketplace card (on full rebuilds)
-      if (prevStatusHtml) {
+        header.className = "flex items-center justify-between mb-2";
+        header.innerHTML = `
+          <div class="flex items-center gap-2">
+            <span class="font-semibold">${name}</span>
+            <span class="text-xs px-2 py-1 rounded ${connected ? "bg-green-100 text-green-700" : "bg-gray-100 text-gray-600"}">
+              ${connected ? "Connected" : "Not connected"}
+            </span>
+          </div>
+          <div class="text-sm" data-card-status>
+            <strong>Status:</strong> <span class="mono" data-status-text>Not Listed</span>
+            <button type="button" class="btn btn-ghost btn-xs ml-2 hidden" data-delist>Delist</button>
+          </div>
+        `;
+        card.appendChild(header);
+  
+        // Restore any previously displayed status for this marketplace card
         try {
-          const node = header.querySelector("[data-status-text]");
-          if (node) node.innerHTML = prevStatusHtml;
+          const prev = prevStatuses.get(String(name || "").trim().toLowerCase());
+          if (prev) {
+            const node = header.querySelector("[data-status-text]");
+            if (node) node.innerHTML = prev;
+          }
         } catch {}
-      }
-
+  
       // --- Body (placeholder fields) ---
       const body = document.createElement("div");
       body.className = "mt-2";
-
+  
       if (slug === "ebay") {
         // eBay placeholder UI — all fields required unless hidden by rules
         body.innerHTML = `
@@ -1295,7 +1232,7 @@ function setMarketplaceVisibility() {
               <label>Shipping Location (Zip) <span class="text-red-600" aria-hidden="true">*</span></label>
               <input id="ebay_shipZip" type="text" inputmode="numeric" pattern="[0-9]{5}" placeholder="e.g. 80903" required />
             </div>
-
+  
             <div class="field">
               <label>Pricing Format <span class="text-red-600" aria-hidden="true">*</span></label>
               <select id="ebay_formatSelect" required>
@@ -1304,7 +1241,7 @@ function setMarketplaceVisibility() {
                 <option value="auction">Auction</option>
               </select>
             </div>
-
+  
             <!-- Auction-only -->
             <div class="field ebay-auction-only hidden">
               <label>Duration <span class="text-red-600" aria-hidden="true">*</span></label>
@@ -1316,12 +1253,12 @@ function setMarketplaceVisibility() {
                 <option value="10">10 Days</option>
               </select>
             </div>
-
+  
             <div class="field">
               <label>Buy It Now Price (USD) <span class="text-red-600" aria-hidden="true">*</span></label>
               <input id="ebay_bin" type="number" step="0.01" min="0" placeholder="0.00" required />
             </div>
-
+  
             <!-- Auction-only -->
             <div class="field ebay-auction-only hidden">
               <label>Starting Bid (USD) <span class="text-red-600" aria-hidden="true">*</span></label>
@@ -1331,7 +1268,8 @@ function setMarketplaceVisibility() {
               <label>Reserve Price (USD)</label>
               <input id="ebay_reserve" type="number" step="0.01" min="0" placeholder="0.00" />
             </div>
-
+  
+            
             <!-- Fixed-only -->
             <div class="field ebay-fixed-only">
               <label class="switch" for="ebay_bestOffer">
@@ -1365,8 +1303,11 @@ function setMarketplaceVisibility() {
               <label>Promotion Percent (%) <span class="text-red-600" aria-hidden="true">*</span></label>
               <input id="ebay_promotePct" type="number" step="0.1" min="0" max="100" placeholder="0" required />
             </div>
-          `;
-        card.appendChild(body);
+            
+            
+        `;
+
+                card.appendChild(body);
 
         // If tenant is connected to eBay, pull policies and populate the selects
         (async () => {
@@ -1407,30 +1348,32 @@ function setMarketplaceVisibility() {
         })();
 
         // Wire local show/hide inside the eBay card (client-only)
-        const formatSel   = body.querySelector("#ebay_formatSelect");
-        const bestOffer   = body.querySelector("#ebay_bestOffer");
-        const promoteChk  = body.querySelector("#ebay_promote");
+        const formatSel   = body.querySelector('#ebay_formatSelect');
 
-        const fixedOnly     = () => body.querySelectorAll(".ebay-fixed-only");
-        const auctionOnly   = () => body.querySelectorAll(".ebay-auction-only");
-        const bestOfferOnly = () => body.querySelectorAll(".ebay-bestoffer-only");
-        const promoOnly     = () => body.querySelectorAll(".ebay-promote-only");
-
+        
+        const bestOffer   = body.querySelector('#ebay_bestOffer');
+        const promoteChk  = body.querySelector('#ebay_promote');
+  
+        const fixedOnly    = () => body.querySelectorAll(".ebay-fixed-only");
+        const auctionOnly  = () => body.querySelectorAll(".ebay-auction-only");
+        const bestOfferOnly= () => body.querySelectorAll(".ebay-bestoffer-only");
+        const promoOnly    = () => body.querySelectorAll(".ebay-promote-only");
+  
         function applyEbayVisibility() {
           const fmt = (formatSel?.value || "").toLowerCase(); // "" | "fixed" | "auction"
           const isFixed   = fmt === "fixed";
           const isAuction = fmt === "auction";
           const hasBO     = !!bestOffer?.checked;
           const promo     = !!promoteChk?.checked;
-
+  
           fixedOnly().forEach(n => n.classList.toggle("hidden", !isFixed));
           auctionOnly().forEach(n => n.classList.toggle("hidden", !isAuction));
           bestOfferOnly().forEach(n => n.classList.toggle("hidden", !(isFixed && hasBO)));
           promoOnly().forEach(n => n.classList.toggle("hidden", !promo));
-
-          // When Best Offer is unchecked, clear and mark not required
-          const autoAcc = body.querySelector("#ebay_autoAccept");
-          const minOff  = body.querySelector("#ebay_minOffer");
+  
+         // When Best Offer is unchecked, clear and mark not required
+          const autoAcc = body.querySelector('#ebay_autoAccept');
+          const minOff  = body.querySelector('#ebay_minOffer');
           if (autoAcc) autoAcc.required = isFixed && hasBO;
           if (minOff)  minOff.required  = isFixed && hasBO;
 
@@ -1446,32 +1389,23 @@ function setMarketplaceVisibility() {
         // First paint: align UI *and* button states to current values
         applyEbayVisibility();
         try { computeValidity(); } catch {}
+        
       } else {
-        // Generic placeholder card for other marketplaces (no filler lists yet)
+        // Generic placeholder card for other marketplaces (no filler lists)
         body.innerHTML = `
           <div class="muted text-sm">Marketplace-specific fields coming soon.</div>
         `;
         card.appendChild(body);
       }
-
-      return card;
+  
+       host.appendChild(card);
     }
-
-    // For each selected marketplace, ensure a card exists
-    for (const id of desiredIds) {
-      if (realized.has(id)) continue; // delta mode: keep existing card and its values
-      const m = byId.get(Number(id));
-      if (!m) continue;
-      const card = createMarketplaceCard(m, prevStatuses.get(Number(id)));
-      host.appendChild(card);
-    }
-
+    
     // After rendering marketplace cards, sync the FB status once
-    try { refreshFacebookTile(); } catch {}
-
-    // If no marketplaces selected, nothing renders here by design.
-  }
-
+    try {refreshFacebookTile(); } catch {}
+    
+     // If no marketplaces selected, nothing renders here by design.
+    }
 
   // === END NEW ===
 
@@ -1966,17 +1900,16 @@ function setMarketplaceVisibility() {
             console.groupEnd?.();
             return;
           }
-
-          //temp removing this because it was causing facbook listings not to create. Removed for sake of production speed. We will assess later. 
+        
           // runner quiet?
-          //if (Array.isArray(jobIds) && jobIds.length > 0) {
-            //const anyRunning = document.querySelector('[data-status-text]')?.textContent?.match(/Publishing|Deleting/i);
-            //if (anyRunning) {
-              //console.log("skip: publish runner still active");
-              //console.groupEnd?.();
-              //return;
-            //}
-          }//
+          if (Array.isArray(jobIds) && jobIds.length > 0) {
+            const anyRunning = document.querySelector('[data-status-text]')?.textContent?.match(/Publishing|Deleting/i);
+            if (anyRunning) {
+              console.log("skip: publish runner still active");
+              console.groupEnd?.();
+              return;
+            }
+          }
         
           // is Facebook selected?
           const isFacebookSelected = (() => {
