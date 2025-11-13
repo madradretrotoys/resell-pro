@@ -1966,16 +1966,17 @@ function setMarketplaceVisibility() {
             console.groupEnd?.();
             return;
           }
-        
+
+          //temp removing this because it was causing facbook listings not to create. Removed for sake of production speed. We will assess later. 
           // runner quiet?
-          if (Array.isArray(jobIds) && jobIds.length > 0) {
-            const anyRunning = document.querySelector('[data-status-text]')?.textContent?.match(/Publishing|Deleting/i);
-            if (anyRunning) {
-              console.log("skip: publish runner still active");
-              console.groupEnd?.();
-              return;
-            }
-          }
+          //if (Array.isArray(jobIds) && jobIds.length > 0) {
+            //const anyRunning = document.querySelector('[data-status-text]')?.textContent?.match(/Publishing|Deleting/i);
+            //if (anyRunning) {
+              //console.log("skip: publish runner still active");
+              //console.groupEnd?.();
+              //return;
+            //}
+          }//
         
           // is Facebook selected?
           const isFacebookSelected = (() => {
