@@ -1063,8 +1063,8 @@ function setMarketplaceVisibility() {
           }
           // live-validate after any toggle
           computeValidity();
-          // update marketplace cards to match current selection
-          try { renderMarketplaceCards(__metaCache); } catch {}
+          // Delta-mode: add/remove cards without resetting existing card inputs
+          try { renderMarketplaceCards(__metaCache, { mode: "delta" }); } catch {}
         });
       } else {
         btn.addEventListener("click", () => {
@@ -1085,51 +1085,53 @@ function setMarketplaceVisibility() {
   // Apply per-item marketplace selection (e.g., when loading an existing item).
   // meta: inventory meta (usually __metaCache)
   // marketplaceListing: res.marketplace_listing from GET /api/inventory/intake
-  function applyMarketplaceSelectionForItem(meta, marketplaceListing) {
-    try {
-      const rows = (meta?.marketplaces || []);
-      const bySlug = new Map(
-        rows.map(r => [String(r.slug || "").toLowerCase(), r])
-      );
-
-      selectedMarketplaceIds.clear();
-
-      if (marketplaceListing) {
-        const ids = [];
-
-        // eBay row present -> include eBay marketplace id
-        if (marketplaceListing.ebay) {
-          const rawId =
-            marketplaceListing.ebay_marketplace_id ??
-            (bySlug.get("ebay") && bySlug.get("ebay").id);
-          if (rawId != null) {
-            const id = Number(rawId);
-            if (!Number.isNaN(id)) ids.push(id);
+    function applyMarketplaceSelectionForItem(meta, marketplaceListing) {
+      try {
+        const rows = (meta?.marketplaces || []);
+        const bySlug = new Map(
+          rows.map(r => [String(r.slug || "").toLowerCase(), r])
+        );
+  
+        selectedMarketplaceIds.clear();
+  
+        if (marketplaceListing) {
+          const ids = [];
+  
+          // eBay row present -> include eBay marketplace id
+          if (marketplaceListing.ebay) {
+            const rawId =
+              marketplaceListing.ebay_marketplace_id ??
+              (bySlug.get("ebay") && bySlug.get("ebay").id);
+            if (rawId != null) {
+              const id = Number(rawId);
+              if (!Number.isNaN(id)) ids.push(id);
+            }
+          }
+  
+          // Facebook row present -> include Facebook marketplace id
+          if (marketplaceListing.facebook) {
+            const rawId =
+              marketplaceListing.facebook_marketplace_id ??
+              (bySlug.get("facebook") && bySlug.get("facebook").id);
+            if (rawId != null) {
+              const id = Number(rawId);
+              if (!Number.isNaN(id)) ids.push(id);
+            }
+          }
+  
+          for (const id of ids) {
+            selectedMarketplaceIds.add(id);
           }
         }
-
-        // Facebook row present -> include Facebook marketplace id
-        if (marketplaceListing.facebook) {
-          const rawId =
-            marketplaceListing.facebook_marketplace_id ??
-            (bySlug.get("facebook") && bySlug.get("facebook").id);
-          if (rawId != null) {
-            const id = Number(rawId);
-            if (!Number.isNaN(id)) ids.push(id);
-          }
-        }
-
-        for (const id of ids) {
-          selectedMarketplaceIds.add(id);
-        }
+  
+        renderMarketplaceTiles(meta);
+        // When hydrating an existing item, do a full rebuild of cards
+        try { renderMarketplaceCards(meta, { mode: "full" }); } catch {}
+      } catch (e) {
+        console.error("marketplaces:applySelection:error", e);
       }
-
-      renderMarketplaceTiles(meta);
-      try { renderMarketplaceCards(meta); } catch {}
-    } catch (e) {
-      console.error("marketplaces:applySelection:error", e);
     }
-  }
+
 
 
     // Render placeholder cards for each selected marketplace (UI-only; no API calls)
