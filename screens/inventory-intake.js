@@ -977,6 +977,9 @@ function setMarketplaceVisibility() {
   
   // Cache latest meta so we can re-render cards on tile toggles
   let __metaCache = null;
+  // Snapshot of the current marketplace_listing rows for this item (from GET /api/inventory/intake)
+  // Used for warnings when deselecting marketplaces that are already live.
+  let __currentMarketplaceListing = null;
   /** currently selected marketplace IDs (from app.marketplaces_available.id) */
   const selectedMarketplaceIds = new Set();
 
@@ -1050,24 +1053,58 @@ function setMarketplaceVisibility() {
         btn.addEventListener("click", () => {
           const id = Number(btn.dataset.marketplaceId);
           const isSel = selectedMarketplaceIds.has(id);
+
           if (isSel) {
+            // If this tile corresponds to a marketplace that already has a live listing,
+            // warn the user that deselecting will end/delete the listing on save.
+            try {
+              const rows = (__metaCache?.marketplaces || []);
+              const row = rows.find(r => Number(r.id) === id);
+              const slug = String(row?.slug || "").toLowerCase();
+              const snap = __currentMarketplaceListing || null;
+
+              let hasLive = false;
+              if (snap) {
+                if (slug === "ebay" && snap.ebay && String(snap.ebay.status || "").toLowerCase() === "live") {
+                  hasLive = true;
+                }
+                if (slug === "facebook" && snap.facebook && String(snap.facebook.status || "").toLowerCase() === "live") {
+                  hasLive = true;
+                }
+              }
+
+              if (hasLive) {
+                const ok = window.confirm(
+                  "If you deselect this marketplace, the existing listing will be ended/deleted when you save. Continue?"
+                );
+                if (!ok) {
+                  // Do not toggle off; leave selection as-is.
+                  return;
+                }
+              }
+            } catch (e) {
+              console.warn("marketplace:deselect:warn_failed", e);
+            }
+
+            // Proceed with deselect
             selectedMarketplaceIds.delete(id);
             btn.classList.remove("btn-primary");
             btn.classList.add("btn-ghost");
             btn.setAttribute("aria-pressed", "false");
           } else {
+            // Selecting a tile
             selectedMarketplaceIds.add(id);
             btn.classList.remove("btn-ghost");
             btn.classList.add("btn-primary");
             btn.setAttribute("aria-pressed", "true");
           }
+
           // live-validate after any toggle
           computeValidity();
-          // Delta-mode: add/remove cards without resetting existing card inputs
-          try { renderMarketplaceCards(__metaCache, { mode: "delta" }); } catch {}
+          // update marketplace cards to match current selection
+          try { renderMarketplaceCards(__metaCache); } catch {}
         });
       } else {
-
         btn.addEventListener("click", () => {
           alert("This marketplace isn’t connected for your tenant yet. Please ask your manager to connect it.");
         });
@@ -1092,7 +1129,10 @@ function setMarketplaceVisibility() {
       const bySlug = new Map(
         rows.map(r => [String(r.slug || "").toLowerCase(), r])
       );
-
+      // Save the full snapshot so tile toggles can see which marketplaces
+      // are already live (for delete warnings, etc.).
+      __currentMarketplaceListing = marketplaceListing || null;
+      
       selectedMarketplaceIds.clear();
 
       if (marketplaceListing) {
