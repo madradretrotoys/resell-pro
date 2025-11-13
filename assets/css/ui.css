@@ -44,14 +44,15 @@
   .page{ padding: var(--page-pad-m); }
 }
 
-/* Card */
 .card{
   background: #fff;
   border: 1px solid var(--card-border);
   border-radius: var(--card-radius);
   box-shadow: var(--card-shadow);
   padding: var(--card-pad-d);
+  color: var(--text);           /* ensure dark text on white */
 }
+
 @media (max-width: 640px){
   .card{ padding: var(--card-pad-m); }
 }
@@ -63,10 +64,18 @@
 /* Typography helpers */
 .muted{ color: var(--muted); }
 
+/* Section titles (used in POS & cards) */
+.section-title{
+  font-weight: 800;
+  font-size: 20px;
+  line-height: 1.3;
+  margin: 0 0 12px;   /* slightly more breathing room under the heading */
+  color: var(--text);
+}
+
 /* Fields */
 input[type="text"], input[type="number"], input[type="email"], select, textarea{
-  display: block;
-  width: 100%;
+  /* display: block;  ← remove to stop default stacking */
   height: var(--field-h);
   border: 1px solid var(--border);
   border-radius: var(--field-radius);
@@ -82,11 +91,162 @@ textarea{
   padding: 10px var(--field-pad-x);
 }
 
-/* Labels */
 label{
   display: inline-block;
-  margin-bottom: 8px;
+  margin-bottom: 0;            /* remove global stacked-form spacing */
   font-size: 14px;
+  color: var(--text);
+  vertical-align: middle;      /* play nicer in inline/flex rows */
+}
+
+/* ===== Marketplace Settings list ===== */
+.mp-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;              /* consistent vertical rhythm between rows */
+}
+
+/* Each marketplace row */
+.mp-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 14px 16px;
+}
+
+/* Left group: name + toggle inline */
+.mp-left {
+  display: inline-flex;
+  align-items: center;
+  gap: 16px;              /* space between name and toggle */
+  min-width: 0;           /* allow safe shrink */
+}
+
+.mp-name {
+  font-weight: 700;
+  font-size: 16px;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Right group: actions flush-right */
+.mp-right {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;              /* Connect / Retry spacing */
+  margin-left: auto;      /* push to far right */
+}
+
+/* Tidy up the switch when used in-row */
+.mp-row .switch .switch-label {
+  color: var(--muted);
+  font-size: 14px;
+}
+.mp-row .switch {
+  gap: 8px;               /* slightly tighter than default */
+}
+
+/* Responsive: stack actions under the left group on small screens */
+@media (max-width: 600px) {
+  .mp-row {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 10px;
+  }
+  .mp-right {
+    justify-content: flex-end;
+    margin-left: 0;
+  }
+}
+
+
+/* ===== Switch (Toggle) ===== */
+.switch{
+  --sw-width: 46px;
+  --sw-height: 26px;
+  --sw-radius: 999px;
+  --sw-track-off: #e5e7eb;      /* neutral-200 */
+  --sw-track-on: var(--brand);  /* primary */
+  --sw-thumb: #fff;
+
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  user-select: none;
+}
+.switch input[type="checkbox"]{
+  appearance: none;
+  width: var(--sw-width);
+  height: var(--sw-height);
+  border-radius: var(--sw-radius);
+  background: var(--sw-track-off);
+  position: relative;
+  border: 1px solid #d1d5db; /* neutral-300 */
+  cursor: pointer;
+  outline: none;
+  transition: background-color .18s ease, border-color .18s ease;
+}
+.switch .slider{
+  position: absolute;
+  width: var(--sw-width);
+  height: var(--sw-height);
+  pointer-events: none;
+}
+.switch .slider::before{
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 4px;
+  transform: translateY(-50%);
+  width: 20px; height: 20px;
+  border-radius: 50%;
+  background: var(--sw-thumb);
+  box-shadow: 0 1px 2px rgba(0,0,0,.25);
+  transition: left .18s ease;
+}
+.switch input[type="checkbox"]:checked{
+  background: var(--sw-track-on);
+  border-color: color-mix(in srgb, var(--sw-track-on) 70%, #000 30%);
+}
+.switch input[type="checkbox"]:checked + .slider::before{
+  left: calc(100% - 24px);
+}
+.switch input[type="checkbox"]:focus-visible{
+  outline: 2px solid var(--brand);
+  outline-offset: 2px;
+}
+.switch .switch-label{
+  font-size: 14px;
+  color: var(--muted);
+}
+/* ===== Intake-scoped: keep switches compact and colored ===== */
+#inventory-intake-screen .switch{
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  width: auto;           /* prevent grid/field from stretching the control */
+}
+#inventory-intake-screen .switch input[type="checkbox"]{
+  flex: 0 0 var(--sw-width);      /* lock track width */
+  width: var(--sw-width);
+  height: var(--sw-height);
+}
+#inventory-intake-screen .switch .slider{
+  width: var(--sw-width);         /* ensure visible track matches the input */
+  height: var(--sw-height);
+}
+#inventory-intake-screen .switch input[type="checkbox"]{
+  background: var(--sw-track-off);
+}
+#inventory-intake-screen .switch input[type="checkbox"]:checked{
+  background: var(--brand);       /* strong ON color on the visible track */
+  border-color: color-mix(in srgb, var(--brand) 70%, #000 30%);
 }
 
 /* Buttons */
@@ -110,11 +270,88 @@ label{
 .btn-danger{ background: var(--danger); color: #fff; border-color: var(--danger); }
 .btn-danger:hover{ background: var(--danger-h); border-color: var(--danger-h); }
 
+/* --- FINAL OVERRIDES: make color variants win against inherited text color or earlier rules --- */
+.btn.btn-success{
+  background: #16a34a !important;   /* emerald-600 */
+  border-color: #16a34a !important;
+  color: #fff !important;            /* force white text on dark bg */
+}
+.btn.btn-success:hover{
+  background: #15803d !important;   /* emerald-700 */
+  border-color: #15803d !important;
+  color: #fff !important;
+}
+
+.btn.btn-danger{
+  background: var(--danger) !important;
+  border-color: var(--danger) !important;
+  color: #fff !important;
+}
+.btn.btn-danger:hover{
+  background: var(--danger-h) !important;
+  border-color: var(--danger-h) !important;
+  color: #fff !important;
+}
+
+.btn.btn-primary{
+  background: var(--brand) !important;
+  border-color: var(--brand) !important;
+  color: #fff !important;
+}
+.btn.btn-primary:hover{
+  background: var(--brand-h) !important;
+  border-color: var(--brand-h) !important;
+  color: #fff !important;
+}
+
+/* Ghost should always remain neutral/dark text */
+.btn.btn-ghost{
+  background: #fff !important;
+  border-color: var(--border) !important;
+  color: var(--text) !important;
+}
+.btn.btn-ghost:hover{
+  background: #f3f4f6 !important;
+  color: var(--text) !important;
+}
+
+
+.btn-success{ background: #16a34a; color: #fff; border-color: #16a34a; }  /* emerald-600 */
+.btn-success:hover{ background: #15803d; border-color: #15803d; }         /* emerald-700 */
+
 /* Tables (Users reference) */
 .table{ width: 100%; border-collapse: separate; border-spacing: 0; }
-.table th, .table td{ text-align: left; padding: 12px 16px; }
+.table th, .table td{
+  text-align: left;
+  padding: 12px 16px;
+  color: var(--text);           /* ensure dark text in white tables */
+}
 .table thead th{ font-weight: 600; }
 .table tbody tr + tr td{ border-top: 1px solid var(--border); }
+
+/* === POS Sales table helpers === */
+.table-fixed { table-layout: fixed; }                 /* keep columns from auto-growing */
+
+.pos-wrap {                                           /* real word-wrapping utility */
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+/* Keep the sales table within the card; define practical column widths */
+.pos-sales-card .table { width: 100%; }
+.pos-sales-card .table th:nth-child(1),
+.pos-sales-card .table td:nth-child(1){ width: 116px; }  /* Time */
+.pos-sales-card .table th:nth-child(2),
+.pos-sales-card .table td:nth-child(2){ width: 260px; }  /* Sale ID */
+.pos-sales-card .table th:nth-child(3),
+.pos-sales-card .table td:nth-child(3){ width: auto; }   /* Payment (flex/wrap) */
+.pos-sales-card .table th:nth-child(4),
+.pos-sales-card .table td:nth-child(4){ width: 104px; }  /* Total */
+.pos-sales-card .table th:nth-child(5),
+.pos-sales-card .table td:nth-child(5){ width: 140px; }  /* Actions */
+
+/* Prevent the card from visually “bursting” if a parent gets wider momentarily */
+.pos-sales-card { overflow: hidden; }
 
 /* ===== Existing Intake-specific styles (kept for now; screen can migrate) ===== */
 #inventory-intake-screen{
@@ -137,10 +374,19 @@ label{
 #inventory-intake-screen .legacy-grid-3{ display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--gap); }
 #inventory-intake-screen .field{ display: flex; flex-direction: column; padding: 2px 2px; min-width: 0; }
 #inventory-intake-screen .field.wide{ grid-column: 1 / -1; }
-#inventory-intake-screen label{ font-size: 12px; margin: 0 0 8px; }
-#inventory-intake-screen input, #inventory-intake-screen select, #inventory-intake-screen textarea{
+/* Label-as-row (for checkbox + caption inside a label) */
+#inventory-intake-screen label.chkrow{
+  margin: 0;                  /* neutralize stacked label bottom margin */
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+/* Exclude checkboxes from the generic input styling */
+#inventory-intake-screen input:not([type="checkbox"]), #inventory-intake-screen select, #inventory-intake-screen textarea{
   background: #fff; border: 1px solid #ddd; border-radius: 8px; padding: 10px 12px; width: 100%; box-sizing: border-box;
 }
+/* Intake-only reset so checkboxes play nicely in row layouts */
+
 #inventory-intake-screen .field > * + *{ margin-top: 8px; }
 #inventory-intake-screen textarea{ min-height: 132px; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace; }
 #inventory-intake-screen .actions{ display: flex; gap: 10px; align-items: center; }
@@ -149,13 +395,308 @@ label{
 #inventory-intake-screen .btn.btn-sm{ padding: 6px 10px; font-size: 13px; }
 #inventory-intake-screen .muted{ color: #6b7280; font-size: 12px; }
 #inventory-intake-screen .mono{ font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace; }
-#inventory-intake-screen .tabs{ display: flex; gap: 6px; margin-bottom: 10px; }
-#inventory-intake-screen .tab{ background: #fff; border: 1px solid #ddd; border-bottom: none; border-radius: 8px 8px 0 0; padding: 6px 10px; cursor: pointer; }
-#inventory-intake-screen .tab.active{ background: #0ea5e9; color: #fff; border-color: #0ea5e9; }
-#inventory-intake-screen .tabpanes{ border: 1px solid #eee; border-radius: 0 12px 12px 12px; padding: 14px; }
+/* Tab row spacing and visual tie-in with content */
+/* Tabs container should stack bar + pane vertically (not side-by-side) */
+#inventory-intake-screen .tabs{
+  display: block;             /* was flex */
+  margin-top: 14px;           /* separation from Copy buttons */
+  margin-bottom: 0;           /* pane below has its own spacing */
+}
+
+/* Full-width tab bar, padded to match the pane so edges line up */
+#inventory-intake-screen .tabBar{
+  display: flex;
+  gap: 8px;
+  width: 100%;
+  box-sizing: border-box;
+  border: 1px solid #eee;
+  border-bottom: none;
+  background: #f9fafb;
+  padding: 8px 14px;          /* match pane padding */
+  border-radius: 8px 8px 0 0;
+}
+
+/* Pane stays framed and matches the bar’s horizontal padding feel */
+#inventory-intake-screen [role="tabpanel"]{
+  border: 1px solid #eee;
+  border-radius: 0 12px 12px 12px;
+  padding: 14px;              /* aligns with tabBar 14px */
+}
+
+/* Legacy .tab styling (kept so older markup still looks fine) */
+#inventory-intake-screen .tab{
+  background: #fff;
+  border: 1px solid #ddd;
+  border-bottom: none;
+  border-radius: 8px 8px 0 0;
+  padding: 6px 10px; cursor: pointer;
+}
+#inventory-intake-screen .tab.active{
+  background: #0ea5e9; color: #fff; border-color: #0ea5e9;
+}
+
+/* Give each tabpanel a light frame so the bar feels attached to the content */
+#inventory-intake-screen [role="tabpanel"]{
+  border: 1px solid #eee;
+  border-radius: 0 12px 12px 12px;
+  padding: 14px;
+}
+
+/* Hide inactive ARIA tabpanels to prevent any stacking */
+#inventory-intake-screen [role="tabpanel"][aria-hidden="true"]{ display: none !important; }
+#inventory-intake-screen [role="tabpanel"]{ display: none !important; }
+#inventory-intake-screen [role="tabpanel"]:not([aria-hidden="true"]){ display: block !important; }
+
+/* Use the global .table look for intake lists (we’ll add the class in HTML) */
+#inventory-intake-screen .table th, 
+#inventory-intake-screen .table td{ padding: 10px 12px; }
+
+/* ===== POS: Ticket single-column helpers (cart → totals → payment row) ===== */
+/* Push totals block to the far right and keep it compact on desktop. */
+.pos-totals{
+  width: min(320px, 100%);     /* fixed-ish width so margin:auto can push it */
+  margin-left: auto;            /* moves the block to the right edge */
+}
+
+/* On phones, let it span full width (stacked layout). */
+@media (max-width: 640px){
+  .pos-totals{ width: 100%; margin-left: 0; }
+}
+
+/* Make the Discounts amount visually negative in red (label stays neutral). */
+.pos-totals #pos-discounts{
+  color: var(--danger);
+}
+
+/* ===== POS Ticket row layout improvements ===== */
+.ticket-row{
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 12px;
+  background: #fff;
+}
+
+/* Use ticket-row padding for totals, without the frame */
+.ticket-row--totals{
+  border: 0;
+  background: transparent;
+  /* keep .ticket-row’s padding so right inset matches item rows */
+  padding: 12px;
+}
+
+/* Placeholder button used to align totals with the item-row action column */
+.btn-placeholder{
+  visibility: hidden;     /* keep space in layout */
+  pointer-events: none;   /* ensure it never intercepts clicks */
+}
+
+/* extra separation between successive items */
+#pos-cart .ticket-row + .ticket-row{
+  margin-top: 8px;
+}
+
+/* Ticket header row should not wrap on desktop */
+@media (min-width: 641px){
+  .pos-ticket-header{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap: 8px;
+    flex-wrap: nowrap;
+  }
+}
+
+.discount-row{
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;      /* wrap gracefully on very small screens */
+}
+.discount-row .push{
+  margin-left: auto;    /* send Apply to the far right */
+}
+
+.btn-xs{ height: 28px; padding: 0 10px; font-size: 12px; }
+.input-sm{ height: 32px; }
+
+.ticket-controls{
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+}
+
+.ticket-line-total{
+  min-width: 80px;
+  text-align: right;
+  font-weight: 600;
+}
+
+@media (max-width: 640px){
+  .ticket-controls{
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 4px;
+  }
+  .ticket-line-total{
+    width: 100%;
+    text-align: right;
+  }
+}
+
+.pos-pay-row{
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;        /* wrap gracefully on smaller widths */
+}
+
+.pos-pay-item{
+  flex: 0 0 auto;         /* keep natural size */
+}
+
+.pos-pay-grow{
+  flex: 1 1 240px;        /* customer field stretches, min practical width */
+}
+
+/* Push the primary CTA to the far right edge of the row */
+.pos-pay-row .pos-pay-push{
+  margin-left: auto;
+}
+
+
+/* Big right-side CTA like OLD screen */
+.pos-pay-row .btn.btn-primary.pos-pay-item{
+  flex: 0 0 360px;            /* wide, stable button on desktop */
+}
+
+/* Wrap gracefully on small screens */
+@media (max-width: 780px){
+  .pos-pay-row .btn.btn-primary.pos-pay-item{
+    flex: 1 1 100%;           /* CTA full width when wrapped */
+  }
+}
+
+
+
+/* Numeric alignment without changing JS: column-targeted per pane */
+#paneDrafts table th:nth-child(3),
+#paneDrafts table td:nth-child(3),   /* Price */
+#paneDrafts table th:nth-child(4),
+#paneDrafts table td:nth-child(4){   /* Quantity */
+  text-align: right;
+}
+#paneInventory table th:nth-child(5),
+#paneInventory table td:nth-child(5), /* Price */
+#paneInventory table th:nth-child(6),
+#paneInventory table td:nth-child(6){ /* QTY */
+  text-align: right;
+}
+
+
+
 #inventory-intake-screen .right{ text-align: right; }
 #inventory-intake-screen .hidden{ display: none !important; }
+#inventory-intake-screen .hidden{ display: none !important; }
+
+/* Hide inactive ARIA tabpanels to prevent stacking under the tab bar */
+#inventory-intake-screen [role="tabpanel"][aria-hidden="true"] { display: none !important; }
+
+/* Hide inactive ARIA tabpanels to prevent stacking under the tab bar */
+#inventory-intake-screen [role="tabpanel"][aria-hidden="true"] { display: none !important; }
+
+/* NEW: Default all tabpanels to hidden; show only the panel that is NOT aria-hidden.
+   This removes any paint window where both panes can appear during boot/restore. */
+#inventory-intake-screen [role="tabpanel"] { display: none !important; }
+#inventory-intake-screen [role="tabpanel"]:not([aria-hidden="true"]) { display: block !important; }
+
+/* NEW: intake-scoped checkbox row + compact 2-col subgrid for partner fields */
+#inventory-intake-screen .chkrow{
+  display:flex;
+  align-items:center;
+  gap:8px;
+  min-height: var(--field-h);
+}
+#inventory-intake-screen .chkrow > label{
+  margin:0;           /* neutralize stacked-label margin */
+  display:inline;
+}
+#inventory-intake-screen .chkrow > input[type="checkbox"]{
+  margin:0;
+  vertical-align: middle;
+}
+
+/* helper for “keep partner fields together” as a 2-col row */
+#inventory-intake-screen .field .subgrid-2{
+  display:grid;
+  grid-template-columns: repeat(2, minmax(0,1fr));
+  gap: var(--gap);
+}
 @media (max-width: 768px){
   #inventory-intake-screen{ --gap: 20px; }
   #inventory-intake-screen .sectionTitle{ margin-bottom: 14px; }
 }
+
+/* ===== Modal Overlay + Card (POS) ===== */
+.modal-overlay{
+  position: fixed;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  background: rgba(17, 24, 39, 0.45); /* neutral-900 @ ~45% */
+  z-index: 1000;
+}
+
+.modal-overlay.hidden{ display: none; }
+
+.modal-card{
+  width: min(560px, calc(100vw - 32px));
+  box-sizing: border-box;
+  padding: var(--card-pad-d);
+  border-radius: var(--card-radius);
+}
+
+@media (max-width: 640px){
+  .modal-card{
+    width: calc(100vw - 24px);
+    padding: var(--card-pad-m);
+  }
+}
+
+/* Keep inputs comfortable inside modals */
+.modal-card .input,
+.modal-card .select{
+  height: var(--field-h);
+}
+
+.modal-card .stack-16 > * + *{ margin-top: 16px; }
+
+/* ===== Opt-in helpers (use only where you want the old behavior) ===== */
+.label-stack { display: inline-block; margin-bottom: 8px; } /* stacked label spacing */
+.input-full  { width: 100%; }                                /* stretch when desired */
+
+
+/* ===== POS: neutralize framework width defaults inside POS panels =====
+   This ensures inputs/selects in POS payment panels do NOT stretch to 100%
+   unless you explicitly opt in with .input-full or a specific width helper. */
+.pos-panel .input,
+.pos-panel .select,
+.pos-panel input[type="text"],
+.pos-panel input[type="number"],
+.pos-panel input[type="email"],
+.pos-panel select,
+.pos-panel textarea{
+  width: auto;
+  max-width: 100%;
+}
+
+/* ===== POS panel compact helpers (higher specificity so they win) ===== */
+.pos-panel .pos-w-amount { width: 120px; }   /* e.g., Amount Received, Change Due */
+.pos-panel .pos-w-method { width: 220px; }   /* e.g., Split Method select */
+.pos-panel .pos-push     { margin-left: auto; }  /* push Confirm to the far right */
+
+/* ===== Generic full-width opt-in (use only where you WANT full width) ===== */
+.input-full { width: 100%; }

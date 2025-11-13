@@ -1,13 +1,10 @@
-
-// Begin functions/api/settings/marketplaces/connect.ts
 import type { PagesFunction } from "@cloudflare/workers-types";
 import { neon } from "@neondatabase/serverless";
+import { onRequestPost as subscribe } from "./subscribe"; // reuse helpers if you prefer (optional)
 
+// Minimal standalone (mirrors subscribe.ts)
 function json(body: any, status = 200): Response {
-  return new Response(JSON.stringify(body), {
-    status,
-    headers: { "content-type": "application/json; charset=utf-8" },
-  });
+  return new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json; charset=utf-8" } });
 }
 function readCookie(cookieHeader: string, name: string) {
   const m = cookieHeader.match(new RegExp(`(?:^|; )${name}=([^;]*)`));
@@ -32,7 +29,6 @@ async function verifyJwt(token: string, secret: string) {
 
 export const onRequestPost: PagesFunction = async ({ request, env }) => {
   try {
-    // --- Auth ---
     const cookieHeader = request.headers.get("cookie") || "";
     const token = readCookie(cookieHeader, "__Host-rp_session");
     if (!token) return json({ ok: false, error: "no_cookie" }, 401);
@@ -40,28 +36,15 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
     const actor_user_id = String((payload as any).sub || "");
     if (!actor_user_id) return json({ ok: false, error: "bad_token" }, 401);
 
-    // --- Tenant ---
     const tenant_id = request.headers.get("x-tenant-id");
     if (!tenant_id) return json({ ok: false, error: "missing_tenant" }, 400);
 
-    // --- Parse marketplace_id from body OR query ---
-    let marketplace_id: number | null = null;
-    try {
-      const url = new URL(request.url);
-      const q = url.searchParams.get("marketplace_id");
-      if (q) marketplace_id = Number(q);
-      if (!marketplace_id) {
-        const body = await request.json().catch(() => ({}));
-        if (body && body.marketplace_id) marketplace_id = Number(body.marketplace_id);
-      }
-    } catch {}
+    const body = await request.json().catch(() => ({}));
+    const marketplace_id = Number((body && body.marketplace_id) || 0);
     if (!marketplace_id) return json({ ok: false, error: "missing_marketplace_id" }, 400);
 
-    // --- Authorize (same as list/users: owner/admin/manager OR can_settings) ---
     const sql = neon(String(env.DATABASE_URL));
-    const actor = await sql<
-      { role: "owner" | "admin" | "manager" | "clerk"; active: boolean; can_settings: boolean | null }[]
-    >`
+    const actor = await sql<{ role: "owner"|"admin"|"manager"|"clerk"; active: boolean; can_settings: boolean|null }[]>`
       SELECT m.role, m.active, COALESCE(p.can_settings, false) AS can_settings
       FROM app.memberships m
       LEFT JOIN app.permissions p ON p.user_id = m.user_id
@@ -73,17 +56,15 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
     const allowSettings = role === "owner" || role === "admin" || role === "manager" || !!actor[0].can_settings;
     if (!allowSettings) return json({ ok: false, error: "forbidden" }, 403);
 
-    // --- Upsert connection: status 'connected' (prototype) ---
     await sql/*sql*/`
-      INSERT INTO app.marketplace_connections (tenant_id, marketplace_id, status, last_success_at)
-      VALUES (${tenant_id}, ${marketplace_id}, 'connected', now())
+      INSERT INTO app.tenant_marketplaces (tenant_id, marketplace_id, enabled)
+      VALUES (${tenant_id}, ${marketplace_id}, false)
       ON CONFLICT (tenant_id, marketplace_id)
-      DO UPDATE SET status = 'connected', last_success_at = now(), updated_at = now()
+      DO UPDATE SET enabled = false, updated_at = now()
     `;
 
-    return json({ ok: true, marketplace_id });
+    return json({ ok: true, marketplace_id, enabled: false });
   } catch (e: any) {
     return json({ ok: false, error: "server_error", message: e?.message || String(e) }, 500);
   }
 };
-//end functions/api/settings/marketplaces/connect.ts

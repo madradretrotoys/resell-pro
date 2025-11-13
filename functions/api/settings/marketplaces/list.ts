@@ -83,7 +83,7 @@ export const onRequestGet: PagesFunction = async ({ request, env }) => {
       return json({ ok: false, error: "forbidden" }, 403);
     }
 
-        // Return all active marketplaces + tenant's connection status
+    // Return all active marketplaces + tenant's connection status + enabled flag
     const rows = await sql/*sql*/`
       SELECT
         m.id,
@@ -93,10 +93,13 @@ export const onRequestGet: PagesFunction = async ({ request, env }) => {
         m.auth_type,
         m.api_base_url,
         m.ui_notes,
-        COALESCE(c.status::text, 'never_connected') AS status
+        COALESCE(c.status::text, 'never_connected') AS status,
+        COALESCE(tm.enabled, false)               AS enabled
       FROM app.marketplaces_available m
       LEFT JOIN app.marketplace_connections c
         ON c.marketplace_id = m.id AND c.tenant_id = ${tenant_id}
+      LEFT JOIN app.tenant_marketplaces tm
+        ON tm.marketplace_id = m.id AND tm.tenant_id = ${tenant_id}
       WHERE m.is_active = true
       ORDER BY m.marketplace_name
     `;

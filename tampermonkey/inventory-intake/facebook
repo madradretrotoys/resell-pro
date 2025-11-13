@@ -1,0 +1,973 @@
+// ==UserScript==
+// @name         Resell Pro → Facebook Marketplace Autofill (v1)
+// @namespace    mad-rad-retro-toys
+// @version      1.0.0
+// @description  Injects "Add to Facebook" on Intake, waits for safe gates, then opens Facebook and autofills at a human pace.
+// @author       Melissa + AI
+//
+// @match        https://resellpros.com/app*
+// @match        https://resellpros.com/main/*
+// @match        https://*.resellpros.com/app*
+// @match        https://www.facebook.com/marketplace/create/item*
+// @grant        GM_setValue
+// @grant        GM_getValue
+// @grant        GM_deleteValue
+// @run-at       document-idle
+// @downloadURL https://raw.githubusercontent.com/madradretrotoys/resell-pro/refs/heads/main/tampermonkey/inventory-intake/facebook/resell-pro-facebook-autofill.user.js
+// @updateURL   https://raw.githubusercontent.com/madradretrotoys/resell-pro/refs/heads/main/tampermonkey/inventory-intake/facebook/resell-pro-facebook-autofill.user.js
+// @grant        GM_xmlhttpRequest
+// @connect      resellpros.com
+// ==/UserScript==
+
+(function () {
+  const NOW = () => Date.now();
+
+  // -----------------------------
+  // Shared helpers
+  // -----------------------------
+  const delay = (ms) => new Promise((r) => setTimeout(r, ms));
+  const humanPause = (min = 250, max = 800) =>
+    delay(min + Math.floor(Math.random() * (max - min + 1)));
+
+  const PAYLOAD_KEY = "rp_fb_payload";
+  const TTL_MS = 5 * 60 * 1000; // 5 minutes
+
+  const savePayload = (payload) => {
+    GM_setValue(PAYLOAD_KEY, { at: NOW(), payload });
+  };
+  const takePayload = () => {
+    const blob = GM_getValue(PAYLOAD_KEY, null);
+    if (!blob) return null;
+    if (NOW() - (blob.at || 0) > TTL_MS) {
+      try { GM_deleteValue(PAYLOAD_KEY); } catch {}
+      return null;
+    }
+    // leave it for retries; FB can get bouncy
+    return blob.payload || null;
+  };
+
+  // Detect which site we’re on
+  const onFacebook = /facebook\.com\/marketplace\/create\/item/i.test(location.href);
+
+  // --------------------------------------------------------------------
+  // Branch A: Intake page — listen for payload and open Facebook
+  // --------------------------------------------------------------------
+  if (!onFacebook) {
+      window.addEventListener("message", (ev) => {
+          try {
+              if (ev.origin !== location.origin) return;
+              const data = ev.data || {};
+              if (data.type !== "RP_FACEBOOK_CREATE" || !data.payload) return;
+              // cache for the FB tab; Intake will open the window
+              savePayload(data.payload);
+              console.log("[tm] intake message → payload cached; Intake is responsible for opening Facebook.");
+          } catch {}
+      });
+      return;
+  }
+
+
+
+  // --------------------------------------------------------------------
+  // Branch B: Facebook create page — consume payload and autofill
+  // --------------------------------------------------------------------
+  // Optional: accept a direct postMessage from opener as a second path
+  window.addEventListener("message", (ev) => {
+    try {
+      const data = ev.data || {};
+      if (data.type === "facebook:intake" && data.payload) {
+        savePayload(data.payload); // refresh cache in case we arrived early
+        console.log("[tm] facebook.com message → payload cached");
+      }
+    } catch {}
+  });
+
+  (async function facebookAutofill() {
+    const payload = takePayload();
+    if (!payload) return; // nothing to do
+
+    // --- helpers to find FB controls (selectors may drift; we try multiple) ---
+    const $ = (sel) => document.querySelector(sel);
+    const $$ = (sel) => Array.from(document.querySelectorAll(sel));
+
+    async function waitFor(sel, { timeout = 20000 } = {}) {
+      const start = NOW();
+      while (NOW() - start < timeout) {
+        const el = $(sel);
+        if (el) return el;
+        await delay(150);
+      }
+      return null;
+    }
+
+    /** Write into React-controlled inputs safely */
+    function setNativeValue(el, value) {
+      const { set } = Object.getOwnPropertyDescriptor(el.__proto__, "value") || {};
+      if (set) { set.call(el, value); }
+      else { el.value = value; }
+      el.dispatchEvent(new Event("input", { bubbles: true, composed: true }));
+    }
+
+    async function typeReliable(el, text) {
+      if (!el) return;
+      el.focus();
+      setNativeValue(el, "");
+      await humanPause(200, 350);
+      setNativeValue(el, String(text));
+      el.dispatchEvent(new Event("input", { bubbles: true, composed: true }));
+      el.dispatchEvent(new Event("change", { bubbles: true }));
+      el.blur();
+      await humanPause(250, 400);
+    }
+
+    // Log the FULL incoming payload for debugging
+    try { console.log("[tm] incoming payload", JSON.parse(JSON.stringify(payload))); }
+    catch { console.log("[tm] incoming payload", payload); }
+
+     // ------- 1) upload photos (CORS-safe via GM_xmlhttpRequest) -------
+    const fileInput =
+      $('input[type="file"][accept*="image"]') ||
+      await waitFor('input[type="file"][accept*="image"]', { timeout: 12000 });
+
+    // Helper: download an image blob via GM_xmlhttpRequest (bypasses page CORS)
+    function xhrBlob(url) {
+      return new Promise((resolve) => {
+        try {
+          GM_xmlhttpRequest({
+            method: "GET",
+            url,
+            responseType: "blob",
+            onload: (res) => resolve(res.response || null),
+            onerror: () => resolve(null),
+            ontimeout: () => resolve(null),
+          });
+        } catch {
+          resolve(null);
+        }
+      });
+    }
+
+    if (fileInput && Array.isArray(payload.images) && payload.images.length) {
+      const files = [];
+      for (const url of payload.images.slice(0, 10)) {
+        const blob = await xhrBlob(url);
+        if (!blob) continue;
+        const ext = /\.jpe?g$/i.test(url)
+          ? "jpg"
+          : /\.png$/i.test(url)
+          ? "png"
+          : "webp";
+        const f = new File([blob], `photo_${files.length + 1}.${ext}`, {
+          type: blob.type || `image/${ext}`,
+        });
+        files.push(f);
+        await humanPause(100, 180);
+      }
+
+      if (files.length) {
+        const dt = new DataTransfer();
+        files.forEach((f) => dt.items.add(f));
+        fileInput.files = dt.files;
+        fileInput.dispatchEvent(new Event("change", { bubbles: true }));
+        console.log("[tm] photos attached:", files.length);
+        await delay(2000); // allow previews to render
+      } else {
+        console.warn("[tm] no photos attached (download/CORS failure)");
+      }
+    } else {
+      console.warn("[tm] no fileInput or empty payload.images");
+    }
+
+
+    // ------- 2) title / price / description -------
+    const titleBox =
+      $('input[aria-label="Title"]') ||
+      $('input[placeholder*="Title"]') ||
+      $('input[type="text"]');
+
+    // Price — prefer the label-bound input; never fall back to a generic text input
+    let priceBox =
+      $('input[aria-label="Price"]') ||
+      (document.querySelector('#_r_1t_')?.closest('label')?.querySelector('input')) || // span “Price” → label → input
+      (Array.from(document.querySelectorAll('label'))
+        .find(l => /^\s*Price\s*$/i.test(l.textContent || ""))?.querySelector('input')) ||
+      null;
+
+    // Guard: if for any reason the same node was picked for title & price, drop price to avoid typing into Title
+    if (priceBox && titleBox && priceBox === titleBox) {
+      console.warn("[tm] priceBox resolved to titleBox — dropping fallback to avoid overwriting title.");
+      priceBox = null;
+    }
+
+    const descBox =
+      $('textarea[aria-label="Description"]') ||
+      $('div[role="textbox"][contenteditable="true"][aria-label="Description"]') ||
+      $('div[role="textbox"][contenteditable="true"]') ||
+      $('textarea');
+
+    // Title
+    await typeReliable(titleBox, payload.title || "");
+
+    // Price
+    if (priceBox) {
+      const priceNum = Number.isFinite(Number(payload.price)) ? Number(payload.price) : 0;
+      await typeReliable(priceBox, priceNum.toFixed(2));
+      // In some FB variants, typing price can trigger a re-render that clears Title — re-assert Title once.
+      if (titleBox && (!titleBox.value || titleBox.value.trim() === "" || /^\d/.test(titleBox.value))) {
+        await typeReliable(titleBox, payload.title || "");
+      }
+    } else {
+      console.warn("[tm] priceBox not found — leaving Price blank to avoid typing into Title.");
+    }
+
+    // Description (textarea or contenteditable)
+    if (descBox) {
+      if (descBox.getAttribute && descBox.getAttribute("contenteditable") === "true") {
+        descBox.focus();
+        document.execCommand("selectAll", false, null);
+        document.execCommand("insertText", false, payload.description || "");
+        descBox.blur();
+        await humanPause();
+      } else {
+        await typeReliable(descBox, payload.description || "");
+      }
+    }
+
+    // Re-assert values once more in case React re-renders after we type
+    if (titleBox && !titleBox.value) await typeReliable(titleBox, payload.title || "");
+    if (descBox) {
+      const currentDesc = (descBox.value ?? descBox.textContent ?? "").trim();
+      if (!currentDesc) {
+        if (descBox.getAttribute && descBox.getAttribute("contenteditable") === "true") {
+          descBox.focus();
+          document.execCommand("insertText", false, payload.description || "");
+          descBox.blur();
+        } else {
+          await typeReliable(descBox, payload.description || "");
+        }
+      }
+    }
+
+    // Expand "More details" first so the SKU field exists & is interactable
+    async function ensureMoreDetailsOpen() {
+      const toggle = Array.from(document.querySelectorAll('div[role="button"],button'))
+        .find(b => /more details/i.test(b.textContent || ""));
+      if (toggle) {
+        const expanded = toggle.getAttribute && toggle.getAttribute("aria-expanded");
+        if (expanded === "false" || expanded == null) {
+          toggle.click();
+          await humanPause(250, 400);
+        }
+      }
+    }
+
+    // SKU (optional but preferred if present) — robust selector + re-usable filler
+    async function fillSku(force = false) {
+      if (!payload.sku) return;
+
+      // (a) ensure the collapsible section is open
+      await ensureMoreDetailsOpen();
+
+      // (b) wait for the concrete input id seen in your HTML, with label fallback
+      const skuBox =
+        (await waitFor('input#_r_51_', { timeout: 3000 })) ||
+        $('input[aria-label="SKU"]') ||
+        (Array.from(document.querySelectorAll('label'))
+          .find(l => /^\s*SKU\s*$/i.test(l.textContent || ""))?.querySelector('input')) ||
+        null;
+
+      if (!skuBox) {
+        console.warn("[tm] SKU input not found on this FB layout");
+        return;
+      }
+
+      // (c) bring into view before typing (React sometimes needs it visible)
+      try { skuBox.scrollIntoView({ block: "center" }); } catch {}
+
+      // (d) use your existing reliable typer
+      const current = (skuBox.value || "").trim();
+      if (force || !current) {
+        await typeReliable(skuBox, String(payload.sku));
+      }
+    }
+
+    // Immediately populate SKU once after description/title/price have been set.
+    await fillSku(true);
+
+    // ------- 3) category / condition / availability -------
+    async function pickFromMenu(triggerMatch, searchText, optionMatch) {
+      const trigger = Array.from(document.querySelectorAll('div[role="button"]'))
+        .find(b => triggerMatch.test((b.textContent || "")));
+      if (!trigger) return false;
+
+      trigger.click();
+      await humanPause();
+
+      // Some variants show a search box; use it if present
+      const search = await waitFor('input[type="search"], input[aria-label*="Search"]', { timeout: 2000 });
+      if (search && searchText) {
+        await typeReliable(search, searchText);
+        await delay(800);
+      }
+
+      // Choose the option
+      const opt = Array.from(document.querySelectorAll('div[role="option"], [role="menuitem"]'))
+        .find(o => optionMatch.test((o.textContent || "")));
+      if (opt) {
+        opt.click();
+        await humanPause();
+        return true;
+      }
+      return false;
+    }
+
+      // Category (commit a real selection from the combobox list) — hardened
+      {
+          const wanted = (payload.category || "Action Figures");
+
+          // 1) Locate the Category combobox input
+          const catBox =
+                document.querySelector('input[role="combobox"][aria-label="Category"]') ||
+                Array.from(document.querySelectorAll('input[role="combobox"], input[type="search"]'))
+          .find(i => /category/i.test(
+              (i.getAttribute('aria-label') || '') + (i.closest('label')?.textContent || '')
+          )) || null;
+
+          // Utility: strong mouse click (React sometimes ignores plain .click())
+          const clickOptionHard = async (el) => {
+              if (!el) return false;
+              for (const type of ["pointerdown","mousedown","mouseup","click"]) {
+                  el.dispatchEvent(new MouseEvent(type, { bubbles: true, cancelable: true, view: window }));
+                  await delay(18);
+              }
+              await humanPause(220, 320);
+              return true;
+          };
+
+          // Utility: did FB actually commit?
+          const verifyCommitted = () => {
+              if (!catBox) return false;
+              const expanded = catBox.getAttribute("aria-expanded");
+              // Consider it committed only if dropdown closed AND focus left the box
+              const closed = (expanded === "false" || expanded === null);
+              return !!closed;
+          };
+
+          // Utility: click outside to force blur/commit
+          const clickDescriptionToCommit = async () => {
+              const desc =
+                    document.querySelector('textarea[aria-label="Description"]') ||
+                    document.querySelector('div[role="textbox"][contenteditable="true"][aria-label="Description"]') ||
+                    document.querySelector('textarea');
+              if (desc) {
+                  (desc instanceof HTMLElement) && desc.click();
+                  desc.focus();
+                  await humanPause(180, 260);
+              }
+          };
+
+          if (catBox) {
+              // 2) Open dropdown & type the query
+              catBox.click();
+              await typeReliable(catBox, wanted);
+
+              // 3) Wait for the listbox that catBox controls
+              const listId = catBox.getAttribute("aria-controls");
+              let list = null;
+              if (listId) {
+                  const t0 = Date.now();
+                  while (!list && Date.now() - t0 < 5000) {
+                      list = document.getElementById(listId);
+                      if (!list) await delay(80);
+                  }
+              }
+
+              // 4) Find the “Action Figures” option inside that list first
+              const matcher = /(^|\W)action figures(\W|$)/i;
+              const findOption = (scope) => {
+                  const nodes = Array.from((scope || document).querySelectorAll('[role="option"], [role="menuitem"], [aria-selected]'));
+                  return nodes.find(n => matcher.test((n.textContent || "").replace(/\s+/g, " ").trim())) || null;
+              };
+              let optionEl = findOption(list) || findOption(document);
+
+              // 5) Try: click the option hard
+              if (optionEl) {
+                  await clickOptionHard(optionEl);
+              }
+
+              // 6) If still open, nudge with ArrowDown → Enter (commits highlighted row)
+              if (!verifyCommitted()) {
+                  catBox.focus();
+                  catBox.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }));
+                  await delay(120);
+                  catBox.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+                  await humanPause(240, 340);
+              }
+
+              // 7) Still open? Force close with Esc, then click Description to blur/commit
+              if (!verifyCommitted()) {
+                  catBox.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+                  await delay(80);
+                  await clickDescriptionToCommit();
+              }
+
+              // 8) Final fallback: generic menu path
+              if (!verifyCommitted()) {
+                  await pickFromMenu(/category/i, wanted, /action figures/i);
+                  await clickDescriptionToCommit();
+              }
+
+              // (Optional) Log whether Next looks enabled now
+              try {
+                  const nextBtn = Array.from(document.querySelectorAll('div[role="button"],button'))
+                  .find(b => /next/i.test(b.textContent || ""));
+                  console.log("[tm] Category committed=", verifyCommitted(), "Next disabled=", !!(nextBtn && nextBtn.disabled));
+              } catch {}
+          } else {
+              // Absolute fallback: open generic “Category” menu and pick
+              await pickFromMenu(/category/i, wanted, /action figures/i);
+              await clickDescriptionToCommit();
+          }
+      }
+
+
+
+    // Condition — label[role="combobox"] with span#_r_2a_ on this layout
+    {
+      const condLabel =
+        document.querySelector('label[role="combobox"] span#_r_2a_')?.closest('label') ||
+        Array.from(document.querySelectorAll('label[role="combobox"]'))
+          .find(l => /condition/i.test(l.textContent || ""));
+      if (condLabel) {
+        condLabel.click();
+        await humanPause();
+        const opt = Array.from(document.querySelectorAll('[role="option"], [role="menuitem"]'))
+          .find(o => /used/i.test(o.textContent || ""));
+        opt?.click();
+        await humanPause();
+      } else {
+        await pickFromMenu(/condition/i, null, /used/i);
+      }
+    }
+
+    // Availability
+    {
+      const wantStock = /in stock/i.test(payload.availability || "");
+      await pickFromMenu(/availability/i, null, wantStock ? /in stock/i : /single item/i);
+    }
+
+    // Turn OFF Boost if it appears toggled on (find section by text, then its child switch)
+    try {
+      const boostSection = Array.from(document.querySelectorAll('*'))
+        .find(n => /Boost listing after publish/i.test(n.textContent || ""));
+      const boostSwitch =
+        boostSection?.querySelector('[role="switch"][aria-checked]') ||
+        boostSection?.querySelector('input[type="checkbox"]');
+
+      async function ensureBoostOff() {
+        if (!boostSwitch) return;
+        const isOn = (boostSwitch.getAttribute?.('aria-checked') === 'true') ||
+                     (typeof boostSwitch.checked === 'boolean' && boostSwitch.checked);
+        if (isOn) {
+          (boostSwitch instanceof HTMLElement ? boostSwitch : boostSwitch).click();
+          await humanPause(200, 350);
+        }
+      }
+
+      await ensureBoostOff();
+      // Some variants flip it back after description/category changes; try once more
+      await ensureBoostOff();
+      console.log("[tm] boost toggle verified OFF");
+    } catch (e) {
+      console.warn("[tm] boost toggle not found/changed", e);
+    }
+
+    // FB may re-render after category/condition/availability. Re-assert SKU.
+    await fillSku(false);
+
+    // ---------- 4) click Publish and report back ----------
+    async function clickPublish() {
+      const btns = $$('div[role="button"], button').filter(b =>
+        /publish|post|next/i.test((b.textContent || "")) && !b.disabled
+      );
+      const pub = btns[0] || null;
+      if (!pub) return false;
+      pub.click();
+      await delay(2000);
+      return true;
+    }
+
+    // Helper: reliably click like a human (pointer + mouse with primary button)
+    async function hardClick(el) {
+      if (!el) return false;
+
+      const ptrOpts = { bubbles: true, cancelable: true, view: window, pointerType: "mouse", button: 0, buttons: 1, isPrimary: true };
+      const mouseOpts = { bubbles: true, cancelable: true, view: window, button: 0, buttons: 1 };
+
+      try {
+        // Prefer real PointerEvents when available
+        if (typeof PointerEvent === "function") {
+          el.dispatchEvent(new PointerEvent("pointerdown", ptrOpts));
+          await humanPause(50, 110);
+          el.dispatchEvent(new PointerEvent("pointerup", ptrOpts));
+          await humanPause(50, 110);
+        }
+
+        // Backfill with mouse events that include primary button state
+        el.dispatchEvent(new MouseEvent("mousedown", mouseOpts));
+        await humanPause(50, 110);
+        el.dispatchEvent(new MouseEvent("mouseup", mouseOpts));
+        await humanPause(30, 90);
+        el.dispatchEvent(new MouseEvent("click", mouseOpts));
+        await humanPause(40, 100);
+
+        // Last resort
+        if (typeof el.click === "function") el.click();
+        return true;
+      } catch (e) {
+        console.warn("[tm] hardClick failed:", e);
+        try { if (typeof el.click === "function") el.click(); } catch {}
+        return false;
+      }
+    }
+
+        // New: Click NEXT on the create screen, then PUBLISH on the audience step.
+    async function clickNextThenPublish() {
+      // Step 1: If we’re on the create page, press Next
+      const onCreate = /facebook\.com\/marketplace\/create\/item(?!\?step=audience)/i.test(location.href);
+      if (onCreate) {
+        const resolveNextStrict = () => {
+          // Prefer aria-label="Next" AND enabled via aria-disabled="false"
+          const strict = Array.from(document.querySelectorAll('div[role="button"][aria-label="Next"],button[aria-label="Next"]'))
+            .find(el => el.offsetParent !== null && el.isConnected && (el.getAttribute("aria-disabled") === null || el.getAttribute("aria-disabled") === "false"));
+          if (strict) return strict;
+
+          // Fallback: visible element containing the word "Next" that is not aria-disabled="true"
+          return Array.from(document.querySelectorAll('div[role="button"],button'))
+            .find(el => {
+              const txt = (el.textContent || "").trim();
+              const ad = el.getAttribute && el.getAttribute("aria-disabled");
+              return /(^|\s)next(\s|$)/i.test(txt) && el.offsetParent !== null && el.isConnected && ad !== "true";
+            }) || null;
+        };
+
+        console.log("[tm] Next: locating button on create screen…");
+        let nextBtn = resolveNextStrict();
+
+        if (!nextBtn) {
+          console.warn("[tm] Next: not found on first pass (strict). Retrying briefly…");
+          const start = Date.now();
+          while (!nextBtn && Date.now() - start < 1000) {
+            await delay(120);
+            nextBtn = resolveNextStrict();
+          }
+        }
+
+        if (!nextBtn) {
+          console.warn("[tm] Next: not found after retries; aborting Next click.");
+          return false;
+        }
+
+        // Log current state
+        const ariaDisabled = (nextBtn.getAttribute && nextBtn.getAttribute("aria-disabled")) || null;
+        console.log("[tm] Next: candidate found", {
+          tag: nextBtn.tagName,
+          class: nextBtn.className,
+          isConnected: !!nextBtn.isConnected,
+          visible: !!(nextBtn.offsetParent !== null),
+          ariaDisabled
+        });
+
+        // Re-query just before clicking in case React re-rendered
+        await delay(300);
+        let fresh = resolveNextStrict();
+
+        const requeryStart = Date.now();
+        while (
+          (!fresh || !fresh.isConnected || fresh.offsetParent === null ||
+           (fresh.getAttribute && fresh.getAttribute("aria-disabled") === "true")) &&
+          Date.now() - requeryStart < 1000
+        ) {
+          await delay(100);
+          fresh = resolveNextStrict();
+        }
+
+        if (!fresh || !fresh.isConnected || fresh.offsetParent === null ||
+            (fresh.getAttribute && fresh.getAttribute("aria-disabled") === "true")) {
+          console.warn("[tm] Next: final element detached/hidden/disabled after re-query; aborting click.");
+          return false;
+        }
+
+        try { fresh.scrollIntoView({ block: "center" }); } catch {}
+
+        const aria2 = (fresh.getAttribute && fresh.getAttribute("aria-disabled")) || null;
+        console.log("[tm] Next: final candidate ready, clicking…", {
+          tag: fresh.tagName,
+          class: fresh.className,
+          isConnected: !!fresh.isConnected,
+          visible: !!(fresh.offsetParent !== null),
+          ariaDisabled: aria2
+        });
+
+        await hardClick(fresh);
+
+        // wait for the audience step to load
+        const t0 = Date.now();
+        while (Date.now() - t0 < 10000) {
+          if (/facebook\.com\/marketplace\/create\/item\?step=audience/i.test(location.href)) {
+            console.log("[tm] Next: audience step detected.");
+            break;
+          }
+          await delay(300);
+        }
+      }
+
+      // Step 2: On the audience step, click Publish
+      const onAudience = /facebook\.com\/marketplace\/create\/item\?step=audience/i.test(location.href);
+      if (!onAudience) {
+        console.warn("[tm] Next: audience step not detected after click.");
+        return false;
+      }
+
+      // reuse the existing publish finder/logic through clickPublish()
+      // (but prefer a short human pause first)
+      await delay(1800);
+      return await clickPublish();
+    }
+
+    // --- DRY-RUN toggle (set to false for live publish)
+    const DRY_RUN = false;
+
+    let published = false;
+    let remoteUrl = null;
+
+    // Helpers for URL capture ----------------------------------------------
+    function normalizeFbItemUrl(u) {
+      try {
+        if (!u) return null;
+        const m = String(u).match(/\/marketplace\/item\/(\d+)/);
+        if (!m) return null;
+        const id = m[1];
+        return `https://www.facebook.com/marketplace/item/${id}`;
+      } catch (e) {
+        console.warn("[tm] normalizeFbItemUrl error", e, u);
+        return null;
+      }
+    }
+
+    async function waitForNavigation(urlPattern, timeoutMs = 15000) {
+      const t0 = Date.now();
+      while (Date.now() - t0 < timeoutMs) {
+        if (urlPattern.test(location.href)) return true;
+        await delay(150);
+      }
+      return false;
+    }
+
+    async function waitForItemLinkFromToast(timeoutMs = 0) {
+      console.log("[tm] toast-harvest: DISABLED — audience/confirmation anchors are not reliable; skipping.");
+      return null;
+    }
+
+     async function sellingPageExtract(finalTitle, finalPrice) {
+         // ---------- jumbo logging helper (no truncation) ----------
+         function logBig(label, text, chunkSize = 50000) {
+             try {
+                 const s = String(text ?? "");
+                 console.log(`[tm] ${label} :: length=${s.length}`);
+                 if (!s.length) return;
+                 for (let i = 0; i < s.length; i += chunkSize) {
+                     console.log(`[tm] ${label} [${i}-${Math.min(i + chunkSize, s.length)}] →`, s.slice(i, i + chunkSize));
+                 }
+             } catch (e) {
+                 console.warn("[tm] logBig error", e);
+             }
+         }
+
+         // 1) Ensure we are on “Your listings”
+         const onSelling = /facebook\.com\/marketplace\/you\/selling/i;
+         if (!onSelling.test(location.href)) {
+             console.log("[tm] selling-extract: waiting for Selling page…", location.href);
+             const ok = await waitForNavigation(onSelling, 20000);
+             if (!ok) return { href: null, debug: "timeout_waiting_for_selling" };
+         }
+
+         // Small scroll to force-render
+         for (let i = 0; i < 2; i++) { window.scrollBy(0, 600); await delay(350); }
+
+         // 2) Inputs & helpers
+         const RAW_TITLE = String(finalTitle || "");
+         const RAW_PRICE = String(finalPrice || "");
+         const wantedPriceNum = Number(String(finalPrice).replace(/[^\d.]/g, ""));
+         const hasWantedPrice = Number.isFinite(wantedPriceNum);
+
+         const moneyRe =
+               /(?:[$£€]\s*\d{1,3}(?:[,\d]{0,3})*(?:\.\d{2})?)|(?:\b\d{1,3}(?:[,\d]{3})*(?:\.\d{2})?\s*(?:USD|usd|dollars?)\b)/;
+
+         function extractPriceFrom(node) {
+             const n = Array.from(node.querySelectorAll("span,div,strong,b"))
+             .find(el => moneyRe.test(el.textContent || "")) || node;
+             const m = (n.textContent || "").match(moneyRe);
+             return m ? m[0] : null;
+         }
+         function priceEqualsWanted(token) {
+             if (!hasWantedPrice || !token) return false;
+             const val = Number(String(token).replace(/[^\d.]/g, ""));
+             return Number.isFinite(val) && Math.abs(val - wantedPriceNum) < 0.01;
+         }
+
+         // 3) Locate cards by the reliable control: aria-label="Mark as sold <TITLE>"
+         const marks = Array.from(document.querySelectorAll('[aria-label^="Mark as sold"]'));
+
+         function closestCard(el) {
+             let n = el;
+             while (n && n !== document.body) {
+                 const t = n.textContent || "";
+                 const here = /Boost listing/i.test(t) && /Share/i.test(t);
+                 const parentHas = /Boost listing/i.test(n.parentElement?.textContent || "") &&
+                       /Share/i.test(n.parentElement?.textContent || "");
+                 if (here && !parentHas) return n;
+                 n = n.parentElement;
+             }
+             return null;
+         }
+
+         const cards = marks.map(btn => ({ btn, card: closestCard(btn) })).filter(x => x.card);
+
+         // Dump EXACT scope we search against
+         const main = document.querySelector('[role="main"]') || document.body;
+         logBig("selling-extract: [role=main] innerHTML (FULL)", main.innerHTML || "");
+
+         console.log("[tm] selling-extract: marks =", marks.length, "cards =", cards.length);
+
+         // If zero cards, show everything we have for forensics
+         if (!cards.length) {
+             const ariaLabels = marks.map((m,i) => ({ i, aria: m.getAttribute("aria-label") || "" }));
+             console.log("[tm] selling-extract: mark aria-labels →", ariaLabels);
+
+             // Dump outerHTML for first 5 mark buttons and their nearest large ancestors
+             marks.slice(0, 5).forEach((m, i) => {
+                 logBig(`selling-extract: mark[${i}] outerHTML`, m.outerHTML || "");
+                 // Walk up a few levels and dump outerHTML so we can see surrounding structure
+                 let n = m, depth = 0;
+                 const chain = [];
+                 while (n && n !== document.body && depth < 6) { chain.push(n); n = n.parentElement; depth++; }
+                 console.log(`[tm] selling-extract: mark[${i}] ancestor chain count=${chain.length}`);
+                 chain.forEach((node, j) => {
+                     const tag = node.tagName, cls = node.className;
+                     console.log(`[tm] selling-extract: mark[${i}] ancestor[${j}] → <${tag} class="${cls}">`);
+                     logBig(`selling-extract: mark[${i}] ancestor[${j}] outerHTML`, node.outerHTML || "");
+                 });
+             });
+
+             // As a last resort, try to decode any encoded /marketplace/item/ link (present in your dumps)
+             const enc = document.documentElement.innerHTML
+             .match(/link%22%3A%22https%3A%2F%2Ffacebook\.com%2Fmarketplace%2Fitem%2F(\d+)%2F/i);
+             if (enc && enc[1]) {
+                 const url = `https://www.facebook.com/marketplace/item/${enc[1]}`;
+                 console.log("[tm] selling-extract: fallback encoded-link →", url);
+                 return { href: url, debug: "fallback_encoded_link_no_cards" };
+             }
+             return { href: null, debug: "no_cards_found_full_dump_emitted" };
+         }
+
+         // 4) Score cards — require RAW title; prefer exact price too
+         const scored = cards.map(({ btn, card }, idx) => {
+             const aria = btn.getAttribute("aria-label") || "";
+             const titleFromAria = aria.replace(/^Mark as sold\s*/i, "").trim();
+             const nodeTitles = Array.from(card.querySelectorAll('a[role="link"], a, h1, h2, h3, strong, span'))
+             .map(n => (n.textContent || "").trim()).filter(Boolean);
+             const titleish = nodeTitles.sort((a,b)=>b.length-a.length)[0] || "";
+             const cardTitle = titleFromAria || titleish;
+
+             const rawTitleOk =
+                   RAW_TITLE && cardTitle &&
+                   cardTitle.toLowerCase().includes(RAW_TITLE.toLowerCase());
+
+             const priceToken = extractPriceFrom(card);
+             const priceOk = priceEqualsWanted(priceToken);
+
+             const score = (rawTitleOk ? 2 : 0) + (priceOk ? 2 : 0); // prefer both
+
+             // Dump each candidate’s full HTML so we can see why it failed/passed
+             logBig(`selling-extract: candidate[${idx}] outerHTML (FULL)`, card.outerHTML || "");
+             console.log("[tm] selling-extract: candidate brief", {
+                 idx, cardTitle, priceToken, rawTitleOk, priceOk, score
+             });
+
+             return { idx, card, cardTitle, priceToken, rawTitleOk, priceOk, score };
+         });
+
+         // Choose: first that matches both; else first that matches title only
+         let match = scored.find(s => s.rawTitleOk && s.priceOk) ||
+             scored.find(s => s.rawTitleOk) || null;
+
+         if (!match) {
+             console.warn("[tm] selling-extract: no card matched RAW title (and/or price) — scored dump above.");
+             // FINAL FALLBACK: decode any encoded /marketplace/item/ link in the HTML
+             const enc = document.documentElement.innerHTML
+             .match(/link%22%3A%22https%3A%2F%2Ffacebook\.com%2Fmarketplace%2Fitem%2F(\d+)%2F/i);
+             if (enc && enc[1]) {
+                 const url = `https://www.facebook.com/marketplace/item/${enc[1]}`;
+                 console.log("[tm] selling-extract: fallback encoded-link →", url);
+                 return { href: url, debug: "fallback_encoded_link_title_price_miss" };
+             }
+             return { href: null, debug: "no_title_price_match_after_scored_dump" };
+         }
+
+         // Log chosen card HTML (full)
+         logBig("selling-extract: chosen card outerHTML (FULL)", match.card.outerHTML || "");
+         console.log("[tm] selling-extract: chosen", {
+             idx: match.idx, cardTitle: match.cardTitle, price: match.priceToken, score: match.score
+         });
+
+         // 5) Try to open the overflow “…” and harvest the canonical link
+         const overflowBtn =
+               match.card.querySelector('div[role="button"][aria-label*="More"]') ||
+               Array.from(match.card.querySelectorAll('div[role="button"],button'))
+         .find(b => /more options|more/i.test((b.getAttribute?.("aria-label") || b.textContent || ""))) || null;
+
+         if (overflowBtn) {
+             try { overflowBtn.scrollIntoView({ block: "center" }); } catch {}
+             console.log("[tm] selling-extract: clicking overflow on chosen card…");
+             await hardClick(overflowBtn);
+             await delay(600);
+         } else {
+             console.warn("[tm] selling-extract: overflow button not found; using dialog/encoded fallbacks.");
+         }
+
+         // 6) Primary harvest: active menu/dialog anchor
+         try {
+             const scope = document.querySelector('[role="menu"], [role="dialog"]') || document.body;
+             const a = Array.from(scope.querySelectorAll('a[href*="/marketplace/item/"]'))[0];
+             if (a) {
+                 const href = a.href;
+                 console.log("[tm] selling-extract: RAW href from menu/dialog →", href);
+                 const normalized = normalizeFbItemUrl(href);
+                 console.log("[tm] selling-extract: normalized →", normalized);
+                 if (normalized && /\/marketplace\/item\/1488459545756453$/.test(normalized)) {
+                     console.warn("[tm] selling-extract: rejecting known stale/audience URL", normalized);
+                     return { href: null, debug: "rejected_known_stale_url" };
+                 }
+                 return { href: normalized || href || null, debug: `ok_${match.priceOk ? "title+price" : "title_only"}` };
+             }
+         } catch (e) {
+             console.warn("[tm] selling-extract: menu/dialog scan error", e);
+         }
+
+         // 7) Secondary harvest: encoded link anywhere in page HTML
+         const enc = document.documentElement.innerHTML
+         .match(/link%22%3A%22https%3A%2F%2Ffacebook\.com%2Fmarketplace%2Fitem%2F(\d+)%2F/i);
+         if (enc && enc[1]) {
+             const url = `https://www.facebook.com/marketplace/item/${enc[1]}`;
+             console.log("[tm] selling-extract: fallback encoded-link →", url);
+             return { href: url, debug: `fallback_encoded_link_${match.priceOk ? "title+price" : "title_only"}` };
+         }
+
+         console.warn("[tm] selling-extract: no item link in menu/dialog and no encoded-link fallback.");
+         return { href: null, debug: `no_item_link_anywhere_${match.priceOk ? "title+price" : "title_only"}` };
+     }
+
+
+
+    // ---------------------------------------------------------------------
+
+    if (DRY_RUN) {
+      console.log("[tm] DRY_RUN enabled: skipping Publish click. Simulating success for testing.");
+      published = true;
+      remoteUrl = null;
+    } else {
+      // Real behavior: click NEXT on the create page, then PUBLISH on the audience step
+      published = await clickNextThenPublish();
+
+      // Toast harvesting is disabled by design — go straight to Selling-page extraction
+      console.log("[tm] post-publish: toast disabled; extracting from Selling page via card match (Title + Price) …");
+      const sres = await sellingPageExtract(payload.title || "", payload.price);
+      console.log("[tm] selling-extract result →", sres);
+      if (sres && sres.href) {
+        remoteUrl = sres.href;
+      }
+
+      // Normalize and log the final chosen URL (raw before/after)
+      const rawUrl = remoteUrl || null;
+      const normalized = normalizeFbItemUrl(rawUrl);
+      console.log("[tm] final URL selection (raw → normalized)", { rawUrl, normalized });
+      remoteUrl = normalized || rawUrl || null;
+    }
+
+    // Callback to Resell Pro (temporary endpoint; CORS-open)
+      const itemId  = payload.item_id || null;
+
+
+      const postBack = (state, message) => {
+          const offerId = (() => {
+              // Try to discover a numeric listing/offer id if we published for real.
+              // 1) If we captured a listing URL (e.g., .../marketplace/item/1234567890/...), parse the id.
+              if (remoteUrl && /\/item\/(\d+)/.test(remoteUrl)) {
+                  try { return (remoteUrl.match(/\/item\/(\d+)\//) || [])[1] || null; } catch {}
+              }
+              // 2) (Optional future) If Facebook exposes a data attr or JSON blob with the id, extract here.
+              return null; // DRY_RUN or no id found
+          })();
+          const body = {
+              item_id: itemId,
+              status: state,
+              remote_url: remoteUrl || null,
+              message: message || null,
+              token: (payload && payload.token) ? String(payload.token) : ""
+          };
+
+          console.log("[tm] posting callback payload (GM_xmlhttpRequest) →", body);
+
+          return new Promise((resolve) => {
+              try {
+                  GM_xmlhttpRequest({
+                      method: "POST",
+                      url: "https://resellpros.com/api/marketplaces/facebook/callback",
+                      headers: { "content-type": "application/json" },
+                      data: JSON.stringify(body),
+                      onload: (res) => {
+                          console.log("[tm] callback response (GM):", res.status, res.responseText);
+                          resolve();
+                      },
+                      onerror: (err) => {
+                          console.error("[tm] callback network error (GM):", err);
+                          resolve();
+                      }
+                  });
+              } catch (e) {
+                  console.error("[tm] callback threw (GM):", e);
+                  resolve();
+              }
+          });
+      };
+    if (itemId) {
+        console.log("[tm] pre-postBack summary", {
+          published,
+          remoteUrl,
+          title: payload.title,
+          price: payload.price
+        });
+
+        if (DRY_RUN) {
+            await postBack("live", "dry_run: publish skipped");
+            console.log("[tm] DRY_RUN postBack -> status: live (dry_run)");
+        } else {
+            const msg = published
+              ? (remoteUrl ? null : "published_but_no_final_item_url_detected")
+              : "publish_button_not_found";
+            await postBack(published ? "live" : "error", msg);
+        }
+
+        try {
+            if (window.opener && typeof window.opener.postMessage === "function") {
+                window.opener.postMessage(
+                    { type: "facebook:create:done", item_id: itemId, status: DRY_RUN ? "live" : (published ? "live" : "error") },
+                    "https://resellpros.com"
+                );
+            }
+        } catch {}
+    }
+
+  })();
+})();

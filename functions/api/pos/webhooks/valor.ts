@@ -1,0 +1,264 @@
+// /api/pos/webhooks/valor
+// Mirrors the previous handler but scoped under /pos/* so it stays organized with POS code.
+import { neon } from "@neondatabase/serverless";
+
+export const onRequest: PagesFunction<Env> = async (ctx) => {
+  const { request, env, waitUntil } = ctx;
+
+  // --- NEW: log exactly what the webhook received (no DB, just console) ---
+  const ct = request.headers.get("content-type") || "";
+  const ua = request.headers.get("user-agent") || "";
+  const cfRay = request.headers.get("cf-ray") || "";
+  const rawBody = await request.text();
+  const head = rawBody.slice(0, 8192); // preview only
+  const shaBuf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(rawBody));
+  const shaHex = Array.from(new Uint8Array(shaBuf)).map(b => b.toString(16).padStart(2, "0")).join("");
+
+  console.log("valor.webhook.recv", {
+    ct, ua, cfRay,
+    len: rawBody.length,
+    sha256: shaHex,
+    head
+  });
+
+
+  
+  // Always ACK immediately so the processor never times out
+  const ack = json({ ok: true });
+
+  // Background processing
+  const p = (async () => {
+    try {
+      const text = await request.text();
+      let payload: any = {};
+      try { payload = JSON.parse(text); } catch { payload = {}; }
+
+      const tenantId =
+        detectTenantFromPayload(payload) ||
+        request.headers.get("x-tenant-id") ||
+        "";
+
+      const txnId =
+        payload?.txn_id ||
+        payload?.data?.txn_id ||
+        ("rtx_" + crypto.randomUUID());
+
+      const invoicenumber =
+        payload?.invoicenumber ||
+        payload?.data?.invoicenumber ||
+        payload?.reference_descriptive_data?.invoicenumber ||
+        "";
+
+      // 1) Log raw webhook
+      // NEW: heartbeat — stamp _debug as soon as the webhook hits (even before status is known)  
+      await heartbeatSession(env, tenantId, invoicenumber);
+      
+      // 1) Log raw webhook
+      await insertWebhookLog(env, {
+        tenant_id: tenantId,
+        txn_id: txnId,
+        invoice_number: invoicenumber || null,
+        state: payload?.state || payload?.data?.state || null,
+        amount: payload?.amount ?? payload?.data?.amount ?? null,
+        total_with_fees: payload?.total_with_fees ?? null,
+        raw: payload,
+      });
+      
+      // 2) Update session status
+      const status = normalizeStatus(payload);
+      await updateSessionStatus(env, tenantId, invoicenumber, status, payload);
+
+      // 3) If approved and sale not yet created, create it now
+      if (status === "approved") {
+        const saleId = await ensureSaleForApproved(env, tenantId, invoicenumber, payload);
+        await stampSaleId(env, tenantId, invoicenumber, saleId);
+      }
+    } catch {
+      // swallow to keep the ACK clean
+    }
+  })();
+
+  waitUntil(p);
+  return ack;
+};
+
+function json(data: any, status = 200): Response {
+  return new Response(JSON.stringify(data), {
+    status,
+    headers: { "content-type": "application/json" },
+  });
+}
+
+function detectTenantFromPayload(p: any) {
+  // Optional: derive tenant if encoded in invoicenumber
+  return null;
+}
+
+function normalizeStatus(p: any): "pending" | "approved" | "declined" {
+  const s = (p?.state || p?.data?.state || "").toString().toLowerCase();
+  if (s.includes("approved")) return "approved";
+  if (s.includes("declin")) return "declined";
+  return "pending";
+}
+
+// ----- DB helpers (Neon) -----
+// Allow NULL tenant_id without a ::uuid cast so we never drop the row
+async function insertWebhookLog(env: Env, row: any) {
+  const sql = neon(env.DATABASE_URL);
+  await sql/*sql*/`
+    INSERT INTO app.valor_webhook_log
+      (tenant_id, txn_id, invoice_number, state, amount, total_with_fees, raw, created_at)
+    VALUES
+      (${row.tenant_id || null}, ${row.txn_id || null}, ${row.invoice_number || null},
+       ${row.state || null}, ${row.amount ?? null}, ${row.total_with_fees ?? null},
+       ${JSON.stringify(row.raw || {})}::jsonb, now())
+  `;
+}
+
+// If tenantId is unknown, drop the tenant filter and target by invoice only.
+async function updateSessionStatus(env: Env, tenantId: string, invoice: string, status: string, wh: any) {
+  const sql = neon(env.DATABASE_URL);
+  const stamped = {
+    ...wh,
+    _debug: { source: "webhook", status, at: new Date().toISOString() }
+  };
+
+  if (tenantId) {
+    await sql/*sql*/`
+      UPDATE app.valor_sessions_log
+         SET status = ${status},
+             webhook_json = ${JSON.stringify(stamped)}::jsonb
+       WHERE tenant_id = ${tenantId}::uuid
+         AND invoice_number = ${invoice}
+       ORDER BY started_at DESC
+       LIMIT 1
+    `;
+  } else {
+    await sql/*sql*/`
+      UPDATE app.valor_sessions_log
+         SET status = ${status},
+             webhook_json = ${JSON.stringify(stamped)}::jsonb
+       WHERE invoice_number = ${invoice}
+       ORDER BY started_at DESC
+       LIMIT 1
+    `;
+  }
+}
+
+// Heartbeat: ensure we leave a trace in webhook_json even if we can't decode status yet.
+async function heartbeatSession(env: Env, tenantId: string, invoice: string) {
+  if (!invoice) return;
+  const sql = neon(env.DATABASE_URL);
+  const beat = { _debug: { source: "webhook_heartbeat", at: new Date().toISOString() } };
+
+  if (tenantId) {
+    await sql/*sql*/`
+      UPDATE app.valor_sessions_log
+         SET webhook_json = COALESCE(webhook_json, '{}'::jsonb) || ${JSON.stringify(beat)}::jsonb
+       WHERE tenant_id = ${tenantId}::uuid
+         AND invoice_number = ${invoice}
+       ORDER BY started_at DESC
+       LIMIT 1
+    `;
+  } else {
+    await sql/*sql*/`
+      UPDATE app.valor_sessions_log
+         SET webhook_json = COALESCE(webhook_json, '{}'::jsonb) || ${JSON.stringify(beat)}::jsonb
+       WHERE invoice_number = ${invoice}
+       ORDER BY started_at DESC
+       LIMIT 1
+    `;
+  }
+}
+
+
+async function ensureSaleForApproved(env: Env, tenantId: string, invoice: string, wh: any) {
+  const sql = neon(env.DATABASE_URL);
+
+  // If a sale already exists for this session, return it.
+  const rowsExisting = tenantId
+    ? await sql/*sql*/`
+        SELECT sale_id
+          FROM app.valor_sessions_log
+         WHERE tenant_id = ${tenantId}::uuid
+           AND invoice_number = ${invoice}
+         ORDER BY started_at DESC
+         LIMIT 1
+      `
+    : await sql/*sql*/`
+        SELECT sale_id
+          FROM app.valor_sessions_log
+         WHERE invoice_number = ${invoice}
+         ORDER BY started_at DESC
+         LIMIT 1
+      `;
+  if (rowsExisting?.[0]?.sale_id) return rowsExisting[0].sale_id;
+
+  // Use the POS snapshot saved at session-open to create the sale row.
+  const sess = tenantId
+    ? (await sql/*sql*/`
+         SELECT pos_snapshot, tenant_id
+           FROM app.valor_sessions_log
+          WHERE tenant_id = ${tenantId}::uuid
+            AND invoice_number = ${invoice}
+          ORDER BY started_at DESC
+          LIMIT 1
+       `)?.[0]
+    : (await sql/*sql*/`
+         SELECT pos_snapshot, tenant_id
+           FROM app.valor_sessions_log
+          WHERE invoice_number = ${invoice}
+          ORDER BY started_at DESC
+          LIMIT 1
+       `)?.[0];
+
+  const resolvedTenant = tenantId || sess?.tenant_id;
+  const snap = sess?.pos_snapshot || {};
+  const items = snap?.items || [];
+  const totals = snap?.totals || { raw_subtotal: 0, line_discounts: 0, subtotal: 0, tax: 0, total: 0 };
+
+  const itemsJson = JSON.stringify({
+    schema: "pos:v1",
+    source_totals: "client",
+    items,
+    totals,
+    payment: "card",
+    payment_parts: Array.isArray(snap?.payment_parts) ? snap.payment_parts : undefined
+  });
+
+  const ins = await sql/*sql*/`
+    INSERT INTO app.sales (
+      sale_ts, tenant_id, raw_subtotal, line_discounts, subtotal, tax, total, payment_method, items_json
+    ) VALUES (
+      now(), ${resolvedTenant}::uuid, ${totals.raw_subtotal}::numeric, ${totals.line_discounts}::numeric,
+      ${totals.subtotal}::numeric, ${totals.tax}::numeric, ${totals.total}::numeric,
+      'card', ${itemsJson}
+    )
+    RETURNING sale_id
+  `;
+  return ins?.[0]?.sale_id || null;
+}
+
+  
+
+async function stampSaleId(env: Env, tenantId: string, invoice: string, saleId: string) {
+  const sql = neon(env.DATABASE_URL);
+  if (tenantId) {
+    await sql/*sql*/`
+      UPDATE app.valor_sessions_log
+         SET sale_id = ${saleId}
+       WHERE tenant_id = ${tenantId}::uuid
+         AND invoice_number = ${invoice}
+       ORDER BY started_at DESC
+       LIMIT 1
+    `;
+  } else {
+    await sql/*sql*/`
+      UPDATE app.valor_sessions_log
+         SET sale_id = ${saleId}
+       WHERE invoice_number = ${invoice}
+       ORDER BY started_at DESC
+       LIMIT 1
+    `;
+  }
+}

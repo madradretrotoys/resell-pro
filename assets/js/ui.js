@@ -1,3 +1,5 @@
+//begin ui.js
+
 export function showToast(msg, ms=2500){
   const el = Object.assign(document.createElement('div'), { textContent: msg });
   Object.assign(el.style,{position:'fixed',bottom:'16px',left:'50%',transform:'translateX(-50%)',background:'#222',color:'#fff',padding:'8px 12px',borderRadius:'8px',zIndex:'9999'});
@@ -10,10 +12,11 @@ export function applyButtonGroupColors(root, options = {}){
   if (!root) return;
   const { allGhost = false } = options;
   const hasColorRole = (btn) =>
-    btn.classList.contains('btn-primary') ||
-    btn.classList.contains('btn-secondary') ||
-    btn.classList.contains('btn-ghost') ||
-    btn.classList.contains('btn-danger');
+  btn.classList.contains('btn-primary') ||
+  btn.classList.contains('btn-secondary') ||
+  btn.classList.contains('btn-ghost') ||
+  btn.classList.contains('btn-danger') ||
+  btn.classList.contains('btn-success'); // respect green buttons
 
   const btns = Array.from(root.querySelectorAll('button.btn'));
   if (allGhost){
@@ -32,3 +35,4 @@ export function applyButtonGroupColors(root, options = {}){
 export function normalizeButtonGroups(root=document){
   root.querySelectorAll('.btn-group').forEach((g)=>applyButtonGroupColors(g));
 }
+//end ui.js

@@ -1,3 +1,4 @@
+
 <!doctype html>
 <html lang="en">
 <head>
@@ -182,7 +183,7 @@
     <button class="burger" onclick="logout()" title="Sign out" aria-label="Sign out">⎋</button>
   </header>
   <div class="wrap">
-    <nav id="nav" aria-label="Primary">
+    <nav id="nav" aria-label="Primary" data-menu>
       <h3>Workspace</h3>
       <a href="?page=dashboard" data-page="dashboard">Dashboard</a>
       <a href="?page=pos"       data-page="pos">POS</a>
@@ -200,30 +201,37 @@
     <main id="app-view" class="content"></main>
   </div>
   <script>
-    
-    const nav = document.getElementById('nav');
-    document.getElementById('menu').onclick = () => nav.classList.toggle('open');
+  // Drawer element and burger button
+  const nav = document.getElementById('nav');
+  const burger = document.getElementById('menu');
 
-    function goto(section){
-      // Simple placeholder content per section
-      const T = {
-        pos: 'Point of Sale',
-        inventory: 'Inventory',
-        intake: 'Intake',
-        estimates: 'Estimates / Buy Tickets',
-        research: 'Research',
-        time: 'Timekeeping',
-        drawer: 'Cash Drawer',
-        payouts: 'Payouts',
-        settings: 'Settings'
-      }[section] || 'Welcome';
-      document.getElementById('title').textContent = T;
-      nav.classList.remove('open');
-      // Later we’ll mount real screens here
-    }
-    
-  </script>
+  // Toggle drawer open/closed
+  burger.onclick = () => {
+    const open = nav.classList.toggle('open');
+    // Keep ARIA state in sync (helps browsers/screen readers)
+    burger.setAttribute('aria-expanded', open ? 'true' : 'false');
+  };
+
+  // Close drawer immediately when any menu link is clicked,
+  // but DO NOT prevent navigation — let the browser reload the page.
+  nav.addEventListener('click', (e) => {
+    const a = e.target.closest('a[href][data-page]');
+    if (!a) return;
+    nav.classList.remove('open');
+    burger.setAttribute('aria-expanded', 'false');
+    // Allow default navigation to /app.html?page=... to proceed
+  });
+
+  // If the page is restored from the back/forward cache, ensure the drawer is closed
+  window.addEventListener('pageshow', () => {
+    nav.classList.remove('open');
+    burger.setAttribute('aria-expanded', 'false');
+  });
+</script>
+
   <!-- Load the small client router -->
   <script type="module" src="/assets/js/router.js"></script>
 </body>
 </html>
+
+

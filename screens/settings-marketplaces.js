@@ -13,17 +13,39 @@ export async function init(ctx) {
   const show = (el) => { el && (el.hidden = false); };
   const hide = (el) => { el && (el.hidden = true); };
 
-  try { window.ui?.setTitle?.("Marketplace Settings"); } catch {}
-
-  hide(banner);
-  hide(denied);
-  show(loading);
-  hide(content);
-
-  try {
-    // Use router-provided session; do NOT re-fetch here
-    console.log("[mp] init() starting");
-    // Use router-provided session; do NOT re-fetch here
+    try { window.ui?.setTitle?.("Marketplace Settings"); } catch {}
+  
+    hide(banner);
+    hide(denied);
+    show(loading);
+    hide(content);
+  
+    // NEW: environment selector wiring
+    try {
+      const currentEnv = (window.localStorage.getItem('mp_env') || 'sandbox').toLowerCase();
+      const radios = document.querySelectorAll('input[name="mp-env"]');
+      radios.forEach(r => {
+        r.checked = r.value === currentEnv;
+        r.addEventListener('change', (ev) => {
+          const val = ev.currentTarget.value;
+          window.localStorage.setItem('mp_env', val);
+          console.log('[mp] env set to', val);
+          // optional: quick confirmation
+          const banner = document.getElementById('settings-marketplaces-banner');
+          if (banner) {
+            banner.textContent = `eBay environment set to ${val}.`;
+            banner.className = 'banner info';
+            banner.hidden = false;
+            setTimeout(() => (banner.hidden = true), 3000);
+          }
+        });
+      });
+    } catch {}
+  
+    try {
+      // Use router-provided session; do NOT re-fetch here
+      console.log("[mp] init() starting");
+    
     const session = ctx?.session;
     console.log("[mp] session role:", session?.user?.role || session?.role);
 
@@ -55,46 +77,166 @@ export async function init(ctx) {
         </div>`;
     } else {
       container.innerHTML = rows.map((r) => {
-      const connected = String(r.status || "").toLowerCase() === "connected";
-      const badge = connected ? `<span class="badge" style="margin-left:8px">Connected</span>` : "";
-      const btn = connected
-        ? `<button class="btn btn--neutral" data-id="${r.id}" disabled>Connected</button>`
-        : `<button class="btn btn--primary" data-id="${r.id}">Connect</button>`;
-      const notes = r.ui_notes ? `<pre class="text-muted" style="white-space:pre-wrap">${JSON.stringify(r.ui_notes, null, 2)}</pre>` : "";
-      return `
-        <div class="card">
-          <h3 style="display:flex;align-items:center;gap:6px">${r.marketplace_name}${badge}</h3>
-          <p class="text-muted">Slug: <code>${r.slug || "-"}</code> · Auth: <code>${r.auth_type}</code></p>
-          ${notes}
-          <div class="actions">${btn}</div>
-        </div>
-      `;
-    }).join("");
-    }
+          const connected = String(r.status || "").toLowerCase() === "connected";
+          const enabled   = !!r.enabled;
+  
+          const notes = r.ui_notes ? `<pre class="text-muted" style="white-space:pre-wrap">${JSON.stringify(r.ui_notes, null, 2)}</pre>` : "";
+  
+          // Subscribe toggle (accessible switch)
+          const toggle = `
+            <label class="switch">
+              <input type="checkbox" role="switch" aria-checked="${enabled}" data-action="toggle-enabled" data-id="${r.id}" ${enabled ? "checked" : ""} />
+              <span class="slider" aria-hidden="true"></span>
+              <span class="switch-label">Enable for tenant</span>
+            </label>
+          `;
+          
+          // Connect/Disconnect (always render the block; hide only when disabled)
+          const connectBtn = connected
+            ? `<button class="btn btn--neutral" data-action="disconnect" data-id="${r.id}">Disconnect</button>`
+            : `<button class="btn btn--primary" data-action="connect" data-id="${r.id}">Connect</button>`;
+          
+          const connectBlock = `
+            <div class="actions" data-connect-wrap="${r.id}" ${enabled ? "" : "hidden"}>
+              ${connectBtn}
+            </div>
+          `;
+  
+          // Badges
+          const statusBadge = connected ? `Connected` : `Not connected`;
+          const enabledBadge = enabled ? `Enabled` : `Disabled`;
+          
+          // If server reports an error status, surface a small Retry control
+          const needsAttention = String(r.status || "").toLowerCase() === "error";
+          const retryBlock = needsAttention
+            ? `
+          <button class="btn btn--warning btn--sm" data-action="retry" data-id="${r.marketplace_id}">Retry</button>
+          `
+            : "";
+          
+          return `
+            <div class="mp-row">
+              <div class="mp-left">
+                <div class="mp-name">${r.marketplace_name}</div>
+                ${toggle}
+              </div>
+          
+              <div class="mp-right" data-connect-wrap="${r.id}" ${enabled ? "" : "hidden"}>
+                ${connectBtn}
+                ${retryBlock}
+              </div>
+            </div>
+          `;
+        }).join("");
+      }
 
     // Wire Connect buttons
-    container.querySelectorAll("button[data-id]").forEach((btn) => {
-      btn.addEventListener("click", async (ev) => {
-        const id = Number(ev.currentTarget.getAttribute("data-id"));
-        ev.currentTarget.disabled = true;
-
+    // Wire Subscribe toggle
+    container.querySelectorAll('input[data-action="toggle-enabled"]').forEach((chk) => {
+      chk.addEventListener("change", async (ev) => {
+        const el = ev.currentTarget; // HTMLInputElement
+        const id = Number(el.getAttribute("data-id"));
+        const wrap = container.querySelector(`[data-connect-wrap="${id}"]`);
+        
+        el.disabled = true;
+        const wantEnable = el.checked;
+        
         try {
-          // Use POST; include id in query as a fallback (helper will attach tenant headers)
-          await api(`/api/settings/marketplaces/connect?marketplace_id=${id}`, { method: "POST" });
-          ev.currentTarget.textContent = "Connected";
-          ev.currentTarget.classList.remove("btn--primary");
-          ev.currentTarget.classList.add("btn--neutral");
-          showBanner("Connection saved.", "info");
+          if (wantEnable) {
+            await api("/api/settings/marketplaces/subscribe", { method: "POST", body: { marketplace_id: id } });
+            el.setAttribute("aria-checked", "true");
+            if (wrap) wrap.hidden = false;  // wrapper already contains the button
+            showBanner("Marketplace enabled for tenant.", "info");
+          } else {
+            await api("/api/settings/marketplaces/unsubscribe", { method: "POST", body: { marketplace_id: id } });
+            el.setAttribute("aria-checked", "false");
+            if (wrap) wrap.hidden = true;
+            showBanner("Marketplace disabled for tenant.", "info");
+          }
         } catch (e) {
-          ev.currentTarget.disabled = false;
+          // revert UI on error
+          el.checked = !wantEnable;
+          el.setAttribute("aria-checked", String(!wantEnable));
           if (e && e.status === 403) return showBanner("Access denied.", "error");
-          showBanner("Failed to connect. Please try again.", "error");
+          showBanner("Failed to update subscription.", "error");
+        } finally {
+          el.disabled = false;
+        }
+
+      });
+    });
+
+    // Wire Connect / Disconnect buttons
+    // CONNECT
+    container.querySelectorAll('button[data-action="connect"]').forEach((btn) => {
+      btn.addEventListener("click", async (ev) => {
+        const b = ev.currentTarget;
+        const id = Number(b.getAttribute("data-id"));
+        b.disabled = true;
+        try {
+          // Start OAuth and follow the returned eBay consent URL
+          const environment = window.localStorage.getItem('mp_env') || 'sandbox';
+          const { redirect_url } = await api('/api/settings/marketplaces/ebay/start', {
+            method: 'POST',
+            body: { marketplace_id: id, environment }
+          });
+          window.location.href = redirect_url;
+          return; // leave the page for eBay; on return the list will refresh & show status
+        } catch (e) {
+          if (e && e.status === 403) showBanner("Access denied.", "error");
+          else showBanner("Failed to start eBay connect. Please try again.", "error");
+        } finally {
+          b.disabled = false;
+        }
+      });
+    });
+    
+    // DISCONNECT
+    container.querySelectorAll('button[data-action="disconnect"]').forEach((btn) => {
+      btn.addEventListener("click", async (ev) => {
+        const b = ev.currentTarget;
+        const id = Number(b.getAttribute("data-id"));
+        b.disabled = true;
+        try {
+          await api(`/api/settings/marketplaces/disconnect?marketplace_id=${id}`, { method: "POST" });
+          b.textContent = "Connect";
+          b.dataset.action = "connect";
+          b.classList.remove("btn--neutral");
+          b.classList.add("btn--primary");
+          showBanner("Disconnected.", "info");
+        } catch (e) {
+          if (e && e.status === 403) showBanner("Access denied.", "error");
+          else showBanner("Failed to disconnect.", "error");
+        } finally {
+          b.disabled = false;
         }
       });
     });
 
+      // RETRY
+      container.querySelectorAll('button[data-action="retry"]').forEach((btn) => {
+        btn.addEventListener("click", async (ev) => {
+          const b = ev.currentTarget;
+          const id = Number(b.getAttribute("data-id"));
+          b.disabled = true;
+          try {
+            await api('/api/settings/marketplaces/ebay/refresh', { method: 'POST', body: { marketplace_id: id } });
+            showBanner("Retry successful. Updating status…", "info");
+            // Keep it simple for v1: reload to re-run init() and pull fresh statuses
+            window.location.reload();
+          } catch (e) {
+            if (e && e.status === 403) showBanner("Access denied.", "error");
+            else showBanner("Retry failed. Please reconnect.", "error");
+          } finally {
+            b.disabled = false;
+          }
+        });
+      });
+    
      hide(loading);
     show(content);
+
+    
   } catch (err) {
     console.error("[mp] fatal:", err);
     hide(loading);

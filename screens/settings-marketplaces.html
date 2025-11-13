@@ -4,8 +4,18 @@
 <section class="screen" data-screen="settings-marketplaces">
   <header class="screen-header">
     <h1>Marketplace Settings</h1>
-    <p class="subtitle">Connect marketplaces and configure listing defaults (coming soon)</p>
+    <p class="subtitle">Connect marketplaces and configure listing defaults (in progress)</p>
   </header>
+
+  <!-- NEW: Environment selector -->
+  <div class="card" id="mp-env-card" style="margin-bottom:1rem;">
+    <strong>eBay Environment</strong>
+    <div style="display:flex; gap:1rem; margin-top:.5rem;">
+      <label><input type="radio" name="mp-env" value="sandbox"> Sandbox</label>
+      <label><input type="radio" name="mp-env" value="production"> Production</label>
+    </div>
+    <small class="text-muted">This controls where the eBay OAuth flow starts. Your selection is saved in localStorage (<code>mp_env</code>).</small>
+  </div>
 
   <!-- Global banner -->
   <div id="settings-marketplaces-banner" class="banner" hidden></div>
@@ -13,7 +23,7 @@
   <!-- Access denied -->
   <div id="settings-marketplaces-denied" class="card error" hidden>
     <h2>Access denied</h2>
-    <p>You must be an Owner or Admin to view Marketplace Settings.</p>
+    <p>You must be an Owner or Admin to view the Marketplace Settings.</p>
   </div>
 
   <!-- Loading -->
@@ -21,12 +31,12 @@
 
     <!-- Content -->
     <div id="settings-marketplaces-content" class="content" hidden>
-      <div id="mp-list" class="grid grid-3" style="gap:14px"></div>
+      <div id="mp-list" class="mp-list"></div>
   
       <div class="card">
         <h3>Notes</h3>
         <p>
-          Connections here are a prototype. We record your selection in
+          Ebay is connected - all other Connections here are a prototype. We record your selection in
           <code>app.marketplace_connections</code> but full OAuth/API flows will be added later.
         </p>
         <div class="actions">

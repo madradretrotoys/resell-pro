@@ -1,3 +1,4 @@
+//Begin router.ts copy
 import { ensureSession, waitForSession } from '/assets/js/auth.js';
 import { showToast } from '/assets/js/ui.js';
 import '/assets/js/api.js'; // ensure window.api is available to screens
@@ -60,6 +61,11 @@ async function loadHTML(url){
   return text;
 }
 export async function loadScreen(name){
+  // Last-ditch guard: if user is typing or keyboard is open, defer
+  if (isTextInput(document.activeElement) || keyboardLikelyOpen()){
+    setTimeout(() => loadScreen(name), 200);
+    return;
+  }
   const meta = SCREENS[name] || SCREENS.dashboard;
   // Defensive: pick the last #app-view in case multiple exist
   const candidates = Array.from(document.querySelectorAll('#app-view'));
@@ -74,6 +80,7 @@ export async function loadScreen(name){
   if (!session?.user) {
     log('auth:fail->redirect', { reason: session?.reason, status: session?.status, debug: session?.debug });
     location.href = '/index.html';
+    window.__navLock = false;
     return;
   }
   log('auth:ok', { user: session.user });
@@ -86,6 +93,7 @@ export async function loadScreen(name){
   } catch (e) {
     log('screen:html:error', e);
     view.innerHTML = `\nFailed to load screen.\n`;
+    window.__navLock = false;
     return;
   }
   try {
@@ -98,24 +106,76 @@ export async function loadScreen(name){
     showToast('Screen script error');
   }
   document.title = `Resell Pro — ${meta.title}`;
-  setActiveLink(name);
+setActiveLink(name);
+
+
+// Release nav lock (see below)
+window.__navLock = false;
+
   log('loadScreen:end', { name });
+  
+   
 }
 
-function goto(name){
+
+async function goto(name){
+  // Prevent double navigation on touchend+click
+  if (window.__navLock) return;
+
+  // No-op if we're already on this screen
+  if (current?.name === name) return;
+
+  window.__navLock = true;
+
+  // If typing, don't navigate yet — this would blur the field and close keyboard
+  if (isTextInput(document.activeElement) || keyboardLikelyOpen()){
+    setTimeout(() => { window.__navLock = false; goto(name); }, 250);
+    return;
+  }
+
   const u = new URL(location.href);
   u.searchParams.set('page', name);
   history.pushState({}, '', u);
-  loadScreen(name);
+
+  await safeLoadScreen(name);
 }
 
-window.addEventListener('popstate', () => loadScreen(qs('page') || 'dashboard'));
-document.addEventListener('click', (e) => {
-  const a = e.target.closest('[data-page]');
-  if(!a) return;
-  e.preventDefault();
-  goto(a.getAttribute('data-page'));
+function isTextInput(el){
+  if(!el) return false;
+  const tag = el.tagName;
+  if (tag === 'INPUT' || tag === 'TEXTAREA' || el.isContentEditable) return true;
+  return false;
+}
+
+function keyboardLikelyOpen(){
+  try{
+    // On mobile, when the keyboard opens, visualViewport.height shrinks
+    if (window.visualViewport) {
+      const ratio = window.visualViewport.height / window.innerHeight;
+      return ratio < 0.85; // heuristic; adjust if needed
+    }
+  }catch{}
+  return false;
+}
+
+async function safeLoadScreen(name){
+  // If user is typing, defer the navigation to avoid blurring/closing the keyboard
+  if (isTextInput(document.activeElement) || keyboardLikelyOpen()){
+    // Re-check shortly rather than forcing a blur
+    setTimeout(() => safeLoadScreen(name), 250);
+    return;
+  }
+  await loadScreen(name);
+}
+
+window.addEventListener('popstate', () => {
+  const name = qs('page') || 'dashboard';
+  // Ignore if it’s the same screen (prevents needless DOM swaps while typing)
+  if (current?.name === name) return;
+  safeLoadScreen(name);
 });
 
 log('boot');
-loadScreen(qs('page') || 'dashboard');
+safeLoadScreen(qs('page') || 'dashboard');
+
+//end router.ts copy
