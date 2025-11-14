@@ -39,7 +39,11 @@ export async function init() {
   // Stash the tenant id once we learn it (from /api/inventory/meta or DOM)
   let __tenantId = "";
   let __duplicateSourceImages = [];
-
+  
+   // When duplicating an item, this flag controls whether we carry photos from the template.
+      // Default is true; the duplicate prompt can flip it off for the new item.
+      let __duplicateCarryPhotos = true;
+  
   console.log("[photos:init]", {
     MAX_PHOTOS,
     __photosLen: __photos.length,
@@ -952,6 +956,44 @@ function setMarketplaceVisibility() {
 
   
     // Hydrate UI from a duplicate seed stashed in sessionStorage (if any)
+      function maybePromptDuplicatePhotos() {
+        try {
+          if (!Array.isArray(__duplicateSourceImages) || __duplicateSourceImages.length === 0) return;
+
+          const dlg   = $("duplicatePhotosDialog");
+          const yesBtn = $("duplicatePhotosYes");
+          const noBtn  = $("duplicatePhotosNo");
+
+          if (!dlg || !yesBtn || !noBtn) return;
+
+          // Avoid wiring twice if called again
+          if (dlg.dataset.wired === "1") {
+            try { dlg.showModal(); } catch {}
+            return;
+          }
+
+          dlg.dataset.wired = "1";
+
+          yesBtn.onclick = () => {
+            __duplicateCarryPhotos = true;
+            try { dlg.close(); } catch {}
+          };
+
+          noBtn.onclick = () => {
+            __duplicateCarryPhotos = false;
+            // Clear duplicated photos so the user starts fresh
+            __duplicateSourceImages = [];
+            __photos = [];
+            try { renderPhotosGrid(); } catch {}
+            try { computeValidity(); } catch {}
+            try { dlg.close(); } catch {}
+          };
+
+          try { dlg.showModal(); } catch {}
+        } catch (e) {
+          console.warn("[duplicateSeed] photo prompt failed", e);
+        }
+      }
       function hydrateFromDuplicateSeed() {
         console.groupCollapsed?.("[duplicateSeed] hydrateFromDuplicateSeed:start");
         let raw = null;
