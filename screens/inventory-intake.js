@@ -808,7 +808,7 @@ function setMarketplaceVisibility() {
     // --- Forward declare populateFromSaved so hydrateFromDuplicateSeed can call it ---
     if (typeof populateFromSaved !== "function") {
       function populateFromSaved() {
-        console.warn("[intake.js] populateSaved placeholder invoked before real definition");
+        console.warn("[intake.js] populateFromSaved placeholder invoked before real definition");
       }
     }
     // Hydrate UI from a duplicate seed stashed in sessionStorage (if any)
