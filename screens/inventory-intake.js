@@ -3292,7 +3292,32 @@ document.addEventListener("intake:item-changed", () => refreshInventory({ force:
           // Photos: either clone them as pending uploads, or clear them
           try {
             if (reusePhotos && images.length) {
-              await queueDuplicatePhotosFromImages(images);
+              // Instead of trying to fetch and recreate blobs in the browser,
+              // simply remember the images from the original item.
+              __duplicateSourceImages = images.map(img => ({
+                r2_key: img.r2_key,
+                cdn_url: img.cdn_url,
+                bytes: img.bytes,
+                width: img.width_px,
+                height: img.height_px,
+                content_type: img.content_type,
+                sha256: img.sha256_hex,
+                sort_order: img.sort_order,
+                is_primary: img.is_primary
+              }));
+              
+              // Show thumbnails exactly as-is (no uploads, no blobs, no CORS)
+              __photos = images.map(img => ({
+                image_id: "tmp-" + crypto.randomUUID(),
+                cdn_url: img.cdn_url,
+                is_primary: img.is_primary,
+                sort_order: img.sort_order,
+              }));
+              
+              // No pending uploads because we do not upload anything yet
+              __pendingFiles = [];
+              
+              renderPhotosGrid();
             } else {
               // Explicitly clear any previous photos/pending files
               __photos = [];
@@ -3411,91 +3436,7 @@ document.addEventListener("intake:item-changed", () => refreshInventory({ force:
         try { computeValidity(); } catch {}
       }
 
-      /**
-       * For duplicates: take images from an existing item and turn them into
-       * "pending" files, so they will be uploaded/attached to the new item
-       * after it is saved.
-       *
-       * IMPORTANT: this does NOT call the upload API. It only fills
-       * __pendingFiles and shows previews, just like freshly added files.
-       * The "intake:item-saved" handler will do the actual upload/attach
-       * once we have the new item_id.
-       */
-      async function queueDuplicatePhotosFromImages(images = []) {
-        try {
-          console.groupCollapsed("[intake.js] duplicate:queuePhotos");
-
-          // Brand-new item: no existing DB photos, no pending files yet
-          __photos = [];
-          __pendingFiles = [];
-          renderPhotosGrid();
-
-          const list = Array.isArray(images)
-            ? images.filter((img) => img && img.cdn_url)
-            : [];
-
-          console.log("duplicate:queuePhotos:start", { count: list.length });
-
-          for (let i = 0; i < list.length; i++) {
-            const img = list[i];
-            try {
-              console.log("duplicate:fetch-photo:start", { i, cdn_url: img.cdn_url });
-
-              const resp = await fetch(img.cdn_url);
-              if (!resp || !resp.ok) {
-                console.warn("duplicate:fetch-photo:non_ok", {
-                  i,
-                  cdn_url: img.cdn_url,
-                  status: resp && resp.status,
-                });
-                continue;
-              }
-
-              const blob = await resp.blob();
-              const baseName =
-                (img.r2_key && String(img.r2_key).split("/").pop()) ||
-                `photo-${i + 1}.jpg`;
-
-              const file = new File([blob], baseName, {
-                type: blob.type || "image/jpeg",
-              });
-
-              // Downscale using the same helper as normal uploads
-              const ds = await downscaleToBlob(file);
-
-              // Treat as brand-new pending upload (no item_id yet)
-              if (!ds._rpId) {
-                ds._rpId = crypto?.randomUUID
-                  ? crypto.randomUUID()
-                  : String(Date.now() + Math.random());
-              }
-              if (!ds._previewUrl) {
-                ds._previewUrl = URL.createObjectURL(ds);
-              }
-
-              __pendingFiles.push(ds);
-            } catch (err) {
-              console.error("duplicate:queue-photo:error", { i, err });
-            }
-          }
-
-          console.log("duplicate:queuePhotos:done", {
-            pending: __pendingFiles.length,
-          });
-
-          renderPhotosGrid();
-          try {
-            computeValidity();
-          } catch {}
-
-          console.groupEnd?.();
-        } catch (err) {
-          console.error("duplicate:queue-photo:outer-error", err);
-          try {
-            console.groupEnd?.();
-          } catch {}
-        }
-      }
+      
 
       // After successful save: confirm, disable form controls, and swap CTAs
       function postSaveSuccess(res, mode) {
