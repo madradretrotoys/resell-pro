@@ -2228,38 +2228,6 @@ function setMarketplaceVisibility() {
             }
           }
         
-          AND the Facebook listing is not already live.
-        async function __emitFacebookReadyIfSafe({ saveStatus, jobIds }) {
-          console.groupCollapsed("[intake.js] facebook:gate");
-          console.log("preconditions", {
-            saveStatus,
-            pendingFiles: (__pendingFiles && __pendingFiles.length) || 0,
-            jobIdsCount: Array.isArray(jobIds) ? jobIds.length : 0
-          });
-        
-          if (String(saveStatus || "").toLowerCase() !== "active") {
-            console.log("skip: saveStatus is not 'active'");
-            console.groupEnd?.();
-            return;
-          }
-        
-          // photos flushed?
-          if (__pendingFiles && __pendingFiles.length > 0) {
-            console.log("skip: pending photos not flushed yet");
-            console.groupEnd?.();
-            return;
-          }
-        
-          // runner quiet?
-          if (Array.isArray(jobIds) && jobIds.length > 0) {
-            const anyRunning = document.querySelector('[data-status-text]')?.textContent?.match(/Publishing|Deleting/i);
-            if (anyRunning) {
-              console.log("skip: publish runner still active");
-              console.groupEnd?.();
-              return;
-            }
-          }
-        
           // is Facebook selected?
           const isFacebookSelected = (() => {
             // use the cached meta to map selected ids → slug
