@@ -1019,61 +1019,8 @@ function setMarketplaceVisibility() {
         console.log("[duplicateSeed] initial thumbnails populated", {
           photosLen: __photos.length,
         });
-        
-        // --- Convert duplicate CDN images → pending File uploads ---
-        (async () => {
-           console.log("[duplicateSeed] begin CDN→pending pipeline", {
-            sourceCount: __duplicateSourceImages.length,
-          });
-          for (const src of __duplicateSourceImages) {
-            try {
 
-              console.log("[duplicateSeed] fetch image", {
-                cdn_url: src.cdn_url,
-                beforePendingLen: __pendingFiles.length,
-              });
-              
-              const resp = await fetch(src.cdn_url, { mode: "cors" });
-              const blob = await resp.blob();
-        
-              const ext = src.content_type && src.content_type.includes("png") ? ".png" : ".jpg";
-              const fname = `dup_${Date.now()}_${Math.random().toString(36).slice(2)}${ext}`;
-              const file = new File([blob], fname, { type: blob.type || "image/jpeg" });
-        
-              // Downscale using the SAME helper used for normal uploads
-              const ds = await downscaleToBlob(file);
-        
-              // Give the pending file a stable ID + preview URL
-              if (!ds._rpId) {
-                ds._rpId = (crypto?.randomUUID ? crypto.randomUUID() : String(Date.now() + Math.random()));
-              }
-              if (!ds._previewUrl) {
-                ds._previewUrl = URL.createObjectURL(ds);
-              }
-        
-              __pendingFiles.push(ds);
-              console.log("[duplicateSeed] pushed pending file", {
-                pendingLen: __pendingFiles.length,
-                _rpId: ds._rpId,
-                name: ds.name,
-                size: ds.size,
-              });
-            } catch (e) {
-              console.error("[intake.js] duplicateSeed: failed to fetch image", src.cdn_url, e);
-            }
-          }
-
-          console.log("[duplicateSeed] finished CDN→pending pipeline", {
-            pendingLen: __pendingFiles.length,
-            photosLen: __photos.length,
-          });
-          
-          // Re-render including pending files
-          try { renderPhotosGrid(); } catch (e) {
-            console.error("[intake.js] renderPhotosGrid failed after duplicateSeed pending fill", e);
-          }
-        })();
-        // Hydrate form + photos
+        // Hydrate form + photos (thumbnails only; originals will be cloned on the server)
         try {
           populateFromSaved(inv, listing);
         } catch (e) {
@@ -3102,6 +3049,25 @@ document.addEventListener("intake:item-changed", () => refreshInventory({ force:
           payload.marketplace_listing = { ...(payload.marketplace_listing || {}), facebook: {} };
         }
 
+          // If this is a duplicated brand-new item, send source images for server-side copy
+          if (
+            !__currentItemId &&
+            Array.isArray(__duplicateSourceImages) &&
+            __duplicateSourceImages.length > 0
+          ) {
+            payload.duplicate_images = __duplicateSourceImages.map((img, idx) => ({
+              r2_key: img.r2_key,
+              cdn_url: img.cdn_url,
+              bytes: img.bytes,
+              content_type: img.content_type,
+              width: img.width ?? null,
+              height: img.height ?? null,
+              sha256: img.sha256 ?? null,
+              sort_order: typeof img.sort_order === "number" ? img.sort_order : idx,
+              is_primary: !!img.is_primary,
+            }));
+          }
+
           return payload;
        }
 
@@ -3124,6 +3090,26 @@ document.addEventListener("intake:item-changed", () => refreshInventory({ force:
         // Backend: upsert into app.item_marketplace_listing when present
         payload.marketplace_listing = { ebay: ebayListing };
       }
+
+      // If this is a duplicated brand-new item, send source images for server-side copy
+      if (
+        !__currentItemId &&
+        Array.isArray(__duplicateSourceImages) &&
+        __duplicateSourceImages.length > 0
+      ) {
+        payload.duplicate_images = __duplicateSourceImages.map((img, idx) => ({
+          r2_key: img.r2_key,
+          cdn_url: img.cdn_url,
+          bytes: img.bytes,
+          content_type: img.content_type,
+          width: img.width ?? null,
+          height: img.height ?? null,
+          sha256: img.sha256 ?? null,
+          sort_order: typeof img.sort_order === "number" ? img.sort_order : idx,
+          is_primary: !!img.is_primary,
+        }));
+      }
+         
       return payload;
     }
 
