@@ -3233,6 +3233,7 @@ document.addEventListener("intake:item-changed", () => refreshInventory({ force:
           <td class="px-3 py-2">
             <div class="flex gap-2">
               <button type="button" class="btn btn-primary btn-sm" data-action="load" data-item-id="${row.item_id}">Load</button>
+              <button type="button" class="btn btn-ghost btn-sm" data-action="duplicate" data-item-id="${row.item_id}">Duplicate</button>
               <button type="button" class="btn btn-ghost btn-sm" data-action="delete" data-item-id="${row.item_id}">Delete</button>
             </div>
           </td>
