@@ -805,10 +805,10 @@ function setMarketplaceVisibility() {
     
     // CLOSE wireShippingBoxAutofill(meta)
     }
-    // --- Forward declare populateFromSaved so hydrateFromDuplicateSeed can call it ---
-    if (typeof populateFromSaved !== "function") {
-      function populateFromSaved() {
-        console.warn("[intake.js] populateFromSaved placeholder invoked before real definition");
+    // --- Forward declare populateSaved so hydrateFromDuplicateSeed can call it ---
+    if (typeof populateSaved !== "function") {
+      function populateSaved() {
+        console.warn("[intake.js] populateSaved placeholder invoked before real definition");
       }
     }
     // Hydrate UI from a duplicate seed stashed in sessionStorage (if any)
@@ -865,9 +865,9 @@ function setMarketplaceVisibility() {
 
         // Hydrate form + photos
         try {
-          populateFromSaved(inv, listing);
+          populateSaved(inv, listing);
         } catch (e) {
-          console.error("[intake.js] populateFromSaved failed for duplicateSeed", e);
+          console.error("[intake.js] populateSaved failed for duplicateSeed", e);
         }
 
         try {
