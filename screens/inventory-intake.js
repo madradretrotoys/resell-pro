@@ -2228,6 +2228,38 @@ function setMarketplaceVisibility() {
             }
           }
         
+          AND the Facebook listing is not already live.
+        async function __emitFacebookReadyIfSafe({ saveStatus, jobIds }) {
+          console.groupCollapsed("[intake.js] facebook:gate");
+          console.log("preconditions", {
+            saveStatus,
+            pendingFiles: (__pendingFiles && __pendingFiles.length) || 0,
+            jobIdsCount: Array.isArray(jobIds) ? jobIds.length : 0
+          });
+        
+          if (String(saveStatus || "").toLowerCase() !== "active") {
+            console.log("skip: saveStatus is not 'active'");
+            console.groupEnd?.();
+            return;
+          }
+        
+          // photos flushed?
+          if (__pendingFiles && __pendingFiles.length > 0) {
+            console.log("skip: pending photos not flushed yet");
+            console.groupEnd?.();
+            return;
+          }
+        
+          // runner quiet?
+          if (Array.isArray(jobIds) && jobIds.length > 0) {
+            const anyRunning = document.querySelector('[data-status-text]')?.textContent?.match(/Publishing|Deleting/i);
+            if (anyRunning) {
+              console.log("skip: publish runner still active");
+              console.groupEnd?.();
+              return;
+            }
+          }
+        
           // is Facebook selected?
           const isFacebookSelected = (() => {
             // use the cached meta to map selected ids → slug
@@ -2244,7 +2276,7 @@ function setMarketplaceVisibility() {
             return;
           }
         
-          // not already live?
+          // not already live? (app.item_marketplace_listing.status === 'live')
           if (__currentItemId) {
             try {
               const snap = await api(`/api/inventory/intake?item_id=${encodeURIComponent(__currentItemId)}`, { method: "GET" });
@@ -2252,9 +2284,50 @@ function setMarketplaceVisibility() {
               window.__intakeSnap = snap;
               // keep a last-known SKU around for local fallback builders
               try { window.__lastKnownSku = String(snap?.inventory?.sku || ""); } catch {}
-              const live = String(snap?.marketplace_listing?.facebook?.status || "").toLowerCase() === "live";
-              console.log("existing fb status", { live, status: snap?.marketplace_listing?.facebook?.status });
-              if (live) { console.log("skip: already live"); console.groupEnd?.(); return; }
+
+              // Normalize Facebook row from marketplace_listing or marketplace_listings
+              const listings = snap?.marketplace_listing || snap?.marketplace_listings || {};
+              let fbRow =
+                listings?.facebook ??
+                listings?.Facebook ??
+                listings?.["2"] ??
+                null;
+
+              // If listings is an array or generic object, try to find a row with slug 'facebook' or marketplace_id = 2
+              if (!fbRow) {
+                if (Array.isArray(listings)) {
+                  fbRow = listings.find(r =>
+                    String(r?.slug || "").toLowerCase() === "facebook" ||
+                    Number(r?.marketplace_id) === 2
+                  ) || null;
+                } else if (listings && typeof listings === "object") {
+                  for (const key of Object.keys(listings)) {
+                    const row = listings[key];
+                    if (!row || typeof row !== "object") continue;
+                    const slug = String(row.slug || "").toLowerCase();
+                    const mpId = Number(row.marketplace_id);
+                    if (slug === "facebook" || mpId === 2) {
+                      fbRow = row;
+                      break;
+                    }
+                  }
+                }
+              }
+
+              const statusRaw =
+                (fbRow && (fbRow.status ?? fbRow.listing_status ?? fbRow.state)) || "";
+              const live = String(statusRaw).toLowerCase() === "live";
+
+              console.log("existing fb status", {
+                live,
+                status: statusRaw
+              });
+
+              if (live) {
+                console.log("skip: already live");
+                console.groupEnd?.();
+                return;
+              }
             } catch (e) {
               console.warn("fb status check failed", e);
             }
@@ -2281,7 +2354,8 @@ function setMarketplaceVisibility() {
           
               console.groupCollapsed("[intake.js] facebook:intake → begin");
               setFacebookStatus("Publishing…", { tone: "info" });
-              console.log("[intake.js] payload echo", payload);   // keep an echo here too
+              console.log("[intake.js] payload echo", payload);
+
               // Kick a short, one-time poll while the FB tab runs (max ~15s)
               (function pollForFlipOnce() {
                 let ticks = 0;
