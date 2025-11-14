@@ -3262,106 +3262,59 @@ document.addEventListener("intake:item-changed", () => refreshInventory({ force:
         }
       }
 
-      async function handleDuplicateInventory(item_id) {
+            async function handleDuplicateInventory(item_id) {
         try {
-          // Ask the user whether they want to reuse photos from the original item
-          const reusePhotos = window.confirm(
-            "Do you want to reuse the photos from this item on the duplicate?\n\n" +
-            "OK = Yes, reuse photos\n" +
-            "Cancel = No, start with no photos."
-          );
-
           // Reuse the same intake API as Load so we get inventory + listing + images
-          const res = await api(`/api/inventory/intake?item_id=${item_id}`, { method: "GET" });
+          const res = await api(`/api/inventory/intake?item_id=${encodeURIComponent(item_id)}`, { method: "GET" });
           if (!res || res.ok === false) throw new Error(res?.error || "load_failed");
-      
+
           const inv     = res.inventory || {};
           const listing = res.listing   || null;
           const images  = Array.isArray(res.images) ? res.images : [];
-      
-          // Treat this as a brand-new item: clear any identifiers
+
+          // Build a duplicate "seed" object that looks like a new draft
           const invClone = { ...inv };
           delete invClone.item_id;
           delete invClone.sku;
-      
-          // Make sure we are not in "view" mode for an existing item
-          __currentItemId = null;
-      
-          // Hydrate the form with the copied values
-          populateFromSaved(invClone, listing);
+          invClone.item_status = "draft";
 
-          // Photos: either clone them as pending uploads, or clear them
+          const seed = {
+            inventory: invClone,
+            listing,
+            images: images.map((img, idx) => ({
+              r2_key: img.r2_key,
+              cdn_url: img.cdn_url,
+              bytes: img.bytes,
+              content_type: img.content_type,
+              width: img.width_px ?? img.width ?? null,
+              height: img.height_px ?? img.height ?? null,
+              sha256: img.sha256_hex ?? img.sha256 ?? null,
+              sort_order: typeof img.sort_order === "number" ? img.sort_order : idx,
+              is_primary: !!img.is_primary,
+            })),
+          };
+
+          // Stash in sessionStorage so the next page load can hydrate from it
           try {
-            if (reusePhotos && images.length) {
-              // Instead of trying to fetch and recreate blobs in the browser,
-              // simply remember the images from the original item.
-              __duplicateSourceImages = images.map(img => ({
-                r2_key: img.r2_key,
-                cdn_url: img.cdn_url,
-                bytes: img.bytes,
-                width: img.width_px,
-                height: img.height_px,
-                content_type: img.content_type,
-                sha256: img.sha256_hex,
-                sort_order: img.sort_order,
-                is_primary: img.is_primary
-              }));
-              
-              // Show thumbnails exactly as-is (no uploads, no blobs, no CORS)
-              __photos = images.map(img => ({
-                image_id: "tmp-" + crypto.randomUUID(),
-                cdn_url: img.cdn_url,
-                is_primary: img.is_primary,
-                sort_order: img.sort_order,
-              }));
-              
-              // No pending uploads because we do not upload anything yet
-              __pendingFiles = [];
-              
-              renderPhotosGrid();
-            } else {
-              // Explicitly clear any previous photos/pending files
-              __photos = [];
-              __pendingFiles = [];
-              renderPhotosGrid();
-              try { computeValidity(); } catch {}
-            }
+            sessionStorage.setItem("rp:intake:duplicateSeed", JSON.stringify(seed));
+            console.log("[intake.js] duplicateSeed stored", {
+              item_id,
+              imageCount: seed.images.length,
+            });
           } catch (e) {
-            console.error("duplicate:photos:error", e);
+            console.warn("[intake.js] unable to store duplicateSeed", e);
           }
-      
-          // Ensure fields are editable and normal CTAs are visible
-          try {
-            const form = document.getElementById("intakeForm");
-            if (form) {
-              const ctrls = Array.from(form.querySelectorAll("input, select, textarea"));
-              ctrls.forEach((el) => {
-                el.disabled = false;
-                el.readOnly = false;
-                el.removeAttribute("aria-disabled");
-              });
-            }
-          } catch {}
-      
-          // If we were previously in view-mode, restore the original CTA row
-          try {
-            const actionsRow = document.querySelector(".actions.flex.gap-2");
-            if (actionsRow && __originalCtasHTML != null) {
-              actionsRow.innerHTML = __originalCtasHTML;
-              wireCtas();
-            }
-          } catch {}
-      
-          // Re-run validation so buttons enable/disable correctly
-          try { computeValidity(); } catch {}
-      
-          alert("Item duplicated. Review and save as a new item.");
-      
+
+          // Navigate back into a pristine "new item" intake screen.
+          // We just reload the page; init() will detect the seed and hydrate.
+          window.location.reload();
+
         } catch (err) {
           console.error("duplicate:error", err);
           alert("Unable to duplicate item.");
         }
       }
+
 
     
       /** Load and render the most recent Active inventory (limit 50) */
