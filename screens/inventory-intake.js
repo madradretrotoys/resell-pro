@@ -38,6 +38,7 @@ export async function init() {
   let __lockDraft = false;        // Phase 0: once Active, we never allow reverting to Draft (UI lock)
   // Stash the tenant id once we learn it (from /api/inventory/meta or DOM)
   let __tenantId = "";
+  let __duplicateSourceImages = [];
   
   // Utility: update counter + disable add when maxed
   function updatePhotosUIBasic() {
