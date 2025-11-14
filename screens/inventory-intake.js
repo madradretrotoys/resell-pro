@@ -805,7 +805,84 @@ function setMarketplaceVisibility() {
     
     // CLOSE wireShippingBoxAutofill(meta)
     }
-    
+
+    // Hydrate UI from a duplicate seed stashed in sessionStorage (if any)
+      function hydrateFromDuplicateSeed() {
+        let raw = null;
+        try {
+          raw = sessionStorage.getItem("rp:intake:duplicateSeed");
+        } catch (e) {
+          console.warn("[intake.js] duplicateSeed: sessionStorage unavailable", e);
+          return false;
+        }
+        if (!raw) return false;
+
+        let seed;
+        try {
+          seed = JSON.parse(raw);
+        } catch (e) {
+          console.error("[intake.js] duplicateSeed: parse failed", e);
+          try { sessionStorage.removeItem("rp:intake:duplicateSeed"); } catch {}
+          return false;
+        }
+
+        // Consume the seed so it only applies once
+        try { sessionStorage.removeItem("rp:intake:duplicateSeed"); } catch {}
+
+        const inv     = seed?.inventory || {};
+        const listing = seed?.listing   || null;
+        const images  = Array.isArray(seed?.images) ? seed.images : [];
+
+        // Force "new item" state
+        __currentItemId    = null;
+        __pendingFiles     = [];
+        __duplicateSourceImages = images.map((img, idx) => ({
+          r2_key: img.r2_key,
+          cdn_url: img.cdn_url,
+          bytes: img.bytes,
+          content_type: img.content_type,
+          width: img.width ?? img.width_px ?? null,
+          height: img.height ?? img.height_px ?? null,
+          sha256: img.sha256 ?? img.sha256_hex ?? null,
+          sort_order: typeof img.sort_order === "number" ? img.sort_order : idx,
+          is_primary: !!img.is_primary,
+        }));
+
+        // Thumbnails only – no uploads yet
+        __photos = __duplicateSourceImages.map((img, idx) => ({
+          image_id: "dup-" + (typeof crypto !== "undefined" && crypto.randomUUID
+            ? crypto.randomUUID()
+            : `${Date.now()}-${idx}`),
+          cdn_url: img.cdn_url,
+          is_primary: !!img.is_primary,
+          sort_order: typeof img.sort_order === "number" ? img.sort_order : idx,
+        }));
+
+        // Hydrate form + photos
+        try {
+          populateFromSaved(inv, listing);
+        } catch (e) {
+          console.error("[intake.js] populateFromSaved failed for duplicateSeed", e);
+        }
+
+        try {
+          renderPhotosGrid();
+        } catch (e) {
+          console.error("[intake.js] renderPhotosGrid failed for duplicateSeed", e);
+        }
+
+        try {
+          computeValidity();
+        } catch {}
+
+        console.log("[intake.js] hydrated from duplicateSeed", {
+          hasListing: !!listing,
+          imageCount: __photos.length,
+        });
+
+        return true;
+      }
+  
 
    // --- Validation helpers (HOISTED so computeValidity can see them) ---
   function getEl(id) { try { return document.getElementById(id); } catch { return null; } }
