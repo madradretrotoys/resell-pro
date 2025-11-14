@@ -805,12 +805,87 @@ function setMarketplaceVisibility() {
     
     // CLOSE wireShippingBoxAutofill(meta)
     }
-    // --- Forward declare populateFromSaved so hydrateFromDuplicateSeed can call it ---
-    if (typeof populateFromSaved !== "function") {
-      function populateFromSaved() {
-        console.warn("[intake.js] populateFromSaved placeholder invoked before real definition");
+
+    /** Populate intake form controls from saved inventory + listing profile */
+    function populateFromSaved(inv, listing) {
+      // Basic Item Details
+      const title = document.getElementById("titleInput") || findControlByLabel("Item Name / Description");
+      if (title) title.value = inv?.product_short_title ?? "";
+    
+      const price = document.getElementById("priceInput") || findControlByLabel("Price (USD)");
+      if (price) price.value = inv?.price ?? "";
+    
+      const qty = document.getElementById("qtyInput") || findControlByLabel("Qty");
+      if (qty) qty.value = inv?.qty ?? "";
+    
+      const cat = document.getElementById("categorySelect") || findControlByLabel("Category");
+      if (cat) cat.value = inv?.category_nm ?? "";
+    
+      const store = document.getElementById("storeLocationSelect") || findControlByLabel("Store Location");
+      if (store) store.value = inv?.instore_loc ?? "";
+    
+      const cogs = document.getElementById("costInput") || findControlByLabel("Cost of Goods (USD)");
+      if (cogs) cogs.value = inv?.cost_of_goods ?? "";
+    
+      const bin = document.getElementById("caseBinShelfInput") || findControlByLabel("Case#/Bin#/Shelf#");
+      if (bin) bin.value = inv?.case_bin_shelf ?? "";
+    
+      const sales = document.getElementById("salesChannelSelect") || findControlByLabel("Sales Channel");
+      if (sales) sales.value = inv?.instore_online ?? "";
+    
+            // Marketplace Listing Details (optional for drafts)
+      if (listing) {
+        
+          const mpCat = document.getElementById("marketplaceCategorySelect") || findControlByLabel("Marketplace Category");
+          if (mpCat) mpCat.value = listing.listing_category_key ?? "";
+        
+          const cond = document.getElementById("conditionSelect") || findControlByLabel("Condition");
+          if (cond) cond.value = listing.condition_key ?? "";
+        
+          const brand = document.getElementById("brandSelect") || findControlByLabel("Brand");
+          if (brand) brand.value = listing.brand_key ?? "";
+        
+          const color = document.getElementById("colorSelect") || findControlByLabel("Primary Color");
+          if (color) color.value = listing.color_key ?? "";
+        
+          const shipBox = document.getElementById("shippingBoxSelect") || findControlByLabel("Shipping Box");
+          if (shipBox) shipBox.value = listing.shipping_box_key ?? "";
+
+         // Long Description (textarea)
+        const longDesc = document.getElementById("longDescriptionTextarea") || findControlByLabel("Long Description");
+        if (longDesc) {
+          const current = String(listing?.product_description ?? "").trim();
+          if (current) {
+            // If server already has a description, use it as-is
+            longDesc.value = current;
+          } else {
+            // Otherwise, compose: <Title> + blank line + base sentence
+            const titleEl = document.getElementById("titleInput") || findControlByLabel("Item Name / Description");
+            const title = String(titleEl?.value || inv?.product_short_title || "").trim();
+            longDesc.value = title ? `${title}\n\n${BASE_DESCRIPTION}` : BASE_DESCRIPTION;
+          }
+        }
+          
+    
+
+        const lb  = document.getElementById("weightLbInput") || findControlByLabel("Weight (lb)");
+        const oz  = document.getElementById("weightOzInput") || findControlByLabel("Weight (oz)");
+        const len = document.getElementById("lengthInput")   || findControlByLabel("Length");
+        const wid = document.getElementById("widthInput")    || findControlByLabel("Width");
+        const hei = document.getElementById("heightInput")   || findControlByLabel("Height");
+        if (lb)  lb.value  = listing.weight_lb ?? "";
+        if (oz)  oz.value  = listing.weight_oz ?? "";
+        if (len) len.value = listing.shipbx_length ?? "";
+        if (wid) wid.value = listing.shipbx_width ?? "";
+        if (hei) hei.value = listing.shipbx_height ?? "";
       }
+    
+      // Recompute validity / show or hide marketplace fields as needed
+      try { setMarketplaceVisibility(); } catch {}
+      try { computeValidity(); } catch {}
     }
+
+  
     // Hydrate UI from a duplicate seed stashed in sessionStorage (if any)
       function hydrateFromDuplicateSeed() {
         let raw = null;
@@ -3025,85 +3100,7 @@ document.addEventListener("intake:item-changed", () => refreshInventory({ force:
       return tr;
     }
     
-    /** Populate intake form controls from saved inventory + listing profile */
-    function populateFromSaved(inv, listing) {
-      // Basic Item Details
-      const title = document.getElementById("titleInput") || findControlByLabel("Item Name / Description");
-      if (title) title.value = inv?.product_short_title ?? "";
-    
-      const price = document.getElementById("priceInput") || findControlByLabel("Price (USD)");
-      if (price) price.value = inv?.price ?? "";
-    
-      const qty = document.getElementById("qtyInput") || findControlByLabel("Qty");
-      if (qty) qty.value = inv?.qty ?? "";
-    
-      const cat = document.getElementById("categorySelect") || findControlByLabel("Category");
-      if (cat) cat.value = inv?.category_nm ?? "";
-    
-      const store = document.getElementById("storeLocationSelect") || findControlByLabel("Store Location");
-      if (store) store.value = inv?.instore_loc ?? "";
-    
-      const cogs = document.getElementById("costInput") || findControlByLabel("Cost of Goods (USD)");
-      if (cogs) cogs.value = inv?.cost_of_goods ?? "";
-    
-      const bin = document.getElementById("caseBinShelfInput") || findControlByLabel("Case#/Bin#/Shelf#");
-      if (bin) bin.value = inv?.case_bin_shelf ?? "";
-    
-      const sales = document.getElementById("salesChannelSelect") || findControlByLabel("Sales Channel");
-      if (sales) sales.value = inv?.instore_online ?? "";
-    
-            // Marketplace Listing Details (optional for drafts)
-      if (listing) {
         
-          const mpCat = document.getElementById("marketplaceCategorySelect") || findControlByLabel("Marketplace Category");
-          if (mpCat) mpCat.value = listing.listing_category_key ?? "";
-        
-          const cond = document.getElementById("conditionSelect") || findControlByLabel("Condition");
-          if (cond) cond.value = listing.condition_key ?? "";
-        
-          const brand = document.getElementById("brandSelect") || findControlByLabel("Brand");
-          if (brand) brand.value = listing.brand_key ?? "";
-        
-          const color = document.getElementById("colorSelect") || findControlByLabel("Primary Color");
-          if (color) color.value = listing.color_key ?? "";
-        
-          const shipBox = document.getElementById("shippingBoxSelect") || findControlByLabel("Shipping Box");
-          if (shipBox) shipBox.value = listing.shipping_box_key ?? "";
-
-         // Long Description (textarea)
-        const longDesc = document.getElementById("longDescriptionTextarea") || findControlByLabel("Long Description");
-        if (longDesc) {
-          const current = String(listing?.product_description ?? "").trim();
-          if (current) {
-            // If server already has a description, use it as-is
-            longDesc.value = current;
-          } else {
-            // Otherwise, compose: <Title> + blank line + base sentence
-            const titleEl = document.getElementById("titleInput") || findControlByLabel("Item Name / Description");
-            const title = String(titleEl?.value || inv?.product_short_title || "").trim();
-            longDesc.value = title ? `${title}\n\n${BASE_DESCRIPTION}` : BASE_DESCRIPTION;
-          }
-        }
-          
-    
-
-        const lb  = document.getElementById("weightLbInput") || findControlByLabel("Weight (lb)");
-        const oz  = document.getElementById("weightOzInput") || findControlByLabel("Weight (oz)");
-        const len = document.getElementById("lengthInput")   || findControlByLabel("Length");
-        const wid = document.getElementById("widthInput")    || findControlByLabel("Width");
-        const hei = document.getElementById("heightInput")   || findControlByLabel("Height");
-        if (lb)  lb.value  = listing.weight_lb ?? "";
-        if (oz)  oz.value  = listing.weight_oz ?? "";
-        if (len) len.value = listing.shipbx_length ?? "";
-        if (wid) wid.value = listing.shipbx_width ?? "";
-        if (hei) hei.value = listing.shipbx_height ?? "";
-      }
-    
-      // Recompute validity / show or hide marketplace fields as needed
-      try { setMarketplaceVisibility(); } catch {}
-      try { computeValidity(); } catch {}
-    }
-    
     /** Enter existing-view mode (disabled fields + Edit/Add New/Delete CTAs) */
     function enterViewMode({ item_id, hasSku = false }) {
       __currentItemId = item_id;
