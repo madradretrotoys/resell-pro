@@ -1238,15 +1238,18 @@ function setMarketplaceVisibility() {
       "#ebay_promotePct"
     ];
 
-    const ebayNodes = ebaySelectors
-      .map(sel => document.querySelector(sel))
-      .filter(Boolean)
-      .filter((n) => {
-        if (!n || n.disabled || n.type === "hidden") return false;
-        if (n.closest(".hidden")) return false;       // hidden by class (format/best-offer/promote toggles)
-        if (n.offsetParent === null) return false;    // not in layout flow
-        return true;
-      });
+    // Only treat eBay-specific fields as required when the eBay tile is actually selected.
+    const ebayNodes = !ebaySelected
+      ? []
+      : ebaySelectors
+          .map(sel => document.querySelector(sel))
+          .filter(Boolean)
+          .filter((n) => {
+            if (!n || n.disabled || n.type === "hidden") return false;
+            if (n.closest(".hidden")) return false;       // hidden by class (format/best-offer/promote toggles)
+            if (n.offsetParent === null) return false;    // not in layout flow
+            return true;
+          });
 
     return [...base, ...ebayNodes];
   }
