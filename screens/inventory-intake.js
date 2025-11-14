@@ -867,7 +867,7 @@ function setMarketplaceVisibility() {
         try {
           populateSaved(inv, listing);
         } catch (e) {
-          console.error("[intake.js] populateFromSaved failed for duplicateSeed", e);
+          console.error("[intake.js] populateSaved failed for duplicateSeed", e);
         }
 
         try {
