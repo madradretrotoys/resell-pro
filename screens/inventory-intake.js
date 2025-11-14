@@ -865,7 +865,7 @@ function setMarketplaceVisibility() {
 
         // Hydrate form + photos
         try {
-          populateFromSaved(inv, listing);
+          populateSaved(inv, listing);
         } catch (e) {
           console.error("[intake.js] populateFromSaved failed for duplicateSeed", e);
         }
