@@ -3350,6 +3350,8 @@ document.addEventListener("intake:item-changed", () => refreshInventory({ force:
             if (action === "load") {
               // reuse the existing loader; it hydrates photos + fields
               btn.addEventListener("click", () => handleLoadDraft(id));
+            } else if (action === "duplicate") {
+              btn.addEventListener("click", () => handleDuplicateInventory(id));
             } else if (action === "delete") {
               btn.addEventListener("click", () => handleDeleteInventory(id, btn.closest("tr")));
             }
