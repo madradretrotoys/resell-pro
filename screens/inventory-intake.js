@@ -937,7 +937,39 @@ function setMarketplaceVisibility() {
           is_primary: !!img.is_primary,
           sort_order: typeof img.sort_order === "number" ? img.sort_order : idx,
         }));
-
+        // --- Convert duplicate CDN images → pending File uploads ---
+        (async () => {
+          for (const src of __duplicateSourceImages) {
+            try {
+              const resp = await fetch(src.cdn_url, { mode: "cors" });
+              const blob = await resp.blob();
+        
+              const ext = src.content_type && src.content_type.includes("png") ? ".png" : ".jpg";
+              const fname = `dup_${Date.now()}_${Math.random().toString(36).slice(2)}${ext}`;
+              const file = new File([blob], fname, { type: blob.type || "image/jpeg" });
+        
+              // Downscale using the SAME helper used for normal uploads
+              const ds = await downscaleToBlob(file);
+        
+              // Give the pending file a stable ID + preview URL
+              if (!ds._rpId) {
+                ds._rpId = (crypto?.randomUUID ? crypto.randomUUID() : String(Date.now() + Math.random()));
+              }
+              if (!ds._previewUrl) {
+                ds._previewUrl = URL.createObjectURL(ds);
+              }
+        
+              __pendingFiles.push(ds);
+            } catch (e) {
+              console.error("[intake.js] duplicateSeed: failed to fetch image", src.cdn_url, e);
+            }
+          }
+        
+          // Re-render including pending files
+          try { renderPhotosGrid(); } catch (e) {
+            console.error("[intake.js] renderPhotosGrid failed after duplicateSeed pending fill", e);
+          }
+        })();
         // Hydrate form + photos
         try {
           populateFromSaved(inv, listing);
