@@ -3263,6 +3263,13 @@ document.addEventListener("intake:item-changed", () => refreshInventory({ force:
 
       async function handleDuplicateInventory(item_id) {
         try {
+          // Ask the user whether they want to reuse photos from the original item
+          const reusePhotos = window.confirm(
+            "Do you want to reuse the photos from this item on the duplicate?\n\n" +
+            "OK = Yes, reuse photos\n" +
+            "Cancel = No, start with no photos."
+          );
+
           // Reuse the same intake API as Load so we get inventory + listing + images
           const res = await api(`/api/inventory/intake?item_id=${item_id}`, { method: "GET" });
           if (!res || res.ok === false) throw new Error(res?.error || "load_failed");
@@ -3281,11 +3288,21 @@ document.addEventListener("intake:item-changed", () => refreshInventory({ force:
       
           // Hydrate the form with the copied values
           populateFromSaved(invClone, listing);
-      
-          // Show photos, but do NOT bind them to an existing item id
+
+          // Photos: either clone them as pending uploads, or clear them
           try {
-            bootstrapPhotos(images, null);
-          } catch {}
+            if (reusePhotos && images.length) {
+              await queueDuplicatePhotosFromImages(images);
+            } else {
+              // Explicitly clear any previous photos/pending files
+              __photos = [];
+              __pendingFiles = [];
+              renderPhotosGrid();
+              try { computeValidity(); } catch {}
+            }
+          } catch (e) {
+            console.error("duplicate:photos:error", e);
+          }
       
           // Ensure fields are editable and normal CTAs are visible
           try {
@@ -3367,32 +3384,74 @@ document.addEventListener("intake:item-changed", () => refreshInventory({ force:
       wireCtas();
       wireCopyXeasy();  // enable/wire the Xeasy copy button
     // NEW: Photos bootstrap
-    wirePhotoPickers();
-    renderPhotosGrid();
-    // Hydrate Photos state from API results and refresh the grid
-    function bootstrapPhotos(images = [], itemId = null) {
-      __currentItemId = itemId || __currentItemId;
-    
-      __photos = (images || [])
-        .map(r => ({
-          image_id: r.image_id,
-          cdn_url: r.cdn_url,
-          is_primary: !!r.is_primary,
-          sort_order: Number(r.sort_order) || 0,
-          r2_key: r.r2_key,
-          width: r.width_px,
-          height: r.height_px,
-          bytes: r.bytes,
-          content_type: r.content_type,
-        }))
-        .sort((a, b) => a.sort_order - b.sort_order);
-    
-      __pendingFiles = [];
+      wirePhotoPickers();
       renderPhotosGrid();
+      // Hydrate Photos state from API results and refresh the grid
+      function bootstrapPhotos(images = [], itemId = null) {
+        __currentItemId = itemId || __currentItemId;
     
-      // Re-evaluate gating to ensure "Save as Draft" may enable based on photos
-      try { computeValidity(); } catch {}
-    }
+        __photos = (images || [])
+          .map(r => ({
+            image_id: r.image_id,
+            cdn_url: r.cdn_url,
+            is_primary: !!r.is_primary,
+            sort_order: Number(r.sort_order) || 0,
+            r2_key: r.r2_key,
+            width: r.width_px,
+            height: r.height_px,
+            bytes: r.bytes,
+            content_type: r.content_type,
+          }))
+          .sort((a, b) => a.sort_order - b.sort_order);
+    
+        __pendingFiles = [];
+        renderPhotosGrid();
+    
+        // Re-evaluate gating to ensure "Save as Draft" may enable based on photos
+        try { computeValidity(); } catch {}
+      }
+
+      /**
+       * For duplicates: take images from an existing item and turn them into
+       * "pending" files, so they will be uploaded/attached to the new item
+       * after it is saved.
+       */
+      async function queueDuplicatePhotosFromImages(images = []) {
+        try {
+          // Start clean: no old photos or pending files for the new duplicate
+          __photos = [];
+          __pendingFiles = [];
+          renderPhotosGrid();
+
+          const list = Array.isArray(images) ? images.filter(img => img && img.cdn_url) : [];
+
+          for (let i = 0; i < list.length; i++) {
+            const img = list[i];
+            try {
+              const resp = await fetch(img.cdn_url);
+              if (!resp.ok) {
+                console.error("duplicate:fetch-photo:non_ok", img.cdn_url, resp.status);
+                continue;
+              }
+              const blob = await resp.blob();
+              const baseName =
+                (img.r2_key && img.r2_key.split("/").pop()) ||
+                `photo-${i + 1}.jpg`;
+              const file = new File([blob], baseName, { type: blob.type || "image/jpeg" });
+
+              // Reuse the same downscale + upload path as normal uploads.
+              const ds = await downscaleToBlob(file);
+              await uploadAndAttach(ds); // with __currentItemId === null → goes into __pendingFiles
+            } catch (e) {
+              console.error("duplicate:queue-photo:error", e);
+            }
+          }
+
+          try { computeValidity(); } catch {}
+        } catch (err) {
+          console.error("duplicate:queue-photo:outer-error", err);
+        }
+      }
 
       // After successful save: confirm, disable form controls, and swap CTAs
       function postSaveSuccess(res, mode) {
