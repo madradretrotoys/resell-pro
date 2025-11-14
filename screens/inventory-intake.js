@@ -2392,6 +2392,13 @@ document.addEventListener("intake:item-changed", () => refreshInventory({ force:
 
     // Pre-fill the Long Description field if empty
     ensureDefaultLongDescription();
+
+    // If we arrived here from a Duplicate action, hydrate from the stashed seed
+      try {
+        hydrateFromDuplicateSeed();
+      } catch (e) {
+        console.error("[intake.js] hydrateFromDuplicateSeed failed", e);
+      }
     
     // Wire and run initial validation
     wireValidation();
