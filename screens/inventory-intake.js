@@ -1074,7 +1074,14 @@ function setMarketplaceVisibility() {
         } catch (e) {
           console.error("[intake.js] renderPhotosGrid failed for duplicateSeed", e);
         }
-
+        
+        // NEW: prompt user whether to keep or drop template photos
+        try {
+          maybePromptDuplicatePhotos();
+        } catch (e) {
+          console.warn("[duplicateSeed] maybePromptDuplicatePhotos failed", e);
+        }
+        
         try {
           computeValidity();
         } catch {}
