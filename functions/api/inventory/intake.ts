@@ -1082,6 +1082,20 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
       RETURNING item_id
     `;
     const item_id = invRows[0].item_id;
+
+    // === DUPLICATE IMAGES (if provided by client) ===
+    if (Array.isArray(body?.duplicate_images) && body.duplicate_images.length > 0) {
+      for (const img of body.duplicate_images) {
+        await sql/*sql*/`
+          INSERT INTO app.item_images
+            (tenant_id, item_id, r2_key, cdn_url, bytes, content_type, width_px, height_px, sha256_hex, is_primary, sort_order)
+          VALUES
+            (${tenant_id}, ${item_id}, ${img.r2_key}, ${img.cdn_url},
+             ${img.bytes}, ${img.content_type}, ${img.width}, ${img.height},
+             ${img.sha256}, ${img.is_primary}, ${img.sort_order})
+        `;
+      }
+    }
     // Store Only: skip marketplace-related tables
     const isStoreOnly = String(inv?.instore_online || "").toLowerCase().includes("store only");
 
