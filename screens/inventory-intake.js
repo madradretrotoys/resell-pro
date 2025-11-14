@@ -1188,7 +1188,6 @@ function setMarketplaceVisibility() {
     host.innerHTML = "";
 
     const rows = (meta?.marketplaces || []).filter(m => m.is_active !== false);
-    const defaults = readDefaults();
 
     // PROTOTYPE RULE:
     // If ZERO marketplaces are connected for this tenant, allow selecting ALL active marketplaces.
@@ -1213,8 +1212,6 @@ function setMarketplaceVisibility() {
       // Baseline styling
       btn.className = "btn btn-sm rounded-2xl";
 
-      
-
       if (enabledSelectable) {
         // Enabled tiles start as ghost (pale) until selected
         btn.classList.add("btn-ghost");
@@ -1228,9 +1225,9 @@ function setMarketplaceVisibility() {
       // label
       btn.textContent = m.marketplace_name || m.slug || `#${m.id}`;
 
-      // preselect from defaults (only if still selectable)
-      if (enabledSelectable && defaults.includes(m.id)) {
-        selectedMarketplaceIds.add(m.id);
+      // initial pressed state comes only from selectedMarketplaceIds
+      const isSelected = selectedMarketplaceIds.has(Number(m.id));
+      if (enabledSelectable && isSelected) {
         btn.classList.remove("btn-ghost");
         btn.classList.add("btn-primary");
         btn.setAttribute("aria-pressed", "true");
@@ -1238,7 +1235,7 @@ function setMarketplaceVisibility() {
         btn.setAttribute("aria-pressed", "false");
       }
 
-      // click toggles selection if selectable
+       // click toggles selection if selectable
       if (enabledSelectable) {
         btn.addEventListener("click", () => {
           const id = Number(btn.dataset.marketplaceId);
@@ -1256,8 +1253,8 @@ function setMarketplaceVisibility() {
           }
           // live-validate after any toggle
           computeValidity();
-          // update marketplace cards to match current selection
-          try { renderMarketplaceCards(__metaCache); } catch {}
+          // Delta-mode: add/remove cards without resetting existing card inputs
+          try { renderMarketplaceCards(__metaCache, { mode: "delta" }); } catch {}
         });
       } else {
         btn.addEventListener("click", () => {
@@ -1275,80 +1272,151 @@ function setMarketplaceVisibility() {
     el.classList.toggle("hidden", !show);
   }
 
-  // Render placeholder cards for each selected marketplace (UI-only; no API calls)
-  function renderMarketplaceCards(meta) {
+  // Apply per-item marketplace selection (e.g., when loading an existing item).
+  // meta: inventory meta (usually __metaCache)
+  // marketplaceListing: res.marketplace_listing from GET /api/inventory/intake
+    function applyMarketplaceSelectionForItem(meta, marketplaceListing) {
+    try {
+      const rows = (meta?.marketplaces || []);
+      const bySlug = new Map(
+        rows.map(r => [String(r.slug || "").toLowerCase(), r])
+      );
+
+      selectedMarketplaceIds.clear();
+
+      if (marketplaceListing) {
+        const ids = [];
+
+        // eBay row present -> include eBay marketplace id
+        if (marketplaceListing.ebay) {
+          const rawId =
+            marketplaceListing.ebay_marketplace_id ??
+            (bySlug.get("ebay") && bySlug.get("ebay").id);
+          if (rawId != null) {
+            const id = Number(rawId);
+            if (!Number.isNaN(id)) ids.push(id);
+          }
+        }
+
+        // Facebook row present -> include Facebook marketplace id
+        if (marketplaceListing.facebook) {
+          const rawId =
+            marketplaceListing.facebook_marketplace_id ??
+            (bySlug.get("facebook") && bySlug.get("facebook").id);
+          if (rawId != null) {
+            const id = Number(rawId);
+            if (!Number.isNaN(id)) ids.push(id);
+          }
+        }
+
+        for (const id of ids) {
+          selectedMarketplaceIds.add(id);
+        }
+      }
+
+      renderMarketplaceTiles(meta);
+      // When hydrating an existing item, do a full rebuild of cards
+      try { renderMarketplaceCards(meta, { mode: "full" }); } catch {}
+    } catch (e) {
+      console.error("marketplaces:applySelection:error", e);
+    }
+  }
+
+
+
+    // Render placeholder cards for each selected marketplace (UI-only; no API calls)
+  // opts.mode: "full" | "delta"
+  //  - "full"  → rebuild all cards (used on initial load / item load)
+  //  - "delta" → add/remove cards without touching existing ones (used on tile clicks)
+  function renderMarketplaceCards(meta, opts) {
     const host = document.getElementById(MP_CARDS_ID);
     if (!host) return;
-  
-    // Capture existing per-card statuses before we wipe the DOM
-    const prevStatuses = new Map();
-    try {
-      for (const card of Array.from(host.querySelectorAll(".card"))) {
-        const name = (card.querySelector(".font-semibold")?.textContent || "")
-          .trim()
-          .toLowerCase();
-        const node = card.querySelector("[data-status-text]");
-        if (name && node) prevStatuses.set(name, node.innerHTML || node.textContent || "");
-      }
-    } catch {}
-  
-    host.innerHTML = "";
-  
+
+    const mode = (opts && opts.mode) || "full";
+
     // Install delegated listeners once so any field edit re-checks validity
     if (!host.dataset.validHook) {
       const safeRecheck = () => { try { computeValidity(); } catch {} };
-      host.addEventListener("input",  safeRecheck);
+      host.addEventListener("input", safeRecheck);
       host.addEventListener("change", safeRecheck);
       host.dataset.validHook = "1";
     }
-  
+
     // Build a lookup of marketplaces by id (id, slug, marketplace_name, is_connected etc.)
     const rows = (meta?.marketplaces || []).filter(m => m.is_active !== false);
     const byId = new Map(rows.map(r => [Number(r.id), r]));
-  
-    // For each selected marketplace, render a card
-    for (const id of selectedMarketplaceIds) {
-      const m = byId.get(Number(id));
-      if (!m) continue;
-  
+    const desiredIds = Array.from(selectedMarketplaceIds).map(Number);
+
+    // Capture existing per-card statuses (by marketplace id) before a full rebuild
+    const prevStatuses = new Map();
+    if (mode === "full") {
+      try {
+        for (const card of Array.from(host.querySelectorAll("[data-marketplace-id]"))) {
+          const mid = Number(card.dataset.marketplaceId);
+          const node = card.querySelector("[data-status-text]");
+          if (!Number.isNaN(mid) && node) {
+            prevStatuses.set(mid, node.innerHTML || node.textContent || "");
+          }
+        }
+      } catch {}
+    }
+
+    // Track which ids already have a card we can keep (delta mode)
+    const realized = new Set();
+    if (mode === "delta") {
+      const existing = Array.from(host.querySelectorAll("[data-marketplace-id]"));
+      for (const card of existing) {
+        const mid = Number(card.dataset.marketplaceId);
+        if (!desiredIds.includes(mid)) {
+          card.remove(); // tile was deselected → drop its card
+          continue;
+        }
+        realized.add(mid); // keep this card (and its current field values) as-is
+      }
+    } else {
+      // full reset: start from a clean container
+      host.innerHTML = "";
+    }
+
+    function createMarketplaceCard(m, prevStatusHtml) {
       const slug = String(m.slug || "").toLowerCase();
       const name = m.marketplace_name || m.slug || `#${m.id}`;
       const connected = !!m.is_connected;
-  
+
       // Card wrapper
       const card = document.createElement("div");
       card.className = "card p-3";
-  
+      card.dataset.marketplaceId = String(m.id);
+
       // --- Header ---
       const header = document.createElement("div");
-        header.className = "flex items-center justify-between mb-2";
-        header.innerHTML = `
-          <div class="flex items-center gap-2">
-            <span class="font-semibold">${name}</span>
-            <span class="text-xs px-2 py-1 rounded ${connected ? "bg-green-100 text-green-700" : "bg-gray-100 text-gray-600"}">
-              ${connected ? "Connected" : "Not connected"}
-            </span>
-          </div>
-          <div class="text-sm" data-card-status>
-            <strong>Status:</strong> <span class="mono" data-status-text>Not Listed</span>
-            <button type="button" class="btn btn-ghost btn-xs ml-2 hidden" data-delist>Delist</button>
-          </div>
-        `;
-        card.appendChild(header);
-  
-        // Restore any previously displayed status for this marketplace card
+      header.className = "flex items-center justify-between mb-2";
+      header.innerHTML = `
+        <div class="flex items-center gap-2">
+          <span class="font-semibold">${name}</span>
+          <span class="text-xs px-2 py-1 rounded ${connected ? "bg-green-100 text-green-700" : "bg-gray-100 text-gray-600"}">
+            ${connected ? "Connected" : "Not connected"}
+          </span>
+        </div>
+        <div class="text-sm" data-card-status>
+          <strong>Status:</strong> <span class="mono" data-status-text>Not Listed</span>
+          <button type="button" class="btn btn-ghost btn-xs ml-2 hidden" data-delist>Delist</button>
+        </div>
+      `;
+      card.appendChild(header);
+
+      // Restore any previously displayed status for this marketplace card (on full rebuilds)
+      if (prevStatusHtml) {
         try {
-          const prev = prevStatuses.get(String(name || "").trim().toLowerCase());
-          if (prev) {
-            const node = header.querySelector("[data-status-text]");
-            if (node) node.innerHTML = prev;
-          }
+          const node = header.querySelector("[data-status-text]");
+          if (node) node.innerHTML = prevStatusHtml;
         } catch {}
-  
+      }
+
       // --- Body (placeholder fields) ---
       const body = document.createElement("div");
       body.className = "mt-2";
-  
+
       if (slug === "ebay") {
         // eBay placeholder UI — all fields required unless hidden by rules
         body.innerHTML = `
@@ -1375,7 +1443,7 @@ function setMarketplaceVisibility() {
               <label>Shipping Location (Zip) <span class="text-red-600" aria-hidden="true">*</span></label>
               <input id="ebay_shipZip" type="text" inputmode="numeric" pattern="[0-9]{5}" placeholder="e.g. 80903" required />
             </div>
-  
+
             <div class="field">
               <label>Pricing Format <span class="text-red-600" aria-hidden="true">*</span></label>
               <select id="ebay_formatSelect" required>
@@ -1384,7 +1452,7 @@ function setMarketplaceVisibility() {
                 <option value="auction">Auction</option>
               </select>
             </div>
-  
+
             <!-- Auction-only -->
             <div class="field ebay-auction-only hidden">
               <label>Duration <span class="text-red-600" aria-hidden="true">*</span></label>
@@ -1396,12 +1464,12 @@ function setMarketplaceVisibility() {
                 <option value="10">10 Days</option>
               </select>
             </div>
-  
+
             <div class="field">
               <label>Buy It Now Price (USD) <span class="text-red-600" aria-hidden="true">*</span></label>
               <input id="ebay_bin" type="number" step="0.01" min="0" placeholder="0.00" required />
             </div>
-  
+
             <!-- Auction-only -->
             <div class="field ebay-auction-only hidden">
               <label>Starting Bid (USD) <span class="text-red-600" aria-hidden="true">*</span></label>
@@ -1411,8 +1479,7 @@ function setMarketplaceVisibility() {
               <label>Reserve Price (USD)</label>
               <input id="ebay_reserve" type="number" step="0.01" min="0" placeholder="0.00" />
             </div>
-  
-            
+
             <!-- Fixed-only -->
             <div class="field ebay-fixed-only">
               <label class="switch" for="ebay_bestOffer">
@@ -1446,11 +1513,8 @@ function setMarketplaceVisibility() {
               <label>Promotion Percent (%) <span class="text-red-600" aria-hidden="true">*</span></label>
               <input id="ebay_promotePct" type="number" step="0.1" min="0" max="100" placeholder="0" required />
             </div>
-            
-            
-        `;
-
-                card.appendChild(body);
+          `;
+        card.appendChild(body);
 
         // If tenant is connected to eBay, pull policies and populate the selects
         (async () => {
@@ -1491,32 +1555,30 @@ function setMarketplaceVisibility() {
         })();
 
         // Wire local show/hide inside the eBay card (client-only)
-        const formatSel   = body.querySelector('#ebay_formatSelect');
+        const formatSel   = body.querySelector("#ebay_formatSelect");
+        const bestOffer   = body.querySelector("#ebay_bestOffer");
+        const promoteChk  = body.querySelector("#ebay_promote");
 
-        
-        const bestOffer   = body.querySelector('#ebay_bestOffer');
-        const promoteChk  = body.querySelector('#ebay_promote');
-  
-        const fixedOnly    = () => body.querySelectorAll(".ebay-fixed-only");
-        const auctionOnly  = () => body.querySelectorAll(".ebay-auction-only");
-        const bestOfferOnly= () => body.querySelectorAll(".ebay-bestoffer-only");
-        const promoOnly    = () => body.querySelectorAll(".ebay-promote-only");
-  
+        const fixedOnly     = () => body.querySelectorAll(".ebay-fixed-only");
+        const auctionOnly   = () => body.querySelectorAll(".ebay-auction-only");
+        const bestOfferOnly = () => body.querySelectorAll(".ebay-bestoffer-only");
+        const promoOnly     = () => body.querySelectorAll(".ebay-promote-only");
+
         function applyEbayVisibility() {
           const fmt = (formatSel?.value || "").toLowerCase(); // "" | "fixed" | "auction"
           const isFixed   = fmt === "fixed";
           const isAuction = fmt === "auction";
           const hasBO     = !!bestOffer?.checked;
           const promo     = !!promoteChk?.checked;
-  
+
           fixedOnly().forEach(n => n.classList.toggle("hidden", !isFixed));
           auctionOnly().forEach(n => n.classList.toggle("hidden", !isAuction));
           bestOfferOnly().forEach(n => n.classList.toggle("hidden", !(isFixed && hasBO)));
           promoOnly().forEach(n => n.classList.toggle("hidden", !promo));
-  
-         // When Best Offer is unchecked, clear and mark not required
-          const autoAcc = body.querySelector('#ebay_autoAccept');
-          const minOff  = body.querySelector('#ebay_minOffer');
+
+          // When Best Offer is unchecked, clear and mark not required
+          const autoAcc = body.querySelector("#ebay_autoAccept");
+          const minOff  = body.querySelector("#ebay_minOffer");
           if (autoAcc) autoAcc.required = isFixed && hasBO;
           if (minOff)  minOff.required  = isFixed && hasBO;
 
@@ -1532,23 +1594,32 @@ function setMarketplaceVisibility() {
         // First paint: align UI *and* button states to current values
         applyEbayVisibility();
         try { computeValidity(); } catch {}
-        
       } else {
-        // Generic placeholder card for other marketplaces (no filler lists)
+        // Generic placeholder card for other marketplaces (no filler lists yet)
         body.innerHTML = `
           <div class="muted text-sm">Marketplace-specific fields coming soon.</div>
         `;
         card.appendChild(body);
       }
-  
-       host.appendChild(card);
+
+      return card;
     }
-    
+
+    // For each selected marketplace, ensure a card exists
+    for (const id of desiredIds) {
+      if (realized.has(id)) continue; // delta mode: keep existing card and its values
+      const m = byId.get(Number(id));
+      if (!m) continue;
+      const card = createMarketplaceCard(m, prevStatuses.get(Number(id)));
+      host.appendChild(card);
+    }
+
     // After rendering marketplace cards, sync the FB status once
-    try {refreshFacebookTile(); } catch {}
-    
-     // If no marketplaces selected, nothing renders here by design.
-    }
+    try { refreshFacebookTile(); } catch {}
+
+    // If no marketplaces selected, nothing renders here by design.
+  }
+
 
   // === END NEW ===
 
@@ -2408,6 +2479,22 @@ document.addEventListener("intake:item-changed", () => refreshInventory({ force:
 
     //Render marketplace tiles (below Shipping)
     __metaCache = meta;
+
+    // Seed selection from per-user defaults for brand NEW items.
+    // When loading an existing item, we override this with applyMarketplaceSelectionForItem().
+    try {
+      const defaults = readDefaults();
+      selectedMarketplaceIds.clear();
+      if (Array.isArray(defaults)) {
+        for (const raw of defaults) {
+          const id = Number(raw);
+          if (!Number.isNaN(id)) {
+            selectedMarketplaceIds.add(id);
+          }
+        }
+      }
+    } catch {}
+
     renderMarketplaceTiles(meta);
     // Render placeholder cards for any preselected tiles (from defaults)
     try { renderMarketplaceCards(__metaCache); } catch {}
@@ -2760,7 +2847,6 @@ document.addEventListener("intake:item-changed", () => refreshInventory({ force:
               return prune({ ...base, ...auctionExtras });
         }
     
-        // Hydrate the eBay card from saved data (called after tiles/cards are rendered)
         function hydrateEbayFromSaved(ebay, ebayMarketplaceId) {
           if (!ebay) return;
         
@@ -2776,19 +2862,6 @@ document.addEventListener("intake:item-changed", () => refreshInventory({ force:
           // Reflect persisted listing status on the card
           // app.item_marketplace_listing(status, mp_item_url) -> ebay.status, ebay.mp_item_url
           // Map: live -> "Listed" (green, linkable); publishing -> "Publishing…"; error -> "Error"; else -> "Not Listed"
-          
-          // Ensure the eBay tile/card is visible and rendered
-          try {
-            if (ebayMarketplaceId && typeof ebayMarketplaceId === "number") {
-              selectedMarketplaceIds.add(Number(ebayMarketplaceId));
-            } else if (__metaCache?.marketplaces) {
-              const row = (__metaCache.marketplaces || []).find(m => String(m.slug || "").toLowerCase() === "ebay");
-              if (row && row.id != null) selectedMarketplaceIds.add(Number(row.id));
-            }
-            renderMarketplaceTiles(__metaCache);
-            renderMarketplaceCards(__metaCache);
-          } catch {}
-          
           try {
             const raw = String(ebay.status || "").toLowerCase();
             const url = ebay.mp_item_url || null;
@@ -2803,12 +2876,16 @@ document.addEventListener("intake:item-changed", () => refreshInventory({ force:
             }
           } catch {}
         
-          
-    
           // Now set values inside the eBay card
           const setVal = (sel, v) => { if (sel) sel.value = v ?? ""; };
-          const setNum = (id, v) => { const el = document.getElementById(id); if (el) el.value = (v ?? "") === "" ? "" : String(v); };
-          const setChk = (id, v) => { const el = document.getElementById(id); if (el) el.checked = !!v; };
+          const setNum = (id, v) => {
+            const el = document.getElementById(id);
+            if (el) el.value = (v ?? "") === "" ? "" : String(v);
+          };
+          const setChk = (id, v) => {
+            const el = document.getElementById(id);
+            if (el) el.checked = !!v;
+          };
     
           // Policies: attempt immediate set (may be overridden by async loader; Patch 1 will re-apply)
           setVal(document.getElementById("ebay_shippingPolicy"), ebay.shipping_policy);
@@ -2844,6 +2921,8 @@ document.addEventListener("intake:item-changed", () => refreshInventory({ force:
           // Also re-validate the whole form
           try { computeValidity(); } catch {}
         }
+
+
 
 
     
@@ -3239,7 +3318,12 @@ document.addEventListener("intake:item-changed", () => refreshInventory({ force:
         // Basic + listing fields (now includes Long Description)
         populateFromSaved(res.inventory || {}, res.listing || null);
 
-        // If the draft has an eBay listing row, auto-select the eBay tile and hydrate the card
+        // Apply per-item marketplace selection from Neon (eBay, Facebook, etc.)
+        try {
+          applyMarketplaceSelectionForItem(__metaCache, res.marketplace_listing || null);
+        } catch {}
+
+        // If the draft has an eBay listing row, hydrate the eBay card fields/status
         try {
           const ebaySaved = res?.marketplace_listing?.ebay || null;
           const ebayId    = res?.marketplace_listing?.ebay_marketplace_id || null;
@@ -3258,6 +3342,7 @@ document.addEventListener("intake:item-changed", () => refreshInventory({ force:
         alert("Failed to load draft.");
       }
     }
+
     
     /** Click handler: Delete a draft from the list */
     async function handleDeleteDraft(item_id, rowEl) {
