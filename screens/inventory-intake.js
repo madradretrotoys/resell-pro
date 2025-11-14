@@ -3093,7 +3093,8 @@ document.addEventListener("intake:item-changed", () => refreshInventory({ force:
 
           // If this is a duplicated brand-new item, send source images for server-side copy
           if (
-            !__currentItemId &&
+             !__currentItemId &&
+            __duplicateCarryPhotos &&
             Array.isArray(__duplicateSourceImages) &&
             __duplicateSourceImages.length > 0
           ) {
@@ -3123,9 +3124,10 @@ document.addEventListener("intake:item-changed", () => refreshInventory({ force:
         const payload = { inventory };
 
         if (
-          !__currentItemId &&
-          Array.isArray(__duplicateSourceImages) &&
-          __duplicateSourceImages.length > 0
+         !__currentItemId &&
+           __duplicateCarryPhotos &&
+           Array.isArray(__duplicateSourceImages) &&
+           __duplicateSourceImages.length > 0
         ) {
           payload.duplicate_images = __duplicateSourceImages.map((img, idx) => ({
             r2_key: img.r2_key,
@@ -3155,8 +3157,9 @@ document.addEventListener("intake:item-changed", () => refreshInventory({ force:
       // If this is a duplicated brand-new item, send source images for server-side copy
       if (
         !__currentItemId &&
-        Array.isArray(__duplicateSourceImages) &&
-        __duplicateSourceImages.length > 0
+         __duplicateCarryPhotos &&
+         Array.isArray(__duplicateSourceImages) &&
+         __duplicateSourceImages.length > 0
       ) {
         payload.duplicate_images = __duplicateSourceImages.map((img, idx) => ({
           r2_key: img.r2_key,
