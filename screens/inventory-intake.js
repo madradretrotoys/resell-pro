@@ -2284,18 +2284,21 @@ function setMarketplaceVisibility() {
 
               const statusRaw =
                 (fbRow && (fbRow.status ?? fbRow.listing_status ?? fbRow.state)) || "";
-              const live = String(statusRaw).toLowerCase() === "live";
+              const st = String(statusRaw).trim().toLowerCase();
+              const alreadyListed = st === "live" || st === "listed";
 
               console.log("existing fb status", {
-                live,
-                status: statusRaw
+                statusRaw,
+                normalized: st,
+                alreadyListed,
               });
 
-              if (live) {
-                console.log("skip: already live");
+              if (alreadyListed) {
+                console.log("skip: already live/listed");
                 console.groupEnd?.();
                 return;
               }
+
             } catch (e) {
               console.warn("fb status check failed", e);
             }
