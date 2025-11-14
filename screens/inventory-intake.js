@@ -3415,41 +3415,85 @@ document.addEventListener("intake:item-changed", () => refreshInventory({ force:
        * For duplicates: take images from an existing item and turn them into
        * "pending" files, so they will be uploaded/attached to the new item
        * after it is saved.
+       *
+       * IMPORTANT: this does NOT call the upload API. It only fills
+       * __pendingFiles and shows previews, just like freshly added files.
+       * The "intake:item-saved" handler will do the actual upload/attach
+       * once we have the new item_id.
        */
       async function queueDuplicatePhotosFromImages(images = []) {
         try {
-          // Start clean: no old photos or pending files for the new duplicate
+          console.groupCollapsed("[intake.js] duplicate:queuePhotos");
+
+          // Brand-new item: no existing DB photos, no pending files yet
           __photos = [];
           __pendingFiles = [];
           renderPhotosGrid();
 
-          const list = Array.isArray(images) ? images.filter(img => img && img.cdn_url) : [];
+          const list = Array.isArray(images)
+            ? images.filter((img) => img && img.cdn_url)
+            : [];
+
+          console.log("duplicate:queuePhotos:start", { count: list.length });
 
           for (let i = 0; i < list.length; i++) {
             const img = list[i];
             try {
+              console.log("duplicate:fetch-photo:start", { i, cdn_url: img.cdn_url });
+
               const resp = await fetch(img.cdn_url);
-              if (!resp.ok) {
-                console.error("duplicate:fetch-photo:non_ok", img.cdn_url, resp.status);
+              if (!resp || !resp.ok) {
+                console.warn("duplicate:fetch-photo:non_ok", {
+                  i,
+                  cdn_url: img.cdn_url,
+                  status: resp && resp.status,
+                });
                 continue;
               }
+
               const blob = await resp.blob();
               const baseName =
-                (img.r2_key && img.r2_key.split("/").pop()) ||
+                (img.r2_key && String(img.r2_key).split("/").pop()) ||
                 `photo-${i + 1}.jpg`;
-              const file = new File([blob], baseName, { type: blob.type || "image/jpeg" });
 
-              // Reuse the same downscale + upload path as normal uploads.
+              const file = new File([blob], baseName, {
+                type: blob.type || "image/jpeg",
+              });
+
+              // Downscale using the same helper as normal uploads
               const ds = await downscaleToBlob(file);
-              await uploadAndAttach(ds); // with __currentItemId === null → goes into __pendingFiles
-            } catch (e) {
-              console.error("duplicate:queue-photo:error", e);
+
+              // Treat as brand-new pending upload (no item_id yet)
+              if (!ds._rpId) {
+                ds._rpId = crypto?.randomUUID
+                  ? crypto.randomUUID()
+                  : String(Date.now() + Math.random());
+              }
+              if (!ds._previewUrl) {
+                ds._previewUrl = URL.createObjectURL(ds);
+              }
+
+              __pendingFiles.push(ds);
+            } catch (err) {
+              console.error("duplicate:queue-photo:error", { i, err });
             }
           }
 
-          try { computeValidity(); } catch {}
+          console.log("duplicate:queuePhotos:done", {
+            pending: __pendingFiles.length,
+          });
+
+          renderPhotosGrid();
+          try {
+            computeValidity();
+          } catch {}
+
+          console.groupEnd?.();
         } catch (err) {
           console.error("duplicate:queue-photo:outer-error", err);
+          try {
+            console.groupEnd?.();
+          } catch {}
         }
       }
 
