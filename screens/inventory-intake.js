@@ -3263,26 +3263,56 @@ document.addEventListener("intake:item-changed", () => refreshInventory({ force:
 
       async function handleDuplicateInventory(item_id) {
         try {
-          // Load the full item (same API you use for `Load`)
-          const res = await api(`/api/inventory/item/${item_id}`, { method: "GET" });
-          if (!res || res.ok === false) throw new Error(res.error || "load_failed");
+          // Reuse the same intake API as Load so we get inventory + listing + images
+          const res = await api(`/api/inventory/intake?item_id=${item_id}`, { method: "GET" });
+          if (!res || res.ok === false) throw new Error(res?.error || "load_failed");
       
-          const original = res.item;
+          const inv     = res.inventory || {};
+          const listing = res.listing   || null;
+          const images  = Array.isArray(res.images) ? res.images : [];
       
-          // Clear identifiers
-          original.item_id = null;
-          original.sku = null;
+          // Treat this as a brand-new item: clear any identifiers
+          const invClone = { ...inv };
+          delete invClone.item_id;
+          delete invClone.sku;
       
-          // Reset photos so the user chooses new ones
-          original.images = [];
+          // Make sure we are not in "view" mode for an existing item
+          __currentItemId = null;
       
-          // Hydrate into form
-          populateIntakeForm(original);
+          // Hydrate the form with the copied values
+          populateFromSaved(invClone, listing);
       
-          // Ensure CTAs allow user to save as a new item
-          enableAddSingle(true);
+          // Show photos, but do NOT bind them to an existing item id
+          try {
+            bootstrapPhotos(images, null);
+          } catch {}
       
-          alert("Item duplicated. Modify and save when ready.");
+          // Ensure fields are editable and normal CTAs are visible
+          try {
+            const form = document.getElementById("intakeForm");
+            if (form) {
+              const ctrls = Array.from(form.querySelectorAll("input, select, textarea"));
+              ctrls.forEach((el) => {
+                el.disabled = false;
+                el.readOnly = false;
+                el.removeAttribute("aria-disabled");
+              });
+            }
+          } catch {}
+      
+          // If we were previously in view-mode, restore the original CTA row
+          try {
+            const actionsRow = document.querySelector(".actions.flex.gap-2");
+            if (actionsRow && __originalCtasHTML != null) {
+              actionsRow.innerHTML = __originalCtasHTML;
+              wireCtas();
+            }
+          } catch {}
+      
+          // Re-run validation so buttons enable/disable correctly
+          try { computeValidity(); } catch {}
+      
+          alert("Item duplicated. Review and save as a new item.");
       
         } catch (err) {
           console.error("duplicate:error", err);
