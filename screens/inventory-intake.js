@@ -39,6 +39,14 @@ export async function init() {
   // Stash the tenant id once we learn it (from /api/inventory/meta or DOM)
   let __tenantId = "";
   let __duplicateSourceImages = [];
+
+  console.log("[photos:init]", {
+    MAX_PHOTOS,
+    __photosLen: __photos.length,
+    __pendingLen: __pendingFiles.length,
+    __currentItemId,
+    __tenantId,
+  });
   
   // Utility: update counter + disable add when maxed
   function updatePhotosUIBasic() {
@@ -46,7 +54,14 @@ export async function init() {
     const cap = `${count} / ${MAX_PHOTOS}`;
     const el = $("photosCount");
     if (el) el.textContent = cap;
-  
+
+    console.log("[photos] updatePhotosUIBasic", {
+      count,
+      photosLen: __photos.length,
+      pendingLen: __pendingFiles.length,
+      currentItemId: __currentItemId,
+    });
+    
     const canAdd = count < MAX_PHOTOS;
     const cam = $("photoCameraInput");
     const fil = $("photoFileInput");
@@ -54,10 +69,23 @@ export async function init() {
     if (fil) fil.disabled = !canAdd;
   }
   
-  // Render thumbnails
+// Render thumbnails
   function renderPhotosGrid() {
     const host = $("photosGrid");
-    if (!host) return;
+    if (!host) {
+      console.warn("[photos] renderPhotosGrid: host #photosGrid not found", {
+        photosLen: __photos.length,
+        pendingLen: __pendingFiles.length,
+        currentItemId: __currentItemId,
+      });
+      return;
+    }
+    console.log("[photos] renderPhotosGrid", {
+      photosLen: __photos.length,
+      pendingLen: __pendingFiles.length,
+      currentItemId: __currentItemId,
+      duplicateSourceCount: Array.isArray(__duplicateSourceImages) ? __duplicateSourceImages.length : 0,
+    });
     // safety: fixed-size columns
     // safety: fixed-size columns + consistent row height
     try {
@@ -227,6 +255,13 @@ export async function init() {
   
   // Upload + attach (requires item_id)
   async function uploadAndAttach(file, { cropOfImageId = null } = {}) {
+    console.log("[photos] uploadAndAttach called", {
+      hasItemId: !!__currentItemId,
+      fileName: file?.name,
+      size: file?.size,
+      pendingId: file?._rpId || null,
+      cropOfImageId,
+    });
     if (!__currentItemId) {
       // Give each pending file a stable identity and a persistent preview URL.
       if (!file._rpId) {
@@ -235,7 +270,13 @@ export async function init() {
       if (!file._previewUrl) {
         file._previewUrl = URL.createObjectURL(file);
       }
+      const before = __pendingFiles.length;
       __pendingFiles.push(file);
+      console.log("[photos] queued file in __pendingFiles (no item_id yet)", {
+        before,
+        after: __pendingFiles.length,
+        _rpId: file._rpId,
+      });
       renderPhotosGrid();
       return;
     }
@@ -287,6 +328,10 @@ export async function init() {
       sort_order: (__photos.length),
       r2_key: up.r2_key,
       width: up.width, height: up.height, bytes: up.bytes, content_type: up.content_type,
+    });
+    console.log("[photos] __photos updated after upload", {
+      photosLen: __photos.length,
+      lastImageId: at.image_id,
     });
     renderPhotosGrid();
     try { computeValidity(); } catch {}
@@ -517,9 +562,29 @@ export async function init() {
         }
         
         
-        if (__pendingFiles.length > 0) {
+       if (__pendingFiles.length > 0) {
+          console.log("[photos] flushing pending files after save", {
+            pendingCount: __pendingFiles.length,
+            currentItemId: __currentItemId,
+            pendingIds: __pendingFiles.map(f => f?._rpId || null),
+          });
           const pending = __pendingFiles.splice(0, __pendingFiles.length);
-          for (const f of pending) await uploadAndAttach(f);
+          for (const f of pending) {
+            console.log("[photos] uploading pending file", {
+              _rpId: f?._rpId || null,
+              name: f?.name,
+              size: f?.size,
+            });
+            await uploadAndAttach(f);
+          }
+          console.log("[photos] pending flush complete", {
+            remainingPending: __pendingFiles.length,
+            photosLen: __photos.length,
+          });
+        } else {
+          console.log("[photos] no pending files to flush on save", {
+            currentItemId: __currentItemId,
+          });
         }
     
        // If server returned marketplace job_ids, kick the runner regardless of action
@@ -888,11 +953,13 @@ function setMarketplaceVisibility() {
   
     // Hydrate UI from a duplicate seed stashed in sessionStorage (if any)
       function hydrateFromDuplicateSeed() {
+        console.groupCollapsed?.("[duplicateSeed] hydrateFromDuplicateSeed:start");
         let raw = null;
         try {
           raw = sessionStorage.getItem("rp:intake:duplicateSeed");
         } catch (e) {
           console.warn("[intake.js] duplicateSeed: sessionStorage unavailable", e);
+          console.groupEnd?.();
           return false;
         }
         if (!raw) return false;
@@ -903,15 +970,23 @@ function setMarketplaceVisibility() {
         } catch (e) {
           console.error("[intake.js] duplicateSeed: parse failed", e);
           try { sessionStorage.removeItem("rp:intake:duplicateSeed"); } catch {}
+          console.groupEnd?.();
           return false;
         }
 
         // Consume the seed so it only applies once
         try { sessionStorage.removeItem("rp:intake:duplicateSeed"); } catch {}
-
+        
         const inv     = seed?.inventory || {};
         const listing = seed?.listing   || null;
         const images  = Array.isArray(seed?.images) ? seed.images : [];
+
+        console.log("[duplicateSeed] parsed", {
+          hasInventory: !!inv,
+          hasListing: !!listing,
+          imageCount: images.length,
+          cdnSample: images.slice(0, 5).map(i => i?.cdn_url || null),
+        });
 
         // Force "new item" state
         __currentItemId    = null;
@@ -927,7 +1002,10 @@ function setMarketplaceVisibility() {
           sort_order: typeof img.sort_order === "number" ? img.sort_order : idx,
           is_primary: !!img.is_primary,
         }));
-
+        console.log("[duplicateSeed] mapped duplicateSourceImages", {
+          duplicateSourceCount: __duplicateSourceImages.length,
+        });
+        
         // Thumbnails only – no uploads yet
         __photos = __duplicateSourceImages.map((img, idx) => ({
           image_id: "dup-" + (typeof crypto !== "undefined" && crypto.randomUUID
@@ -937,10 +1015,24 @@ function setMarketplaceVisibility() {
           is_primary: !!img.is_primary,
           sort_order: typeof img.sort_order === "number" ? img.sort_order : idx,
         }));
+
+        console.log("[duplicateSeed] initial thumbnails populated", {
+          photosLen: __photos.length,
+        });
+        
         // --- Convert duplicate CDN images → pending File uploads ---
         (async () => {
+           console.log("[duplicateSeed] begin CDN→pending pipeline", {
+            sourceCount: __duplicateSourceImages.length,
+          });
           for (const src of __duplicateSourceImages) {
             try {
+
+              console.log("[duplicateSeed] fetch image", {
+                cdn_url: src.cdn_url,
+                beforePendingLen: __pendingFiles.length,
+              });
+              
               const resp = await fetch(src.cdn_url, { mode: "cors" });
               const blob = await resp.blob();
         
@@ -960,11 +1052,22 @@ function setMarketplaceVisibility() {
               }
         
               __pendingFiles.push(ds);
+              console.log("[duplicateSeed] pushed pending file", {
+                pendingLen: __pendingFiles.length,
+                _rpId: ds._rpId,
+                name: ds.name,
+                size: ds.size,
+              });
             } catch (e) {
               console.error("[intake.js] duplicateSeed: failed to fetch image", src.cdn_url, e);
             }
           }
-        
+
+          console.log("[duplicateSeed] finished CDN→pending pipeline", {
+            pendingLen: __pendingFiles.length,
+            photosLen: __photos.length,
+          });
+          
           // Re-render including pending files
           try { renderPhotosGrid(); } catch (e) {
             console.error("[intake.js] renderPhotosGrid failed after duplicateSeed pending fill", e);
@@ -990,8 +1093,9 @@ function setMarketplaceVisibility() {
         console.log("[intake.js] hydrated from duplicateSeed", {
           hasListing: !!listing,
           imageCount: __photos.length,
+          pendingLen: __pendingFiles.length,
         });
-
+        console.groupEnd?.();
         return true;
       }
   
