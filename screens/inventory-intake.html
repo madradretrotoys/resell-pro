@@ -325,6 +325,31 @@
     </form>
   </section>
 
+  <!-- Duplicate Photos Prompt (only used when loading a duplicate) -->
+  <dialog id="duplicatePhotosDialog" class="rounded-2xl p-0">
+    <form method="dialog" class="p-3 w-[90vw] max-w-md">
+      <h3 class="sectionTitle mb-2">Reuse Photos?</h3>
+      <p class="text-sm mb-3">
+        This item was loaded from an existing listing. Do you want to reuse the photos from the original item?
+      </p>
+      <div class="flex gap-2 justify-end">
+        <button
+          id="duplicatePhotosNo"
+          type="button"
+          class="btn btn-ghost btn-sm"
+        >
+          No, start with empty photos
+        </button>
+        <button
+          id="duplicatePhotosYes"
+          type="button"
+          class="btn btn-primary btn-sm"
+        >
+          Yes, reuse photos
+        </button>
+      </div>
+    </form>
+  </dialog>
   
 <!-- Crop Modal -->
 <dialog id="cropDialog" class="rounded-2xl p-0">
