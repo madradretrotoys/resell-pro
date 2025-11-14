@@ -3097,7 +3097,7 @@ document.addEventListener("intake:item-changed", () => refreshInventory({ force:
             is_primary: !!img.is_primary,
           }));
         }
-        return { inventory };
+        return { payload };
       }
     
       const listing = prune(listingAll);
