@@ -3078,6 +3078,25 @@ document.addEventListener("intake:item-changed", () => refreshInventory({ force:
       const inventory = prune(invAll);
     
       if (isStoreOnly) {
+        const payload = { inventory };
+
+        if (
+          !__currentItemId &&
+          Array.isArray(__duplicateSourceImages) &&
+          __duplicateSourceImages.length > 0
+        ) {
+          payload.duplicate_images = __duplicateSourceImages.map((img, idx) => ({
+            r2_key: img.r2_key,
+            cdn_url: img.cdn_url,
+            bytes: img.bytes,
+            content_type: img.content_type,
+            width: img.width ?? null,
+            height: img.height ?? null,
+            sha256: img.sha256 ?? null,
+            sort_order: typeof img.sort_order === "number" ? img.sort_order : idx,
+            is_primary: !!img.is_primary,
+          }));
+        }
         return { inventory };
       }
     
@@ -3118,6 +3137,7 @@ document.addEventListener("intake:item-changed", () => refreshInventory({ force:
       if (mode !== "draft" && !computeValidity()) return;
     
       const payload = buildPayload(mode === "draft");
+      console.log("[intake] duplicate_images count", Array.isArray(payload.duplicate_images) ? payload.duplicate_images.length : 0); 
       // If we’re editing an existing item, send its id so the server updates it
       if (__currentItemId) {
         payload.item_id = __currentItemId;
