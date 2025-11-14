@@ -2394,6 +2394,12 @@ document.addEventListener("intake:item-changed", () => refreshInventory({ force:
     ensureDefaultLongDescription();
 
     // If we arrived here from a Duplicate action, hydrate from the stashed seed
+    // --- Forward declare populateFromSaved so hydrateFromDuplicateSeed can call it ---
+    if (typeof populateFromSaved !== "function") {
+      function populateFromSaved() {
+        console.warn("[intake.js] populateFromSaved forward-declared placeholder invoked");
+      }
+    }
       try {
         hydrateFromDuplicateSeed();
       } catch (e) {
