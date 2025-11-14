@@ -38,6 +38,19 @@ export async function init() {
   let __lockDraft = false;        // Phase 0: once Active, we never allow reverting to Draft (UI lock)
   // Stash the tenant id once we learn it (from /api/inventory/meta or DOM)
   let __tenantId = "";
+  let __duplicateSourceImages = [];
+  
+   // When duplicating an item, this flag controls whether we carry photos from the template.
+      // Default is true; the duplicate prompt can flip it off for the new item.
+      let __duplicateCarryPhotos = true;
+  
+  console.log("[photos:init]", {
+    MAX_PHOTOS,
+    __photosLen: __photos.length,
+    __pendingLen: __pendingFiles.length,
+    __currentItemId,
+    __tenantId,
+  });
   
   // Utility: update counter + disable add when maxed
   function updatePhotosUIBasic() {
@@ -45,7 +58,14 @@ export async function init() {
     const cap = `${count} / ${MAX_PHOTOS}`;
     const el = $("photosCount");
     if (el) el.textContent = cap;
-  
+
+    console.log("[photos] updatePhotosUIBasic", {
+      count,
+      photosLen: __photos.length,
+      pendingLen: __pendingFiles.length,
+      currentItemId: __currentItemId,
+    });
+    
     const canAdd = count < MAX_PHOTOS;
     const cam = $("photoCameraInput");
     const fil = $("photoFileInput");
@@ -53,10 +73,23 @@ export async function init() {
     if (fil) fil.disabled = !canAdd;
   }
   
-  // Render thumbnails
+// Render thumbnails
   function renderPhotosGrid() {
     const host = $("photosGrid");
-    if (!host) return;
+    if (!host) {
+      console.warn("[photos] renderPhotosGrid: host #photosGrid not found", {
+        photosLen: __photos.length,
+        pendingLen: __pendingFiles.length,
+        currentItemId: __currentItemId,
+      });
+      return;
+    }
+    console.log("[photos] renderPhotosGrid", {
+      photosLen: __photos.length,
+      pendingLen: __pendingFiles.length,
+      currentItemId: __currentItemId,
+      duplicateSourceCount: Array.isArray(__duplicateSourceImages) ? __duplicateSourceImages.length : 0,
+    });
     // safety: fixed-size columns
     // safety: fixed-size columns + consistent row height
     try {
@@ -226,6 +259,13 @@ export async function init() {
   
   // Upload + attach (requires item_id)
   async function uploadAndAttach(file, { cropOfImageId = null } = {}) {
+    console.log("[photos] uploadAndAttach called", {
+      hasItemId: !!__currentItemId,
+      fileName: file?.name,
+      size: file?.size,
+      pendingId: file?._rpId || null,
+      cropOfImageId,
+    });
     if (!__currentItemId) {
       // Give each pending file a stable identity and a persistent preview URL.
       if (!file._rpId) {
@@ -234,7 +274,13 @@ export async function init() {
       if (!file._previewUrl) {
         file._previewUrl = URL.createObjectURL(file);
       }
+      const before = __pendingFiles.length;
       __pendingFiles.push(file);
+      console.log("[photos] queued file in __pendingFiles (no item_id yet)", {
+        before,
+        after: __pendingFiles.length,
+        _rpId: file._rpId,
+      });
       renderPhotosGrid();
       return;
     }
@@ -286,6 +332,10 @@ export async function init() {
       sort_order: (__photos.length),
       r2_key: up.r2_key,
       width: up.width, height: up.height, bytes: up.bytes, content_type: up.content_type,
+    });
+    console.log("[photos] __photos updated after upload", {
+      photosLen: __photos.length,
+      lastImageId: at.image_id,
     });
     renderPhotosGrid();
     try { computeValidity(); } catch {}
@@ -516,9 +566,29 @@ export async function init() {
         }
         
         
-        if (__pendingFiles.length > 0) {
+       if (__pendingFiles.length > 0) {
+          console.log("[photos] flushing pending files after save", {
+            pendingCount: __pendingFiles.length,
+            currentItemId: __currentItemId,
+            pendingIds: __pendingFiles.map(f => f?._rpId || null),
+          });
           const pending = __pendingFiles.splice(0, __pendingFiles.length);
-          for (const f of pending) await uploadAndAttach(f);
+          for (const f of pending) {
+            console.log("[photos] uploading pending file", {
+              _rpId: f?._rpId || null,
+              name: f?.name,
+              size: f?.size,
+            });
+            await uploadAndAttach(f);
+          }
+          console.log("[photos] pending flush complete", {
+            remainingPending: __pendingFiles.length,
+            photosLen: __photos.length,
+          });
+        } else {
+          console.log("[photos] no pending files to flush on save", {
+            currentItemId: __currentItemId,
+          });
         }
     
        // If server returned marketplace job_ids, kick the runner regardless of action
@@ -804,7 +874,227 @@ function setMarketplaceVisibility() {
     
     // CLOSE wireShippingBoxAutofill(meta)
     }
+
+    /** Populate intake form controls from saved inventory + listing profile */
+    function populateFromSaved(inv, listing) {
+      // Basic Item Details
+      const title = document.getElementById("titleInput") || findControlByLabel("Item Name / Description");
+      if (title) title.value = inv?.product_short_title ?? "";
     
+      const price = document.getElementById("priceInput") || findControlByLabel("Price (USD)");
+      if (price) price.value = inv?.price ?? "";
+    
+      const qty = document.getElementById("qtyInput") || findControlByLabel("Qty");
+      if (qty) qty.value = inv?.qty ?? "";
+    
+      const cat = document.getElementById("categorySelect") || findControlByLabel("Category");
+      if (cat) cat.value = inv?.category_nm ?? "";
+    
+      const store = document.getElementById("storeLocationSelect") || findControlByLabel("Store Location");
+      if (store) store.value = inv?.instore_loc ?? "";
+    
+      const cogs = document.getElementById("costInput") || findControlByLabel("Cost of Goods (USD)");
+      if (cogs) cogs.value = inv?.cost_of_goods ?? "";
+    
+      const bin = document.getElementById("caseBinShelfInput") || findControlByLabel("Case#/Bin#/Shelf#");
+      if (bin) bin.value = inv?.case_bin_shelf ?? "";
+    
+      const sales = document.getElementById("salesChannelSelect") || findControlByLabel("Sales Channel");
+      if (sales) sales.value = inv?.instore_online ?? "";
+    
+            // Marketplace Listing Details (optional for drafts)
+      if (listing) {
+        
+          const mpCat = document.getElementById("marketplaceCategorySelect") || findControlByLabel("Marketplace Category");
+          if (mpCat) mpCat.value = listing.listing_category_key ?? "";
+        
+          const cond = document.getElementById("conditionSelect") || findControlByLabel("Condition");
+          if (cond) cond.value = listing.condition_key ?? "";
+        
+          const brand = document.getElementById("brandSelect") || findControlByLabel("Brand");
+          if (brand) brand.value = listing.brand_key ?? "";
+        
+          const color = document.getElementById("colorSelect") || findControlByLabel("Primary Color");
+          if (color) color.value = listing.color_key ?? "";
+        
+          const shipBox = document.getElementById("shippingBoxSelect") || findControlByLabel("Shipping Box");
+          if (shipBox) shipBox.value = listing.shipping_box_key ?? "";
+
+         // Long Description (textarea)
+        const longDesc = document.getElementById("longDescriptionTextarea") || findControlByLabel("Long Description");
+        if (longDesc) {
+          const current = String(listing?.product_description ?? "").trim();
+          if (current) {
+            // If server already has a description, use it as-is
+            longDesc.value = current;
+          } else {
+            // Otherwise, compose: <Title> + blank line + base sentence
+            const titleEl = document.getElementById("titleInput") || findControlByLabel("Item Name / Description");
+            const title = String(titleEl?.value || inv?.product_short_title || "").trim();
+            longDesc.value = title ? `${title}\n\n${BASE_DESCRIPTION}` : BASE_DESCRIPTION;
+          }
+        }
+          
+    
+
+        const lb  = document.getElementById("weightLbInput") || findControlByLabel("Weight (lb)");
+        const oz  = document.getElementById("weightOzInput") || findControlByLabel("Weight (oz)");
+        const len = document.getElementById("lengthInput")   || findControlByLabel("Length");
+        const wid = document.getElementById("widthInput")    || findControlByLabel("Width");
+        const hei = document.getElementById("heightInput")   || findControlByLabel("Height");
+        if (lb)  lb.value  = listing.weight_lb ?? "";
+        if (oz)  oz.value  = listing.weight_oz ?? "";
+        if (len) len.value = listing.shipbx_length ?? "";
+        if (wid) wid.value = listing.shipbx_width ?? "";
+        if (hei) hei.value = listing.shipbx_height ?? "";
+      }
+    
+      // Recompute validity / show or hide marketplace fields as needed
+      try { setMarketplaceVisibility(); } catch {}
+      try { computeValidity(); } catch {}
+    }
+
+  
+    // Hydrate UI from a duplicate seed stashed in sessionStorage (if any)
+      function maybePromptDuplicatePhotos() {
+        try {
+          if (!Array.isArray(__duplicateSourceImages) || __duplicateSourceImages.length === 0) return;
+
+          const dlg   = $("duplicatePhotosDialog");
+          const yesBtn = $("duplicatePhotosYes");
+          const noBtn  = $("duplicatePhotosNo");
+
+          if (!dlg || !yesBtn || !noBtn) return;
+
+          // Avoid wiring twice if called again
+          if (dlg.dataset.wired === "1") {
+            try { dlg.showModal(); } catch {}
+            return;
+          }
+
+          dlg.dataset.wired = "1";
+
+          yesBtn.onclick = () => {
+            __duplicateCarryPhotos = true;
+            try { dlg.close(); } catch {}
+          };
+
+          noBtn.onclick = () => {
+            __duplicateCarryPhotos = false;
+            // Clear duplicated photos so the user starts fresh
+            __duplicateSourceImages = [];
+            __photos = [];
+            try { renderPhotosGrid(); } catch {}
+            try { computeValidity(); } catch {}
+            try { dlg.close(); } catch {}
+          };
+
+          try { dlg.showModal(); } catch {}
+        } catch (e) {
+          console.warn("[duplicateSeed] photo prompt failed", e);
+        }
+      }
+      function hydrateFromDuplicateSeed() {
+        console.groupCollapsed?.("[duplicateSeed] hydrateFromDuplicateSeed:start");
+        let raw = null;
+        try {
+          raw = sessionStorage.getItem("rp:intake:duplicateSeed");
+        } catch (e) {
+          console.warn("[intake.js] duplicateSeed: sessionStorage unavailable", e);
+          console.groupEnd?.();
+          return false;
+        }
+        if (!raw) return false;
+
+        let seed;
+        try {
+          seed = JSON.parse(raw);
+        } catch (e) {
+          console.error("[intake.js] duplicateSeed: parse failed", e);
+          try { sessionStorage.removeItem("rp:intake:duplicateSeed"); } catch {}
+          console.groupEnd?.();
+          return false;
+        }
+
+        // Consume the seed so it only applies once
+        try { sessionStorage.removeItem("rp:intake:duplicateSeed"); } catch {}
+        
+        const inv     = seed?.inventory || {};
+        const listing = seed?.listing   || null;
+        const images  = Array.isArray(seed?.images) ? seed.images : [];
+
+        console.log("[duplicateSeed] parsed", {
+          hasInventory: !!inv,
+          hasListing: !!listing,
+          imageCount: images.length,
+          cdnSample: images.slice(0, 5).map(i => i?.cdn_url || null),
+        });
+
+        // Force "new item" state
+        __currentItemId    = null;
+        __pendingFiles     = [];
+        __duplicateSourceImages = images.map((img, idx) => ({
+          r2_key: img.r2_key,
+          cdn_url: img.cdn_url,
+          bytes: img.bytes,
+          content_type: img.content_type,
+          width: img.width ?? img.width_px ?? null,
+          height: img.height ?? img.height_px ?? null,
+          sha256: img.sha256 ?? img.sha256_hex ?? null,
+          sort_order: typeof img.sort_order === "number" ? img.sort_order : idx,
+          is_primary: !!img.is_primary,
+        }));
+        console.log("[duplicateSeed] mapped duplicateSourceImages", {
+          duplicateSourceCount: __duplicateSourceImages.length,
+        });
+        
+        // Thumbnails only – no uploads yet
+        __photos = __duplicateSourceImages.map((img, idx) => ({
+          image_id: "dup-" + (typeof crypto !== "undefined" && crypto.randomUUID
+            ? crypto.randomUUID()
+            : `${Date.now()}-${idx}`),
+          cdn_url: img.cdn_url,
+          is_primary: !!img.is_primary,
+          sort_order: typeof img.sort_order === "number" ? img.sort_order : idx,
+        }));
+
+        console.log("[duplicateSeed] initial thumbnails populated", {
+          photosLen: __photos.length,
+        });
+
+        // Hydrate form + photos (thumbnails only; originals will be cloned on the server)
+        try {
+          populateFromSaved(inv, listing);
+        } catch (e) {
+          console.error("[intake.js] populateFromSaved failed for duplicateSeed", e);
+        }
+
+        try {
+          renderPhotosGrid();
+        } catch (e) {
+          console.error("[intake.js] renderPhotosGrid failed for duplicateSeed", e);
+        }
+        
+        // NEW: prompt user whether to keep or drop template photos
+        try {
+          maybePromptDuplicatePhotos();
+        } catch (e) {
+          console.warn("[duplicateSeed] maybePromptDuplicatePhotos failed", e);
+        }
+        
+        try {
+          computeValidity();
+        } catch {}
+
+        console.log("[intake.js] hydrated from duplicateSeed", {
+          hasListing: !!listing,
+          imageCount: __photos.length,
+          pendingLen: __pendingFiles.length,
+        });
+        console.groupEnd?.();
+        return true;
+      }
+  
 
    // --- Validation helpers (HOISTED so computeValidity can see them) ---
   function getEl(id) { try { return document.getElementById(id); } catch { return null; } }
@@ -948,15 +1238,18 @@ function setMarketplaceVisibility() {
       "#ebay_promotePct"
     ];
 
-    const ebayNodes = ebaySelectors
-      .map(sel => document.querySelector(sel))
-      .filter(Boolean)
-      .filter((n) => {
-        if (!n || n.disabled || n.type === "hidden") return false;
-        if (n.closest(".hidden")) return false;       // hidden by class (format/best-offer/promote toggles)
-        if (n.offsetParent === null) return false;    // not in layout flow
-        return true;
-      });
+    // Only treat eBay-specific fields as required when the eBay tile is actually selected.
+    const ebayNodes = !ebaySelected
+      ? []
+      : ebaySelectors
+          .map(sel => document.querySelector(sel))
+          .filter(Boolean)
+          .filter((n) => {
+            if (!n || n.disabled || n.type === "hidden") return false;
+            if (n.closest(".hidden")) return false;       // hidden by class (format/best-offer/promote toggles)
+            if (n.offsetParent === null) return false;    // not in layout flow
+            return true;
+          });
 
     return [...base, ...ebayNodes];
   }
@@ -998,7 +1291,6 @@ function setMarketplaceVisibility() {
     host.innerHTML = "";
 
     const rows = (meta?.marketplaces || []).filter(m => m.is_active !== false);
-    const defaults = readDefaults();
 
     // PROTOTYPE RULE:
     // If ZERO marketplaces are connected for this tenant, allow selecting ALL active marketplaces.
@@ -1023,8 +1315,6 @@ function setMarketplaceVisibility() {
       // Baseline styling
       btn.className = "btn btn-sm rounded-2xl";
 
-      
-
       if (enabledSelectable) {
         // Enabled tiles start as ghost (pale) until selected
         btn.classList.add("btn-ghost");
@@ -1038,9 +1328,9 @@ function setMarketplaceVisibility() {
       // label
       btn.textContent = m.marketplace_name || m.slug || `#${m.id}`;
 
-      // preselect from defaults (only if still selectable)
-      if (enabledSelectable && defaults.includes(m.id)) {
-        selectedMarketplaceIds.add(m.id);
+      // initial pressed state comes only from selectedMarketplaceIds
+      const isSelected = selectedMarketplaceIds.has(Number(m.id));
+      if (enabledSelectable && isSelected) {
         btn.classList.remove("btn-ghost");
         btn.classList.add("btn-primary");
         btn.setAttribute("aria-pressed", "true");
@@ -1048,7 +1338,7 @@ function setMarketplaceVisibility() {
         btn.setAttribute("aria-pressed", "false");
       }
 
-      // click toggles selection if selectable
+       // click toggles selection if selectable
       if (enabledSelectable) {
         btn.addEventListener("click", () => {
           const id = Number(btn.dataset.marketplaceId);
@@ -1066,8 +1356,8 @@ function setMarketplaceVisibility() {
           }
           // live-validate after any toggle
           computeValidity();
-          // update marketplace cards to match current selection
-          try { renderMarketplaceCards(__metaCache); } catch {}
+          // Delta-mode: add/remove cards without resetting existing card inputs
+          try { renderMarketplaceCards(__metaCache, { mode: "delta" }); } catch {}
         });
       } else {
         btn.addEventListener("click", () => {
@@ -1085,80 +1375,151 @@ function setMarketplaceVisibility() {
     el.classList.toggle("hidden", !show);
   }
 
-  // Render placeholder cards for each selected marketplace (UI-only; no API calls)
-  function renderMarketplaceCards(meta) {
+  // Apply per-item marketplace selection (e.g., when loading an existing item).
+  // meta: inventory meta (usually __metaCache)
+  // marketplaceListing: res.marketplace_listing from GET /api/inventory/intake
+    function applyMarketplaceSelectionForItem(meta, marketplaceListing) {
+    try {
+      const rows = (meta?.marketplaces || []);
+      const bySlug = new Map(
+        rows.map(r => [String(r.slug || "").toLowerCase(), r])
+      );
+
+      selectedMarketplaceIds.clear();
+
+      if (marketplaceListing) {
+        const ids = [];
+
+        // eBay row present -> include eBay marketplace id
+        if (marketplaceListing.ebay) {
+          const rawId =
+            marketplaceListing.ebay_marketplace_id ??
+            (bySlug.get("ebay") && bySlug.get("ebay").id);
+          if (rawId != null) {
+            const id = Number(rawId);
+            if (!Number.isNaN(id)) ids.push(id);
+          }
+        }
+
+        // Facebook row present -> include Facebook marketplace id
+        if (marketplaceListing.facebook) {
+          const rawId =
+            marketplaceListing.facebook_marketplace_id ??
+            (bySlug.get("facebook") && bySlug.get("facebook").id);
+          if (rawId != null) {
+            const id = Number(rawId);
+            if (!Number.isNaN(id)) ids.push(id);
+          }
+        }
+
+        for (const id of ids) {
+          selectedMarketplaceIds.add(id);
+        }
+      }
+
+      renderMarketplaceTiles(meta);
+      // When hydrating an existing item, do a full rebuild of cards
+      try { renderMarketplaceCards(meta, { mode: "full" }); } catch {}
+    } catch (e) {
+      console.error("marketplaces:applySelection:error", e);
+    }
+  }
+
+
+
+    // Render placeholder cards for each selected marketplace (UI-only; no API calls)
+  // opts.mode: "full" | "delta"
+  //  - "full"  → rebuild all cards (used on initial load / item load)
+  //  - "delta" → add/remove cards without touching existing ones (used on tile clicks)
+  function renderMarketplaceCards(meta, opts) {
     const host = document.getElementById(MP_CARDS_ID);
     if (!host) return;
-  
-    // Capture existing per-card statuses before we wipe the DOM
-    const prevStatuses = new Map();
-    try {
-      for (const card of Array.from(host.querySelectorAll(".card"))) {
-        const name = (card.querySelector(".font-semibold")?.textContent || "")
-          .trim()
-          .toLowerCase();
-        const node = card.querySelector("[data-status-text]");
-        if (name && node) prevStatuses.set(name, node.innerHTML || node.textContent || "");
-      }
-    } catch {}
-  
-    host.innerHTML = "";
-  
+
+    const mode = (opts && opts.mode) || "full";
+
     // Install delegated listeners once so any field edit re-checks validity
     if (!host.dataset.validHook) {
       const safeRecheck = () => { try { computeValidity(); } catch {} };
-      host.addEventListener("input",  safeRecheck);
+      host.addEventListener("input", safeRecheck);
       host.addEventListener("change", safeRecheck);
       host.dataset.validHook = "1";
     }
-  
+
     // Build a lookup of marketplaces by id (id, slug, marketplace_name, is_connected etc.)
     const rows = (meta?.marketplaces || []).filter(m => m.is_active !== false);
     const byId = new Map(rows.map(r => [Number(r.id), r]));
-  
-    // For each selected marketplace, render a card
-    for (const id of selectedMarketplaceIds) {
-      const m = byId.get(Number(id));
-      if (!m) continue;
-  
+    const desiredIds = Array.from(selectedMarketplaceIds).map(Number);
+
+    // Capture existing per-card statuses (by marketplace id) before a full rebuild
+    const prevStatuses = new Map();
+    if (mode === "full") {
+      try {
+        for (const card of Array.from(host.querySelectorAll("[data-marketplace-id]"))) {
+          const mid = Number(card.dataset.marketplaceId);
+          const node = card.querySelector("[data-status-text]");
+          if (!Number.isNaN(mid) && node) {
+            prevStatuses.set(mid, node.innerHTML || node.textContent || "");
+          }
+        }
+      } catch {}
+    }
+
+    // Track which ids already have a card we can keep (delta mode)
+    const realized = new Set();
+    if (mode === "delta") {
+      const existing = Array.from(host.querySelectorAll("[data-marketplace-id]"));
+      for (const card of existing) {
+        const mid = Number(card.dataset.marketplaceId);
+        if (!desiredIds.includes(mid)) {
+          card.remove(); // tile was deselected → drop its card
+          continue;
+        }
+        realized.add(mid); // keep this card (and its current field values) as-is
+      }
+    } else {
+      // full reset: start from a clean container
+      host.innerHTML = "";
+    }
+
+    function createMarketplaceCard(m, prevStatusHtml) {
       const slug = String(m.slug || "").toLowerCase();
       const name = m.marketplace_name || m.slug || `#${m.id}`;
       const connected = !!m.is_connected;
-  
+
       // Card wrapper
       const card = document.createElement("div");
       card.className = "card p-3";
-  
+      card.dataset.marketplaceId = String(m.id);
+
       // --- Header ---
       const header = document.createElement("div");
-        header.className = "flex items-center justify-between mb-2";
-        header.innerHTML = `
-          <div class="flex items-center gap-2">
-            <span class="font-semibold">${name}</span>
-            <span class="text-xs px-2 py-1 rounded ${connected ? "bg-green-100 text-green-700" : "bg-gray-100 text-gray-600"}">
-              ${connected ? "Connected" : "Not connected"}
-            </span>
-          </div>
-          <div class="text-sm" data-card-status>
-            <strong>Status:</strong> <span class="mono" data-status-text>Not Listed</span>
-            <button type="button" class="btn btn-ghost btn-xs ml-2 hidden" data-delist>Delist</button>
-          </div>
-        `;
-        card.appendChild(header);
-  
-        // Restore any previously displayed status for this marketplace card
+      header.className = "flex items-center justify-between mb-2";
+      header.innerHTML = `
+        <div class="flex items-center gap-2">
+          <span class="font-semibold">${name}</span>
+          <span class="text-xs px-2 py-1 rounded ${connected ? "bg-green-100 text-green-700" : "bg-gray-100 text-gray-600"}">
+            ${connected ? "Connected" : "Not connected"}
+          </span>
+        </div>
+        <div class="text-sm" data-card-status>
+          <strong>Status:</strong> <span class="mono" data-status-text>Not Listed</span>
+          <button type="button" class="btn btn-ghost btn-xs ml-2 hidden" data-delist>Delist</button>
+        </div>
+      `;
+      card.appendChild(header);
+
+      // Restore any previously displayed status for this marketplace card (on full rebuilds)
+      if (prevStatusHtml) {
         try {
-          const prev = prevStatuses.get(String(name || "").trim().toLowerCase());
-          if (prev) {
-            const node = header.querySelector("[data-status-text]");
-            if (node) node.innerHTML = prev;
-          }
+          const node = header.querySelector("[data-status-text]");
+          if (node) node.innerHTML = prevStatusHtml;
         } catch {}
-  
+      }
+
       // --- Body (placeholder fields) ---
       const body = document.createElement("div");
       body.className = "mt-2";
-  
+
       if (slug === "ebay") {
         // eBay placeholder UI — all fields required unless hidden by rules
         body.innerHTML = `
@@ -1185,7 +1546,7 @@ function setMarketplaceVisibility() {
               <label>Shipping Location (Zip) <span class="text-red-600" aria-hidden="true">*</span></label>
               <input id="ebay_shipZip" type="text" inputmode="numeric" pattern="[0-9]{5}" placeholder="e.g. 80903" required />
             </div>
-  
+
             <div class="field">
               <label>Pricing Format <span class="text-red-600" aria-hidden="true">*</span></label>
               <select id="ebay_formatSelect" required>
@@ -1194,7 +1555,7 @@ function setMarketplaceVisibility() {
                 <option value="auction">Auction</option>
               </select>
             </div>
-  
+
             <!-- Auction-only -->
             <div class="field ebay-auction-only hidden">
               <label>Duration <span class="text-red-600" aria-hidden="true">*</span></label>
@@ -1206,12 +1567,12 @@ function setMarketplaceVisibility() {
                 <option value="10">10 Days</option>
               </select>
             </div>
-  
+
             <div class="field">
               <label>Buy It Now Price (USD) <span class="text-red-600" aria-hidden="true">*</span></label>
               <input id="ebay_bin" type="number" step="0.01" min="0" placeholder="0.00" required />
             </div>
-  
+
             <!-- Auction-only -->
             <div class="field ebay-auction-only hidden">
               <label>Starting Bid (USD) <span class="text-red-600" aria-hidden="true">*</span></label>
@@ -1221,8 +1582,7 @@ function setMarketplaceVisibility() {
               <label>Reserve Price (USD)</label>
               <input id="ebay_reserve" type="number" step="0.01" min="0" placeholder="0.00" />
             </div>
-  
-            
+
             <!-- Fixed-only -->
             <div class="field ebay-fixed-only">
               <label class="switch" for="ebay_bestOffer">
@@ -1256,11 +1616,8 @@ function setMarketplaceVisibility() {
               <label>Promotion Percent (%) <span class="text-red-600" aria-hidden="true">*</span></label>
               <input id="ebay_promotePct" type="number" step="0.1" min="0" max="100" placeholder="0" required />
             </div>
-            
-            
-        `;
-
-                card.appendChild(body);
+          `;
+        card.appendChild(body);
 
         // If tenant is connected to eBay, pull policies and populate the selects
         (async () => {
@@ -1301,32 +1658,30 @@ function setMarketplaceVisibility() {
         })();
 
         // Wire local show/hide inside the eBay card (client-only)
-        const formatSel   = body.querySelector('#ebay_formatSelect');
+        const formatSel   = body.querySelector("#ebay_formatSelect");
+        const bestOffer   = body.querySelector("#ebay_bestOffer");
+        const promoteChk  = body.querySelector("#ebay_promote");
 
-        
-        const bestOffer   = body.querySelector('#ebay_bestOffer');
-        const promoteChk  = body.querySelector('#ebay_promote');
-  
-        const fixedOnly    = () => body.querySelectorAll(".ebay-fixed-only");
-        const auctionOnly  = () => body.querySelectorAll(".ebay-auction-only");
-        const bestOfferOnly= () => body.querySelectorAll(".ebay-bestoffer-only");
-        const promoOnly    = () => body.querySelectorAll(".ebay-promote-only");
-  
+        const fixedOnly     = () => body.querySelectorAll(".ebay-fixed-only");
+        const auctionOnly   = () => body.querySelectorAll(".ebay-auction-only");
+        const bestOfferOnly = () => body.querySelectorAll(".ebay-bestoffer-only");
+        const promoOnly     = () => body.querySelectorAll(".ebay-promote-only");
+
         function applyEbayVisibility() {
           const fmt = (formatSel?.value || "").toLowerCase(); // "" | "fixed" | "auction"
           const isFixed   = fmt === "fixed";
           const isAuction = fmt === "auction";
           const hasBO     = !!bestOffer?.checked;
           const promo     = !!promoteChk?.checked;
-  
+
           fixedOnly().forEach(n => n.classList.toggle("hidden", !isFixed));
           auctionOnly().forEach(n => n.classList.toggle("hidden", !isAuction));
           bestOfferOnly().forEach(n => n.classList.toggle("hidden", !(isFixed && hasBO)));
           promoOnly().forEach(n => n.classList.toggle("hidden", !promo));
-  
-         // When Best Offer is unchecked, clear and mark not required
-          const autoAcc = body.querySelector('#ebay_autoAccept');
-          const minOff  = body.querySelector('#ebay_minOffer');
+
+          // When Best Offer is unchecked, clear and mark not required
+          const autoAcc = body.querySelector("#ebay_autoAccept");
+          const minOff  = body.querySelector("#ebay_minOffer");
           if (autoAcc) autoAcc.required = isFixed && hasBO;
           if (minOff)  minOff.required  = isFixed && hasBO;
 
@@ -1342,23 +1697,32 @@ function setMarketplaceVisibility() {
         // First paint: align UI *and* button states to current values
         applyEbayVisibility();
         try { computeValidity(); } catch {}
-        
       } else {
-        // Generic placeholder card for other marketplaces (no filler lists)
+        // Generic placeholder card for other marketplaces (no filler lists yet)
         body.innerHTML = `
           <div class="muted text-sm">Marketplace-specific fields coming soon.</div>
         `;
         card.appendChild(body);
       }
-  
-       host.appendChild(card);
+
+      return card;
     }
-    
+
+    // For each selected marketplace, ensure a card exists
+    for (const id of desiredIds) {
+      if (realized.has(id)) continue; // delta mode: keep existing card and its values
+      const m = byId.get(Number(id));
+      if (!m) continue;
+      const card = createMarketplaceCard(m, prevStatuses.get(Number(id)));
+      host.appendChild(card);
+    }
+
     // After rendering marketplace cards, sync the FB status once
-    try {refreshFacebookTile(); } catch {}
-    
-     // If no marketplaces selected, nothing renders here by design.
-    }
+    try { refreshFacebookTile(); } catch {}
+
+    // If no marketplaces selected, nothing renders here by design.
+  }
+
 
   // === END NEW ===
 
@@ -2018,21 +2382,30 @@ function isDraftsTabVisible() {
 }
 
 async function refreshDrafts({ force = false } = {}) {
-  if (!force && !isDraftsTabVisible()) return;
-  if (__draftsRefreshTimer) window.clearTimeout(__draftsRefreshTimer);
-  __draftsRefreshTimer = window.setTimeout(async () => {
-    try {
-      const header = document.querySelector('#recentDraftsHeader, [data-recent-drafts-header]');
-      if (header) header.classList.add("loading");
-      // Support scope where loadDrafts is defined later/inside try{}
-      const __callLoadDrafts = (window && window.__loadDrafts) || (typeof loadDrafts === "function" ? loadDrafts : null);
-      if (__callLoadDrafts) { await __callLoadDrafts(); }
-    } finally {
-      const header = document.querySelector('#recentDraftsHeader, [data-recent-drafts-header]');
-      if (header) header.classList.remove("loading");
-      __draftsRefreshTimer = null;
-    }
-  }, 300);
+  console.groupCollapsed("[intake.debug] refreshDrafts()", { force, tabVisible: isDraftsTabVisible() });
+  try {
+    if (!force && !isDraftsTabVisible()) { console.log("skip: drafts tab hidden"); return; }
+    if (__draftsRefreshTimer) window.clearTimeout(__draftsRefreshTimer);
+    __draftsRefreshTimer = window.setTimeout(async () => {
+      const t0 = performance.now();
+      try {
+        const header = document.querySelector('#recentDraftsHeader, [data-recent-drafts-header]');
+        if (header) header.classList.add("loading");
+        const fn = (window && window.__loadDrafts) || (typeof loadDrafts === "function" ? loadDrafts : null);
+        console.log("call loadDrafts()", { hasWrapper: !!window.__loadDrafts, found: !!fn });
+        if (fn) { await fn(); }
+        console.log("loadDrafts() done", { elapsed_ms: Math.round(performance.now() - t0) });
+      } catch (e) {
+        console.error("refreshDrafts.error", e);
+      } finally {
+        const header = document.querySelector('#recentDraftsHeader, [data-recent-drafts-header]');
+        if (header) header.classList.remove("loading");
+        __draftsRefreshTimer = null;
+      }
+    }, 300);
+  } finally {
+    console.groupEnd?.();
+  }
 }
 
 // Central event to refresh Drafts after successful add/save/delete
@@ -2051,20 +2424,30 @@ function isInventoryTabVisible() {
 }
 
 async function refreshInventory({ force = false } = {}) {
-  if (!force && !isInventoryTabVisible()) return;
-  if (__inventoryRefreshTimer) window.clearTimeout(__inventoryRefreshTimer);
-  __inventoryRefreshTimer = window.setTimeout(async () => {
-    try {
-      const header = document.querySelector('#recentInventoryHeader, [data-recent-inventory-header]');
-      if (header) header.classList.add("loading");
-      const __callLoadInventory = (window && window.__loadInventory) || (typeof loadInventory === "function" ? loadInventory : null);
-      if (__callLoadInventory) { await __callLoadInventory(); }
-    } finally {
-      const header = document.querySelector('#recentInventoryHeader, [data-recent-inventory-header]');
-      if (header) header.classList.remove("loading");
-      __inventoryRefreshTimer = null;
-    }
-  }, 300);
+  console.groupCollapsed("[intake.debug] refreshInventory()", { force, tabVisible: isInventoryTabVisible() });
+  try {
+    if (!force && !isInventoryTabVisible()) { console.log("skip: inventory pane hidden"); return; }
+    if (__inventoryRefreshTimer) window.clearTimeout(__inventoryRefreshTimer);
+    __inventoryRefreshTimer = window.setTimeout(async () => {
+      const t0 = performance.now();
+      try {
+        const header = document.querySelector('#recentInventoryHeader, [data-recent-inventory-header]');
+        if (header) header.classList.add("loading");
+        const fn = (window && window.__loadInventory) || (typeof loadInventory === "function" ? loadInventory : null);
+        console.log("call loadInventory()", { hasWrapper: !!window.__loadInventory, found: !!fn });
+        if (fn) { await fn(); }
+        console.log("loadInventory() done", { elapsed_ms: Math.round(performance.now() - t0) });
+      } catch (e) {
+        console.error("refreshInventory.error", e);
+      } finally {
+        const header = document.querySelector('#recentInventoryHeader, [data-recent-inventory-header]');
+        if (header) header.classList.remove("loading");
+        __inventoryRefreshTimer = null;
+      }
+    }, 300);
+  } finally {
+    console.groupEnd?.();
+  }
 }
 
 // Refresh inventory after add/save/delete when the Inventory tab is open
@@ -2199,6 +2582,22 @@ document.addEventListener("intake:item-changed", () => refreshInventory({ force:
 
     //Render marketplace tiles (below Shipping)
     __metaCache = meta;
+
+    // Seed selection from per-user defaults for brand NEW items.
+    // When loading an existing item, we override this with applyMarketplaceSelectionForItem().
+    try {
+      const defaults = readDefaults();
+      selectedMarketplaceIds.clear();
+      if (Array.isArray(defaults)) {
+        for (const raw of defaults) {
+          const id = Number(raw);
+          if (!Number.isNaN(id)) {
+            selectedMarketplaceIds.add(id);
+          }
+        }
+      }
+    } catch {}
+
     renderMarketplaceTiles(meta);
     // Render placeholder cards for any preselected tiles (from defaults)
     try { renderMarketplaceCards(__metaCache); } catch {}
@@ -2295,13 +2694,34 @@ document.addEventListener("intake:item-changed", () => refreshInventory({ force:
 
     // Pre-fill the Long Description field if empty
     ensureDefaultLongDescription();
+
+    // If we arrived here from a Duplicate action, hydrate from the stashed seed
+      try {
+        hydrateFromDuplicateSeed();
+      } catch (e) {
+        console.error("[intake.js] hydrateFromDuplicateSeed failed", e);
+      }
     
     // Wire and run initial validation
     wireValidation();
     computeValidity();
     
     // Auto-load drafts into the Drafts tab on screen load (does not auto-switch the tab)
-    await loadDrafts?.();
+    console.groupCollapsed("[intake.debug] init → loadDrafts (first paint)");
+    try {
+      const t0 = performance.now();
+      if (typeof loadDrafts === "function") {
+        const out = await loadDrafts();
+        console.log("loadDrafts() resolved", { type: typeof out });
+      } else {
+        console.log("loadDrafts() not found at init");
+      }
+      console.log("elapsed_ms", Math.round(performance.now() - t0));
+    } catch (e) {
+      console.error("loadDrafts.init.error", e);
+    } finally {
+      console.groupEnd?.();
+    }
     
     // True tab wiring (ARIA tabs + lazy-load for Inventory)
     (function wireIntakeTabs() {
@@ -2346,16 +2766,38 @@ document.addEventListener("intake:item-changed", () => refreshInventory({ force:
       }
 
       // Click behavior
-      tabDrafts?.addEventListener("click", async () => {
-        activate(tabDrafts, paneDrafts);
-        // Ensure drafts render whenever the Drafts tab is shown
-        await (typeof loadDrafts === "function" ? loadDrafts() : Promise.resolve());
+      tabDrafts?.addEventListener("click", async (e) => {
+        e.preventDefault();
+        console.groupCollapsed("[intake.debug] CLICK → Drafts tab");
+        try {
+          activate(tabDrafts, paneDrafts);
+          const t0 = performance.now();
+          const fn = (typeof loadDrafts === "function") ? loadDrafts : null;
+          console.log("activate(drafts) + call loadDrafts()", { found: !!fn });
+          if (fn) { await fn(); }
+          console.log("loadDrafts() completed", { elapsed_ms: Math.round(performance.now() - t0) });
+        } catch (err) {
+          console.error("tabDrafts.click.error", err);
+        } finally {
+          console.groupEnd?.();
+        }
       });
-
-      tabInventory?.addEventListener("click", async () => {
-        activate(tabInventory, paneInventory);
-        // Lazy-load inventory on demand
-        await (typeof loadInventory === "function" ? loadInventory() : Promise.resolve());
+      
+      tabInventory?.addEventListener("click", async (e) => {
+        e.preventDefault();
+        console.groupCollapsed("[intake.debug] CLICK → Inventory tab");
+        try {
+          activate(tabInventory, paneInventory);
+          const t0 = performance.now();
+          const fn = (typeof loadInventory === "function") ? loadInventory : null;
+          console.log("activate(inventory) + call loadInventory()", { found: !!fn });
+          if (fn) { await fn(); }
+          console.log("loadInventory() completed", { elapsed_ms: Math.round(performance.now() - t0) });
+        } catch (err) {
+          console.error("tabInventory.click.error", err);
+        } finally {
+          console.groupEnd?.();
+        }
       });
 
       // Bulk is disabled/placeholder for now
@@ -2385,6 +2827,51 @@ document.addEventListener("intake:item-changed", () => refreshInventory({ force:
       activate(tabDrafts, paneDrafts);
     })();
 
+    // [intake.debug] Targeted fetch logger for /api/inventory/{drafts|recent}
+    (function rpInstrumentFetchOnce() {
+      try {
+        const g = window;
+        if (!g || !g.fetch || g.fetch.__rpInventoryWrapped) return;
+        const orig = g.fetch.bind(g);
+        g.fetch = async function(input, init) {
+          const url = (typeof input === "string") ? input : (input && input.url) || "";
+          const isDrafts = /\/api\/inventory\/drafts?/i.test(url);
+          const isRecent = /\/api\/inventory\/recent/i.test(url);
+          const watch = isDrafts || isRecent;
+    
+          if (!watch) return orig(input, init);
+    
+          const t0 = performance.now();
+          console.groupCollapsed("[intake.debug] fetch →", url);
+          try {
+            console.log("request", { method: (init && init.method) || "GET", headers: (init && init.headers) || undefined });
+            const res = await orig(input, init);
+            console.log("response", { status: res.status, ok: res.ok, type: res.type });
+            try {
+              const clone = res.clone();
+              const text = await clone.text();
+              let rows = null, ok = null, parsed = null;
+              try { parsed = JSON.parse(text); } catch {}
+              if (parsed && parsed.rows) rows = Array.isArray(parsed.rows) ? parsed.rows.length : null;
+              if (parsed && typeof parsed.ok !== "undefined") ok = parsed.ok;
+              console.log("body.peek", { ok, rows, bytes: text.length });
+            } catch (e) {
+              console.warn("peek.body.failed", String(e));
+            }
+            return res;
+          } catch (err) {
+            console.error("fetch.error", err);
+            throw err;
+          } finally {
+            console.log("elapsed_ms", Math.round(performance.now() - t0));
+            console.groupEnd?.();
+          }
+        };
+        g.fetch.__rpInventoryWrapped = true;
+      } catch (e) {
+        console.warn("rpInstrumentFetchOnce.failed", e);
+      }
+    })();
     
     // --- [NEW] Submission wiring: both buttons call POST /api/inventory/intake ---
     function valByIdOrLabel(id, label) {
@@ -2463,7 +2950,6 @@ document.addEventListener("intake:item-changed", () => refreshInventory({ force:
               return prune({ ...base, ...auctionExtras });
         }
     
-        // Hydrate the eBay card from saved data (called after tiles/cards are rendered)
         function hydrateEbayFromSaved(ebay, ebayMarketplaceId) {
           if (!ebay) return;
         
@@ -2493,22 +2979,16 @@ document.addEventListener("intake:item-changed", () => refreshInventory({ force:
             }
           } catch {}
         
-          // Ensure the eBay tile/card is visible and rendered
-          try {
-            if (ebayMarketplaceId && typeof ebayMarketplaceId === "number") {
-              selectedMarketplaceIds.add(Number(ebayMarketplaceId));
-            } else if (__metaCache?.marketplaces) {
-              const row = (__metaCache.marketplaces || []).find(m => String(m.slug || "").toLowerCase() === "ebay");
-              if (row && row.id != null) selectedMarketplaceIds.add(Number(row.id));
-            }
-            renderMarketplaceTiles(__metaCache);
-            renderMarketplaceCards(__metaCache);
-          } catch {}
-    
           // Now set values inside the eBay card
           const setVal = (sel, v) => { if (sel) sel.value = v ?? ""; };
-          const setNum = (id, v) => { const el = document.getElementById(id); if (el) el.value = (v ?? "") === "" ? "" : String(v); };
-          const setChk = (id, v) => { const el = document.getElementById(id); if (el) el.checked = !!v; };
+          const setNum = (id, v) => {
+            const el = document.getElementById(id);
+            if (el) el.value = (v ?? "") === "" ? "" : String(v);
+          };
+          const setChk = (id, v) => {
+            const el = document.getElementById(id);
+            if (el) el.checked = !!v;
+          };
     
           // Policies: attempt immediate set (may be overridden by async loader; Patch 1 will re-apply)
           setVal(document.getElementById("ebay_shippingPolicy"), ebay.shipping_policy);
@@ -2544,6 +3024,8 @@ document.addEventListener("intake:item-changed", () => refreshInventory({ force:
           // Also re-validate the whole form
           try { computeValidity(); } catch {}
         }
+
+
 
 
     
@@ -2619,6 +3101,26 @@ document.addEventListener("intake:item-changed", () => refreshInventory({ force:
           payload.marketplace_listing = { ...(payload.marketplace_listing || {}), facebook: {} };
         }
 
+          // If this is a duplicated brand-new item, send source images for server-side copy
+          if (
+             !__currentItemId &&
+            __duplicateCarryPhotos &&
+            Array.isArray(__duplicateSourceImages) &&
+            __duplicateSourceImages.length > 0
+          ) {
+            payload.duplicate_images = __duplicateSourceImages.map((img, idx) => ({
+              r2_key: img.r2_key,
+              cdn_url: img.cdn_url,
+              bytes: img.bytes,
+              content_type: img.content_type,
+              width: img.width ?? null,
+              height: img.height ?? null,
+              sha256: img.sha256 ?? null,
+              sort_order: typeof img.sort_order === "number" ? img.sort_order : idx,
+              is_primary: !!img.is_primary,
+            }));
+          }
+
           return payload;
        }
 
@@ -2629,7 +3131,27 @@ document.addEventListener("intake:item-changed", () => refreshInventory({ force:
       const inventory = prune(invAll);
     
       if (isStoreOnly) {
-        return { inventory };
+        const payload = { inventory };
+
+        if (
+         !__currentItemId &&
+           __duplicateCarryPhotos &&
+           Array.isArray(__duplicateSourceImages) &&
+           __duplicateSourceImages.length > 0
+        ) {
+          payload.duplicate_images = __duplicateSourceImages.map((img, idx) => ({
+            r2_key: img.r2_key,
+            cdn_url: img.cdn_url,
+            bytes: img.bytes,
+            content_type: img.content_type,
+            width: img.width ?? null,
+            height: img.height ?? null,
+            sha256: img.sha256 ?? null,
+            sort_order: typeof img.sort_order === "number" ? img.sort_order : idx,
+            is_primary: !!img.is_primary,
+          }));
+        }
+        return payload ;
       }
     
       const listing = prune(listingAll);
@@ -2641,6 +3163,27 @@ document.addEventListener("intake:item-changed", () => refreshInventory({ force:
         // Backend: upsert into app.item_marketplace_listing when present
         payload.marketplace_listing = { ebay: ebayListing };
       }
+
+      // If this is a duplicated brand-new item, send source images for server-side copy
+      if (
+        !__currentItemId &&
+         __duplicateCarryPhotos &&
+         Array.isArray(__duplicateSourceImages) &&
+         __duplicateSourceImages.length > 0
+      ) {
+        payload.duplicate_images = __duplicateSourceImages.map((img, idx) => ({
+          r2_key: img.r2_key,
+          cdn_url: img.cdn_url,
+          bytes: img.bytes,
+          content_type: img.content_type,
+          width: img.width ?? null,
+          height: img.height ?? null,
+          sha256: img.sha256 ?? null,
+          sort_order: typeof img.sort_order === "number" ? img.sort_order : idx,
+          is_primary: !!img.is_primary,
+        }));
+      }
+         
       return payload;
     }
 
@@ -2649,6 +3192,7 @@ document.addEventListener("intake:item-changed", () => refreshInventory({ force:
       if (mode !== "draft" && !computeValidity()) return;
     
       const payload = buildPayload(mode === "draft");
+      console.log("[intake] duplicate_images count", Array.isArray(payload.duplicate_images) ? payload.duplicate_images.length : 0); 
       // If we’re editing an existing item, send its id so the server updates it
       if (__currentItemId) {
         payload.item_id = __currentItemId;
@@ -2824,6 +3368,7 @@ document.addEventListener("intake:item-changed", () => refreshInventory({ force:
         <td class="px-3 py-2">
           <div class="flex gap-2">
             <button type="button" class="btn btn-primary btn-sm" data-action="load" data-item-id="${row.item_id}">Load</button>
+            <button type="button" class="btn btn-ghost btn-sm" data-action="duplicate" data-item-id="${row.item_id}">Duplicate</button>
             <button type="button" class="btn btn-ghost btn-sm" data-action="delete" data-item-id="${row.item_id}">Delete</button>
           </div>
         </td>
@@ -2831,85 +3376,7 @@ document.addEventListener("intake:item-changed", () => refreshInventory({ force:
       return tr;
     }
     
-    /** Populate intake form controls from saved inventory + listing profile */
-    function populateFromSaved(inv, listing) {
-      // Basic Item Details
-      const title = document.getElementById("titleInput") || findControlByLabel("Item Name / Description");
-      if (title) title.value = inv?.product_short_title ?? "";
-    
-      const price = document.getElementById("priceInput") || findControlByLabel("Price (USD)");
-      if (price) price.value = inv?.price ?? "";
-    
-      const qty = document.getElementById("qtyInput") || findControlByLabel("Qty");
-      if (qty) qty.value = inv?.qty ?? "";
-    
-      const cat = document.getElementById("categorySelect") || findControlByLabel("Category");
-      if (cat) cat.value = inv?.category_nm ?? "";
-    
-      const store = document.getElementById("storeLocationSelect") || findControlByLabel("Store Location");
-      if (store) store.value = inv?.instore_loc ?? "";
-    
-      const cogs = document.getElementById("costInput") || findControlByLabel("Cost of Goods (USD)");
-      if (cogs) cogs.value = inv?.cost_of_goods ?? "";
-    
-      const bin = document.getElementById("caseBinShelfInput") || findControlByLabel("Case#/Bin#/Shelf#");
-      if (bin) bin.value = inv?.case_bin_shelf ?? "";
-    
-      const sales = document.getElementById("salesChannelSelect") || findControlByLabel("Sales Channel");
-      if (sales) sales.value = inv?.instore_online ?? "";
-    
-            // Marketplace Listing Details (optional for drafts)
-      if (listing) {
         
-          const mpCat = document.getElementById("marketplaceCategorySelect") || findControlByLabel("Marketplace Category");
-          if (mpCat) mpCat.value = listing.listing_category_key ?? "";
-        
-          const cond = document.getElementById("conditionSelect") || findControlByLabel("Condition");
-          if (cond) cond.value = listing.condition_key ?? "";
-        
-          const brand = document.getElementById("brandSelect") || findControlByLabel("Brand");
-          if (brand) brand.value = listing.brand_key ?? "";
-        
-          const color = document.getElementById("colorSelect") || findControlByLabel("Primary Color");
-          if (color) color.value = listing.color_key ?? "";
-        
-          const shipBox = document.getElementById("shippingBoxSelect") || findControlByLabel("Shipping Box");
-          if (shipBox) shipBox.value = listing.shipping_box_key ?? "";
-
-         // Long Description (textarea)
-        const longDesc = document.getElementById("longDescriptionTextarea") || findControlByLabel("Long Description");
-        if (longDesc) {
-          const current = String(listing?.product_description ?? "").trim();
-          if (current) {
-            // If server already has a description, use it as-is
-            longDesc.value = current;
-          } else {
-            // Otherwise, compose: <Title> + blank line + base sentence
-            const titleEl = document.getElementById("titleInput") || findControlByLabel("Item Name / Description");
-            const title = String(titleEl?.value || inv?.product_short_title || "").trim();
-            longDesc.value = title ? `${title}\n\n${BASE_DESCRIPTION}` : BASE_DESCRIPTION;
-          }
-        }
-          
-    
-
-        const lb  = document.getElementById("weightLbInput") || findControlByLabel("Weight (lb)");
-        const oz  = document.getElementById("weightOzInput") || findControlByLabel("Weight (oz)");
-        const len = document.getElementById("lengthInput")   || findControlByLabel("Length");
-        const wid = document.getElementById("widthInput")    || findControlByLabel("Width");
-        const hei = document.getElementById("heightInput")   || findControlByLabel("Height");
-        if (lb)  lb.value  = listing.weight_lb ?? "";
-        if (oz)  oz.value  = listing.weight_oz ?? "";
-        if (len) len.value = listing.shipbx_length ?? "";
-        if (wid) wid.value = listing.shipbx_width ?? "";
-        if (hei) hei.value = listing.shipbx_height ?? "";
-      }
-    
-      // Recompute validity / show or hide marketplace fields as needed
-      try { setMarketplaceVisibility(); } catch {}
-      try { computeValidity(); } catch {}
-    }
-    
     /** Enter existing-view mode (disabled fields + Edit/Add New/Delete CTAs) */
     function enterViewMode({ item_id, hasSku = false }) {
       __currentItemId = item_id;
@@ -3016,7 +3483,12 @@ document.addEventListener("intake:item-changed", () => refreshInventory({ force:
         // Basic + listing fields (now includes Long Description)
         populateFromSaved(res.inventory || {}, res.listing || null);
 
-        // If the draft has an eBay listing row, auto-select the eBay tile and hydrate the card
+        // Apply per-item marketplace selection from Neon (eBay, Facebook, etc.)
+        try {
+          applyMarketplaceSelectionForItem(__metaCache, res.marketplace_listing || null);
+        } catch {}
+
+        // If the draft has an eBay listing row, hydrate the eBay card fields/status
         try {
           const ebaySaved = res?.marketplace_listing?.ebay || null;
           const ebayId    = res?.marketplace_listing?.ebay_marketplace_id || null;
@@ -3035,6 +3507,7 @@ document.addEventListener("intake:item-changed", () => refreshInventory({ force:
         alert("Failed to load draft.");
       }
     }
+
     
     /** Click handler: Delete a draft from the list */
     async function handleDeleteDraft(item_id, rowEl) {
@@ -3086,8 +3559,12 @@ document.addEventListener("intake:item-changed", () => refreshInventory({ force:
           const id = btn.getAttribute("data-item-id");
           if (action === "load") {
             btn.addEventListener("click", () => handleLoadDraft(id));
+          
+          } else if (action === "duplicate") {
+            btn.addEventListener("click", () => handleDuplicateInventory(id));
+          
           } else if (action === "delete") {
-            btn.addEventListener("click", (e) => handleDeleteDraft(id, btn.closest("tr")));
+            btn.addEventListener("click", () => handleDeleteInventory(id, btn.closest("tr")));
           }
         });
       } catch (err) {
@@ -3125,6 +3602,7 @@ document.addEventListener("intake:item-changed", () => refreshInventory({ force:
           <td class="px-3 py-2">
             <div class="flex gap-2">
               <button type="button" class="btn btn-primary btn-sm" data-action="load" data-item-id="${row.item_id}">Load</button>
+              <button type="button" class="btn btn-ghost btn-sm" data-action="duplicate" data-item-id="${row.item_id}">Duplicate</button>
               <button type="button" class="btn btn-ghost btn-sm" data-action="delete" data-item-id="${row.item_id}">Delete</button>
             </div>
           </td>
@@ -3151,7 +3629,62 @@ document.addEventListener("intake:item-changed", () => refreshInventory({ force:
           alert("Failed to delete item.");
         }
       }
-      
+
+            async function handleDuplicateInventory(item_id) {
+        try {
+          // Reuse the same intake API as Load so we get inventory + listing + images
+          const res = await api(`/api/inventory/intake?item_id=${encodeURIComponent(item_id)}`, { method: "GET" });
+          if (!res || res.ok === false) throw new Error(res?.error || "load_failed");
+
+          const inv     = res.inventory || {};
+          const listing = res.listing   || null;
+          const images  = Array.isArray(res.images) ? res.images : [];
+
+          // Build a duplicate "seed" object that looks like a new draft
+          const invClone = { ...inv };
+          delete invClone.item_id;
+          delete invClone.sku;
+          invClone.item_status = "draft";
+
+          const seed = {
+            inventory: invClone,
+            listing,
+            images: images.map((img, idx) => ({
+              r2_key: img.r2_key,
+              cdn_url: img.cdn_url,
+              bytes: img.bytes,
+              content_type: img.content_type,
+              width: img.width_px ?? img.width ?? null,
+              height: img.height_px ?? img.height ?? null,
+              sha256: img.sha256_hex ?? img.sha256 ?? null,
+              sort_order: typeof img.sort_order === "number" ? img.sort_order : idx,
+              is_primary: !!img.is_primary,
+            })),
+          };
+
+          // Stash in sessionStorage so the next page load can hydrate from it
+          try {
+            sessionStorage.setItem("rp:intake:duplicateSeed", JSON.stringify(seed));
+            console.log("[intake.js] duplicateSeed stored", {
+              item_id,
+              imageCount: seed.images.length,
+            });
+          } catch (e) {
+            console.warn("[intake.js] unable to store duplicateSeed", e);
+          }
+
+          // Navigate back into a pristine "new item" intake screen.
+          // We just reload the page; init() will detect the seed and hydrate.
+          window.location.reload();
+
+        } catch (err) {
+          console.error("duplicate:error", err);
+          alert("Unable to duplicate item.");
+        }
+      }
+
+
+    
       /** Load and render the most recent Active inventory (limit 50) */
       async function loadInventory() {
         try {
@@ -3181,6 +3714,8 @@ document.addEventListener("intake:item-changed", () => refreshInventory({ force:
             if (action === "load") {
               // reuse the existing loader; it hydrates photos + fields
               btn.addEventListener("click", () => handleLoadDraft(id));
+            } else if (action === "duplicate") {
+              btn.addEventListener("click", () => handleDuplicateInventory(id));
             } else if (action === "delete") {
               btn.addEventListener("click", () => handleDeleteInventory(id, btn.closest("tr")));
             }
@@ -3196,32 +3731,34 @@ document.addEventListener("intake:item-changed", () => refreshInventory({ force:
       wireCtas();
       wireCopyXeasy();  // enable/wire the Xeasy copy button
     // NEW: Photos bootstrap
-    wirePhotoPickers();
-    renderPhotosGrid();
-    // Hydrate Photos state from API results and refresh the grid
-    function bootstrapPhotos(images = [], itemId = null) {
-      __currentItemId = itemId || __currentItemId;
-    
-      __photos = (images || [])
-        .map(r => ({
-          image_id: r.image_id,
-          cdn_url: r.cdn_url,
-          is_primary: !!r.is_primary,
-          sort_order: Number(r.sort_order) || 0,
-          r2_key: r.r2_key,
-          width: r.width_px,
-          height: r.height_px,
-          bytes: r.bytes,
-          content_type: r.content_type,
-        }))
-        .sort((a, b) => a.sort_order - b.sort_order);
-    
-      __pendingFiles = [];
+      wirePhotoPickers();
       renderPhotosGrid();
+      // Hydrate Photos state from API results and refresh the grid
+      function bootstrapPhotos(images = [], itemId = null) {
+        __currentItemId = itemId || __currentItemId;
     
-      // Re-evaluate gating to ensure "Save as Draft" may enable based on photos
-      try { computeValidity(); } catch {}
-    }
+        __photos = (images || [])
+          .map(r => ({
+            image_id: r.image_id,
+            cdn_url: r.cdn_url,
+            is_primary: !!r.is_primary,
+            sort_order: Number(r.sort_order) || 0,
+            r2_key: r.r2_key,
+            width: r.width_px,
+            height: r.height_px,
+            bytes: r.bytes,
+            content_type: r.content_type,
+          }))
+          .sort((a, b) => a.sort_order - b.sort_order);
+    
+        __pendingFiles = [];
+        renderPhotosGrid();
+    
+        // Re-evaluate gating to ensure "Save as Draft" may enable based on photos
+        try { computeValidity(); } catch {}
+      }
+
+      
 
       // After successful save: confirm, disable form controls, and swap CTAs
       function postSaveSuccess(res, mode) {

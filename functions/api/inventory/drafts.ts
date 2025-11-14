@@ -87,6 +87,7 @@ export const onRequestGet: PagesFunction = async ({ request, env }) => {
       LEFT JOIN app.item_listing_profile lp
         ON lp.item_id = i.item_id AND lp.tenant_id = ${tenant_id}
       WHERE i.item_status = 'draft'
+        AND i.tenant_id = ${tenant_id}
       ORDER BY i.updated_at DESC
       LIMIT 50
     `;
