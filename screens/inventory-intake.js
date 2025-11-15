@@ -3547,6 +3547,14 @@ document.addEventListener("intake:item-changed", () => refreshInventory({ force:
         // Enter view mode (treat as previously-saved edit path). Drafts have no SKU.
         enterViewMode({ item_id, hasSku: !!res?.inventory?.sku });
 
+        
+      // If this loaded item already has a SKU, enable "Copy for Xeasy" immediately
+      if (res?.inventory?.sku) {
+        try {
+          enableCopyXeasy(true);
+        } catch {}
+      }
+        
       } catch (err) {
         console.error("drafts:load:error", err);
         alert("Failed to load draft.");
