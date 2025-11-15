@@ -2218,16 +2218,7 @@ function setMarketplaceVisibility() {
             return;
           }
         
-          // runner quiet?
-          if (Array.isArray(jobIds) && jobIds.length > 0) {
-            const anyRunning = document.querySelector('[data-status-text]')?.textContent?.match(/Publishing|Deleting/i);
-            if (anyRunning) {
-              console.log("skip: publish runner still active");
-              console.groupEnd?.();
-              return;
-            }
-          }
-        
+                  
           // is Facebook selected?
           const isFacebookSelected = (() => {
             // use the cached meta to map selected ids → slug
