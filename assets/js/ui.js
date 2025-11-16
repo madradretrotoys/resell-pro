@@ -48,6 +48,8 @@ export function normalizeButtonGroups(root=document){
  *
  * This will bind click handlers that open the dialog with the
  * clicked image URL, avoiding duplicate bindings on re-render.
+ * It also wires the Close button, backdrop click, and Escape key
+ * once per dialog instance.
  */
 export function wireInventoryImageLightbox(root = document) {
   try {
@@ -58,6 +60,19 @@ export function wireInventoryImageLightbox(root = document) {
 
     if (!viewer || !viewerImg) return;
 
+    const closeDialog = () => {
+      try {
+        if (typeof viewer.close === "function") {
+          viewer.close();
+        } else {
+          viewer.removeAttribute("open");
+        }
+      } catch {
+        viewer.removeAttribute("open");
+      }
+    };
+
+    // Bind thumbnails within the given root
     const buttons = root.querySelectorAll(
       ".inventory-thumb-btn[data-image-url]"
     );
@@ -78,6 +93,8 @@ export function wireInventoryImageLightbox(root = document) {
         try {
           if (typeof viewer.showModal === "function") {
             viewer.showModal();
+          } else if (typeof viewer.show === "function") {
+            viewer.show();
           } else {
             viewer.setAttribute("open", "true");
           }
@@ -86,6 +103,33 @@ export function wireInventoryImageLightbox(root = document) {
         }
       });
     });
+
+    // Wire Close / backdrop / Esc once per dialog
+    if (viewer.dataset.lightboxChromeBound !== "1") {
+      viewer.dataset.lightboxChromeBound = "1";
+
+      const closeBtn = viewer.querySelector("button[type='submit']");
+      if (closeBtn) {
+        closeBtn.addEventListener("click", (ev) => {
+          ev.preventDefault();
+          closeDialog();
+        });
+      }
+
+      // Click outside the card (on the dialog backdrop area) closes
+      viewer.addEventListener("click", (ev) => {
+        if (ev.target === viewer) {
+          closeDialog();
+        }
+      });
+
+      // Escape key closes the dialog when open
+      document.addEventListener("keydown", (ev) => {
+        if (ev.key === "Escape" && viewer.open) {
+          closeDialog();
+        }
+      });
+    }
   } catch (err) {
     console.error("[ui] wireInventoryImageLightbox error", err);
   }
