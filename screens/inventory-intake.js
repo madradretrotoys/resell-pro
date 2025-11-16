@@ -3619,19 +3619,83 @@ document.addEventListener("intake:item-changed", () => refreshInventory({ force:
      // Make loadDrafts available to the refresh bus declared earlier
       try { window.__loadDrafts = loadDrafts; } catch {}
       
-      /** Render a single inventory row (Active items) */
+     function extractLiveMarketplaces(row) {
+        try {
+          // Backend: /api/inventory/recent should return `row.marketplaces`
+          // as an array of { slug, name, status, icon_url, remote_url? }.
+          const marketplaces = Array.isArray(row?.marketplaces) ? row.marketplaces : [];
+      
+          return marketplaces
+            .filter((mp) => {
+              const status = String(mp.status || "").toLowerCase();
+              return status === "live" && mp.icon_url;
+            })
+            .map((mp) => ({
+              slug: mp.slug || null,
+              name: mp.name || mp.slug || "",
+              icon_url: mp.icon_url,
+              href: mp.remote_url || mp.url || null,
+            }));
+        } catch {
+          return [];
+        }
+      }
+      
+      /**
+       * Render a secondary row that shows marketplace icons for an inventory item.
+       * Returns a <tr> element, or null if there are no live marketplaces.
+       */
+      function renderInventoryMarketplacesRow(row) {
+        const live = extractLiveMarketplaces(row);
+        if (!live.length) return null;
+      
+        const tr = document.createElement("tr");
+        tr.className = "inventory-marketplaces-row border-b";
+      
+        if (row && row.item_id != null) {
+          tr.dataset.itemId = row.item_id;
+          tr.dataset.rowKind = "marketplaces";
+        }
+      
+        const iconsHtml = live
+          .map(
+            (mp) => `
+              <div class="inventory-marketplace-icon" title="${mp.name || ""}">
+                <img src="${mp.icon_url}" alt="${mp.name || ""}" loading="lazy">
+              </div>
+            `
+          )
+          .join("");
+      
+        tr.innerHTML = `
+          <td class="px-3 pt-1 pb-3" colspan="8">
+            <div class="inventory-marketplaces-strip">
+              ${iconsHtml}
+            </div>
+          </td>
+        `;
+      
+        return tr;
+      }
+      
       function renderInventoryRow(row) {
         const tr = document.createElement("tr");
-        tr.className = "border-b";
-        const price = (row.price != null) ? `$${Number(row.price).toFixed(2)}` : "—";
-        const qty = (row.qty ?? "—");
+        tr.className = "border-b inventory-row";
+      
+        if (row && row.item_id != null) {
+          tr.dataset.itemId = row.item_id;
+          tr.dataset.rowKind = "inventory";
+        }
+      
+        const price = row.price != null ? `$${Number(row.price).toFixed(2)}` : "—";
+        const qty = row.qty ?? "—";
         const cat = row.category_nm || "—";
         const title = row.product_short_title || "—";
         const saved = fmtSaved(row.saved_at);
       
         const imgCell = `
           <div class="w-10 h-10 rounded-lg overflow-hidden border" style="width:40px;height:40px">
-            ${row.image_url ? `<img src="${row.image_url}" alt="" style="width:40px;height:40px;object-fit:cover" loading="lazy">` : `<div class="w-10 h-10 bg-gray-100"></div>`}
+            ${row.image_url ? `<img src="${row.image_url}" alt="... loading="lazy">` : `<div class="w-10 h-10 bg-gray-100"></div>`}
           </div>
         `;
       
@@ -3645,27 +3709,69 @@ document.addEventListener("intake:item-changed", () => refreshInventory({ force:
           <td class="px-3 py-2">${cat}</td>
           <td class="px-3 py-2">
             <div class="flex gap-2">
-              <button type="button" class="btn btn-primary btn-sm" data-action="load" data-item-id="${row.item_id}">Load</button>
-              <button type="button" class="btn btn-ghost btn-sm" data-action="duplicate" data-item-id="${row.item_id}">Duplicate</button>
-              <button type="button" class="btn btn-ghost btn-sm" data-action="delete" data-item-id="${row.item_id}">Delete</button>
+              <button
+                type="button"
+                class="btn btn-primary btn-sm"
+                data-action="load"
+                data-item-id="${row.item_id}"
+              >
+                Load
+              </button>
+              <button
+                type="button"
+                class="btn btn-ghost btn-sm"
+                data-action="duplicate"
+                data-item-id="${row.item_id}"
+              >
+                Duplicate
+              </button>
+              <button
+                type="button"
+                class="btn btn-ghost btn-sm"
+                data-action="delete"
+                data-item-id="${row.item_id}"
+              >
+                Delete
+              </button>
             </div>
           </td>
         `;
+      
         return tr;
       }
+
       
       /** Click handler: Delete an inventory item from the list (Active) */
       async function handleDeleteInventory(item_id, rowEl) {
         try {
           const sure = confirm("Delete this item? This cannot be undone.");
           if (!sure) return;
+      
           const res = await api("/api/inventory/intake", {
             method: "POST",
             headers: { "content-type": "application/json" },
-            body: JSON.stringify({ action: "delete", item_id })
+            body: JSON.stringify({ action: "delete", item_id }),
           });
+      
           if (!res || res.ok === false) throw new Error(res?.error || "delete_failed");
-          if (rowEl && rowEl.parentElement) rowEl.parentElement.removeChild(rowEl);
+      
+          // Remove the main inventory row and its optional marketplaces row.
+          if (rowEl && rowEl.parentElement) {
+            const tbody = rowEl.parentElement;
+            const itemId = (rowEl.dataset && rowEl.dataset.itemId) || item_id;
+      
+            tbody.removeChild(rowEl);
+      
+            if (itemId != null) {
+              const mpRow = tbody.querySelector(
+                `tr[data-row-kind="marketplaces"][data-item-id="${itemId}"]`
+              );
+              if (mpRow) {
+                tbody.removeChild(mpRow);
+              }
+            }
+          }
+      
           // also nudge the drafts/inventory panes to stay current
           document.dispatchEvent(new CustomEvent("intake:item-changed"));
         } catch (err) {
@@ -3674,7 +3780,7 @@ document.addEventListener("intake:item-changed", () => refreshInventory({ force:
         }
       }
 
-            async function handleDuplicateInventory(item_id) {
+      async function handleDuplicateInventory(item_id) {
         try {
           // Reuse the same intake API as Load so we get inventory + listing + images
           const res = await api(`/api/inventory/intake?item_id=${encodeURIComponent(item_id)}`, { method: "GET" });
@@ -3734,6 +3840,7 @@ document.addEventListener("intake:item-changed", () => refreshInventory({ force:
         try {
           const tbody = document.getElementById("recentInventoryTbody");
           if (!tbody) return;
+      
           const res = await api("/api/inventory/recent?limit=50", { method: "GET" });
           if (!res || res.ok === false) throw new Error(res?.error || "inventory_failed");
           const rows = Array.isArray(res.rows) ? res.rows : [];
@@ -3747,27 +3854,38 @@ document.addEventListener("intake:item-changed", () => refreshInventory({ force:
           }
       
           for (const r of rows) {
-            const tr = renderInventoryRow(r);
-            tbody.appendChild(tr);
+            const mainRow = renderInventoryRow(r);
+            if (mainRow) {
+              tbody.appendChild(mainRow);
+            }
+      
+            const mpRow = renderInventoryMarketplacesRow(r);
+            if (mpRow) {
+              tbody.appendChild(mpRow);
+            }
           }
       
           // Wire row buttons
           tbody.querySelectorAll("button[data-action]").forEach((btn) => {
             const action = btn.getAttribute("data-action");
             const id = btn.getAttribute("data-item-id");
+      
             if (action === "load") {
               // reuse the existing loader; it hydrates photos + fields
               btn.addEventListener("click", () => handleLoadDraft(id));
             } else if (action === "duplicate") {
               btn.addEventListener("click", () => handleDuplicateInventory(id));
             } else if (action === "delete") {
-              btn.addEventListener("click", () => handleDeleteInventory(id, btn.closest("tr")));
+              btn.addEventListener("click", () =>
+                handleDeleteInventory(id, btn.closest("tr"))
+              );
             }
           });
         } catch (err) {
           console.error("inventory:load:error", err);
         }
       }
+
       
       // Expose for refresh bus
       try { window.__loadInventory = loadInventory; } catch {}
