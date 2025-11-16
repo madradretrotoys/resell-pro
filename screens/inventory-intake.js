@@ -3618,6 +3618,65 @@ document.addEventListener("intake:item-changed", () => refreshInventory({ force:
 
      // Make loadDrafts available to the refresh bus declared earlier
       try { window.__loadDrafts = loadDrafts; } catch {}
+
+      function extractLiveMarketplaces(row) {
+        try {
+          // Backend: /api/inventory/recent should return `row.marketplaces`
+          // as an array of { slug, name, status, icon_url, remote_url? }.
+          const marketplaces = Array.isArray(row?.marketplaces) ? row.marketplaces : [];
+      
+          return marketplaces
+            .filter((mp) => {
+              const status = String(mp.status || "").toLowerCase();
+              return status === "live" && mp.icon_url;
+            })
+            .map((mp) => ({
+              slug: mp.slug || null,
+              name: mp.name || mp.slug || "",
+              icon_url: mp.icon_url,
+              href: mp.remote_url || mp.url || null,
+            }));
+        } catch {
+          return [];
+        }
+      }
+      
+      /**
+       * Render a secondary row that shows marketplace icons for an inventory item.
+       * Returns a <tr> element, or null if there are no live marketplaces.
+       */
+      function renderInventoryMarketplacesRow(row) {
+        const live = extractLiveMarketplaces(row);
+        if (!live.length) return null;
+      
+        const tr = document.createElement("tr");
+        tr.className = "inventory-marketplaces-row border-b";
+      
+        if (row && row.item_id != null) {
+          tr.dataset.itemId = row.item_id;
+          tr.dataset.rowKind = "marketplaces";
+        }
+      
+        const iconsHtml = live
+          .map(
+            (mp) => `
+              <div class="inventory-marketplace-icon" title="${mp.name || ""}">
+                <img src="${mp.icon_url}" alt="${mp.name || ""}" loading="lazy">
+              </div>
+            `
+          )
+          .join("");
+      
+        tr.innerHTML = `
+          <td class="px-3 pt-1 pb-3" colspan="8">
+            <div class="inventory-marketplaces-strip">
+              ${iconsHtml}
+            </div>
+          </td>
+        `;
+      
+        return tr;
+      }
       
       /** Render a single inventory row (Active items) */
       function renderInventoryRow(row) {
