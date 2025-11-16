@@ -3788,11 +3788,11 @@ document.addEventListener("intake:item-changed", () => refreshInventory({ force:
 
 
     
-      /** Load and render the most recent Active inventory (limit 50) */
       async function loadInventory() {
         try {
           const tbody = document.getElementById("recentInventoryTbody");
           if (!tbody) return;
+      
           const res = await api("/api/inventory/recent?limit=50", { method: "GET" });
           if (!res || res.ok === false) throw new Error(res?.error || "inventory_failed");
           const rows = Array.isArray(res.rows) ? res.rows : [];
@@ -3806,27 +3806,38 @@ document.addEventListener("intake:item-changed", () => refreshInventory({ force:
           }
       
           for (const r of rows) {
-            const tr = renderInventoryRow(r);
-            tbody.appendChild(tr);
+            const mainRow = renderInventoryRow(r);
+            if (mainRow) {
+              tbody.appendChild(mainRow);
+            }
+      
+            const mpRow = renderInventoryMarketplacesRow(r);
+            if (mpRow) {
+              tbody.appendChild(mpRow);
+            }
           }
       
           // Wire row buttons
           tbody.querySelectorAll("button[data-action]").forEach((btn) => {
             const action = btn.getAttribute("data-action");
             const id = btn.getAttribute("data-item-id");
+      
             if (action === "load") {
               // reuse the existing loader; it hydrates photos + fields
               btn.addEventListener("click", () => handleLoadDraft(id));
             } else if (action === "duplicate") {
               btn.addEventListener("click", () => handleDuplicateInventory(id));
             } else if (action === "delete") {
-              btn.addEventListener("click", () => handleDeleteInventory(id, btn.closest("tr")));
+              btn.addEventListener("click", () =>
+                handleDeleteInventory(id, btn.closest("tr"))
+              );
             }
           });
         } catch (err) {
           console.error("inventory:load:error", err);
         }
       }
+
       
       // Expose for refresh bus
       try { window.__loadInventory = loadInventory; } catch {}
