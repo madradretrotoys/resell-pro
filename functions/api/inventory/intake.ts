@@ -3,7 +3,18 @@ import { neon } from "@neondatabase/serverless";
 
 
 type Role = "owner" | "admin" | "manager" | "clerk";
+
+type MarketplaceAction = "upsert" | "delete" | "ignore";
+type IntakeIntent = {
+  source?: string; // e.g., "intake"
+  mode?: "draft" | "active";
+  inventory?: "create" | "update";
+  marketplaces?: Record<string, MarketplaceAction>;
+};
+
 const json = (data: any, status = 200) =>
+
+  
   new Response(JSON.stringify(data), {
     status,
     headers: { "content-type": "application/json", "cache-control": "no-store" },
@@ -399,6 +410,11 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
     const inv = body?.inventory || {};
     const lst = body?.listing || {};
     const ebay = body?.marketplace_listing?.ebay || null;
+
+    // Intent: optional explicit marketplace actions from the intake UI
+    const intent: IntakeIntent = (body?.intent || {}) as IntakeIntent;
+    const intentMarketplaces: Record<string, MarketplaceAction> =
+      intent.marketplaces || {};
     
     // Status: support Option A drafts; default to 'active' for existing flows
     const rawStatus = (body?.status || inv?.item_status || "active");
@@ -864,6 +880,68 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
               }
             }
           }
+
+          // If the intake intent explicitly requests eBay delete (tile deselected),
+          // enqueue a delete job and mark the listing as delete_pending.
+          if (intentMarketplaces?.ebay === "delete" && EBAY_MARKETPLACE_ID) {
+            const iml = await sql/*sql*/`
+              SELECT marketplace_id, mp_offer_id, mp_item_id
+                FROM app.item_marketplace_listing
+               WHERE item_id    = ${item_id}
+                 AND tenant_id  = ${tenant_id}
+                 AND marketplace_id = ${EBAY_MARKETPLACE_ID}
+                 AND (mp_offer_id IS NOT NULL OR mp_item_id IS NOT NULL)
+            `;
+            for (const r of iml as any[]) {
+              const inserted = await sql/*sql*/`
+                WITH ins AS (
+                  INSERT INTO app.marketplace_publish_jobs
+                    (tenant_id, item_id, marketplace_id, op, status, payload_snapshot)
+                  SELECT
+                    ${tenant_id}, ${item_id}, ${r.marketplace_id}, 'delete', 'queued',
+                    ${{
+                      item_id,
+                      tenant_id,
+                      marketplace_id: r.marketplace_id,
+                      marketplace_listing: {
+                        mp_offer_id: r.mp_offer_id,
+                        mp_item_id: r.mp_item_id
+                      }
+                    }}
+                  WHERE NOT EXISTS (
+                    SELECT 1
+                      FROM app.marketplace_publish_jobs j
+                     WHERE j.tenant_id      = ${tenant_id}
+                       AND j.item_id        = ${item_id}
+                       AND j.marketplace_id = ${r.marketplace_id}
+                       AND j.op             = 'delete'
+                       AND j.status IN ('queued','running')
+                  )
+                  RETURNING job_id
+                )
+                SELECT job_id FROM ins
+                UNION ALL
+                SELECT j.job_id
+                  FROM app.marketplace_publish_jobs j
+                 WHERE j.tenant_id      = ${tenant_id}
+                   AND j.item_id        = ${item_id}
+                   AND j.marketplace_id = ${r.marketplace_id}
+                   AND j.op             = 'delete'
+                   AND j.status IN ('queued','running')
+                 LIMIT 1
+              `;
+
+              // Reflect pending delete on the listing row
+              await sql/*sql*/`
+                UPDATE app.item_marketplace_listing
+                   SET status='delete_pending', updated_at=now()
+                 WHERE item_id       = ${item_id}
+                   AND tenant_id     = ${tenant_id}
+                   AND marketplace_id = ${r.marketplace_id}
+              `;
+            }
+          }
+          
           // Enqueue marketplace publish jobs (same behavior as Create Active)
           await enqueuePublishJobs(tenant_id, item_id, body, status);
 
