@@ -72,7 +72,7 @@ export const onRequestGet: PagesFunction = async ({ request, env }) => {
     const limit = Number.isFinite(limitRaw) ? Math.max(1, Math.min(100, limitRaw)) : 50;
 
    // Query: latest Active items for this tenant + primary image (if any)
-    const rows = await sql<{
+        const rows = await sql<{
       item_id: string;
       saved_at: string;
       sku: string | null;
@@ -105,7 +105,7 @@ export const onRequestGet: PagesFunction = async ({ request, env }) => {
                 'slug', m.slug,
                 'name', m.marketplace_name,
                 'status', l.status,
-                'icon_url', m.ui_notes->>'icon_url',
+                'icon_url', m.icon_url,
                 'remote_url', l.mp_item_url
               )
               ORDER BY m.marketplace_name
@@ -137,6 +137,7 @@ export const onRequestGet: PagesFunction = async ({ request, env }) => {
       ORDER BY i.updated_at DESC
       LIMIT ${limit}
     `;
+
      
     return json({ ok: true, rows }, 200);
   } catch (err: any) {
