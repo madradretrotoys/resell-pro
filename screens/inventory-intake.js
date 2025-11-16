@@ -3337,6 +3337,12 @@ document.addEventListener("intake:item-changed", () => refreshInventory({ force:
       // DEBUG (short): confirm server accepted and returned item_id/status
       if (res?.ok) {
         console.log("[intake] server.ok item_id=", res.item_id, "status=", res.status);
+         // NEW: remember the SKU from the server so Copy for Xeasy can use it
+        try {
+          if (res.sku) {
+            window.__lastKnownSku = String(res.sku).trim();
+          }
+        } catch {}
       }
       // Log non-OK responses with full context before throwing
       if (!res || res.ok === false) {
