@@ -2892,16 +2892,19 @@ document.addEventListener("intake:item-changed", () => refreshInventory({ force:
       };
     })();
 
-    // Inventory Image Viewer: click thumbnails in Active Inventory to open a lightbox
+     // Inventory Image Viewer: click thumbnails in Active Inventory to open a lightbox
     (function wireInventoryImageViewer() {
       try {
-        const dialog = document.getElementById("inventoryImageViewer");
+        const dialog   = document.getElementById("inventoryImageViewer");
         const imgTarget = document.getElementById("inventoryImageViewerImg");
-        const tbody = document.getElementById("recentInventoryTbody");
+        const tbody    = document.getElementById("recentInventoryTbody");
 
         // If any of the pieces are missing, quietly no-op
         if (!dialog || !imgTarget || !tbody) return;
 
+        const closeBtn = dialog.querySelector("button[type='submit']");
+
+        // Open on thumbnail click
         tbody.addEventListener("click", (event) => {
           const target = event.target;
           if (!(target instanceof HTMLElement)) return;
@@ -2925,6 +2928,43 @@ document.addEventListener("intake:item-changed", () => refreshInventory({ force:
             dialog.showModal();
           } else if (typeof dialog.show === "function") {
             dialog.show();
+          } else {
+            // Very old browsers: fall back to setting the open attribute
+            dialog.setAttribute("open", "true");
+          }
+        });
+
+        // Explicit Close button wiring (don’t rely solely on form method="dialog")
+        if (closeBtn) {
+          closeBtn.addEventListener("click", (ev) => {
+            ev.preventDefault();
+            try {
+              dialog.close();
+            } catch {
+              dialog.removeAttribute("open");
+            }
+          });
+        }
+
+        // Click on backdrop (outside card) closes the dialog
+        dialog.addEventListener("click", (ev) => {
+          if (ev.target === dialog) {
+            try {
+              dialog.close();
+            } catch {
+              dialog.removeAttribute("open");
+            }
+          }
+        });
+
+        // Escape key closes the dialog when open
+        document.addEventListener("keydown", (ev) => {
+          if (ev.key === "Escape" && dialog.open) {
+            try {
+              dialog.close();
+            } catch {
+              dialog.removeAttribute("open");
+            }
           }
         });
       } catch (err) {
