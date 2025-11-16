@@ -1,4 +1,5 @@
 import { api } from "/assets/js/api.js";
+import { wireInventoryImageLightbox } from "/assets/js/ui.js";
 
 // Exported so router can call it: router awaits `mod.init(...)` after importing this module.
 // (See assets/js/router.js for the dynamic import and named-export call.)
@@ -3935,28 +3936,9 @@ document.addEventListener("intake:item-changed", () => refreshInventory({ force:
             }
           });
 
-          // Wire image thumbnail clicks → open Image Preview dialog
-          const viewer = document.getElementById("inventoryImageViewer");
-          const viewerImg = document.getElementById("inventoryImageViewerImg");
-
-          if (viewer && viewerImg) {
-            tbody.querySelectorAll(".inventory-thumb-btn[data-image-url]").forEach((btn) => {
-              btn.addEventListener("click", () => {
-                const url = btn.getAttribute("data-image-url");
-                if (!url) return;
-                viewerImg.src = url;
-
-                try {
-                  // Use native dialog API when available
-                  viewer.showModal();
-                } catch {
-                  // Fallback: mark as open if .showModal() is not supported
-                  viewer.setAttribute("open", "true");
-                }
-              });
-            });
-          }
-        } catch (err) {
+          // Wire image thumbnail clicks → open shared Image Preview dialog
+            wireInventoryImageLightbox(tbody);
+          } catch (err) {
           console.error("inventory:load:error", err);
         }
       }
