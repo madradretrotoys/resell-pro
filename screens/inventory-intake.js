@@ -2147,6 +2147,21 @@ function setMarketplaceVisibility() {
             "SUN 11-5\n" +
             "303-960-2117";
           description = description ? `${description}\n\n${footer}` : footer;
+
+           // 3b) Safety: remove any accidental duplicate consecutive lines
+          // (e.g., if the SKU footer was already present in the snapshot)
+          if (description) {
+            const lines = String(description).split(/\r?\n/);
+            const cleaned = [];
+            let last = "";
+            for (const line of lines) {
+              const trimmed = line.trim();
+              if (trimmed && trimmed === last) continue;
+              cleaned.push(line);
+              last = trimmed;
+            }
+            description = cleaned.join("\n");
+          }
         
           // 4) hard-coded for v1
           const category  = "Action Figures";
