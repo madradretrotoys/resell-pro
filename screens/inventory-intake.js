@@ -2711,6 +2711,11 @@ document.addEventListener("intake:item-changed", () => refreshInventory({ force:
             document.getElementById("ebay_bestOffer")?.dispatchEvent(new Event("change"));
             document.getElementById("ebay_promote")?.dispatchEvent(new Event("change"));
           } catch {}
+
+          // 4) Re-check validity now that pre-selected marketplace defaults are applied
+          try {
+            computeValidity();
+          } catch {}
         } catch {}
       }
     
