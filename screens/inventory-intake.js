@@ -549,8 +549,32 @@ export async function init() {
         const saveStatus = String(ev?.detail?.save_status || "").toLowerCase(); // "active" | "draft" | "delete"
         const action     = String(ev?.detail?.action || (saveStatus === "delete" ? "delete" : "save")).toLowerCase();
         const jobIds     = Array.isArray(ev?.detail?.job_ids) ? ev.detail.job_ids : [];
+        const intent     = ev?.detail?.intent || null;
+        const intentMarketplaces = Array.isArray(intent?.marketplaces) ? intent.marketplaces : null;
+
         if (!id) { console.warn("[intake.js] intake:item-saved missing item_id"); console.groupEnd?.(); return; }
         __currentItemId = id;
+
+        // Debug: confirm that UI → API → response intent is flowing, especially for eBay deletes
+        if (intentMarketplaces) {
+          const ebayIntent = intentMarketplaces.find((m) => {
+            const slug = String(m?.slug || "").toLowerCase();
+            return slug === "ebay";
+          }) || null;
+
+          console.log("[intake.js] marketplace intent (response)", {
+            saveStatus,
+            action,
+            marketplaces: intentMarketplaces,
+            ebayIntent,
+          });
+        } else {
+          console.log("[intake.js] marketplace intent (response) missing or empty", {
+            saveStatus,
+            action,
+            rawIntent: intent,
+          });
+        }
         
         
         // Phase 0: once Active, permanently lock Draft action for this listing (UI)
@@ -608,10 +632,44 @@ export async function init() {
            }
         }
 
-        // When the save is Active, photos are flushed, and eBay jobs are quiet,
-        // this will emit `intake:facebook-ready` ONLY if Facebook is selected
-        // and not already live for this item.
-        await __emitFacebookReadyIfSafe({ saveStatus, jobIds });
+        // Derive Facebook intent from the server’s normalized intent.marketplaces, if present.
+        // This lets us avoid re-creating Facebook listings when they are already live.
+        let facebookOp = null;
+        if (intentMarketplaces) {
+          const facebookIntent = intentMarketplaces.find((m) => {
+            const slug = String(m?.slug || "").toLowerCase();
+            // Marketplace id "2" is Facebook in our current schema; keep slug as primary key.
+            return slug === "facebook" || String(m?.marketplace_id) === "2";
+          }) || null;
+          facebookOp = facebookIntent?.operation || null;
+        }
+
+        const shouldEmitFacebook =
+          saveStatus === "active" && (
+            // If we don’t have intent yet, preserve legacy behavior.
+            !facebookOp ||
+            // When the server explicitly says "create", we allow the ready event.
+            String(facebookOp).toLowerCase() === "create"
+          );
+
+        console.log("[intake.js] facebook intent gate", {
+          saveStatus,
+          facebookOp,
+          shouldEmitFacebook,
+        });
+
+        // When the save is Active, photos are flushed, and the server indicates that
+        // Facebook should be created, this will emit `intake:facebook-ready`.
+        if (shouldEmitFacebook) {
+          await __emitFacebookReadyIfSafe({ saveStatus, jobIds, intentMarketplaces });
+        } else {
+          console.log("[intake.js] skip facebook-ready emit", {
+            reason: saveStatus !== "active"
+              ? "non-active-save"
+              : "facebook-op-not-create (likely already live / skip)",
+          });
+        }
+
         // Immediately reconcile the Facebook card with the DB snapshot
         try { await refreshFacebookTile(); } catch {}
       } catch (e) {
