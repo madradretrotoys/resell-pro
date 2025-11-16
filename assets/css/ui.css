@@ -106,6 +106,36 @@ label{
   gap: 12px;              /* consistent vertical rhythm between rows */
 }
 
+/* Active Inventory ▸ marketplace icons under each row */
+.inventory-marketplaces-row td {
+  border-top: 0;
+  padding-top: 4px;
+}
+
+.inventory-marketplaces-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.inventory-marketplace-icon {
+  width: 32px;
+  height: 32px;
+  border-radius: 999px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  background: #fff;
+  box-shadow: 0 1px 2px rgba(15,23,42,.12);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.inventory-marketplace-icon img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
 /* Each marketplace row */
 .mp-row {
   display: flex;
@@ -596,6 +626,13 @@ label{
   text-align: right;
 }
 
+/* Active Inventory thumbnails: keep tidy in-row size and show zoom cursor */
+#paneInventory table tbody td:nth-child(2) img{
+  max-height: 60px;
+  width: auto;
+  border-radius: 4px;
+  cursor: zoom-in;
+}
 
 
 #inventory-intake-screen .right{ text-align: right; }
@@ -700,3 +737,31 @@ label{
 
 /* ===== Generic full-width opt-in (use only where you WANT full width) ===== */
 .input-full { width: 100%; }
+
+/* Inventory Image Viewer (Active Inventory lightbox) */
+#inventoryImageViewer {
+  padding: 0;
+  border: 0;
+  max-width: min(90vw, 720px);
+}
+
+#inventoryImageViewer::backdrop {
+  background: rgba(15, 23, 42, 0.55);
+}
+
+#inventoryImageViewer form {
+  margin: 0;
+  padding: 16px;
+  box-sizing: border-box;
+}
+
+#inventoryImageViewerImg {
+  display: block;
+  max-width: 100%;
+  max-height: 70vh;
+  width: auto;
+  height: auto;
+  object-fit: contain;
+  border-radius: 8px;
+  background: #f3f4f6;
+}

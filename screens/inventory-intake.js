@@ -1,4 +1,5 @@
 import { api } from "/assets/js/api.js";
+import { wireInventoryImageLightbox } from "/assets/js/ui.js";
 
 // Exported so router can call it: router awaits `mod.init(...)` after importing this module.
 // (See assets/js/router.js for the dynamic import and named-export call.)
@@ -1972,88 +1973,99 @@ function setMarketplaceVisibility() {
         }
         
         function buildXeasyText() {
-        // Title
-        const titleEl = document.getElementById("titleInput") || findControlByLabel("Item Name / Description");
-        const title = String(titleEl?.value || "").trim();
-      
-        // Price → format with a leading $; integers show as $10, non-integers as $10.50
-        const priceCtrl = document.getElementById("priceInput") || findControlByLabel("Price (USD)");
-        const rawPrice = String(priceCtrl?.value ?? "").trim();
-        let price = rawPrice;
-        if (price) {
-          const n = Number(String(price).replace(/[$,]/g, ""));
-          if (!Number.isNaN(n)) {
-            price = Number.isInteger(n) ? `$${n}` : `$${n.toFixed(2)}`;
-          } else if (!price.startsWith("$")) {
-            price = `$${price}`;
+          // Title
+          const titleEl = document.getElementById("titleInput") || findControlByLabel("Item Name / Description");
+          const title = String(titleEl?.value || "").trim();
+        
+          // Price → format with a leading $; integers show as $10, non-integers as $10.50
+          const priceCtrl = document.getElementById("priceInput") || findControlByLabel("Price (USD)");
+          const rawPrice = String(priceCtrl?.value ?? "").trim();
+          let price = rawPrice;
+          if (price) {
+            const n = Number(String(price).replace(/[$,]/g, ""));
+            if (!Number.isNaN(n)) {
+              price = Number.isInteger(n) ? `$${n}` : `$${n.toFixed(2)}`;
+            } else if (!price.startsWith("$")) {
+              price = `$${price}`;
+            }
           }
-        }
-      
-        // SKU priority: server snapshot → [data-sku-out] / #skuOut → __lastKnownSku
-        let sku = "";
-        try {
-          const snapSku = String(window?.__intakeSnap?.inventory?.sku ?? "").trim();
-          if (snapSku) sku = snapSku;
-        } catch {}
-        if (!sku) {
+        
+          // SKU priority: server snapshot → DOM echo ([data-sku-out]/#skuOut) → last-known
+          let sku = "";
           try {
-            const el = document.querySelector("[data-sku-out]") || document.getElementById("skuOut");
-            if (el) {
-              const t = String(el.textContent || "");
-              const m = t.match(/SKU\s*(.+)$/i); // handles "SKU ABC-12345"
-              sku = (m ? m[1] : t).trim();
-            }
+            const snapSku = String(window?.__intakeSnap?.inventory?.sku ?? "").trim();
+            if (snapSku) sku = snapSku;
           } catch {}
-        }
-        if (!sku) {
-          try { sku = String(window.__lastKnownSku || "").trim(); } catch {}
-        }
-      
-        // Store location & Case # (prefer the combined label "Case#/Bin#/Shelf#" if present)
-        const storeSel = document.getElementById("storeLocationSelect");
-        const storeLoc = String(storeSel?.value || "").trim();
-        const caseEl =
-          document.getElementById("caseShelfInput")
-          || findControlByLabel("Case#/Bin#/Shelf#")
-          || findControlByLabel("Case #");
-        const caseNo = String(caseEl?.value || "").trim();
-      
-        // Word-safe packing: first 14 chars (no mid-word) then next 23 chars (no mid-word)
-        const packWords = (s, limit) => {
-          const words = String(s || "").trim().split(/\s+/).filter(Boolean);
-          if (words.length === 0) return ["", ""];
-          let part = "";
-          let i = 0;
-          while (i < words.length) {
-            const next = part ? `${part} ${words[i]}` : words[i];
-            if (next.length <= limit) {
-              part = next;
-              i++;
-            } else {
-              break;
+        
+          if (!sku) {
+            try {
+              const el = document.querySelector("[data-sku-out]") || document.getElementById("skuOut");
+              if (el) {
+                // Prefer a data attribute if present, otherwise use text content
+                let t = "";
+                if (el.dataset && typeof el.dataset.sku === "string" && el.dataset.sku.trim() !== "") {
+                  t = el.dataset.sku;
+                } else {
+                  t = String(el.textContent || "");
+                }
+                t = t.trim();
+                // Strip leading "SKU" label if present, e.g. "SKU 12345" or "SKU: 12345"
+                t = t.replace(/^sku[:\s]*/i, "").trim();
+                sku = t;
+              }
+            } catch {}
+          }
+        
+          if (!sku) {
+            try { sku = String(window.__lastKnownSku || "").trim(); } catch {}
+          }
+        
+          // Store location & Case # (prefer the combined label "Case#/Bin#/Shelf#" if present)
+          const storeSel = document.getElementById("storeLocationSelect");
+          const storeLoc = String(storeSel?.value || "").trim();
+          const caseEl =
+            document.getElementById("caseShelfInput")
+            || findControlByLabel("Case#/Bin#/Shelf#")
+            || findControlByLabel("Case #");
+          const caseNo = String(caseEl?.value || "").trim();
+        
+          // Word-safe packing: first 14 chars (no mid-word) then next 23 chars (no mid-word)
+          const packWords = (s, limit) => {
+            const words = String(s || "").trim().split(/\s+/).filter(Boolean);
+            if (words.length === 0) return ["", ""];
+            let part = "";
+            let i = 0;
+            while (i < words.length) {
+              const next = part ? `${part} ${words[i]}` : words[i];
+              if (next.length <= limit) {
+                part = next;
+                i++;
+              } else {
+                break;
+              }
             }
-          }
-          if (!part) { // if first word itself > limit, take it whole (no truncation)
-            part = words[0];
-            i = 1;
-          }
-          const rest = words.slice(i).join(" ");
-          return [part, rest];
-        };
-      
-        // Line 1: Price and SKU
-        const line1 = `${price} ${sku}`.trim();
-      
-        // Line 2/3: prepend RC, then title split across 14/23 without breaking words
-        const rc = `R${storeLoc}-C${caseNo}`.trim();
-        const [t1, tail] = packWords(title, 14);
-        const [t2] = packWords(tail, 23);
-      
-        const line2 = `${rc} ${t1}`.trim();
-        const line3 = String(t2 || "").trim();
-      
-        return [line1, line2, line3].filter(Boolean).join("\n");
-      }
+            if (!part) { // if first word itself > limit, take it whole (no truncation)
+              part = words[0];
+              i = 1;
+            }
+            const rest = words.slice(i).join(" ");
+            return [part, rest];
+          };
+        
+          // Line 1: Price and SKU (this is where your SKU should appear)
+          const line1 = `${price} ${sku}`.trim();
+        
+          // Line 2/3: prepend RC, then title split across 14/23 without breaking words
+          const rc = `R${storeLoc}-C${caseNo}`.trim();
+          const [t1, tail] = packWords(title, 14);
+          const [t2] = packWords(tail, 23);
+        
+          const line2 = `${rc} ${t1}`.trim();
+          const line3 = String(t2 || "").trim();
+        
+          return [line1, line2, line3].filter(Boolean).join("\n");
+        }
+
 
         
         function wireCopyXeasy() {
@@ -2146,6 +2158,21 @@ function setMarketplaceVisibility() {
             "SUN 11-5\n" +
             "303-960-2117";
           description = description ? `${description}\n\n${footer}` : footer;
+
+           // 3b) Safety: remove any accidental duplicate consecutive lines
+          // (e.g., if the SKU footer was already present in the snapshot)
+          if (description) {
+            const lines = String(description).split(/\r?\n/);
+            const cleaned = [];
+            let last = "";
+            for (const line of lines) {
+              const trimmed = line.trim();
+              if (trimmed && trimmed === last) continue;
+              cleaned.push(line);
+              last = trimmed;
+            }
+            description = cleaned.join("\n");
+          }
         
           // 4) hard-coded for v1
           const category  = "Action Figures";
@@ -2218,16 +2245,7 @@ function setMarketplaceVisibility() {
             return;
           }
         
-          // runner quiet?
-          if (Array.isArray(jobIds) && jobIds.length > 0) {
-            const anyRunning = document.querySelector('[data-status-text]')?.textContent?.match(/Publishing|Deleting/i);
-            if (anyRunning) {
-              console.log("skip: publish runner still active");
-              console.groupEnd?.();
-              return;
-            }
-          }
-        
+                  
           // is Facebook selected?
           const isFacebookSelected = (() => {
             // use the cached meta to map selected ids → slug
@@ -2244,7 +2262,7 @@ function setMarketplaceVisibility() {
             return;
           }
         
-          // not already live?
+          // not already live? (app.item_marketplace_listing.status === 'live')
           if (__currentItemId) {
             try {
               const snap = await api(`/api/inventory/intake?item_id=${encodeURIComponent(__currentItemId)}`, { method: "GET" });
@@ -2252,9 +2270,53 @@ function setMarketplaceVisibility() {
               window.__intakeSnap = snap;
               // keep a last-known SKU around for local fallback builders
               try { window.__lastKnownSku = String(snap?.inventory?.sku || ""); } catch {}
-              const live = String(snap?.marketplace_listing?.facebook?.status || "").toLowerCase() === "live";
-              console.log("existing fb status", { live, status: snap?.marketplace_listing?.facebook?.status });
-              if (live) { console.log("skip: already live"); console.groupEnd?.(); return; }
+
+              // Normalize Facebook row from marketplace_listing or marketplace_listings
+              const listings = snap?.marketplace_listing || snap?.marketplace_listings || {};
+              let fbRow =
+                listings?.facebook ??
+                listings?.Facebook ??
+                listings?.["2"] ??
+                null;
+
+              // If listings is an array or generic object, try to find a row with slug 'facebook' or marketplace_id = 2
+              if (!fbRow) {
+                if (Array.isArray(listings)) {
+                  fbRow = listings.find(r =>
+                    String(r?.slug || "").toLowerCase() === "facebook" ||
+                    Number(r?.marketplace_id) === 2
+                  ) || null;
+                } else if (listings && typeof listings === "object") {
+                  for (const key of Object.keys(listings)) {
+                    const row = listings[key];
+                    if (!row || typeof row !== "object") continue;
+                    const slug = String(row.slug || "").toLowerCase();
+                    const mpId = Number(row.marketplace_id);
+                    if (slug === "facebook" || mpId === 2) {
+                      fbRow = row;
+                      break;
+                    }
+                  }
+                }
+              }
+
+              const statusRaw =
+                (fbRow && (fbRow.status ?? fbRow.listing_status ?? fbRow.state)) || "";
+              const st = String(statusRaw).trim().toLowerCase();
+              const alreadyListed = st === "live" || st === "listed";
+
+              console.log("existing fb status", {
+                statusRaw,
+                normalized: st,
+                alreadyListed,
+              });
+
+              if (alreadyListed) {
+                console.log("skip: already live/listed");
+                console.groupEnd?.();
+                return;
+              }
+
             } catch (e) {
               console.warn("fb status check failed", e);
             }
@@ -2281,7 +2343,8 @@ function setMarketplaceVisibility() {
           
               console.groupCollapsed("[intake.js] facebook:intake → begin");
               setFacebookStatus("Publishing…", { tone: "info" });
-              console.log("[intake.js] payload echo", payload);   // keep an echo here too
+              console.log("[intake.js] payload echo", payload);
+
               // Kick a short, one-time poll while the FB tab runs (max ~15s)
               (function pollForFlipOnce() {
                 let ticks = 0;
@@ -2648,6 +2711,11 @@ document.addEventListener("intake:item-changed", () => refreshInventory({ force:
             document.getElementById("ebay_bestOffer")?.dispatchEvent(new Event("change"));
             document.getElementById("ebay_promote")?.dispatchEvent(new Event("change"));
           } catch {}
+
+          // 4) Re-check validity now that pre-selected marketplace defaults are applied
+          try {
+            computeValidity();
+          } catch {}
         } catch {}
       }
     
@@ -2827,53 +2895,117 @@ document.addEventListener("intake:item-changed", () => refreshInventory({ force:
       activate(tabDrafts, paneDrafts);
     })();
 
-    // [intake.debug] Targeted fetch logger for /api/inventory/{drafts|recent}
+    // [intake.debug] Targeted fetch logger – instrumentation for edge cases
     (function rpInstrumentFetchOnce() {
-      try {
-        const g = window;
-        if (!g || !g.fetch || g.fetch.__rpInventoryWrapped) return;
-        const orig = g.fetch.bind(g);
-        g.fetch = async function(input, init) {
-          const url = (typeof input === "string") ? input : (input && input.url) || "";
-          const isDrafts = /\/api\/inventory\/drafts?/i.test(url);
-          const isRecent = /\/api\/inventory\/recent/i.test(url);
-          const watch = isDrafts || isRecent;
-    
-          if (!watch) return orig(input, init);
-    
-          const t0 = performance.now();
-          console.groupCollapsed("[intake.debug] fetch →", url);
-          try {
-            console.log("request", { method: (init && init.method) || "GET", headers: (init && init.headers) || undefined });
-            const res = await orig(input, init);
-            console.log("response", { status: res.status, ok: res.ok, type: res.type });
-            try {
-              const clone = res.clone();
-              const text = await clone.text();
-              let rows = null, ok = null, parsed = null;
-              try { parsed = JSON.parse(text); } catch {}
-              if (parsed && parsed.rows) rows = Array.isArray(parsed.rows) ? parsed.rows.length : null;
-              if (parsed && typeof parsed.ok !== "undefined") ok = parsed.ok;
-              console.log("body.peek", { ok, rows, bytes: text.length });
-            } catch (e) {
-              console.warn("peek.body.failed", String(e));
-            }
-            return res;
-          } catch (err) {
-            console.error("fetch.error", err);
-            throw err;
-          } finally {
-            console.log("elapsed_ms", Math.round(performance.now() - t0));
-            console.groupEnd?.();
+      if (window.__rpFetchInstrumented) return;
+      window.__rpFetchInstrumented = true;
+
+      const origFetch = window.fetch;
+      if (!origFetch) return;
+
+      window.fetch = async (...args) => {
+        const [input, init] = args;
+        const url = (typeof input === "string") ? input : input?.url;
+        const started = performance.now();
+        try {
+          const res = await origFetch(...args);
+          const ms = Math.round(performance.now() - started);
+          if (url && String(url).includes("/api/inventory")) {
+            console.log("[intake.fetch]", { url, status: res.status, ms });
           }
-        };
-        g.fetch.__rpInventoryWrapped = true;
-      } catch (e) {
-        console.warn("rpInstrumentFetchOnce.failed", e);
+          return res;
+        } catch (err) {
+          const ms = Math.round(performance.now() - started);
+          if (url && String(url).includes("/api/inventory")) {
+            console.error("[intake.fetch.error]", { url, ms, err });
+          }
+          throw err;
+        }
+      };
+    })();
+
+     // Inventory Image Viewer: click thumbnails in Active Inventory to open a lightbox
+    (function wireInventoryImageViewer() {
+      try {
+        const dialog   = document.getElementById("inventoryImageViewer");
+        const imgTarget = document.getElementById("inventoryImageViewerImg");
+        const tbody    = document.getElementById("recentInventoryTbody");
+
+        // If any of the pieces are missing, quietly no-op
+        if (!dialog || !imgTarget || !tbody) return;
+
+        const closeBtn = dialog.querySelector("button[type='submit']");
+
+        // Open on thumbnail click
+        tbody.addEventListener("click", (event) => {
+          const target = event.target;
+          if (!(target instanceof HTMLElement)) return;
+
+          // Find the nearest <img> inside the clicked cell
+          const img = target.closest("img");
+          if (!img) return;
+
+          const src =
+            img.getAttribute("data-full-src") ||
+            img.getAttribute("src");
+
+          if (!src) return;
+
+          event.preventDefault();
+
+          imgTarget.src = src;
+          imgTarget.alt = img.getAttribute("alt") || "Item image";
+
+          if (typeof dialog.showModal === "function") {
+            dialog.showModal();
+          } else if (typeof dialog.show === "function") {
+            dialog.show();
+          } else {
+            // Very old browsers: fall back to setting the open attribute
+            dialog.setAttribute("open", "true");
+          }
+        });
+
+        // Explicit Close button wiring (don’t rely solely on form method="dialog")
+        if (closeBtn) {
+          closeBtn.addEventListener("click", (ev) => {
+            ev.preventDefault();
+            try {
+              dialog.close();
+            } catch {
+              dialog.removeAttribute("open");
+            }
+          });
+        }
+
+        // Click on backdrop (outside card) closes the dialog
+        dialog.addEventListener("click", (ev) => {
+          if (ev.target === dialog) {
+            try {
+              dialog.close();
+            } catch {
+              dialog.removeAttribute("open");
+            }
+          }
+        });
+
+        // Escape key closes the dialog when open
+        document.addEventListener("keydown", (ev) => {
+          if (ev.key === "Escape" && dialog.open) {
+            try {
+              dialog.close();
+            } catch {
+              dialog.removeAttribute("open");
+            }
+          }
+        });
+      } catch (err) {
+        console.warn("[intake.js] wireInventoryImageViewer failed", err);
       }
     })();
     
-    // --- [NEW] Submission wiring: both buttons call POST /api/inventory/intake ---
+    // --- [NEW] Submission wiring: both buttons call POST /api/inventory/intake
+
     function valByIdOrLabel(id, label) {
       const el = id ? document.getElementById(id) : null;
       if (el) return el.value ?? "";
@@ -3210,6 +3342,12 @@ document.addEventListener("intake:item-changed", () => refreshInventory({ force:
       // DEBUG (short): confirm server accepted and returned item_id/status
       if (res?.ok) {
         console.log("[intake] server.ok item_id=", res.item_id, "status=", res.status);
+         // NEW: remember the SKU from the server so Copy for Xeasy can use it
+        try {
+          if (res.sku) {
+            window.__lastKnownSku = String(res.sku).trim();
+          }
+        } catch {}
       }
       // Log non-OK responses with full context before throwing
       if (!res || res.ok === false) {
@@ -3502,6 +3640,20 @@ document.addEventListener("intake:item-changed", () => refreshInventory({ force:
         // Enter view mode (treat as previously-saved edit path). Drafts have no SKU.
         enterViewMode({ item_id, hasSku: !!res?.inventory?.sku });
 
+        // NEW: remember the SKU for Copy-for-Xeasy
+        try {
+          if (res?.inventory?.sku) {
+            window.__lastKnownSku = String(res.inventory.sku).trim();
+          }
+        } catch {}
+        
+      // If this loaded item already has a SKU, enable "Copy for Xeasy" immediately
+      if (res?.inventory?.sku) {
+        try {
+          enableCopyXeasy(true);
+        } catch {}
+      }
+        
       } catch (err) {
         console.error("drafts:load:error", err);
         alert("Failed to load draft.");
@@ -3574,6 +3726,65 @@ document.addEventListener("intake:item-changed", () => refreshInventory({ force:
 
      // Make loadDrafts available to the refresh bus declared earlier
       try { window.__loadDrafts = loadDrafts; } catch {}
+
+      function extractLiveMarketplaces(row) {
+        try {
+          // Backend: /api/inventory/recent should return `row.marketplaces`
+          // as an array of { slug, name, status, icon_url, remote_url? }.
+          const marketplaces = Array.isArray(row?.marketplaces) ? row.marketplaces : [];
+      
+          return marketplaces
+            .filter((mp) => {
+              const status = String(mp.status || "").toLowerCase();
+              return status === "live" && mp.icon_url;
+            })
+            .map((mp) => ({
+              slug: mp.slug || null,
+              name: mp.name || mp.slug || "",
+              icon_url: mp.icon_url,
+              href: mp.remote_url || mp.url || null,
+            }));
+        } catch {
+          return [];
+        }
+      }
+      
+      /**
+       * Render a secondary row that shows marketplace icons for an inventory item.
+       * Returns a <tr> element, or null if there are no live marketplaces.
+       */
+      function renderInventoryMarketplacesRow(row) {
+        const live = extractLiveMarketplaces(row);
+        if (!live.length) return null;
+      
+        const tr = document.createElement("tr");
+        tr.className = "inventory-marketplaces-row border-b";
+      
+        if (row && row.item_id != null) {
+          tr.dataset.itemId = row.item_id;
+          tr.dataset.rowKind = "marketplaces";
+        }
+      
+        const iconsHtml = live
+          .map(
+            (mp) => `
+              <div class="inventory-marketplace-icon" title="${mp.name || ""}">
+                <img src="${mp.icon_url}" alt="${mp.name || ""}" loading="lazy">
+              </div>
+            `
+          )
+          .join("");
+      
+        tr.innerHTML = `
+          <td class="px-3 pt-1 pb-3" colspan="8">
+            <div class="inventory-marketplaces-strip">
+              ${iconsHtml}
+            </div>
+          </td>
+        `;
+      
+        return tr;
+      }
       
       /** Render a single inventory row (Active items) */
       function renderInventoryRow(row) {
@@ -3585,11 +3796,29 @@ document.addEventListener("intake:item-changed", () => refreshInventory({ force:
         const title = row.product_short_title || "—";
         const saved = fmtSaved(row.saved_at);
       
+        const imgUrl = row.image_url || "";
         const imgCell = `
           <div class="w-10 h-10 rounded-lg overflow-hidden border" style="width:40px;height:40px">
-            ${row.image_url ? `<img src="${row.image_url}" alt="" style="width:40px;height:40px;object-fit:cover" loading="lazy">` : `<div class="w-10 h-10 bg-gray-100"></div>`}
+            ${
+              imgUrl
+                ? `<button
+                     type="button"
+                     class="w-10 h-10 block inventory-thumb-btn"
+                     data-image-url="${imgUrl}"
+                     aria-label="View image"
+                   >
+                     <img
+                       src="${imgUrl}"
+                       alt=""
+                       style="width:40px;height:40px;object-fit:cover"
+                       loading="lazy"
+                     >
+                   </button>`
+                : `<div class="w-10 h-10 bg-gray-100"></div>`
+            }
           </div>
         `;
+
       
         tr.innerHTML = `
           <td class="px-3 py-2 whitespace-nowrap">${saved}</td>
@@ -3610,18 +3839,36 @@ document.addEventListener("intake:item-changed", () => refreshInventory({ force:
         return tr;
       }
       
-      /** Click handler: Delete an inventory item from the list (Active) */
-      async function handleDeleteInventory(item_id, rowEl) {
+     async function handleDeleteInventory(item_id, rowEl) {
         try {
           const sure = confirm("Delete this item? This cannot be undone.");
           if (!sure) return;
+      
           const res = await api("/api/inventory/intake", {
             method: "POST",
             headers: { "content-type": "application/json" },
-            body: JSON.stringify({ action: "delete", item_id })
+            body: JSON.stringify({ action: "delete", item_id }),
           });
+      
           if (!res || res.ok === false) throw new Error(res?.error || "delete_failed");
-          if (rowEl && rowEl.parentElement) rowEl.parentElement.removeChild(rowEl);
+      
+          // Remove the main inventory row and its optional marketplaces row.
+          if (rowEl && rowEl.parentElement) {
+            const tbody = rowEl.parentElement;
+            const itemId = (rowEl.dataset && rowEl.dataset.itemId) || item_id;
+      
+            tbody.removeChild(rowEl);
+      
+            if (itemId != null) {
+              const mpRow = tbody.querySelector(
+                `tr[data-row-kind="marketplaces"][data-item-id="${itemId}"]`
+              );
+              if (mpRow) {
+                tbody.removeChild(mpRow);
+              }
+            }
+          }
+      
           // also nudge the drafts/inventory panes to stay current
           document.dispatchEvent(new CustomEvent("intake:item-changed"));
         } catch (err) {
@@ -3629,6 +3876,7 @@ document.addEventListener("intake:item-changed", () => refreshInventory({ force:
           alert("Failed to delete item.");
         }
       }
+
 
             async function handleDuplicateInventory(item_id) {
         try {
@@ -3685,11 +3933,11 @@ document.addEventListener("intake:item-changed", () => refreshInventory({ force:
 
 
     
-      /** Load and render the most recent Active inventory (limit 50) */
       async function loadInventory() {
         try {
           const tbody = document.getElementById("recentInventoryTbody");
           if (!tbody) return;
+      
           const res = await api("/api/inventory/recent?limit=50", { method: "GET" });
           if (!res || res.ok === false) throw new Error(res?.error || "inventory_failed");
           const rows = Array.isArray(res.rows) ? res.rows : [];
@@ -3703,27 +3951,42 @@ document.addEventListener("intake:item-changed", () => refreshInventory({ force:
           }
       
           for (const r of rows) {
-            const tr = renderInventoryRow(r);
-            tbody.appendChild(tr);
+            const mainRow = renderInventoryRow(r);
+            if (mainRow) {
+              tbody.appendChild(mainRow);
+            }
+      
+            const mpRow = renderInventoryMarketplacesRow(r);
+            if (mpRow) {
+              tbody.appendChild(mpRow);
+            }
           }
       
           // Wire row buttons
           tbody.querySelectorAll("button[data-action]").forEach((btn) => {
             const action = btn.getAttribute("data-action");
             const id = btn.getAttribute("data-item-id");
+
             if (action === "load") {
               // reuse the existing loader; it hydrates photos + fields
               btn.addEventListener("click", () => handleLoadDraft(id));
             } else if (action === "duplicate") {
               btn.addEventListener("click", () => handleDuplicateInventory(id));
             } else if (action === "delete") {
-              btn.addEventListener("click", () => handleDeleteInventory(id, btn.closest("tr")));
+              btn.addEventListener("click", () =>
+                handleDeleteInventory(id, btn.closest("tr"))
+              );
             }
           });
-        } catch (err) {
+
+          // Wire image thumbnail clicks → open shared Image Preview dialog
+            wireInventoryImageLightbox(tbody);
+          } catch (err) {
           console.error("inventory:load:error", err);
         }
       }
+
+
       
       // Expose for refresh bus
       try { window.__loadInventory = loadInventory; } catch {}

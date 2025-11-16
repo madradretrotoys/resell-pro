@@ -26,8 +26,26 @@
   // Shared helpers
   // -----------------------------
   const delay = (ms) => new Promise((r) => setTimeout(r, ms));
-  const humanPause = (min = 250, max = 800) =>
-    delay(min + Math.floor(Math.random() * (max - min + 1)));
+
+    /** Random integer between ms range */
+    function rand(min, max) {
+        return Math.floor(Math.random() * (max - min + 1)) + min;
+    }
+
+    /** Configurable human delays */
+    const HUMAN = {
+        betweenFields: [800, 2400],       // pause between every field
+        typingChar: [40, 180],            // delay between characters
+        descriptionChar: [40, 180],        // slightly faster for desc (but still human)
+        imageStart: [1200, 3200],         // wait before starting image uploads
+        imageBetween: [400, 1100],        // wait between each image
+        imageRenderWait: [2000, 4200],    // wait for Facebook to render thumbnails
+    };
+
+    /** Natural randomized pause */
+    const humanPause = async (min = 400, max = 1200) => {
+        await delay(rand(min, max));
+    };
 
   const PAYLOAD_KEY = "rp_fb_payload";
   const TTL_MS = 5 * 60 * 1000; // 5 minutes
@@ -108,16 +126,27 @@
       el.dispatchEvent(new Event("input", { bubbles: true, composed: true }));
     }
 
-    async function typeReliable(el, text) {
-      if (!el) return;
-      el.focus();
-      setNativeValue(el, "");
-      await humanPause(200, 350);
-      setNativeValue(el, String(text));
-      el.dispatchEvent(new Event("input", { bubbles: true, composed: true }));
-      el.dispatchEvent(new Event("change", { bubbles: true }));
-      el.blur();
-      await humanPause(250, 400);
+    async function typeReliable(el, text, isDescription = false) {
+        if (!el) return;
+        const chars = String(text).split("");
+
+        // Choose speeds
+        const [minC, maxC] = isDescription
+        ? HUMAN.descriptionChar
+        : HUMAN.typingChar;
+
+        el.focus();
+        setNativeValue(el, "");
+        el.dispatchEvent(new Event("input", { bubbles: true }));
+
+        for (const ch of chars) {
+            await delay(rand(minC, maxC));
+            setNativeValue(el, el.value + ch);
+            el.dispatchEvent(new Event("input", { bubbles: true }));
+        }
+
+        await humanPause(...HUMAN.betweenFields);
+        el.blur();
     }
 
     // Log the FULL incoming payload for debugging
@@ -149,31 +178,39 @@
 
     if (fileInput && Array.isArray(payload.images) && payload.images.length) {
       const files = [];
-      for (const url of payload.images.slice(0, 10)) {
-        const blob = await xhrBlob(url);
-        if (!blob) continue;
-        const ext = /\.jpe?g$/i.test(url)
-          ? "jpg"
-          : /\.png$/i.test(url)
-          ? "png"
-          : "webp";
-        const f = new File([blob], `photo_${files.length + 1}.${ext}`, {
-          type: blob.type || `image/${ext}`,
-        });
-        files.push(f);
-        await humanPause(100, 180);
-      }
+      // Wait before starting images (natural)
+        await humanPause(...HUMAN.imageStart);
 
-      if (files.length) {
-        const dt = new DataTransfer();
-        files.forEach((f) => dt.items.add(f));
-        fileInput.files = dt.files;
-        fileInput.dispatchEvent(new Event("change", { bubbles: true }));
-        console.log("[tm] photos attached:", files.length);
-        await delay(2000); // allow previews to render
-      } else {
-        console.warn("[tm] no photos attached (download/CORS failure)");
-      }
+        for (const url of payload.images.slice(0, 10)) {
+            await humanPause(...HUMAN.imageBetween);   // wait between each image
+            const blob = await xhrBlob(url);
+            if (!blob) continue;
+
+            const ext = /\.jpe?g$/i.test(url)
+            ? "jpg"
+            : /\.png$/i.test(url)
+            ? "png"
+            : "webp";
+
+            const f = new File([blob], `photo_${files.length + 1}.${ext}`, {
+                type: blob.type || `image/${ext}`,
+            });
+            files.push(f);
+        }
+
+        // Apply images
+        if (files.length) {
+            const dt = new DataTransfer();
+            files.forEach((f) => dt.items.add(f));
+            fileInput.files = dt.files;
+            fileInput.dispatchEvent(new Event("change", { bubbles: true }));
+
+            // Longer, randomized rendering time
+            await humanPause(...HUMAN.imageRenderWait);
+
+        } else {
+            console.warn("[tm] no photos attached (download/CORS failure)");
+        }
     } else {
       console.warn("[tm] no fileInput or empty payload.images");
     }
@@ -207,18 +244,36 @@
 
     // Title
     await typeReliable(titleBox, payload.title || "");
+    await humanPause(...HUMAN.betweenFields);
 
     // Price
+
     if (priceBox) {
       const priceNum = Number.isFinite(Number(payload.price)) ? Number(payload.price) : 0;
-      await typeReliable(priceBox, priceNum.toFixed(2));
+      const priceStr = priceNum.toFixed(2);
+
+      // Use a single direct setNativeValue for price to avoid FB mis-parsing typed decimals.
+      try {
+        priceBox.focus();
+        setNativeValue(priceBox, "");
+        setNativeValue(priceBox, priceStr);
+        priceBox.blur();
+      } catch (e) {
+        console.warn("[tm] priceBox setNativeValue failed, falling back to typeReliable", e);
+        await typeReliable(priceBox, priceStr);
+      }
+
+      await humanPause(...HUMAN.betweenFields);
+
       // In some FB variants, typing price can trigger a re-render that clears Title — re-assert Title once.
       if (titleBox && (!titleBox.value || titleBox.value.trim() === "" || /^\d/.test(titleBox.value))) {
         await typeReliable(titleBox, payload.title || "");
+        await humanPause(...HUMAN.betweenFields);
       }
     } else {
       console.warn("[tm] priceBox not found — leaving Price blank to avoid typing into Title.");
     }
+
 
     // Description (textarea or contenteditable)
     if (descBox) {
@@ -230,6 +285,7 @@
         await humanPause();
       } else {
         await typeReliable(descBox, payload.description || "");
+        await humanPause(...HUMAN.betweenFields);
       }
     }
 
@@ -293,6 +349,7 @@
 
     // Immediately populate SKU once after description/title/price have been set.
     await fillSku(true);
+    await humanPause(...HUMAN.betweenFields);
 
     // ------- 3) category / condition / availability -------
     async function pickFromMenu(triggerMatch, searchText, optionMatch) {
@@ -608,7 +665,7 @@
           visible: !!(fresh.offsetParent !== null),
           ariaDisabled: aria2
         });
-
+        await humanPause(...HUMAN.betweenFields);
         await hardClick(fresh);
 
         // wait for the audience step to load
@@ -632,6 +689,7 @@
       // reuse the existing publish finder/logic through clickPublish()
       // (but prefer a short human pause first)
       await delay(1800);
+      await humanPause(...HUMAN.betweenFields);
       return await clickPublish();
     }
 
