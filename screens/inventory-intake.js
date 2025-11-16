@@ -3713,18 +3713,36 @@ document.addEventListener("intake:item-changed", () => refreshInventory({ force:
         return tr;
       }
       
-      /** Click handler: Delete an inventory item from the list (Active) */
-      async function handleDeleteInventory(item_id, rowEl) {
+     async function handleDeleteInventory(item_id, rowEl) {
         try {
           const sure = confirm("Delete this item? This cannot be undone.");
           if (!sure) return;
+      
           const res = await api("/api/inventory/intake", {
             method: "POST",
             headers: { "content-type": "application/json" },
-            body: JSON.stringify({ action: "delete", item_id })
+            body: JSON.stringify({ action: "delete", item_id }),
           });
+      
           if (!res || res.ok === false) throw new Error(res?.error || "delete_failed");
-          if (rowEl && rowEl.parentElement) rowEl.parentElement.removeChild(rowEl);
+      
+          // Remove the main inventory row and its optional marketplaces row.
+          if (rowEl && rowEl.parentElement) {
+            const tbody = rowEl.parentElement;
+            const itemId = (rowEl.dataset && rowEl.dataset.itemId) || item_id;
+      
+            tbody.removeChild(rowEl);
+      
+            if (itemId != null) {
+              const mpRow = tbody.querySelector(
+                `tr[data-row-kind="marketplaces"][data-item-id="${itemId}"]`
+              );
+              if (mpRow) {
+                tbody.removeChild(mpRow);
+              }
+            }
+          }
+      
           // also nudge the drafts/inventory panes to stay current
           document.dispatchEvent(new CustomEvent("intake:item-changed"));
         } catch (err) {
@@ -3732,6 +3750,7 @@ document.addEventListener("intake:item-changed", () => refreshInventory({ force:
           alert("Failed to delete item.");
         }
       }
+
 
             async function handleDuplicateInventory(item_id) {
         try {
