@@ -2863,53 +2863,77 @@ document.addEventListener("intake:item-changed", () => refreshInventory({ force:
       activate(tabDrafts, paneDrafts);
     })();
 
-    // [intake.debug] Targeted fetch logger for /api/inventory/{drafts|recent}
+    // [intake.debug] Targeted fetch logger – instrumentation for edge cases
     (function rpInstrumentFetchOnce() {
-      try {
-        const g = window;
-        if (!g || !g.fetch || g.fetch.__rpInventoryWrapped) return;
-        const orig = g.fetch.bind(g);
-        g.fetch = async function(input, init) {
-          const url = (typeof input === "string") ? input : (input && input.url) || "";
-          const isDrafts = /\/api\/inventory\/drafts?/i.test(url);
-          const isRecent = /\/api\/inventory\/recent/i.test(url);
-          const watch = isDrafts || isRecent;
-    
-          if (!watch) return orig(input, init);
-    
-          const t0 = performance.now();
-          console.groupCollapsed("[intake.debug] fetch →", url);
-          try {
-            console.log("request", { method: (init && init.method) || "GET", headers: (init && init.headers) || undefined });
-            const res = await orig(input, init);
-            console.log("response", { status: res.status, ok: res.ok, type: res.type });
-            try {
-              const clone = res.clone();
-              const text = await clone.text();
-              let rows = null, ok = null, parsed = null;
-              try { parsed = JSON.parse(text); } catch {}
-              if (parsed && parsed.rows) rows = Array.isArray(parsed.rows) ? parsed.rows.length : null;
-              if (parsed && typeof parsed.ok !== "undefined") ok = parsed.ok;
-              console.log("body.peek", { ok, rows, bytes: text.length });
-            } catch (e) {
-              console.warn("peek.body.failed", String(e));
-            }
-            return res;
-          } catch (err) {
-            console.error("fetch.error", err);
-            throw err;
-          } finally {
-            console.log("elapsed_ms", Math.round(performance.now() - t0));
-            console.groupEnd?.();
+      if (window.__rpFetchInstrumented) return;
+      window.__rpFetchInstrumented = true;
+
+      const origFetch = window.fetch;
+      if (!origFetch) return;
+
+      window.fetch = async (...args) => {
+        const [input, init] = args;
+        const url = (typeof input === "string") ? input : input?.url;
+        const started = performance.now();
+        try {
+          const res = await origFetch(...args);
+          const ms = Math.round(performance.now() - started);
+          if (url && String(url).includes("/api/inventory")) {
+            console.log("[intake.fetch]", { url, status: res.status, ms });
           }
-        };
-        g.fetch.__rpInventoryWrapped = true;
-      } catch (e) {
-        console.warn("rpInstrumentFetchOnce.failed", e);
+          return res;
+        } catch (err) {
+          const ms = Math.round(performance.now() - started);
+          if (url && String(url).includes("/api/inventory")) {
+            console.error("[intake.fetch.error]", { url, ms, err });
+          }
+          throw err;
+        }
+      };
+    })();
+
+    // Inventory Image Viewer: click thumbnails in Active Inventory to open a lightbox
+    (function wireInventoryImageViewer() {
+      try {
+        const dialog = document.getElementById("inventoryImageViewer");
+        const imgTarget = document.getElementById("inventoryImageViewerImg");
+        const tbody = document.getElementById("recentInventoryTbody");
+
+        // If any of the pieces are missing, quietly no-op
+        if (!dialog || !imgTarget || !tbody) return;
+
+        tbody.addEventListener("click", (event) => {
+          const target = event.target;
+          if (!(target instanceof HTMLElement)) return;
+
+          // Find the nearest <img> inside the clicked cell
+          const img = target.closest("img");
+          if (!img) return;
+
+          const src =
+            img.getAttribute("data-full-src") ||
+            img.getAttribute("src");
+
+          if (!src) return;
+
+          event.preventDefault();
+
+          imgTarget.src = src;
+          imgTarget.alt = img.getAttribute("alt") || "Item image";
+
+          if (typeof dialog.showModal === "function") {
+            dialog.showModal();
+          } else if (typeof dialog.show === "function") {
+            dialog.show();
+          }
+        });
+      } catch (err) {
+        console.warn("[intake.js] wireInventoryImageViewer failed", err);
       }
     })();
     
-    // --- [NEW] Submission wiring: both buttons call POST /api/inventory/intake ---
+    // --- [NEW] Submission wiring: both buttons call POST /api/inventory/intake
+
     function valByIdOrLabel(id, label) {
       const el = id ? document.getElementById(id) : null;
       if (el) return el.value ?? "";
