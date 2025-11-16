@@ -245,11 +245,26 @@
     // Title
     await typeReliable(titleBox, payload.title || "");
     await humanPause(...HUMAN.betweenFields);
+
     // Price
+
     if (priceBox) {
       const priceNum = Number.isFinite(Number(payload.price)) ? Number(payload.price) : 0;
-      await typeReliable(priceBox, priceNum.toFixed(2));
+      const priceStr = priceNum.toFixed(2);
+
+      // Use a single direct setNativeValue for price to avoid FB mis-parsing typed decimals.
+      try {
+        priceBox.focus();
+        setNativeValue(priceBox, "");
+        setNativeValue(priceBox, priceStr);
+        priceBox.blur();
+      } catch (e) {
+        console.warn("[tm] priceBox setNativeValue failed, falling back to typeReliable", e);
+        await typeReliable(priceBox, priceStr);
+      }
+
       await humanPause(...HUMAN.betweenFields);
+
       // In some FB variants, typing price can trigger a re-render that clears Title — re-assert Title once.
       if (titleBox && (!titleBox.value || titleBox.value.trim() === "" || /^\d/.test(titleBox.value))) {
         await typeReliable(titleBox, payload.title || "");
@@ -258,6 +273,7 @@
     } else {
       console.warn("[tm] priceBox not found — leaving Price blank to avoid typing into Title.");
     }
+
 
     // Description (textarea or contenteditable)
     if (descBox) {
