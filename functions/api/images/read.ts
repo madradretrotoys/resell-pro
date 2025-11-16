@@ -11,6 +11,19 @@ export const onRequestGet: PagesFunction = async ({ request, env }) => {
   const key = url.searchParams.get("key") || "";
   if (!tenant_id || !key) return notFound();
 
+  // Handle preflight (defensive; GETs for images usually won’t hit this, but it’s safe to support)
+  if (request.method === "OPTIONS") {
+    const preflightHeaders = new Headers();
+    const origin = request.headers.get("origin") || "*";
+    preflightHeaders.set("Access-Control-Allow-Origin", origin);
+    preflightHeaders.set("Vary", "Origin");
+    preflightHeaders.set("Access-Control-Allow-Methods", "GET,HEAD,OPTIONS");
+    preflightHeaders.set("Access-Control-Allow-Headers", "*");
+    preflightHeaders.set("Access-Control-Max-Age", "86400");
+    return new Response(null, { status: 204, headers: preflightHeaders });
+  }
+
+  
   const r2_key = `${tenant_id}/${key}`;
   // @ts-ignore
   const obj = await env.R2_IMAGES.get(r2_key);
@@ -21,6 +34,12 @@ export const onRequestGet: PagesFunction = async ({ request, env }) => {
   headers.set("cache-control", "public, max-age=31536000, immutable");
   headers.set("etag", obj.httpEtag);
 
+  // CORS: allow your app origin (and make it vary on Origin)
+  const origin = request.headers.get("origin") || "*";
+  headers.set("Access-Control-Allow-Origin", origin);
+  headers.set("Vary", "Origin");
+  headers.set("Access-Control-Allow-Methods", "GET,HEAD,OPTIONS");
+  
   return new Response(obj.body, { status: 200, headers });
 };
 // end functions/api/images/read.ts
