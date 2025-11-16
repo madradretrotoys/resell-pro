@@ -3157,11 +3157,7 @@ document.addEventListener("intake:item-changed", () => refreshInventory({ force:
           try { computeValidity(); } catch {}
         }
 
-
-
-
-    
-       function buildPayload(isDraft = false) {
+    function buildPayload(isDraft = false) {
       // helper: drop empty strings/null/undefined
       const prune = (obj) => {
         const out = {};
@@ -3178,9 +3174,18 @@ document.addEventListener("intake:item-changed", () => refreshInventory({ force:
       // Collect all possible fields (strings left as entered; numbers coerced when present)
       const invAll = {
         product_short_title: title,
-        price: (() => { const v = valByIdOrLabel(null, "Price (USD)"); return v !== "" ? Number(v) : undefined; })(),
-        qty: (() => { const v = valByIdOrLabel(null, "Qty"); return v !== "" ? Number(v) : undefined; })(),
-        cost_of_goods: (() => { const v = valByIdOrLabel(null, "Cost of Goods (USD)"); return v !== "" ? Number(v) : undefined; })(),
+        price: (() => {
+          const v = valByIdOrLabel(null, "Price (USD)");
+          return v !== "" ? Number(v) : undefined;
+        })(),
+        qty: (() => {
+          const v = valByIdOrLabel(null, "Qty");
+          return v !== "" ? Number(v) : undefined;
+        })(),
+        cost_of_goods: (() => {
+          const v = valByIdOrLabel(null, "Cost of Goods (USD)");
+          return v !== "" ? Number(v) : undefined;
+        })(),
         category_nm: valByIdOrLabel("categorySelect", "Category"),
         instore_loc: valByIdOrLabel("storeLocationSelect", "Store Location"),
         case_bin_shelf: valByIdOrLabel(null, "Case#/Bin#/Shelf#"),
@@ -3188,59 +3193,129 @@ document.addEventListener("intake:item-changed", () => refreshInventory({ force:
       };
     
       const listingAll = {
-        listing_category_key: valByIdOrLabel("marketplaceCategorySelect", "Marketplace Category"),
-        condition_key:        valByIdOrLabel("conditionSelect", "Condition"),
-        brand_key:            valByIdOrLabel("brandSelect", "Brand"),
-        color_key:            valByIdOrLabel("colorSelect", "Primary Color"),
-        product_description:  valByIdOrLabel(null, "Long Description"),
-        shipping_box_key:     valByIdOrLabel("shippingBoxSelect", "Shipping Box"),
-        weight_lb:  (() => { const v = valByIdOrLabel("shipWeightLb", "Weight (lb)"); return v !== "" ? Number(v) : undefined; })(),
-        weight_oz:  (() => { const v = valByIdOrLabel("shipWeightOz", "Weight (oz)"); return v !== "" ? Number(v) : undefined; })(),
-        shipbx_length: (() => { const v = valByIdOrLabel("shipLength", "Length"); return v !== "" ? Number(v) : undefined; })(),
-        shipbx_width:  (() => { const v = valByIdOrLabel("shipWidth", "Width"); return v !== "" ? Number(v) : undefined; })(),
-        shipbx_height: (() => { const v = valByIdOrLabel("shipHeight", "Height"); return v !== "" ? Number(v) : undefined; })(),
+        listing_category_key: valByIdOrLabel(
+          "marketplaceCategorySelect",
+          "Marketplace Category"
+        ),
+        condition_key: valByIdOrLabel("conditionSelect", "Condition"),
+        brand_key: valByIdOrLabel("brandSelect", "Brand"),
+        color_key: valByIdOrLabel("colorSelect", "Primary Color"),
+        product_description: valByIdOrLabel(null, "Long Description"),
+        shipping_box_key: valByIdOrLabel("shippingBoxSelect", "Shipping Box"),
+        weight_lb: (() => {
+          const v = valByIdOrLabel("shipWeightLb", "Weight (lb)");
+          return v !== "" ? Number(v) : undefined;
+        })(),
+        weight_oz: (() => {
+          const v = valByIdOrLabel("shipWeightOz", "Weight (oz)");
+          return v !== "" ? Number(v) : undefined;
+        })(),
+        shipbx_length: (() => {
+          const v = valByIdOrLabel("shipLength", "Length");
+          return v !== "" ? Number(v) : undefined;
+        })(),
+        shipbx_width: (() => {
+          const v = valByIdOrLabel("shipWidth", "Width");
+          return v !== "" ? Number(v) : undefined;
+        })(),
+        shipbx_height: (() => {
+          const v = valByIdOrLabel("shipHeight", "Height");
+          return v !== "" ? Number(v) : undefined;
+        })(),
       };
-
-      // NEW: eBay marketplace listing fields (maps to app.item_marketplace_listing)
+    
+      // eBay marketplace listing fields (maps to app.item_marketplace_listing)
       const ebayListing = getEbayListingFields();
-
-      if (isDraft) {
-        // Send any non-empty fields for drafts (Basic + Marketplace + eBay listing fields)
-        const inventory = prune(invAll);
-        const listing   = prune(listingAll);
-        const payload = { status: "draft", inventory };
-      
-        if (Object.keys(listing).length > 0) payload.listing = listing;
-
-        // Ensure marketplaces_selected includes the UI selections (including Facebook)
+    
+      // Helper: normalize marketplaces_selected → array of slugs ("ebay", "facebook", ...)
+      const gatherSelectedMarketplaces = () => {
+        const selectedSlugs = new Set();
+    
+        // 1) From the cached marketplace meta + selectedMarketplaceIds
         try {
-          // Reuse whatever mechanism you already have for tile selection; fallback to data-attributes
-          const selected = new Set(Array.from(document.querySelectorAll('[data-mp-selected="true"]')).map(n => (n.dataset.mpSlug || "").toLowerCase()));
-          // If you store selected IDs elsewhere, merge them here
-          if (!Array.isArray(payload.marketplaces_selected)) payload.marketplaces_selected = [];
-          for (const s of selected) {
-            if (s && !payload.marketplaces_selected.includes(s)) payload.marketplaces_selected.push(s);
+          const rows = (__metaCache?.marketplaces || []);
+          const byId = new Map(
+            rows.map((r) => [
+              Number(r.id),
+              String(r.slug || "").toLowerCase(),
+            ])
+          );
+    
+          for (const id of selectedMarketplaceIds) {
+            const slug = byId.get(Number(id));
+            if (slug) selectedSlugs.add(slug);
           }
-        } catch { /* no-op */ }
-        
-        // eBay-specific fields (existing)
-        if (Object.keys(ebayListing).length > 0) {
-          payload.marketplace_listing = { ...(payload.marketplace_listing || {}), ebay: ebayListing };
+        } catch {
+          // no-op
         }
-
-        // NEW: Facebook flag so the server upserts the stub row
-        if (payload.marketplaces_selected.includes("facebook")) {
-          payload.marketplace_listing = { ...(payload.marketplace_listing || {}), facebook: {} };
+    
+        // 2) DOM fallback: tiles marked with data-mp-selected="true"
+        try {
+          const nodes = document.querySelectorAll(
+            '[data-mp-selected="true"]'
+          );
+          nodes.forEach((n) => {
+            const slug = String(n.dataset.mpSlug || "").toLowerCase();
+            if (slug) selectedSlugs.add(slug);
+          });
+        } catch {
+          // no-op
         }
-
-          // If this is a duplicated brand-new item, send source images for server-side copy
-          if (
-             !__currentItemId &&
-            __duplicateCarryPhotos &&
-            Array.isArray(__duplicateSourceImages) &&
-            __duplicateSourceImages.length > 0
-          ) {
-            payload.duplicate_images = __duplicateSourceImages.map((img, idx) => ({
+    
+        return Array.from(selectedSlugs.values());
+      };
+    
+      const marketplaces_selected = gatherSelectedMarketplaces();
+    
+      // Helper: attach marketplace_listing (ebay, facebook stub, etc.)
+      const attachMarketplaceListing = (payload) => {
+        const listingObj = {};
+    
+        // eBay-specific fields
+        if (ebayListing && Object.keys(ebayListing).length > 0) {
+          listingObj.ebay = ebayListing;
+        }
+    
+        // Facebook stub so the server can upsert / track the row
+        if (Array.isArray(marketplaces_selected) &&
+            marketplaces_selected.includes("facebook")) {
+          if (!listingObj.facebook) {
+            listingObj.facebook = {};
+          }
+        }
+    
+        if (Object.keys(listingObj).length > 0) {
+          payload.marketplace_listing = listingObj;
+        }
+      };
+    
+      // --------------------
+      // Draft items
+      // --------------------
+      if (isDraft) {
+        const inventory = prune(invAll);
+        const listing = prune(listingAll);
+        const payload = { status: "draft", inventory };
+    
+        if (Object.keys(listing).length > 0) {
+          payload.listing = listing;
+        }
+    
+        if (marketplaces_selected.length > 0) {
+          payload.marketplaces_selected = marketplaces_selected;
+        }
+    
+        attachMarketplaceListing(payload);
+    
+        // If this is a duplicated brand-new item, send source images for server-side copy
+        if (
+          !__currentItemId &&
+          __duplicateCarryPhotos &&
+          Array.isArray(__duplicateSourceImages) &&
+          __duplicateSourceImages.length > 0
+        ) {
+          payload.duplicate_images = __duplicateSourceImages.map(
+            (img, idx) => ({
               r2_key: img.r2_key,
               cdn_url: img.cdn_url,
               bytes: img.bytes,
@@ -3248,30 +3323,78 @@ document.addEventListener("intake:item-changed", () => refreshInventory({ force:
               width: img.width ?? null,
               height: img.height ?? null,
               sha256: img.sha256 ?? null,
-              sort_order: typeof img.sort_order === "number" ? img.sort_order : idx,
+              sort_order:
+                typeof img.sort_order === "number"
+                  ? img.sort_order
+                  : idx,
               is_primary: !!img.is_primary,
-            }));
-          }
-
-          return payload;
-       }
-
+            })
+          );
+        }
     
-      // Active/new items
-      const salesChannel = valByIdOrLabel("salesChannelSelect", "Sales Channel");
+        return payload;
+      }
+    
+      // --------------------
+      // Active / new items
+      // --------------------
+      const salesChannel = valByIdOrLabel(
+        "salesChannelSelect",
+        "Sales Channel"
+      );
       const isStoreOnly = /store only/i.test(String(salesChannel || ""));
       const inventory = prune(invAll);
     
+      // Store-only: no marketplaces / listing needed
       if (isStoreOnly) {
         const payload = { inventory };
-
+    
         if (
-         !__currentItemId &&
-           __duplicateCarryPhotos &&
-           Array.isArray(__duplicateSourceImages) &&
-           __duplicateSourceImages.length > 0
+          !__currentItemId &&
+          __duplicateCarryPhotos &&
+          Array.isArray(__duplicateSourceImages) &&
+          __duplicateSourceImages.length > 0
         ) {
-          payload.duplicate_images = __duplicateSourceImages.map((img, idx) => ({
+          payload.duplicate_images = __duplicateSourceImages.map(
+            (img, idx) => ({
+              r2_key: img.r2_key,
+              cdn_url: img.cdn_url,
+              bytes: img.bytes,
+              content_type: img.content_type,
+              width: img.width ?? null,
+              height: img.height ?? null,
+              sha256: img.sha256 ?? null,
+              sort_order:
+                typeof img.sort_order === "number"
+                  ? img.sort_order
+                  : idx,
+              is_primary: !!img.is_primary,
+            })
+          );
+        }
+    
+        return payload;
+      }
+    
+      // Online / marketplace items
+      const listing = prune(listingAll);
+      const payload = { inventory, listing };
+    
+      if (marketplaces_selected.length > 0) {
+        payload.marketplaces_selected = marketplaces_selected;
+      }
+    
+      attachMarketplaceListing(payload);
+    
+      // If this is a duplicated brand-new item, send source images for server-side copy
+      if (
+        !__currentItemId &&
+        __duplicateCarryPhotos &&
+        Array.isArray(__duplicateSourceImages) &&
+        __duplicateSourceImages.length > 0
+      ) {
+        payload.duplicate_images = __duplicateSourceImages.map(
+          (img, idx) => ({
             r2_key: img.r2_key,
             cdn_url: img.cdn_url,
             bytes: img.bytes,
@@ -3279,45 +3402,23 @@ document.addEventListener("intake:item-changed", () => refreshInventory({ force:
             width: img.width ?? null,
             height: img.height ?? null,
             sha256: img.sha256 ?? null,
-            sort_order: typeof img.sort_order === "number" ? img.sort_order : idx,
+            sort_order:
+              typeof img.sort_order === "number"
+                ? img.sort_order
+                : idx,
             is_primary: !!img.is_primary,
-          }));
-        }
-        return payload ;
+          })
+        );
       }
     
-      const listing = prune(listingAll);
-      const marketplaces_selected = Array.from(selectedMarketplaceIds.values());
-
-      const payload = { inventory, listing, marketplaces_selected };
-
-      if (Object.keys(ebayListing).length > 0) {
-        // Backend: upsert into app.item_marketplace_listing when present
-        payload.marketplace_listing = { ebay: ebayListing };
-      }
-
-      // If this is a duplicated brand-new item, send source images for server-side copy
-      if (
-        !__currentItemId &&
-         __duplicateCarryPhotos &&
-         Array.isArray(__duplicateSourceImages) &&
-         __duplicateSourceImages.length > 0
-      ) {
-        payload.duplicate_images = __duplicateSourceImages.map((img, idx) => ({
-          r2_key: img.r2_key,
-          cdn_url: img.cdn_url,
-          bytes: img.bytes,
-          content_type: img.content_type,
-          width: img.width ?? null,
-          height: img.height ?? null,
-          sha256: img.sha256 ?? null,
-          sort_order: typeof img.sort_order === "number" ? img.sort_order : idx,
-          is_primary: !!img.is_primary,
-        }));
-      }
-         
       return payload;
     }
+
+
+
+
+    
+         
 
 
      async function submitIntake(mode = "active") {
