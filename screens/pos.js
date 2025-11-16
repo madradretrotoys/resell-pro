@@ -1,7 +1,7 @@
 // POS Screen (Cloudflare + Neon)
 import { ensureSession } from "../assets/js/auth.js";
 import { api } from "../assets/js/api.js";
-import { showToast, applyButtonGroupColors } from "../assets/js/ui.js"; // ui.js exports
+import { showToast, applyButtonGroupColors, wireInventoryImageLightbox } from "../assets/js/ui.js"; // ui.js exports
 // Local helper: ui.js doesn't export fmtCurrency in this repo
 const fmtCurrency = (n) => {
   const v = Number(n || 0);
@@ -334,7 +334,7 @@ export async function init(ctx) {
       return;
     }
 
-    el.results.innerHTML = items.map((it) => {
+       el.results.innerHTML = items.map((it) => {
       // API returns: item_id, sku, product_short_title, price, qty, instore_loc, case_bin_shelf, image_url
       const meta = [
         it.sku ? String(it.sku) : "",
@@ -344,9 +344,22 @@ export async function init(ctx) {
         (it.case_bin_shelf || "")
       ].filter(Boolean).join(" · ");
 
-       // Normalize thumbnails: fixed box + object-fit cover
+       // Normalize thumbnails: fixed box + object-fit cover, and make clickable
       const img = it.image_url
-        ? `<img class="pos-thumb" src="${escapeHtml(it.image_url)}" alt="" width="96" height="96" loading="lazy">`
+        ? `<button
+             type="button"
+             class="inventory-thumb-btn"
+             data-image-url="${escapeHtml(it.image_url)}"
+           >
+             <img
+               class="pos-thumb"
+               src="${escapeHtml(it.image_url)}"
+               alt="Item image"
+               width="96"
+               height="96"
+               loading="lazy"
+             >
+           </button>`
         : `<div class="pos-thumb pos-thumb--ph" style="width:96px;height:96px;"></div>`;
 
       return `
@@ -370,7 +383,11 @@ export async function init(ctx) {
         </div>`;
     }).join("");
 
+    // Wire the shared inventory image lightbox for the POS results
+    wireInventoryImageLightbox(el.results);
+
     el.results.onclick = (e) => {
+
       const btn = e.target.closest("button[data-add]");
       if (!btn) return;
       const data = JSON.parse(btn.getAttribute("data-add"));
