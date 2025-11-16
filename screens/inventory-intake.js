@@ -369,7 +369,7 @@ export async function init() {
   
   // Replace
   async function replaceImage(oldModel, newFile) {
-    const ds = await downscaleToBlob(f);
+    const ds = await downscaleToBlob(newFile);
     if (!ds._rpId) ds._rpId = (crypto?.randomUUID ? crypto.randomUUID() : String(Date.now() + Math.random()));
     if (!ds._previewUrl) ds._previewUrl = URL.createObjectURL(ds);
     await uploadAndAttach(ds);
