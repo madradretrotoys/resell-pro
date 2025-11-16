@@ -3157,6 +3157,36 @@ document.addEventListener("intake:item-changed", () => refreshInventory({ force:
           try { computeValidity(); } catch {}
         }
 
+      // Compute per-marketplace intent from the current tile selection.
+    // This is where we encode the “deselect eBay → delete listing” rule.
+    function computeMarketplaceIntent(meta, selectedIds) {
+      const intent = {};
+      try {
+        const rows = (meta?.marketplaces || []);
+        for (const m of rows) {
+          const slug = String(m.slug || "").toLowerCase();
+          if (!slug) continue;
+          const id = Number(m.id);
+          const isSelected = selectedIds.has(id);
+
+          if (slug === "ebay") {
+            // Decision: deselecting the eBay tile == delete the eBay listing
+            intent[slug] = isSelected ? "upsert" : "delete";
+          } else if (slug === "facebook") {
+            // Decision: for Facebook we only have create logic right now.
+            // Deselecting should NOT delete in v1 → just ignore.
+            intent[slug] = isSelected ? "upsert" : "ignore";
+          } else {
+            // Future marketplaces: default to upsert when selected, ignore when not.
+            intent[slug] = isSelected ? "upsert" : "ignore";
+          }
+        }
+      } catch {
+        // fail open — server will fall back to old behavior if intent is missing
+      }
+      return intent;
+    }
+
     function buildPayload(isDraft = false) {
       // helper: drop empty strings/null/undefined
       const prune = (obj) => {
@@ -3168,7 +3198,7 @@ document.addEventListener("intake:item-changed", () => refreshInventory({ force:
         }
         return out;
       };
-    
+      
       const title = valByIdOrLabel(null, "Item Name / Description");
     
       // Collect all possible fields (strings left as entered; numbers coerced when present)
@@ -3266,7 +3296,10 @@ document.addEventListener("intake:item-changed", () => refreshInventory({ force:
       };
     
       const marketplaces_selected = gatherSelectedMarketplaces();
-    
+
+      // Compute explicit marketplace intent snapshot using current tiles
+      const marketplaces_intent = computeMarketplaceIntent(__metaCache, selectedMarketplaceIds);
+
       // Helper: attach marketplace_listing (ebay, facebook stub, etc.)
       const attachMarketplaceListing = (payload) => {
         const listingObj = {};
@@ -3288,6 +3321,14 @@ document.addEventListener("intake:item-changed", () => refreshInventory({ force:
           payload.marketplace_listing = listingObj;
         }
       };
+
+      // Helper: build explicit intent object for the server
+      const buildIntent = () => ({
+        source: "intake",
+        mode: isDraft ? "draft" : "active",
+        inventory: __currentItemId ? "update" : "create",
+        marketplaces: marketplaces_intent
+      });
     
       // --------------------
       // Draft items
@@ -3306,6 +3347,9 @@ document.addEventListener("intake:item-changed", () => refreshInventory({ force:
         }
     
         attachMarketplaceListing(payload);
+
+        // NEW: attach explicit intent
+        payload.intent = buildIntent();
     
         // If this is a duplicated brand-new item, send source images for server-side copy
         if (
@@ -3348,6 +3392,9 @@ document.addEventListener("intake:item-changed", () => refreshInventory({ force:
       // Store-only: no marketplaces / listing needed
       if (isStoreOnly) {
         const payload = { inventory };
+
+        // NEW: still tell the server what we meant to do
+        payload.intent = buildIntent();
     
         if (
           !__currentItemId &&
@@ -3385,6 +3432,9 @@ document.addEventListener("intake:item-changed", () => refreshInventory({ force:
       }
     
       attachMarketplaceListing(payload);
+
+      // NEW: attach explicit intent
+      payload.intent = buildIntent();
     
       // If this is a duplicated brand-new item, send source images for server-side copy
       if (
@@ -3413,6 +3463,7 @@ document.addEventListener("intake:item-changed", () => refreshInventory({ force:
     
       return payload;
     }
+
 
 
 
