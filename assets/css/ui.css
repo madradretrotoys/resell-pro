@@ -106,6 +106,36 @@ label{
   gap: 12px;              /* consistent vertical rhythm between rows */
 }
 
+/* Active Inventory ▸ marketplace icons under each row */
+.inventory-marketplaces-row td {
+  border-top: 0;
+  padding-top: 4px;
+}
+
+.inventory-marketplaces-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.inventory-marketplace-icon {
+  width: 32px;
+  height: 32px;
+  border-radius: 999px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  background: #fff;
+  box-shadow: 0 1px 2px rgba(15,23,42,.12);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.inventory-marketplace-icon img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
 /* Each marketplace row */
 .mp-row {
   display: flex;
