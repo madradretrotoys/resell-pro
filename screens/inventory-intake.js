@@ -3635,6 +3635,12 @@ document.addEventListener("intake:item-changed", () => refreshInventory({ force:
         // Enter view mode (treat as previously-saved edit path). Drafts have no SKU.
         enterViewMode({ item_id, hasSku: !!res?.inventory?.sku });
 
+        // NEW: remember the SKU for Copy-for-Xeasy
+        try {
+          if (res?.inventory?.sku) {
+            window.__lastKnownSku = String(res.inventory.sku).trim();
+          }
+        } catch {}
         
       // If this loaded item already has a SKU, enable "Copy for Xeasy" immediately
       if (res?.inventory?.sku) {
