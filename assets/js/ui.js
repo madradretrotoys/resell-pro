@@ -35,4 +35,60 @@ export function applyButtonGroupColors(root, options = {}){
 export function normalizeButtonGroups(root=document){
   root.querySelectorAll('.btn-group').forEach((g)=>applyButtonGroupColors(g));
 }
+
+/**
+ * Shared Inventory Image Lightbox helper.
+ *
+ * Any screen can:
+ *   - Include a <dialog id="inventoryImageViewer"> with
+ *       <img id="inventoryImageViewerImg">
+ *   - Render thumbnails/buttons with class "inventory-thumb-btn"
+ *     and data-image-url="https://..."
+ *   - Call wireInventoryImageLightbox(container)
+ *
+ * This will bind click handlers that open the dialog with the
+ * clicked image URL, avoiding duplicate bindings on re-render.
+ */
+export function wireInventoryImageLightbox(root = document) {
+  try {
+    if (!root) root = document;
+
+    const viewer    = document.getElementById("inventoryImageViewer");
+    const viewerImg = document.getElementById("inventoryImageViewerImg");
+
+    if (!viewer || !viewerImg) return;
+
+    const buttons = root.querySelectorAll(
+      ".inventory-thumb-btn[data-image-url]"
+    );
+
+    buttons.forEach((btn) => {
+      if (!btn) return;
+
+      // Avoid double-binding when the table re-renders
+      if (btn.dataset.lightboxBound === "1") return;
+      btn.dataset.lightboxBound = "1";
+
+      btn.addEventListener("click", () => {
+        const url = btn.getAttribute("data-image-url");
+        if (!url) return;
+
+        viewerImg.src = url;
+
+        try {
+          if (typeof viewer.showModal === "function") {
+            viewer.showModal();
+          } else {
+            viewer.setAttribute("open", "true");
+          }
+        } catch {
+          viewer.setAttribute("open", "true");
+        }
+      });
+    });
+  } catch (err) {
+    console.error("[ui] wireInventoryImageLightbox error", err);
+  }
+}
+
 //end ui.js
