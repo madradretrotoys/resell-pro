@@ -3688,11 +3688,29 @@ document.addEventListener("intake:item-changed", () => refreshInventory({ force:
         const title = row.product_short_title || "—";
         const saved = fmtSaved(row.saved_at);
       
+        const imgUrl = row.image_url || "";
         const imgCell = `
           <div class="w-10 h-10 rounded-lg overflow-hidden border" style="width:40px;height:40px">
-            ${row.image_url ? `<img src="${row.image_url}" alt="" style="width:40px;height:40px;object-fit:cover" loading="lazy">` : `<div class="w-10 h-10 bg-gray-100"></div>`}
+            ${
+              imgUrl
+                ? `<button
+                     type="button"
+                     class="w-10 h-10 block inventory-thumb-btn"
+                     data-image-url="${imgUrl}"
+                     aria-label="View image"
+                   >
+                     <img
+                       src="${imgUrl}"
+                       alt=""
+                       style="width:40px;height:40px;object-fit:cover"
+                       loading="lazy"
+                     >
+                   </button>`
+                : `<div class="w-10 h-10 bg-gray-100"></div>`
+            }
           </div>
         `;
+
       
         tr.innerHTML = `
           <td class="px-3 py-2 whitespace-nowrap">${saved}</td>
@@ -3840,7 +3858,7 @@ document.addEventListener("intake:item-changed", () => refreshInventory({ force:
           tbody.querySelectorAll("button[data-action]").forEach((btn) => {
             const action = btn.getAttribute("data-action");
             const id = btn.getAttribute("data-item-id");
-      
+
             if (action === "load") {
               // reuse the existing loader; it hydrates photos + fields
               btn.addEventListener("click", () => handleLoadDraft(id));
@@ -3852,10 +3870,33 @@ document.addEventListener("intake:item-changed", () => refreshInventory({ force:
               );
             }
           });
+
+          // Wire image thumbnail clicks → open Image Preview dialog
+          const viewer = document.getElementById("inventoryImageViewer");
+          const viewerImg = document.getElementById("inventoryImageViewerImg");
+
+          if (viewer && viewerImg) {
+            tbody.querySelectorAll(".inventory-thumb-btn[data-image-url]").forEach((btn) => {
+              btn.addEventListener("click", () => {
+                const url = btn.getAttribute("data-image-url");
+                if (!url) return;
+                viewerImg.src = url;
+
+                try {
+                  // Use native dialog API when available
+                  viewer.showModal();
+                } catch {
+                  // Fallback: mark as open if .showModal() is not supported
+                  viewer.setAttribute("open", "true");
+                }
+              });
+            });
+          }
         } catch (err) {
           console.error("inventory:load:error", err);
         }
       }
+
 
       
       // Expose for refresh bus
