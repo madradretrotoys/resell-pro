@@ -299,6 +299,23 @@
             </thead>
             <tbody id="recentInventoryTbody"></tbody>
           </table>
+          <!-- Inventory Image Viewer -->
+          <dialog id="inventoryImageViewer" class="rounded-2xl p-0">
+            <form method="dialog" class="p-3 w-[90vw] max-w-xl">
+              <h3 class="sectionTitle mb-2">Image Preview</h3>
+          
+              <img
+                id="inventoryImageViewerImg"
+                src=""
+                alt="Item Image"
+                class="max-h-[70vh] w-full h-auto object-contain bg-base-200 rounded-lg"
+              />
+          
+              <div class="flex justify-end mt-3">
+                <button class="btn btn-ghost btn-sm" type="submit">Close</button>
+              </div>
+            </form>
+          </dialog>
         </section>
 
         <!-- Bulk Entry pane (placeholder) -->
