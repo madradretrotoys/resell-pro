@@ -410,11 +410,6 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
     const inv = body?.inventory || {};
     const lst = body?.listing || {};
     const ebay = body?.marketplace_listing?.ebay || null;
-
-    // Intent: optional explicit marketplace actions from the intake UI
-    const intent: IntakeIntent = (body?.intent || {}) as IntakeIntent;
-    const intentMarketplaces: Record<string, MarketplaceAction> =
-      intent.marketplaces || {};
     
     // Status: support Option A drafts; default to 'active' for existing flows
     const rawStatus = (body?.status || inv?.item_status || "active");
@@ -423,6 +418,45 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
     
     // Optional: if present, we update instead of insert
     const item_id_in: string | null = body?.item_id ? String(body.item_id) : null;
+
+    // Normalize intent.marketplaces (if provided by the client)
+    const rawIntent = body?.intent || null;
+    const intentMarketplaces: any[] = Array.isArray(rawIntent?.marketplaces)
+      ? rawIntent.marketplaces
+          .map((m: any) => {
+            if (!m) return null;
+            const slug = String(m.slug || "").toLowerCase() || null;
+            const idRaw = (m as any).marketplace_id;
+            const id =
+              idRaw == null
+                ? null
+                : typeof idRaw === "number"
+                ? idRaw
+                : /^\d+$/.test(String(idRaw))
+                ? Number(idRaw)
+                : null;
+            return {
+              marketplace_id: id,
+              slug,
+              selected: !!m.selected,
+              operation: m.operation || null,
+            };
+          })
+          .filter((m: any) => m && (m.marketplace_id != null || m.slug))
+      : [];
+
+    // Canonicalize marketplaces_selected from intent when present so all downstream
+    // logic (including enqueuePublishJobs) sees the same selection/ops.
+    if (intentMarketplaces.length > 0) {
+      const selectedForJobs: Array<number | string> = intentMarketplaces
+        .filter((m: any) => m.selected && m.operation !== "delete")
+        .map((m: any) => {
+          if (m.marketplace_id != null) return m.marketplace_id;
+          return m.slug;
+        })
+        .filter((v: any) => v !== null && v !== undefined);
+      body.marketplaces_selected = selectedForJobs;
+    }
     
     // === DEBUG: show payload routing decisions ===
     console.log("[intake] payload", {
@@ -431,7 +465,8 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
       item_id_in,
       marketplaces_selected: body?.marketplaces_selected ?? null,
       has_ebay_block: !!ebay,
-      listing_keys_present: !!lst && Object.values(lst).some(v => v !== null && v !== undefined && String(v) !== "")
+      listing_keys_present: !!lst && Object.values(lst).some(v => v !== null && v !== undefined && String(v) !== ""),
+      intent_marketplaces: intentMarketplaces
     });
 
 
@@ -800,7 +835,77 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
                 shipbx_width     = EXCLUDED.shipbx_width,
                 shipbx_height    = EXCLUDED.shipbx_height
             `;
-  
+              // Handle per-marketplace DELETE intent (e.g., deselecting the eBay tile on update)
+             if (EBAY_MARKETPLACE_ID && intentMarketplaces.length) {
+               const ebayIntent = intentMarketplaces.find((m: any) => {
+                 const slug = String(m.slug || "").toLowerCase();
+                 const id = m.marketplace_id != null ? Number(m.marketplace_id) : null;
+                 return slug === "ebay" || id === EBAY_MARKETPLACE_ID;
+               });
+               if (ebayIntent?.operation === "delete") {
+                 console.log("[intake] intent.ebay_delete", { item_id, EBAY_MARKETPLACE_ID });
+                 const iml = await sql/*sql*/`
+                   SELECT marketplace_id, mp_offer_id, mp_item_id
+                   FROM app.item_marketplace_listing
+                   WHERE item_id = ${item_id}
+                     AND tenant_id = ${tenant_id}
+                     AND marketplace_id = ${EBAY_MARKETPLACE_ID}
+                     AND (mp_offer_id IS NOT NULL OR mp_item_id IS NOT NULL)
+                 `;
+                 if (iml.length) {
+                   const r: any = iml[0];
+                   const inserted = await sql/*sql*/`
+                     WITH ins AS (
+                       INSERT INTO app.marketplace_publish_jobs
+                         (tenant_id, item_id, marketplace_id, op, status, payload_snapshot)
+                       SELECT
+                         ${tenant_id}, ${item_id}, ${EBAY_MARKETPLACE_ID}, 'delete', 'queued',
+                         ${{
+                           item_id,
+                           tenant_id,
+                           marketplace_id: EBAY_MARKETPLACE_ID,
+                           marketplace_listing: { mp_offer_id: r.mp_offer_id, mp_item_id: r.mp_item_id }
+                         }}
+                       WHERE NOT EXISTS (
+                         SELECT 1
+                           FROM app.marketplace_publish_jobs j
+                          WHERE j.tenant_id      = ${tenant_id}
+                            AND j.item_id        = ${item_id}
+                            AND j.marketplace_id = ${EBAY_MARKETPLACE_ID}
+                            AND j.op             = 'delete'
+                            AND j.status IN ('queued','running')
+                       )
+                       RETURNING job_id
+                     )
+                     SELECT job_id FROM ins
+                     UNION ALL
+                     SELECT j.job_id
+                       FROM app.marketplace_publish_jobs j
+                      WHERE j.tenant_id      = ${tenant_id}
+                        AND j.item_id        = ${item_id}
+                        AND j.marketplace_id = ${EBAY_MARKETPLACE_ID}
+                        AND j.op             = 'delete'
+                        AND j.status IN ('queued','running')
+                      LIMIT 1
+                   `;
+                   const jobId = Array.isArray(inserted) && inserted[0]?.job_id ? String(inserted[0].job_id) : null;
+                   console.log("[intake] intent.ebay_delete_job", { item_id, jobId });
+                   await sql/*sql*/`
+                     UPDATE app.item_marketplace_listing
+                        SET status='delete_pending', updated_at=now()
+                      WHERE item_id=${item_id} AND tenant_id=${tenant_id} AND marketplace_id=${EBAY_MARKETPLACE_ID}
+                   `;
+                 } else {
+                   // No remote id; safe to drop the row entirely
+                   await sql/*sql*/`
+                     DELETE FROM app.item_marketplace_listing
+                      WHERE item_id = ${item_id}
+                        AND tenant_id = ${tenant_id}
+                        AND marketplace_id = ${EBAY_MARKETPLACE_ID}
+                   `;
+                 }
+               }
+             }
             // Upsert selected marketplaces (prototype).
             // eBay gets the rich field set; all other selected marketplaces (e.g., Facebook) get a stub row.
             {
@@ -963,6 +1068,7 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
             status,
             published: false,
             job_ids: job_ids_upd,
+            intent: { marketplaces: intentMarketplaces },
             ms: Date.now() - t0
           }, 200);
         }
@@ -1340,6 +1446,7 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
       status,
       published: false,
       job_ids,
+      intent: { marketplaces: intentMarketplaces },
       ms: Date.now() - t0
     }, 200);
 
