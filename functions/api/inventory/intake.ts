@@ -195,7 +195,7 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
       return upsertFooter(body, sku, instore_loc, case_bin_shelf);
     }
 
-            // === Helper: enqueue marketplace publish jobs (create vs update + no-change short-circuit) ===
+     // === Helper: enqueue marketplace publish jobs (create vs update + no-change short-circuit) ===
     async function enqueuePublishJobs(
       tenant_id: string,
       item_id: string,
@@ -205,22 +205,37 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
       try {
         const rawSel = Array.isArray(body?.marketplaces_selected) ? body.marketplaces_selected : [];
 
-        // Intent: explicit per-marketplace actions from the intake UI
-        const intent: IntakeIntent = (body?.intent || {}) as IntakeIntent;
-        const intentMarketplaces: Record<string, MarketplaceAction> =
-          intent.marketplaces || {};
-
         // Accept slugs (strings) and numeric ids (numbers OR numeric strings)
         let slugs = rawSel
           .filter((v: any) => typeof v === "string" && isNaN(Number(v)) && v.trim() !== "")
           .map((s: string) => s.toLowerCase());
         const ids = rawSel
-          .map((v: any) => (typeof v === "number" && Number.isInteger(v)) ? v
-            : (typeof v === "string" && /^\d+$/.test(v) ? Number(v) : null))
+          .map((v: any) =>
+            typeof v === "number" && Number.isInteger(v)
+              ? v
+              : typeof v === "string" && /^\d+$/.test(v)
+              ? Number(v)
+              : null
+          )
           .filter((n: number | null): n is number => n !== null);
 
+        // Derive a canonical per-marketplace action map (slug -> upsert|delete|ignore)
+        const actionsBySlug: Record<string, MarketplaceAction> = {};
+        if (Array.isArray(intentMarketplaces) && intentMarketplaces.length > 0) {
+          for (const m of intentMarketplaces as any[]) {
+            if (!m) continue;
+            const slug = String(m.slug || "").toLowerCase();
+            if (!slug) continue;
+            const opRaw = String(m.operation || "").toLowerCase();
+            let action: MarketplaceAction = "upsert";
+            if (opRaw === "delete") action = "delete";
+            else if (opRaw === "ignore") action = "ignore";
+            actionsBySlug[slug] = action;
+          }
+        }
+
         // Merge in marketplaces from intent (any non-"ignore" actions)
-        const intentSlugs = Object.entries(intentMarketplaces)
+        const intentSlugs = Object.entries(actionsBySlug)
           .filter(([, action]) => action && action !== "ignore")
           .map(([slug]) => slug.toLowerCase());
 
@@ -236,13 +251,13 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
           slugs,
           ids,
           intentMarketplaces,
+          actionsBySlug,
         });
 
         if (slugs.length === 0 && ids.length === 0) {
           console.log("[intake] enqueue.skip_no_selection");
           return;
         }
-
 
         // Resolve tenant-enabled marketplaces by either slug OR id
         const rows = await sql/*sql*/`
@@ -297,7 +312,7 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
           };
           return JSON.stringify(sorter(obj));
         };
-                const sha256Hex = async (s: string) => {
+        const sha256Hex = async (s: string) => {
           const data = new TextEncoder().encode(s);
           const hash = await crypto.subtle.digest("SHA-256", data);
           return Array.from(new Uint8Array(hash)).map(b => b.toString(16).padStart(2,"0")).join("");
@@ -306,9 +321,9 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
         for (const r of rows) {
           const slug = String(r.slug || "").toLowerCase();
 
-          // Look up desired action for this marketplace from intent (default: "upsert")
+          // Desired action from unified intent (default: "upsert")
           const desiredAction: MarketplaceAction =
-            (intentMarketplaces[slug] as MarketplaceAction) || "upsert";
+            (actionsBySlug[slug] as MarketplaceAction) || "upsert";
 
           // If the client explicitly said "ignore", skip this marketplace entirely.
           if (desiredAction === "ignore") {
@@ -331,8 +346,26 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
             continue;
           }
 
+          // Pull the marketplace row (if present) to know current identifiers/status
+          const iml = Array.isArray(imlRows) ? imlRows.find((x: any) => x.marketplace_id === r.id) : null;
+
           if (slug === "facebook") {
-            // Ensure stub exists so UI reflects progress
+            const statusNorm = String(iml?.status || "").toLowerCase();
+            const isLiveLike = statusNorm === "active" || statusNorm === "live";
+
+            // If Facebook is already live/active and we're not explicitly deleting,
+            // don't keep flipping it back to "publishing" or emitting new publish_started events.
+            if (isLiveLike && desiredAction !== "delete") {
+              console.log("[intake] fb.skip_already_live", {
+                item_id,
+                marketplace_id: r.id,
+                current_status: statusNorm,
+                desiredAction,
+              });
+              continue;
+            }
+
+            // Ensure stub exists so UI reflects progress for first-time or non-live publishes
             await sql/*sql*/`
               INSERT INTO app.item_marketplace_listing
                 (item_id, tenant_id, marketplace_id, status)
@@ -354,12 +387,6 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
 
             continue;
           }
-          
-          // Pull the marketplace row (if present) to know current identifiers/status
-          const iml = Array.isArray(imlRows) ? imlRows.find((x:any) => x.marketplace_id === r.id) : null;
-
-
-
 
           // Build canonical snapshot for this marketplace
           const snapshot = {
@@ -967,9 +994,23 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
             // Upsert selected marketplaces (prototype).
             // eBay gets the rich field set; all other selected marketplaces (e.g., Facebook) get a stub row.
             {
-              const mpIds: number[] = Array.isArray(body?.marketplaces_selected)
-                ? body.marketplaces_selected.map((n: any) => Number(n)).filter((n) => !Number.isNaN(n))
-                : [];
+              const mpIds: number[] = [];
+              if (Array.isArray(body?.marketplaces_selected)) {
+                for (const v of body.marketplaces_selected as any[]) {
+                  if (typeof v === "number" && !Number.isNaN(v)) {
+                    mpIds.push(v);
+                  } else if (typeof v === "string") {
+                    // Numeric string → id
+                    if (/^\d+$/.test(v)) {
+                      const n = Number(v);
+                      if (!Number.isNaN(n)) mpIds.push(n);
+                    } else if (EBAY_MARKETPLACE_ID && v.toLowerCase() === "ebay") {
+                      // Allow the UI to send "ebay" as a slug and still hit the rich eBay upsert
+                      mpIds.push(EBAY_MARKETPLACE_ID);
+                    }
+                  }
+                }
+              }
 
               // Normalize the ebay payload once
               const e = ebay ? normalizeEbay(ebay) : null;
