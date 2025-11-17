@@ -195,7 +195,7 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
       return upsertFooter(body, sku, instore_loc, case_bin_shelf);
     }
 
-        // === Helper: enqueue marketplace publish jobs (create vs update + no-change short-circuit) ===
+            // === Helper: enqueue marketplace publish jobs (create vs update + no-change short-circuit) ===
     async function enqueuePublishJobs(
       tenant_id: string,
       item_id: string,
@@ -204,10 +204,14 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
     ): Promise<void> {
       try {
         const rawSel = Array.isArray(body?.marketplaces_selected) ? body.marketplaces_selected : [];
-        console.log("[intake] enqueue.start", { item_id, status, rawSel });
+
+        // Intent: explicit per-marketplace actions from the intake UI
+        const intent: IntakeIntent = (body?.intent || {}) as IntakeIntent;
+        const intentMarketplaces: Record<string, MarketplaceAction> =
+          intent.marketplaces || {};
 
         // Accept slugs (strings) and numeric ids (numbers OR numeric strings)
-        const slugs = rawSel
+        let slugs = rawSel
           .filter((v: any) => typeof v === "string" && isNaN(Number(v)) && v.trim() !== "")
           .map((s: string) => s.toLowerCase());
         const ids = rawSel
@@ -215,10 +219,30 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
             : (typeof v === "string" && /^\d+$/.test(v) ? Number(v) : null))
           .filter((n: number | null): n is number => n !== null);
 
+        // Merge in marketplaces from intent (any non-"ignore" actions)
+        const intentSlugs = Object.entries(intentMarketplaces)
+          .filter(([, action]) => action && action !== "ignore")
+          .map(([slug]) => slug.toLowerCase());
+
+        if (intentSlugs.length > 0) {
+          const merged = new Set<string>([...slugs, ...intentSlugs]);
+          slugs = Array.from(merged);
+        }
+
+        console.log("[intake] enqueue.start", {
+          item_id,
+          status,
+          rawSel,
+          slugs,
+          ids,
+          intentMarketplaces,
+        });
+
         if (slugs.length === 0 && ids.length === 0) {
           console.log("[intake] enqueue.skip_no_selection");
           return;
         }
+
 
         // Resolve tenant-enabled marketplaces by either slug OR id
         const rows = await sql/*sql*/`
@@ -273,7 +297,7 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
           };
           return JSON.stringify(sorter(obj));
         };
-        const sha256Hex = async (s: string) => {
+                const sha256Hex = async (s: string) => {
           const data = new TextEncoder().encode(s);
           const hash = await crypto.subtle.digest("SHA-256", data);
           return Array.from(new Uint8Array(hash)).map(b => b.toString(16).padStart(2,"0")).join("");
@@ -281,6 +305,32 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
 
         for (const r of rows) {
           const slug = String(r.slug || "").toLowerCase();
+
+          // Look up desired action for this marketplace from intent (default: "upsert")
+          const desiredAction: MarketplaceAction =
+            (intentMarketplaces[slug] as MarketplaceAction) || "upsert";
+
+          // If the client explicitly said "ignore", skip this marketplace entirely.
+          if (desiredAction === "ignore") {
+            console.log("[intake] enqueue.skip_intent_ignore", {
+              item_id,
+              marketplace_id: r.id,
+              slug,
+            });
+            continue;
+          }
+
+          // If the client requested a delete, the delete path above handles it.
+          // Do NOT enqueue create/update jobs here.
+          if (desiredAction === "delete") {
+            console.log("[intake] enqueue.skip_intent_delete", {
+              item_id,
+              marketplace_id: r.id,
+              slug,
+            });
+            continue;
+          }
+
           if (slug === "facebook") {
             // Ensure stub exists so UI reflects progress
             await sql/*sql*/`
@@ -307,6 +357,7 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
           
           // Pull the marketplace row (if present) to know current identifiers/status
           const iml = Array.isArray(imlRows) ? imlRows.find((x:any) => x.marketplace_id === r.id) : null;
+
 
 
 
