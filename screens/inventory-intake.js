@@ -370,10 +370,26 @@ export async function init() {
   
   // Replace
   async function replaceImage(oldModel, newFile) {
-    const ds = await downscaleToBlob(f);
-    if (!ds._rpId) ds._rpId = (crypto?.randomUUID ? crypto.randomUUID() : String(Date.now() + Math.random()));
-    if (!ds._previewUrl) ds._previewUrl = URL.createObjectURL(ds);
-    await uploadAndAttach(ds);
+    if (!newFile) return;
+
+    // Downscale the newly selected file
+    const ds = await downscaleToBlob(newFile);
+
+    // Ensure this file has a stable id + preview URL (for consistency with pending uploads)
+    if (!ds._rpId) {
+      ds._rpId = (crypto?.randomUUID ? crypto.randomUUID() : String(Date.now() + Math.random()));
+    }
+    if (!ds._previewUrl) {
+      ds._previewUrl = URL.createObjectURL(ds);
+    }
+
+    // If we're replacing an existing persisted image, tell uploadAndAttach which image to retire.
+    const cropOfImageId = oldModel && oldModel.image_id ? oldModel.image_id : null;
+
+    await uploadAndAttach(
+      ds,
+      cropOfImageId ? { cropOfImageId } : {}
+    );
   }
   
   // Minimal cropper: square crop with zoom+drag
