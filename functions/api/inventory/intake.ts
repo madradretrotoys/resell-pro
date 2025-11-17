@@ -407,27 +407,37 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
           const isLiveLike = statusNorm === "active" || statusNorm === "live";
           const hasActiveOffer = !!(iml?.mp_offer_id) && isLiveLike;
           const op = hasActiveOffer ? "update" : "create";
-
-          // Compare vs most recent snapshot (any op) to short-circuit no-ops
+        
+          // Compare vs most recent *succeeded* snapshot to short-circuit no-ops
           const last = await sql/*sql*/`
-            SELECT payload_snapshot
+            SELECT status, payload_snapshot
             FROM app.marketplace_publish_jobs
             WHERE tenant_id = ${tenant_id}
               AND item_id = ${item_id}
               AND marketplace_id = ${r.id}
-              AND status IN ('queued','running','done')
             ORDER BY created_at DESC
             LIMIT 1
           `;
-          const lastHash = String(last?.[0]?.payload_snapshot?._hash || "");
-          if (lastHash && lastHash === hash) {
-            // Log an event and skip
+          const lastRow: any = Array.isArray(last) && last[0] ? last[0] : null;
+          const lastStatus = String(lastRow?.status || "");
+          const lastHash = String(lastRow?.payload_snapshot?._hash || "");
+          const isLastSucceeded = lastStatus === "succeeded";
+
+          // Only skip when:
+          //  - this listing already has a live/active offer, AND
+          //  - the most recent job for this marketplace actually succeeded, AND
+          //  - the payload hash is unchanged.
+          if (hasActiveOffer && isLastSucceeded && lastHash && lastHash === hash) {
             await sql/*sql*/`
               INSERT INTO app.item_marketplace_events
                 (item_id, tenant_id, marketplace_id, kind)
               VALUES (${item_id}, ${tenant_id}, ${r.id}, 'skipped_no_change')
             `;
-            console.log("[intake] enqueue.skip_no_change", { item_id, marketplace_id: r.id });
+            console.log("[intake] enqueue.skip_no_change", {
+              item_id,
+              marketplace_id: r.id,
+              lastStatus,
+            });
             continue;
           }
 
@@ -994,6 +1004,7 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
             // Upsert selected marketplaces (prototype).
             // eBay gets the rich field set; all other selected marketplaces (e.g., Facebook) get a stub row.
             {
+               {
               const mpIds: number[] = [];
               if (Array.isArray(body?.marketplaces_selected)) {
                 for (const v of body.marketplaces_selected as any[]) {
@@ -1031,7 +1042,7 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
                        ${e.promote}, ${e.promote_percent}, ${e.duration}, ${e.starting_bid}, ${e.reserve_price})
                     ON CONFLICT (item_id, marketplace_id)
                     DO UPDATE SET
-                      status = 'live',
+                      status = 'draft',
                       shipping_policy = EXCLUDED.shipping_policy,
                       payment_policy  = EXCLUDED.payment_policy,
                       return_policy   = EXCLUDED.return_policy,
