@@ -401,14 +401,26 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
           const hash = await sha256Hex(snapshotStr);
           const payload_snapshot = { ...snapshot, _hash: hash };
 
-          // Determine desired op
-          // Option A: treat 'live' the same as 'active' so edits enqueue 'update' after first publish
+           // Determine desired op
+          // Option A: treat 'live' the same as 'active' so edits enqueue 'update' after first publish.
+          // IMPORTANT:
+          // - If the listing row exists but is NOT live/active (error, draft, ended, etc.),
+          //   always treat it as a fresh CREATE so we don't get stuck in a non-live state.
           const statusNorm = String(iml?.status || "").toLowerCase();
           const isLiveLike = statusNorm === "active" || statusNorm === "live";
-          const hasActiveOffer = !!(iml?.mp_offer_id) && isLiveLike;
-          const op = hasActiveOffer ? "update" : "create";
+          const hasMpOffer = !!(iml?.mp_offer_id);
 
-           // Compare vs most recent *succeeded* snapshot to short-circuit no-ops
+          let op: "create" | "update";
+          if (isLiveLike && hasMpOffer) {
+            // Live/active offer on the marketplace → update the existing listing.
+            op = "update";
+          } else {
+            // No live offer (or no row / no offer id) → create a new listing.
+            // This covers the case where a row exists but status is NOT live.
+            op = "create";
+          }
+
+          // Compare vs most recent *succeeded* snapshot to short-circuit no-ops
           const last = await sql/*sql*/`
             SELECT status, payload_snapshot
             FROM app.marketplace_publish_jobs
