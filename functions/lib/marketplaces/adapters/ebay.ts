@@ -566,17 +566,39 @@ async function create(params: CreateParams): Promise<CreateResult> {
   if (primary) imageUrls.push(primary);
   if (Array.isArray(gallery) && gallery.length) imageUrls.push(...gallery);
 
-  // Map our richer UI labels to eBay's 2-value enum: NEW or USED
+  // Map our richer UI labels to eBay's ConditionEnum values.
+  // UI → eBay:
+  //   "Pre-Owned - Good"                     → USED_GOOD
+  //   "Pre-Owned - Fair"                     → USED_ACCEPTABLE
+  //   "Pre-Owned Poor (Major flaws)"         → USED_ACCEPTABLE
+  //   "Pre-Owned - Broken For Parts Only"    → FOR_PARTS_OR_NOT_WORKING
+  //
+  // Anything starting with "New" (or empty) is treated as NEW.
   const rawCond = String(profile?.item_condition || '').trim().toLowerCase();
-  
+
   // helpers
   const isNew =
     rawCond.startsWith('new') ||               // "New With Imperfections", "New Without Tags/Box", etc.
-    rawCond === '' ;                           // default to NEW if empty
-  
-  const conditionEnum = isNew ? 'NEW' : 'USED';
-  
-  // include a short note only for USED items
+    rawCond === '';                            // default to NEW if empty
+
+  // explicit mapping for our Pre-Owned labels
+  const conditionMap: Record<string, string> = {
+    'pre-owned - good': 'USED_GOOD',
+    'pre-owned - fair': 'USED_ACCEPTABLE',
+    'pre-owned poor (major flaws)': 'USED_ACCEPTABLE',
+    'pre-owned - broken for parts only': 'FOR_PARTS_OR_NOT_WORKING'
+  };
+
+  let conditionEnum: string;
+  if (isNew) {
+    conditionEnum = 'NEW';
+  } else {
+    // If we get an exact match on one of our UI labels, use that.
+    // Otherwise, fall back to a reasonable used default.
+    conditionEnum = conditionMap[rawCond] || 'USED_GOOD';
+  }
+
+  // include a short note only for non-NEW items
   const conditionDescription =
     !isNew && profile?.product_description
       ? String(profile.product_description).slice(0, 1000)
