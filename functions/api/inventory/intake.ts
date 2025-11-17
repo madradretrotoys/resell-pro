@@ -716,7 +716,14 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
             }
           }
           
-          return json({ ok: true, item_id, sku: updInv[0].sku, status, ms: Date.now() - t0 }, 200);
+          return json({
+            ok: true,
+            item_id,
+            sku: updInv[0].sku,
+            status,
+            intent: { marketplaces: intentMarketplaces },
+            ms: Date.now() - t0
+          }, 200);
         }
 
 
@@ -1258,7 +1265,14 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
         }
       }
       
-      return json({ ok: true, item_id, sku: null, status: 'draft', ms: Date.now() - t0 }, 200);
+      return json({
+        ok: true,
+        item_id,
+        sku: null,
+        status: "draft",
+        intent: { marketplaces: intentMarketplaces },
+        ms: Date.now() - t0
+      }, 200);
     }
 
 
