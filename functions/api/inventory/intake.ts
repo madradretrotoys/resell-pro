@@ -471,7 +471,7 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
           //  - this listing already has a live/active offer, AND
           //  - the most recent job for this marketplace actually succeeded, AND
           //  - the payload hash is unchanged.
-          if (hasActiveOffer && isLastSucceeded && lastHash && lastHash === hash) {
+          if (isLiveLike && hasMpOffer && isLastSucceeded && lastHash && lastHash === hash) {
             await sql/*sql*/`
               INSERT INTO app.item_marketplace_events
                 (item_id, tenant_id, marketplace_id, kind)
