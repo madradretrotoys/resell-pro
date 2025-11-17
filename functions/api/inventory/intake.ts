@@ -861,6 +861,15 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
 
           
         // === ACTIVE UPDATE: if promoting to active and no SKU yet, allocate ===
+        console.log("[intake.ACTIVE] begin", {
+          tenant_id,
+          actor_user_id,
+          item_id_in,
+          inv_status: inv?.item_status ?? null,
+          instore_online: inv?.instore_online ?? null,
+          marketplaces_selected: body?.marketplaces_selected ?? null,
+          intentMarketplaces
+        });
         // Look up category_code only when needed for SKU allocation
         const catRows = await sql<{ category_code: string }[]>`
           SELECT category_code FROM app.sku_categories WHERE category_name = ${inv.category_nm} LIMIT 1
@@ -974,6 +983,13 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
                 shipbx_width     = EXCLUDED.shipbx_width,
                 shipbx_height    = EXCLUDED.shipbx_height
             `;
+
+              console.log("[intake.ACTIVE] listing_profile_upserted", {
+                tenant_id,
+                item_id,
+                listing_category_key: lst.listing_category_key,
+                condition_key: lst.condition_key
+              });
               // Handle per-marketplace DELETE intent (e.g., deselecting the eBay tile on update)
              if (EBAY_MARKETPLACE_ID && intentMarketplaces.length) {
                const ebayIntent = intentMarketplaces.find((m: any) => {
@@ -981,6 +997,12 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
                  const id = m.marketplace_id != null ? Number(m.marketplace_id) : null;
                  return slug === "ebay" || id === EBAY_MARKETPLACE_ID;
                });
+               console.log("[intake.ACTIVE] ebay_intent_check", {
+                tenant_id,
+                item_id,
+                EBAY_MARKETPLACE_ID,
+                ebayIntent
+              });
                if (ebayIntent?.operation === "delete") {
                  console.log("[intake] intent.ebay_delete", { item_id, EBAY_MARKETPLACE_ID });
                  const iml = await sql/*sql*/`
@@ -991,6 +1013,11 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
                      AND marketplace_id = ${EBAY_MARKETPLACE_ID}
                      AND (mp_offer_id IS NOT NULL OR mp_item_id IS NOT NULL)
                  `;
+                 console.log("[intake] intent.ebay_delete_iml", {
+                  tenant_id,
+                  item_id,
+                  rows: iml.length
+                });
                  if (iml.length) {
                    const r: any = iml[0];
                    const inserted = await sql/*sql*/`
@@ -1065,10 +1092,18 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
                   }
                 }
               }
-
+              console.log("[intake.ACTIVE] marketplaces_selected_normalized", {
+                tenant_id,
+                item_id,
+                raw: body?.marketplaces_selected ?? null,
+                mpIds
+              });
               // Normalize the ebay payload once
               const e = ebay ? normalizeEbay(ebay) : null;
-
+                console.log("[intake.ACTIVE] ebay_payload_normalized", {
+                hasEbay: !!ebay,
+                hasNormalized: !!e
+              });
               for (const mpId of mpIds) {
                 if (mpId === EBAY_MARKETPLACE_ID && e) {
                   // eBay: full field upsert (existing behavior)
@@ -1102,6 +1137,11 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
                       reserve_price = EXCLUDED.reserve_price,
                       updated_at = now()
                   `;
+                  console.log("[intake.ACTIVE] ebay_listing_upserted", {
+                    tenant_id,
+                    item_id,
+                    marketplace_id: mpId
+                  });
                   await sql/*sql*/`
                     INSERT INTO app.user_marketplace_defaults
                       (tenant_id, user_id, marketplace_id,
@@ -1122,6 +1162,11 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
                       promote          = EXCLUDED.promote,
                       updated_at       = now()
                   `;
+                  console.log("[intake.ACTIVE] ebay_defaults_upserted", {
+                    tenant_id,
+                    user_id: actor_user_id,
+                    marketplace_id: EBAY_MARKETPLACE_ID
+                  });
                 } else {
                   // Non-eBay (e.g., Facebook): ensure a stub listing row exists with 'publishing'
                   await sql/*sql*/`
@@ -1134,6 +1179,11 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
                       status = 'publishing',
                       updated_at = now()
                   `;
+                  console.log("[intake.ACTIVE] non_ebay_listing_stub_upserted", {
+                    tenant_id,
+                    item_id,
+                    marketplace_id: mpId
+                  });
                 }
               }
             }
@@ -1150,6 +1200,11 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
                  AND marketplace_id = ${EBAY_MARKETPLACE_ID}
                  AND (mp_offer_id IS NOT NULL OR mp_item_id IS NOT NULL)
             `;
+            console.log("[intake.ACTIVE] explicit_ebay_delete_intent", {
+              tenant_id,
+              item_id,
+              rows: iml.length
+            });
             for (const r of iml as any[]) {
               const inserted = await sql/*sql*/`
                 WITH ins AS (
@@ -1201,8 +1256,17 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
           }
           
           // Enqueue marketplace publish jobs (same behavior as Create Active)
+          console.log("[intake.ACTIVE] enqueuePublishJobs.start", {
+            tenant_id,
+            item_id,
+            status,
+            intentMarketplaces
+          });
           await enqueuePublishJobs(tenant_id, item_id, body, status);
-
+          console.log("[intake.ACTIVE] enqueuePublishJobs.done", {
+            tenant_id,
+            item_id
+          });
           // Return any queued jobs so the client can trigger them by job_id
           const enqueuedUpd = await sql/*sql*/`
             SELECT job_id
@@ -1212,8 +1276,13 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
               AND status    = 'queued'
             ORDER BY created_at ASC
           `;
+          
           const job_ids_upd = Array.isArray(enqueuedUpd) ? enqueuedUpd.map((r: any) => String(r.job_id)) : [];
-
+          console.log("[intake.ACTIVE] queued_jobs", {
+            tenant_id,
+            item_id,
+            job_ids_upd
+          });
           return json({
             ok: true,
             item_id,
