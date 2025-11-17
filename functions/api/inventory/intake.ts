@@ -401,7 +401,7 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
           const hash = await sha256Hex(snapshotStr);
           const payload_snapshot = { ...snapshot, _hash: hash };
 
-           // Determine desired op
+                     // Determine desired op 
           // Option A: treat 'live' the same as 'active' so edits enqueue 'update' after first publish.
           // IMPORTANT:
           // - If the listing row exists but is NOT live/active (error, draft, ended, etc.),
@@ -409,6 +409,19 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
           const statusNorm = String(iml?.status || "").toLowerCase();
           const isLiveLike = statusNorm === "active" || statusNorm === "live";
           const hasMpOffer = !!(iml?.mp_offer_id);
+
+          console.log("[intake.enqueuePublishJobs] decide-op: pre", {
+            tenant_id,
+            item_id,
+            marketplace_id: r.id,
+            slug: r.slug,
+            iml_status: iml?.status ?? null,
+            statusNorm,
+            isLiveLike,
+            hasMpOffer,
+            mp_offer_id: iml?.mp_offer_id ?? null,
+            payload_marketplace_listing_status: (body as any)?.marketplace_listing?.status ?? null
+          });
 
           let op: "create" | "update";
           if (isLiveLike && hasMpOffer) {
@@ -420,6 +433,14 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
             op = "create";
           }
 
+          console.log("[intake.enqueuePublishJobs] decide-op: selected", {
+            tenant_id,
+            item_id,
+            marketplace_id: r.id,
+            slug: r.slug,
+            op
+          });
+
           // Compare vs most recent *succeeded* snapshot to short-circuit no-ops
           const last = await sql/*sql*/`
             SELECT status, payload_snapshot
@@ -430,7 +451,18 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
             ORDER BY created_at DESC
             LIMIT 1
           `;
-          const lastRow: any = Array.isArray(last) && last[0] ? last[0] : null;
+
+          const lastRow = Array.isArray(last) && last.length ? last[0] : null;
+          console.log("[intake.enqueuePublishJobs] last-job", {
+            tenant_id,
+            item_id,
+            marketplace_id: r.id,
+            slug: r.slug,
+            op,
+            last_status: lastRow ? lastRow.status : null,
+            has_last: !!lastRow
+          });
+
           const lastStatus = String(lastRow?.status || "");
           const lastHash = String(lastRow?.payload_snapshot?._hash || "");
           const isLastSucceeded = lastStatus === "succeeded";
