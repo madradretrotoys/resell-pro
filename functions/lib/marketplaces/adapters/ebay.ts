@@ -705,34 +705,42 @@ async function create(params: CreateParams): Promise<CreateResult> {
   const isCardCategoryForConditionDescriptor =
     ebayCategoryId === "183050" || ebayCategoryId === "261328";
 
-  // For now we align with the offer-level Card Condition you’re sending ("Excellent")
-  const cardConditionLabel =
-    isCardCategoryForConditionDescriptor ? "Excellent" : null;
+  // For trading card categories, we treat non-NEW as Ungraded (conditionId 4000 via USED_VERY_GOOD)
+  // and send the required Card Condition descriptor:
+  // - name: "40001"   (Card Condition)
+  // - values: ["400011"] (Excellent)
+  //
+  // This matches the getItemConditionPolicies metadata for 183050/261328.
+  const cardConditionDescriptor = isCardCategoryForConditionDescriptor
+    ? { name: "40001", values: ["400011"], label: "Excellent" }
+    : null;
 
-  if (cardConditionLabel) {
+  if (cardConditionDescriptor) {
     console.log("[ebay:cards.conditionDescriptor]", {
       ebayCategoryId,
       conditionEnum,
-      cardConditionLabel
+      descriptorName: cardConditionDescriptor.name,
+      descriptorValues: cardConditionDescriptor.values,
+      label: cardConditionDescriptor.label
     });
   }
-
   // map our fields into eBay inventory item structure
   const computedQty = Math.max(1, Number((item && item.qty) != null ? item.qty : 1));
   const inventoryItemBody: any = {
     condition: conditionEnum,
     ...(conditionDescription ? { conditionDescription } : {}),
-    ...(cardConditionLabel
+    ...(cardConditionDescriptor
       ? {
-          // For trading card verticals, also emit Card Condition as a conditionDescriptor
+          // For trading card verticals, emit Card Condition as a conditionDescriptor
+          // using the numeric IDs required by the Inventory API.
           conditionDescriptors: [
             {
-              name: "Card Condition",
-              values: [cardConditionLabel]
+              name: cardConditionDescriptor.name,
+              values: cardConditionDescriptor.values
             }
           ]
         }
-      : {}),
+      : {}), 
     product: {
       title: item?.product_short_title || '',
       description: profile?.product_description || '',
