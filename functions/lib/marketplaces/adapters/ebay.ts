@@ -792,16 +792,30 @@ async function create(params: CreateParams): Promise<CreateResult> {
   // Ensure the eBay Inventory Location exists (create if needed & verify)
   await ensureLocation(merchantLocationKey, shippingZip);
   // (No extra GET needed here; ensureLocation already verified.)
-   // Build itemSpecifics from mapping table values (omit when null/empty)
-    const itemSpecifics: Array<{ name: string; values: string[] }> = [];
-    const pushIf = (name: string, val: unknown) => {
-      const s = String(val ?? '').trim();
-      if (s) itemSpecifics.push({ name, values: [s] });
-    };
-    pushIf('Type',      mappedSpecifics.type);
-    pushIf('Model',     mappedSpecifics.model);
-    pushIf('Franchise', mappedSpecifics.franchise);
-    pushIf('Sport',     mappedSpecifics.sport);
+
+  // Build itemSpecifics from mapping table values (omit when null/empty)
+  const itemSpecifics: Array<{ name: string; values: string[] }> = [];
+  const pushIf = (name: string, val: unknown) => {
+    const s = String(val ?? '').trim();
+    if (s) itemSpecifics.push({ name, values: [s] });
+  };
+  pushIf('Type',      mappedSpecifics.type);
+  pushIf('Model',     mappedSpecifics.model);
+  pushIf('Franchise', mappedSpecifics.franchise);
+  pushIf('Sport',     mappedSpecifics.sport);
+
+  // Card categories where eBay requires Card Condition (40001)
+  const isCardCategoryForItemSpecifics =
+    ebayCategoryId === "183050" || ebayCategoryId === "261328";
+
+  if (isCardCategoryForItemSpecifics) {
+    const cardConditionLabel = "Near mint or better";
+    pushIf('Card Condition', cardConditionLabel);
+    console.log('[ebay:cards.itemSpecifics.cardCondition]', {
+      ebayCategoryId,
+      cardConditionLabel
+    });
+  }
     
    const offerBody: any = {
     sku,
