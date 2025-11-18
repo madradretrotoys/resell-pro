@@ -29,14 +29,119 @@ async function decryptJson(base64Key: string, blob: string): Promise<any> {
   return JSON.parse(new TextDecoder().decode(pt));
 }
 
-function msUntil(iso: string | null | undefined) {
+ function msUntil(iso: string | null | undefined) {
   if (!iso) return -1;
   const t = Date.parse(iso);
   if (!Number.isFinite(t)) return -1;
   return t - Date.now();
 }
 
+// Normalize our internal UI condition labels to a valid eBay Inventory API ConditionEnum,
+// taking into account the category's allowed condition IDs from getItemConditionPolicies.
+// This keeps us from hitting 2004/25021 condition errors.
+function normalizeConditionForCategory(opts: { rawCond: string; ebayCategoryId: string | null }): { conditionEnum: string } {
+  const { rawCond, ebayCategoryId } = opts;
+  const raw = (rawCond || "").trim().toLowerCase();
+  const cat = String(ebayCategoryId || "").trim();
+
+  // "New" handling is consistent across your current categories
+  const isNew =
+    raw.startsWith("new") ||
+    raw === "";
+
+  if (isNew) {
+    return { conditionEnum: "NEW" };
+  }
+
+  // Category groups based on your getItemConditionPolicies snapshot.
+  // Group A: categories that only support New/Used (1000/3000).
+  const CATS_NEW_USED_ONLY = [
+    "19027",
+    "151093",
+    "261069",
+    "262346",
+    "261068",
+    "1340",
+    "262348",
+    "230",
+    "2535",
+    "234",
+    "30",
+    "261070"
+  ];
+
+  // Group B: categories with granular used states but no "parts" (259104/259105).
+  const CATS_MULTI_USED = [
+    "259104",
+    "259105"
+  ];
+
+  // Group C/D: categories that explicitly support "For parts or not working" (7000).
+  const CATS_WITH_PARTS = [
+    "139971",
+    "88433"
+  ];
+
+  // Group E: trading card categories (graded/ungraded).
+  const CATS_CARDS = [
+    "261328",
+    "183050"
+  ];
+
+  // Special-case: broken/parts-only where category supports 7000.
+  if (raw === "pre-owned - broken for parts only" && CATS_WITH_PARTS.includes(cat)) {
+    return { conditionEnum: "FOR_PARTS_OR_NOT_WORKING" };
+  }
+
+  // Trading cards: for now treat all pre-owned as generic "Used".
+  // (Graded/ungraded descriptors can be layered in later.)
+  if (CATS_CARDS.includes(cat)) {
+    return { conditionEnum: "USED_EXCELLENT" };
+  }
+
+  // Categories that only support New/Used (1000/3000).
+  if (CATS_NEW_USED_ONLY.includes(cat)) {
+    return { conditionEnum: "USED_EXCELLENT" };
+  }
+
+  // Categories with granular used states but no "parts".
+  if (CATS_MULTI_USED.includes(cat)) {
+    if (raw === "pre-owned - good") {
+      return { conditionEnum: "USED_GOOD" };
+    }
+    if (
+      raw === "pre-owned - fair" ||
+      raw === "pre-owned poor (major flaws)" ||
+      raw === "pre-owned - broken for parts only"
+    ) {
+      // No 7000 in these categories; fall back to Acceptable for lower tiers and parts.
+      return { conditionEnum: "USED_ACCEPTABLE" };
+    }
+    // Default used tier if we don't recognize the pre-owned label.
+    return { conditionEnum: "USED_VERY_GOOD" };
+  }
+
+  // Categories that support the full range including parts (e.g. 88433, 139971).
+  if (CATS_WITH_PARTS.includes(cat)) {
+    if (raw === "pre-owned - good") {
+      return { conditionEnum: "USED_GOOD" };
+    }
+    if (raw === "pre-owned - fair" || raw === "pre-owned poor (major flaws)") {
+      return { conditionEnum: "USED_ACCEPTABLE" };
+    }
+    if (raw === "pre-owned - broken for parts only") {
+      return { conditionEnum: "FOR_PARTS_OR_NOT_WORKING" };
+    }
+    // Default used tier.
+    return { conditionEnum: "USED_VERY_GOOD" };
+  }
+
+  // Fallback for any future categories: treat pre-owned as generic Used.
+  return { conditionEnum: "USED_EXCELLENT" };
+}
+
 async function create(params: CreateParams): Promise<CreateResult> {
+
   const { env, tenant_id, item, profile, mpListing, images } = params;
   const sql = getSql(env);
 
@@ -566,57 +671,31 @@ async function create(params: CreateParams): Promise<CreateResult> {
   if (primary) imageUrls.push(primary);
   if (Array.isArray(gallery) && gallery.length) imageUrls.push(...gallery);
 
-   // Map our richer UI labels to eBay's ConditionEnum values **per category**.
-  //
-  // For your current categories from getItemConditionPolicies:
-  //   - Most support only "New" (1000) and "Used" (3000).
-  //   - Some also support "For parts or not working" (7000), e.g. 139971, 88433.
-  //
-  // UI → eBay (for **your** categories):
-  //   "New ..."                                → NEW
-  //   "Pre-Owned - Good"                      → USED
-  //   "Pre-Owned - Fair"                      → USED
-  //   "Pre-Owned Poor (Major flaws)"          → USED
-  //   "Pre-Owned - Broken For Parts Only"     → FOR_PARTS_OR_NOT_WORKING
-  //       (but only in categories that allow 7000; otherwise fall back to USED)
-  //
-  // Anything starting with "New" (or empty) is treated as NEW.
-    const rawCond = String(profile?.item_condition || '').trim().toLowerCase();
+   // Map our richer UI labels to eBay's ConditionEnum values,
+  // normalized per category so we avoid 2004/25021 condition errors.
+  const rawCond = String(profile?.item_condition || "").trim().toLowerCase();
 
-    const isNew =
-      rawCond.startsWith('new') ||   // "New With Imperfections", "New Without Tags/Box", etc.
-      rawCond === '';                // default to NEW if empty
-  
-    // Categories (by ebayCategoryId) that explicitly support "For parts or not working" (7000)
-    const supportsParts = ['139971', '88433'].includes(String(ebayCategoryId || '').trim());
-  
-    let conditionEnum: string;
-    if (isNew) {
-      conditionEnum = 'NEW';
-    } else if (rawCond === 'pre-owned - broken for parts only' && supportsParts) {
-      conditionEnum = 'FOR_PARTS_OR_NOT_WORKING';
-    } else {
-      // For all other pre-owned cases in your current categories, send a generic “Used” value
-      // that the Inventory API actually understands. For your action-figure category (261068),
-      // eBay maps this to the 3000 “Used” condition id.
-      conditionEnum = 'USED_EXCELLENT';
-    }
-  
-    // Helpful debug so we can see exactly what was chosen at runtime
-    console.log('[ebay:condition.map]', {
-      uiCondition: profile?.item_condition || null,
-      rawCond,
-      ebayCategoryId,
-      supportsParts,
-      conditionEnum
-    });
+  const { conditionEnum } = normalizeConditionForCategory({
+    rawCond,
+    ebayCategoryId
+  });
 
+  // Helpful debug so we can see exactly what was chosen at runtime
+  console.log("[ebay:condition.map]", {
+    uiCondition: profile?.item_condition || null,
+    rawCond,
+    ebayCategoryId,
+    conditionEnum
+  });
+
+  const isNew = conditionEnum === "NEW";
 
   // include a short note only for non-NEW items
   const conditionDescription =
     !isNew && profile?.product_description
       ? String(profile.product_description).slice(0, 1000)
       : undefined;
+
 
 
   // map our fields into eBay inventory item structure
