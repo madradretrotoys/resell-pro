@@ -701,13 +701,38 @@ async function create(params: CreateParams): Promise<CreateResult> {
       ? String(profile.product_description).slice(0, 1000)
       : undefined;
 
+  // Card categories where eBay’s vertical requires Card Condition (40001)
+  const isCardCategoryForConditionDescriptor =
+    ebayCategoryId === "183050" || ebayCategoryId === "261328";
 
+  // For now we align with the offer-level Card Condition you’re sending ("Excellent")
+  const cardConditionLabel =
+    isCardCategoryForConditionDescriptor ? "Excellent" : null;
+
+  if (cardConditionLabel) {
+    console.log("[ebay:cards.conditionDescriptor]", {
+      ebayCategoryId,
+      conditionEnum,
+      cardConditionLabel
+    });
+  }
 
   // map our fields into eBay inventory item structure
   const computedQty = Math.max(1, Number((item && item.qty) != null ? item.qty : 1));
   const inventoryItemBody: any = {
-    condition: conditionEnum,  
+    condition: conditionEnum,
     ...(conditionDescription ? { conditionDescription } : {}),
+    ...(cardConditionLabel
+      ? {
+          // For trading card verticals, also emit Card Condition as a conditionDescriptor
+          conditionDescriptors: [
+            {
+              name: "Card Condition",
+              values: [cardConditionLabel]
+            }
+          ]
+        }
+      : {}),
     product: {
       title: item?.product_short_title || '',
       description: profile?.product_description || '',
