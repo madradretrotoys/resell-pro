@@ -53,6 +53,16 @@ function normalizeConditionForCategory(opts: { rawCond: string; ebayCategoryId: 
     return { conditionEnum: "NEW" };
   }
 
+  // 🔹 Special-case: Non-sports trading cards (183050 or 261328)
+  // For now, do NOT send any condition at all. Metadata says condition is optional,
+  // and sending 3000 ends up failing at publish time. We keep your nuance in the
+  // description only for this category.
+  if (cat === "183050" || cat === "261328") {
+    console.log("[ebay:condition.map.override_cards_no_condition]", { rawCond: raw, ebayCategoryId: cat });
+    return { conditionEnum: null };
+  }
+
+  
   // Category groups based on your getItemConditionPolicies snapshot.
   // Group A: categories that only support New/Used (1000/3000).
   const CATS_NEW_USED_ONLY = [
@@ -82,19 +92,17 @@ function normalizeConditionForCategory(opts: { rawCond: string; ebayCategoryId: 
     "88433"
   ];
 
-  // Group E: trading card categories (graded/ungraded).
-  const CATS_CARDS = [
-    "261328",
-    "183050"
-  ];
-
+  // If you later want generic card handling separate from the hard overrides above,
+  // you can populate this with additional category IDs.
+  const CATS_CARDS: string[] = [];
+  
   // Special-case: broken/parts-only where category supports 7000.
   if (raw === "pre-owned - broken for parts only" && CATS_WITH_PARTS.includes(cat)) {
     return { conditionEnum: "FOR_PARTS_OR_NOT_WORKING" };
   }
 
-  // Trading cards: for now treat all pre-owned as generic "Used".
-  // (Graded/ungraded descriptors can be layered in later.)
+  // Trading cards (generic placeholder, currently unused since both 183050 and 261328
+  // are handled above). Left here for future expansion if needed.
   if (CATS_CARDS.includes(cat)) {
     return { conditionEnum: "USED_EXCELLENT" };
   }
@@ -701,7 +709,8 @@ async function create(params: CreateParams): Promise<CreateResult> {
   // map our fields into eBay inventory item structure
   const computedQty = Math.max(1, Number((item && item.qty) != null ? item.qty : 1));
   const inventoryItemBody: any = {
-    condition: conditionEnum,  
+    // Only send condition when we actually have one (NOT for 183050/261328 now)
+    ...(conditionEnum ? { condition: conditionEnum } : {}),
     ...(conditionDescription ? { conditionDescription } : {}),
     product: {
       title: item?.product_short_title || '',
