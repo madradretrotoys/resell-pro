@@ -809,7 +809,7 @@ async function create(params: CreateParams): Promise<CreateResult> {
     ebayCategoryId === "183050" || ebayCategoryId === "261328";
 
   if (isCardCategoryForItemSpecifics) {
-    const cardConditionLabel = "Near mint or better";
+    const cardConditionLabel = "Excellent";
     pushIf('Card Condition', cardConditionLabel);
     console.log('[ebay:cards.itemSpecifics.cardCondition]', {
       ebayCategoryId,
