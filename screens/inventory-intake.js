@@ -118,43 +118,60 @@ export async function init() {
     updatePhotosUIBasic();
     // Nudge gating when photo count changes (add/replace/delete/reorder)
     try { computeValidity(); } catch {}
+    // NEW: wire the shared inventory image lightbox for photo thumbnails
+    try {
+      // Limit binding to this grid so we don’t touch other screens unnecessarily
+      wireInventoryImageLightbox(host);
+    } catch (err) {
+      console.warn("[photos] wireInventoryImageLightbox failed for photosGrid", err);
+    }
   }
   
-  // Thumb element
+    // Thumb element
   function renderThumb(model, flags) {
-  const { persisted = false, pending = false } = flags || {};
-  const wrap = document.createElement("div");
-  // fixed 140x140 thumb box (pure CSS styles; no Tailwind utilities)
-  wrap.className = "relative group border rounded-xl overflow-hidden";
-  wrap.style.width = "140px";
-  wrap.style.height = "140px";
-  wrap.style.display = "inline-block"; // ensure the grid cell stays compact
-  wrap.tabIndex = 0;
+    const { persisted = false, pending = false } = flags || {};
+    const wrap = document.createElement("div");
+    // fixed 140x140 thumb box (pure CSS styles; no Tailwind utilities)
+    wrap.className = "relative group border rounded-xl overflow-hidden";
+    wrap.style.width = "140px";
+    wrap.style.height = "140px";
+    wrap.style.display = "inline-block"; // ensure the grid cell stays compact
+    wrap.tabIndex = 0;
 
-  const img = new Image();
-  img.src = model.cdn_url || "";
-  img.alt = "Item photo";
-  img.loading = "lazy";
-  img.className = "block";
-  img.style.width = "140px";
-  img.style.height = "140px";
-  img.style.objectFit = "cover";
-  img.style.display = "block";
-  wrap.appendChild(img);
+    // NEW: clickable button wrapper that the shared lightbox helper can bind to.
+    // This keeps the Crop/Replace/Primary/Delete bar separate so it doesn’t trigger the viewer.
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "inventory-thumb-btn block w-full h-full";
+    btn.title = "Click to view larger";
+    btn.dataset.imageUrl = model.cdn_url || "";
 
-  const bar = document.createElement("div");
-  bar.className = "absolute inset-x-0 bottom-0 p-1 bg-black/50 opacity-0 group-hover:opacity-100 transition";
-  bar.innerHTML = `
-    <div class="flex gap-1 justify-center">
-      <button class="btn btn-ghost btn-sm" data-act="crop" title="Crop">Crop</button>
-      <label class="btn btn-ghost btn-sm cursor-pointer" title="Replace">
-        Replace
-        <input type="file" accept="image/*" class="hidden" data-act="replace">
-      </label>
-      <button class="btn btn-ghost btn-sm" data-act="primary" ${pending ? "disabled" : ""} title="Set Primary">Primary</button>
-      <button class="btn btn-ghost btn-sm" data-act="delete" title="Delete">Delete</button>
-    </div>
-  `;
+    const img = new Image();
+    img.src = model.cdn_url || "";
+    img.alt = "Item photo";
+    img.loading = "lazy";
+    img.className = "block";
+    img.style.width = "140px";
+    img.style.height = "140px";
+    img.style.objectFit = "cover";
+    img.style.display = "block";
+
+    btn.appendChild(img);
+    wrap.appendChild(btn);
+
+    const bar = document.createElement("div");
+    bar.className = "absolute inset-x-0 bottom-0 p-1 bg-black/50 opacity-0 group-hover:opacity-100 transition";
+    bar.innerHTML = `
+      <div class="flex gap-1 justify-center">
+        <button class="btn btn-ghost btn-sm" data-act="crop" title="Crop">Crop</button>
+        <label class="btn btn-ghost btn-sm cursor-pointer" title="Replace">
+          Replace
+          <input type="file" accept="image/*" class="hidden" data-act="replace">
+        </label>
+        <button class="btn btn-ghost btn-sm" data-act="primary" ${pending ? "disabled" : ""} title="Set Primary">Primary</button>
+        <button class="btn btn-ghost btn-sm" data-act="delete" title="Delete">Delete</button>
+      </div>
+    `;
     wrap.appendChild(bar);
   
     // Drag handle in reorder mode
@@ -202,6 +219,7 @@ export async function init() {
   
     return wrap;
   }
+
   
   // Enable drop targets to reorder cards
   function hostDragEnable() {
