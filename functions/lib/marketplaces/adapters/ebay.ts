@@ -581,33 +581,36 @@ async function create(params: CreateParams): Promise<CreateResult> {
   //       (but only in categories that allow 7000; otherwise fall back to USED)
   //
   // Anything starting with "New" (or empty) is treated as NEW.
-  const rawCond = String(profile?.item_condition || '').trim().toLowerCase();
+    const rawCond = String(profile?.item_condition || '').trim().toLowerCase();
 
-  const isNew =
-    rawCond.startsWith('new') ||   // "New With Imperfections", "New Without Tags/Box", etc.
-    rawCond === '';                // default to NEW if empty
+    const isNew =
+      rawCond.startsWith('new') ||   // "New With Imperfections", "New Without Tags/Box", etc.
+      rawCond === '';                // default to NEW if empty
+  
+    // Categories (by ebayCategoryId) that explicitly support "For parts or not working" (7000)
+    const supportsParts = ['139971', '88433'].includes(String(ebayCategoryId || '').trim());
+  
+    let conditionEnum: string;
+    if (isNew) {
+      conditionEnum = 'NEW';
+    } else if (rawCond === 'pre-owned - broken for parts only' && supportsParts) {
+      conditionEnum = 'FOR_PARTS_OR_NOT_WORKING';
+    } else {
+      // For all other pre-owned cases in your current categories, send a generic “Used” value
+      // that the Inventory API actually understands. For your action-figure category (261068),
+      // eBay maps this to the 3000 “Used” condition id.
+      conditionEnum = 'USED_EXCELLENT';
+    }
+  
+    // Helpful debug so we can see exactly what was chosen at runtime
+    console.log('[ebay:condition.map]', {
+      uiCondition: profile?.item_condition || null,
+      rawCond,
+      ebayCategoryId,
+      supportsParts,
+      conditionEnum
+    });
 
-  // Categories (by ebayCategoryId) that explicitly support "For parts or not working" (7000)
-  const supportsParts = ['139971', '88433'].includes(String(ebayCategoryId || '').trim());
-
-  let conditionEnum: string;
-  if (isNew) {
-    conditionEnum = 'NEW';
-  } else if (rawCond === 'pre-owned - broken for parts only' && supportsParts) {
-    conditionEnum = 'FOR_PARTS_OR_NOT_WORKING';
-  } else {
-    // For all other pre-owned cases in your current categories, just send "USED".
-    conditionEnum = 'USED';
-  }
-
-  // Helpful debug so we can see exactly what was chosen at runtime
-  console.log('[ebay:condition.map]', {
-    uiCondition: profile?.item_condition || null,
-    rawCond,
-    ebayCategoryId,
-    supportsParts,
-    conditionEnum
-  });
 
   // include a short note only for non-NEW items
   const conditionDescription =
