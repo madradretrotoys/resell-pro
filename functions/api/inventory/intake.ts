@@ -195,6 +195,85 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
       return upsertFooter(body, sku, instore_loc, case_bin_shelf);
     }
 
+
+    // Vendoo mapping helpers (category + condition)
+    // These are intentionally generic and just return raw rows so the caller can
+    // shape the payload as needed without over-coupling to schema details.
+    async function loadVendooCategoryMap(
+      sql: any,
+      tenantId: number | null | undefined,
+      listingCategory: string | null | undefined
+    ) {
+      if (!tenantId || !listingCategory) return [];
+      try {
+        const rows = await sql`
+          select *
+          from app.marketplace_category_vendoo_map
+          where tenant_id = ${tenantId}
+            and category_key = ${listingCategory}
+        `;
+        return rows;
+      } catch (err) {
+        console.error("vendoo:category-map:load:error", {
+          tenantId,
+          listingCategory,
+          error: String(err),
+        });
+        return [];
+      }
+    }
+  
+    async function loadMarketplaceConditions(
+      sql: any,
+      tenantId: number | null | undefined,
+      conditionName: string | null | undefined
+    ) {
+      if (!tenantId || !conditionName) return [];
+      try {
+        const rows = await sql`
+          select *
+          from app.marketplace_conditions
+          where tenant_id = ${tenantId}
+            and condition_name = ${conditionName}
+        `;
+        return rows;
+      } catch (err) {
+        console.error("vendoo:conditions:load:error", {
+          tenantId,
+          conditionName,
+          error: String(err),
+        });
+        return [];
+      }
+    }
+  
+    async function loadVendooEbayConditionMap(
+      sql: any,
+      tenantId: number | null | undefined,
+      conditionName: string | null | undefined,
+      conditionOption: string | null | undefined
+    ) {
+      if (!tenantId || !conditionName || !conditionOption) return [];
+      try {
+        const rows = await sql`
+          select *
+          from app.marketplace_condition_vendoo_ebay_map
+          where tenant_id = ${tenantId}
+            and condition_name = ${conditionName}
+            and condition_options = ${conditionOption}
+        `;
+        return rows;
+      } catch (err) {
+        console.error("vendoo:ebay-condition-map:load:error", {
+          tenantId,
+          conditionName,
+          conditionOption,
+          error: String(err),
+        });
+        return [];
+      }
+    }
+    
      // === Helper: enqueue marketplace publish jobs (create vs update + no-change short-circuit) ===
     async function enqueuePublishJobs(
       tenant_id: string,
