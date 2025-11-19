@@ -2673,6 +2673,20 @@ function setMarketplaceVisibility() {
             inventory_meta,
             images,
             ebay_payload_snapshot,
+            // Optional server-side Vendoo mapping fields (Phase 2)
+            vendoo_category_key,
+            vendoo_category_vendoo,
+            vendoo_category_ebay,
+            vendoo_category_facebook,
+            vendoo_category_depop,
+            vendoo_condition_main,
+            vendoo_condition_fb,
+            vendoo_condition_depop,
+            vendoo_condition_ebay,
+            vendoo_condition_ebay_option,
+            vendoo_mapping: vendoo_mapping_incoming,
+
+            
           } = detail;
       
           const normalizedSaveStatus = String(saveStatus || "").toLowerCase();
@@ -2682,7 +2696,73 @@ function setMarketplaceVisibility() {
             });
             return null;
           }
-      
+          // Normalize Vendoo mapping coming back from the server (Phase 2).
+          const vendooMappingFromDetail =
+            vendoo_mapping_incoming && typeof vendoo_mapping_incoming === "object"
+              ? vendoo_mapping_incoming
+              : null;
+
+          const vendoo_mapping = {
+            // Category mapping
+            category_key:
+              vendoo_category_key ||
+              (vendooMappingFromDetail && vendooMappingFromDetail.category_key) ||
+              null,
+            category_vendoo:
+              vendoo_category_vendoo ||
+              (vendooMappingFromDetail && vendooMappingFromDetail.category_vendoo) ||
+              null,
+            category_ebay:
+              vendoo_category_ebay ||
+              (vendooMappingFromDetail && vendooMappingFromDetail.category_ebay) ||
+              null,
+            category_facebook:
+              vendoo_category_facebook ||
+              (vendooMappingFromDetail && vendooMappingFromDetail.category_facebook) ||
+              null,
+            category_depop:
+              vendoo_category_depop ||
+              (vendooMappingFromDetail && vendooMappingFromDetail.category_depop) ||
+              null,
+
+            // Condition mapping
+            condition_main:
+              vendoo_condition_main ||
+              (vendooMappingFromDetail && vendooMappingFromDetail.condition_main) ||
+              null,
+            condition_fb:
+              vendoo_condition_fb ||
+              (vendooMappingFromDetail && vendooMappingFromDetail.condition_fb) ||
+              null,
+            condition_depop:
+              vendoo_condition_depop ||
+              (vendooMappingFromDetail && vendooMappingFromDetail.condition_depop) ||
+              null,
+            condition_ebay:
+              vendoo_condition_ebay ||
+              (vendooMappingFromDetail && vendooMappingFromDetail.condition_ebay) ||
+              null,
+            condition_ebay_option:
+              vendoo_condition_ebay_option ||
+              (vendooMappingFromDetail && vendooMappingFromDetail.condition_ebay_option) ||
+              null,
+          };
+
+          console.log("[vendoo] rpBuildVendooPayload: normalized vendoo_mapping", {
+            vendoo_mapping,
+            vendoo_mapping_incoming,
+            vendoo_category_key,
+            vendoo_category_vendoo,
+            vendoo_category_ebay,
+            vendoo_category_facebook,
+            vendoo_category_depop,
+            vendoo_condition_main,
+            vendoo_condition_fb,
+            vendoo_condition_depop,
+            vendoo_condition_ebay,
+            vendoo_condition_ebay_option,
+          });
+          
           // Prefer intent.marketplaces from the server; fall back to marketplaces_selected.
           const intentMarketplaces = Array.isArray(intent?.marketplaces)
             ? intent.marketplaces
@@ -2725,6 +2805,8 @@ function setMarketplaceVisibility() {
             marketplaces_selected: intentMarketplaces,
             // eBay payload snapshot is the main bridge we’ll reuse for Vendoo mapping logic.
             ebay_payload_snapshot: ebay_payload_snapshot || null,
+            // Normalized Vendoo mapping so Tampermonkey doesn't need to hit Neon.
+            vendoo_mapping,
           };
       
           console.log("[vendoo] rpBuildVendooPayload: built payload", payload);
