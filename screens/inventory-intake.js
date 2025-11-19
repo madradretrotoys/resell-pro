@@ -2877,7 +2877,7 @@ function setMarketplaceVisibility() {
             };
 
            // 1. Open Vendoo window (required so Tampermonkey loads)
-          let vendooWin = window.open("https://app.vendoo.co/products/new", "_blank");
+          let vendooWin = window.open("https://web.vendoo.co/app/item/new", "_blank");
           
           if (!vendooWin || vendooWin.closed) {
             console.warn("[vendoo] popup blocked – allow popups for resellpros.com");
