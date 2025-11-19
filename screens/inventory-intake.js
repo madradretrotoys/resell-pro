@@ -1430,7 +1430,7 @@ function setMarketplaceVisibility() {
 
     const rows = (meta?.marketplaces || []).filter(m => m.is_active !== false);
 
-    / Discover marketplace ids for helpful logging / future rules
+    // Discover marketplace ids for helpful logging / future rules
     let ebayMarketplaceId = null;
     let vendooMarketplaceId = null;
     try {
