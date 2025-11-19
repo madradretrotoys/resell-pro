@@ -2838,7 +2838,7 @@ function setMarketplaceVisibility() {
             }
       
             const evDetail = {
-              type: "vendoo:emit_ready_if_safe",
+              type: "mrad_vendoo_fill",
               payload,
               marketplaces_selected: marketplaces_selected || null,
             };
@@ -2859,16 +2859,37 @@ function setMarketplaceVisibility() {
           try {
             const detail = ev?.detail || {};
             console.log("[vendoo] intake:vendoo-ready event", detail);
-      
-            // The Tampermonkey script listens for this postMessage.
+        
+            // Tampermonkey listens for "mrad_vendoo_fill"
             const message = {
-              type: "vendoo:emit_ready_if_safe",
+              type: "mrad_vendoo_fill",
               payload: detail.payload || null,
               marketplaces_selected: detail.marketplaces_selected || null,
             };
-      
+
+           // 1. Open Vendoo window (required so Tampermonkey loads)
+          let vendooWin = window.open("https://app.vendoo.co/products/new", "_blank");
+          
+          if (!vendooWin || vendooWin.closed) {
+            console.warn("[vendoo] popup blocked – allow popups for resellpros.com");
+          } else {
+            console.log("[vendoo] Vendoo window opened");
+          }
+          
+          // 2. Post message to Tampermonkey in THIS window
+          console.log("[vendoo] posting message to window for Tampermonkey", message);
+          window.postMessage(message, "*");
+          
+          // 3. ALSO send the payload into the Vendoo tab (Tampermonkey listens there too)
+          try {
+            vendooWin.postMessage(message, "*");
+            console.log("[vendoo] posted message to Vendoo window");
+          } catch (e) {
+            console.warn("[vendoo] failed to post to vendooWin", e);
+          }
+        
             console.log("[vendoo] posting message to window for Tampermonkey", message);
-            window.postMessage(message, window.location.origin || "*");
+            window.postMessage(message, "*");
           } catch (err) {
             console.warn("[vendoo] intake:vendoo-ready handler error", err);
           }
