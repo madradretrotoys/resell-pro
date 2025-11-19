@@ -4658,13 +4658,22 @@ document.addEventListener("intake:item-changed", () => refreshInventory({ force:
           // notify photos module to flush any pending uploads
             
           try {
+            const saveStatus = (mode === "draft" ? "draft" : "active");
+          
             document.dispatchEvent(
               new CustomEvent("intake:item-saved", {
                 detail: {
+                  // existing fields
                   item_id: __currentItemId,
                   action: "save",
-                  save_status: (mode === "draft" ? "draft" : "active"),
-                  job_ids: Array.isArray(res?.job_ids) ? res.job_ids : []
+                  save_status: saveStatus,
+                  job_ids: Array.isArray(res?.job_ids) ? res.job_ids : [],
+          
+                  // NEW: required for Vendoo workflow
+                  ok: (typeof res?.ok === "boolean" ? res.ok : true),
+                  status: res?.status || saveStatus,
+                  intent: res?.intent || null,
+                  marketplaces_selected: res?.marketplaces_selected || null
                 }
               })
             );
