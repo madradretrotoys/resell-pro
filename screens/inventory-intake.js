@@ -2793,6 +2793,7 @@ function setMarketplaceVisibility() {
           }
       
           const payload = {
+            __token: "MRAD_VENDOO_V1",       // ⭐ REQUIRED BY TAMPERMONKEY
             source: "resell-pro",
             mode: "single",
             save_status: normalizedSaveStatus,
@@ -2839,7 +2840,10 @@ function setMarketplaceVisibility() {
       
             const evDetail = {
               type: "mrad_vendoo_fill",
-              payload,
+              payload: {
+                ...payload,
+                __token: payload.__token || "MRAD_VENDOO_V1"   // ⭐ ENSURE TOKEN ALWAYS PRESENT
+              },
               marketplaces_selected: marketplaces_selected || null,
             };
       
@@ -2859,6 +2863,11 @@ function setMarketplaceVisibility() {
           try {
             const detail = ev?.detail || {};
             console.log("[vendoo] intake:vendoo-ready event", detail);
+
+            // Ensure token always present
+            if (!payload.__token) {
+              payload.__token = "MRAD_VENDOO_V1";
+            }
         
             // Tampermonkey listens for "mrad_vendoo_fill"
             const message = {
