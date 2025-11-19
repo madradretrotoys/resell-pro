@@ -1643,30 +1643,37 @@ function setMarketplaceVisibility() {
       host.dataset.validHook = "1";
     }
 
-    // Build a lookup of marketplaces by id (id, slug, marketplace_name, is_connected etc.)
+     // Build a lookup of marketplaces by id (id, slug, marketplace_name, is_connected etc.)
     const rows = (meta?.marketplaces || []).filter(m => m.is_active !== false);
     const byId = new Map(rows.map(r => [Number(r.id), r]));
     const desiredIds = Array.from(selectedMarketplaceIds).map(Number);
-    // Vendoo path: if Vendoo is selected, always render the eBay card as well
+
+    // Vendoo path: if Vendoo is selected, always render cards for ALL connected marketplaces.
+    // This lets the user see per-marketplace Vendoo status (eBay, Facebook, Depop, etc.)
     try {
       let vendooId = null;
-      let ebayId = null;
+      const connectedIds = [];
 
       for (const r of rows) {
         const slug = String(r.slug || "").toLowerCase();
         if (slug === "vendoo") vendooId = Number(r.id);
-        if (slug === "ebay") ebayId = Number(r.id);
+        if (r.is_connected) connectedIds.push(Number(r.id));
       }
 
       const vendooSelected =
         vendooId != null && desiredIds.includes(vendooId);
 
-      if (vendooSelected && ebayId != null && !desiredIds.includes(ebayId)) {
-        desiredIds.push(ebayId);
+      if (vendooSelected) {
+        for (const mid of connectedIds) {
+          if (!desiredIds.includes(mid)) {
+            desiredIds.push(mid);
+          }
+        }
       }
     } catch (e) {
-      console.error("marketplaces:vendoo-ebay-card-sync:error", e);
+      console.error("marketplaces:vendoo-cards-sync:error", e);
     }
+
     // Capture existing per-card statuses (by marketplace id) before a full rebuild
     const prevStatuses = new Map();
     if (mode === "full") {
