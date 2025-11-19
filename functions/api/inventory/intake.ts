@@ -428,6 +428,38 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
           // Pull the marketplace row (if present) to know current identifiers/status
           const iml = Array.isArray(imlRows) ? imlRows.find((x: any) => x.marketplace_id === r.id) : null;
 
+          if (slug === "vendoo") {
+            console.log("[intake] vendoo.skip_enqueue_tampermonkey", {
+              item_id,
+              marketplace_id: r.id,
+              slug,
+              desiredAction,
+            });
+
+            // Ensure stub exists so UI can reflect progress while Tampermonkey/Vendoo runs
+            await sql/*sql*/`
+              INSERT INTO app.item_marketplace_listing
+                (item_id, tenant_id, marketplace_id, status)
+              VALUES
+                (${item_id}, ${tenant_id}, ${r.id}, 'publishing')
+              ON CONFLICT (item_id, marketplace_id)
+              DO UPDATE SET
+                status = 'publishing',
+                updated_at = now()
+            `;
+
+            await sql/*sql*/`
+              INSERT INTO app.item_marketplace_events
+                (item_id, tenant_id, marketplace_id, kind, payload)
+              VALUES
+                (${item_id}, ${tenant_id}, ${r.id}, 'publish_started', jsonb_build_object('source','vendoo_enqueue'))
+            `;
+
+            // No server-runner job for Vendoo; browser/Tampermonkey flow will complete it.
+            continue;
+          }
+
+          
           if (slug === "facebook") {
             const statusNorm = String(iml?.status || "").toLowerCase();
             const isLiveLike = statusNorm === "active" || statusNorm === "live";
