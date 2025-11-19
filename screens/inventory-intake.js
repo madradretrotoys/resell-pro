@@ -2764,25 +2764,77 @@ function setMarketplaceVisibility() {
           });
           
           // Prefer intent.marketplaces from the server; fall back to marketplaces_selected.
-          const intentMarketplaces = Array.isArray(intent?.marketplaces)
+          const rawIntentMarketplaces = Array.isArray(intent?.marketplaces)
             ? intent.marketplaces
             : Array.isArray(marketplaces_selected)
             ? marketplaces_selected
             : [];
-      
+          
+          console.log("[vendoo] rpBuildVendooPayload: raw intent sources", {
+            intentFromServer: intent?.marketplaces || null,
+            marketplaces_selected: marketplaces_selected || null,
+            rawIntentMarketplaces,
+            intentType: intent?.type || null,
+          });
+          
+          // Normalize to objects so fallback string arrays like ["vendoo"] still work.
+          const intentMarketplaces = (rawIntentMarketplaces || []).map((m) => {
+            if (typeof m === "string") {
+              const normalized = {
+                slug: m,
+                marketplace_id: null,
+                operation: "create",
+                selected: true,
+              };
+              console.log("[vendoo] rpBuildVendooPayload: normalized string marketplace to object", {
+                original: m,
+                normalized,
+              });
+              return normalized;
+            }
+          
+            const normalized = m || {};
+            console.log("[vendoo] rpBuildVendooPayload: normalized marketplace object", {
+              original: m,
+              normalized,
+            });
+            return normalized;
+          });
+          
+          console.log("[vendoo] rpBuildVendooPayload: normalized intentMarketplaces", {
+            intentMarketplaces,
+          });
+          
           // Marketplace id 13 is Vendoo in our schema.
           const vendooIntent =
             intentMarketplaces.find((m) => {
               const slug = String(m?.slug || "").toLowerCase();
-              return slug === "vendoo" || String(m?.marketplace_id) === "13";
+              const isVendoo =
+                slug === "vendoo" || String(m?.marketplace_id) === "13";
+              if (isVendoo) {
+                console.log("[vendoo] rpBuildVendooPayload: vendoo candidate matched", {
+                  candidate: m,
+                  slug,
+                });
+              } else {
+                console.log("[vendoo] rpBuildVendooPayload: marketplace candidate skipped", {
+                  candidate: m,
+                  slug,
+                });
+              }
+              return isVendoo;
             }) || null;
-      
+          
           if (!vendooIntent) {
             console.log("[vendoo] rpBuildVendooPayload: no vendoo marketplace intent found", {
               intentMarketplaces,
             });
             return null;
           }
+          
+          console.log("[vendoo] rpBuildVendooPayload: using vendooIntent", {
+            vendooIntent,
+          });
       
           const vendooOperation = String(vendooIntent.operation || "").toLowerCase() || "create";
           if (vendooOperation !== "create") {
@@ -2889,21 +2941,17 @@ function setMarketplaceVisibility() {
           console.log("[vendoo] posting message to window for Tampermonkey", message);
           window.postMessage(message, "*");
           
-          // 3. ALSO send the payload into the Vendoo tab (Tampermonkey listens there too)
-          try {
-            vendooWin.postMessage(message, "*");
-            console.log("[vendoo] posted message to Vendoo window");
-          } catch (e) {
-            console.warn("[vendoo] failed to post to vendooWin", e);
-          }
-        
-            console.log("[vendoo] posting message to window for Tampermonkey", message);
-            window.postMessage(message, "*");
+           // 3. ALSO send the payload into the Vendoo tab (Tampermonkey listens there too)
+            try {
+              vendooWin.postMessage(message, "*");
+              console.log("[vendoo] posted message to Vendoo window");
+            } catch (e) {
+              console.warn("[vendoo] failed to post to vendooWin", e);
+            }
           } catch (err) {
             console.warn("[vendoo] intake:vendoo-ready handler error", err);
           }
         });
-
         //end vendoo process 
 
 
