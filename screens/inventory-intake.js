@@ -2915,11 +2915,21 @@ function setMarketplaceVisibility() {
           try {
             const detail = ev?.detail || {};
             console.log("[vendoo] intake:vendoo-ready event", detail);
-
+            
+            // Derive payload from event detail
+            console.log("[vendoo] raw detail.payload", detail.payload);
+            const payload = detail.payload || {};
+            console.log("[vendoo] derived payload before token", payload);
+            
             // Ensure token always present
             if (!payload.__token) {
+              console.log("[vendoo] __token missing on payload, setting default token");
               payload.__token = "MRAD_VENDOO_V1";
+            } else {
+              console.log("[vendoo] __token already present on payload", payload.__token);
             }
+            
+            console.log("[vendoo] payload after token ensure", payload);
         
             // Tampermonkey listens for "mrad_vendoo_fill"
             const message = {
