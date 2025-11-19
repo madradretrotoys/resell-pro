@@ -2523,22 +2523,134 @@ function setMarketplaceVisibility() {
 
 
 
-/** Refresh when the FB tab signals it’s done (dry-run or real) */
-window.addEventListener("message", (ev) => {
-  try {
-    const okOrigin =
-      ev.origin === location.origin || ev.origin === "https://www.facebook.com";
-    if (!okOrigin) return;
-    if (ev.data && ev.data.type === "facebook:create:done") {
-      refreshFacebookTile();
-    }
-  } catch {}
-});
+        /** Refresh when the FB tab signals it’s done (dry-run or real) */
+        window.addEventListener("message", (ev) => {
+          try {
+            const okOrigin =
+              ev.origin === location.origin || ev.origin === "https://www.facebook.com";
+            if (!okOrigin) return;
+            if (ev.data && ev.data.type === "facebook:create:done") {
+              refreshFacebookTile();
+            }
+          } catch {}
+        });
 
-/** Also refresh when user returns focus from the FB window */
-window.addEventListener("focus", () => {
-  setTimeout(() => { try { refreshFacebookTile(); } catch {} }, 300);
-});
+        /** Also refresh when user returns focus from the FB window */
+        window.addEventListener("focus", () => {
+          setTimeout(() => { try { refreshFacebookTile(); } catch {} }, 300);
+        });
+
+        // begin vendoo process
+        // --- Vendoo Tampermonkey payload helper (phase 1) ---
+        function rpBuildVendooPayload(detail) {
+          try {
+            console.log("[intake] vendoo:build_payload:start", { detail });
+      
+            const {
+              item,
+              listing,
+              inventory_meta,
+              marketplaces_selected,
+              images,
+              ebay_payload_snapshot,
+            } = detail || {};
+      
+            const base = {
+              tenant_id: __tenantId || null,
+              item_id: item?.id ?? null,
+              sku: item?.sku ?? null,
+              marketplaces_selected: marketplaces_selected || [],
+            };
+      
+            // Phase 1: reuse what we already know from the listing + eBay payload snapshot.
+            // In a later pass we will add the Neon-driven category/condition mapping here.
+            const vendoo = {
+              title: listing?.title || "",
+              description: listing?.description || "",
+              price: listing?.price || null,
+              condition: listing?.item_condition || null,
+              // TODO (phase 2): drop in mapped condition/category values from Neon tables:
+              //  - app.marketplace_conditions (vendoo_map, fb_map, depop_map)
+              //  - app.marketplace_category_vendoo_map
+            };
+      
+            const primaryImage =
+              Array.isArray(images) && images.length ? images[0] : null;
+      
+            const payload = {
+              ...base,
+              vendoo,
+              images,
+              primary_image: primaryImage,
+              // Keep the full eBay payload snapshot around so Tampermonkey
+              // can reuse anything it needs while we wire in proper mappings.
+              ebay_payload_snapshot: ebay_payload_snapshot || null,
+            };
+      
+            console.log("[intake] vendoo:build_payload:ok", { payload });
+            return payload;
+          } catch (err) {
+            console.error("[intake] vendoo:build_payload:error", err);
+            return null;
+          }
+        }
+      
+        function __emitVendooReadyIfSafe(detail) {
+          try {
+            console.log("[intake] vendoo:emit_ready_if_safe:start", { detail });
+      
+            if (!detail || !detail.ok) {
+              console.log("[intake] vendoo:emit_ready_if_safe:skip:not_ok");
+              return;
+            }
+      
+            // Only fire for ACTIVE saves — same rule as Facebook / eBay ACTIVE listings.
+            if (detail.status !== "ACTIVE") {
+              console.log("[intake] vendoo:emit_ready_if_safe:skip:not_active", {
+                status: detail.status,
+              });
+              return;
+            }
+      
+            // Phase 1 guard: require that the Vendoo marketplace is actually selected in this save.
+            const selected = new Set(
+              (detail.marketplaces_selected || []).map((m) =>
+                typeof m === "string" ? m.toLowerCase() : m
+              )
+            );
+            const vendooSelected =
+              selected.has("vendoo") || selected.has("VENDOO") || selected.has(13);
+      
+            if (!vendooSelected) {
+              console.log(
+                "[intake] vendoo:emit_ready_if_safe:skip:vendoo_not_selected",
+                { marketplaces_selected: detail.marketplaces_selected }
+              );
+              return;
+            }
+      
+            const payload = rpBuildVendooPayload(detail);
+            if (!payload) {
+              console.log("[intake] vendoo:emit_ready_if_safe:skip:no_payload");
+              return;
+            }
+      
+            window.postMessage(
+              {
+                source: "resell_pro",
+                kind: "VENDOO_READY",
+                payload,
+              },
+              window.location.origin
+            );
+      
+            console.log("[intake] vendoo:emit_ready_if_safe:posted", { payload });
+          } catch (err) {
+            console.error("[intake] vendoo:emit_ready_if_safe:error", err);
+          }
+        }
+        //end vendoo process 
+
 
   
 // --- Drafts refresh bus + helpers (anchored insert) ---
