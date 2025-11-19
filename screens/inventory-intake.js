@@ -704,8 +704,53 @@ export async function init() {
           });
         }
 
+        // —— Vendoo intent gate (mirrors Facebook pattern) ——
+        let vendooOp = null;
+        if (intentMarketplaces) {
+          const vendooIntent = intentMarketplaces.find((m) => {
+            const slug = String(m?.slug || "").toLowerCase();
+            // Marketplace id "13" is Vendoo in our current schema; keep slug as primary key as well.
+            return slug === "vendoo" || String(m?.marketplace_id) === "13";
+          }) || null;
+          vendooOp = vendooIntent?.operation || null;
+        }
+
+        const shouldEmitVendoo =
+          saveStatus === "active" && (
+            // If we don’t have intent yet, preserve legacy behavior.
+            !vendooOp ||
+            // When the server explicitly says "create", we allow the Vendoo-ready event.
+            String(vendooOp).toLowerCase() === "create"
+          );
+
+        console.log("[intake.js] vendoo intent gate", {
+          saveStatus,
+          vendooOp,
+          shouldEmitVendoo,
+        });
+
+        // When the save is Active, photos are flushed, and the server indicates that
+        // Vendoo should be created, this will feed the Tampermonkey bridge.
+        if (shouldEmitVendoo) {
+          try {
+            await __emitVendooReadyIfSafe(ev.detail);
+          } catch (err) {
+            console.warn("[intake.js] __emitVendooReadyIfSafe failed", err);
+          }
+        } else {
+          console.log("[intake.js] skip vendoo-ready emit", {
+            reason: saveStatus !== "active"
+              ? "non-active-save"
+              : "vendoo-op-not-create (likely already live / skip)",
+          });
+        }
+        
         // Immediately reconcile the Facebook card with the DB snapshot
         try { await refreshFacebookTile(); } catch {}
+
+        // Immediately reconcile the vendoo card with the DB snapshot
+        try { await refreshVendooTile(); } catch {}
+      
       } catch (e) {
         console.error("photos:flush:error", e);
       } finally {
@@ -2541,114 +2586,143 @@ function setMarketplaceVisibility() {
         });
 
         // begin vendoo process
-        // --- Vendoo Tampermonkey payload helper (phase 1) ---
+        // ===== Vendoo: payload builder + emit helper (Tampermonkey bridge) =====
         function rpBuildVendooPayload(detail) {
-          try {
-            console.log("[intake] vendoo:build_payload:start", { detail });
+          console.log("[vendoo] rpBuildVendooPayload: incoming detail", detail);
       
-            const {
-              item,
-              listing,
-              inventory_meta,
-              marketplaces_selected,
-              images,
-              ebay_payload_snapshot,
-            } = detail || {};
-      
-            const base = {
-              tenant_id: __tenantId || null,
-              item_id: item?.id ?? null,
-              sku: item?.sku ?? null,
-              marketplaces_selected: marketplaces_selected || [],
-            };
-      
-            // Phase 1: reuse what we already know from the listing + eBay payload snapshot.
-            // In a later pass we will add the Neon-driven category/condition mapping here.
-            const vendoo = {
-              title: listing?.title || "",
-              description: listing?.description || "",
-              price: listing?.price || null,
-              condition: listing?.item_condition || null,
-              // TODO (phase 2): drop in mapped condition/category values from Neon tables:
-              //  - app.marketplace_conditions (vendoo_map, fb_map, depop_map)
-              //  - app.marketplace_category_vendoo_map
-            };
-      
-            const primaryImage =
-              Array.isArray(images) && images.length ? images[0] : null;
-      
-            const payload = {
-              ...base,
-              vendoo,
-              images,
-              primary_image: primaryImage,
-              // Keep the full eBay payload snapshot around so Tampermonkey
-              // can reuse anything it needs while we wire in proper mappings.
-              ebay_payload_snapshot: ebay_payload_snapshot || null,
-            };
-      
-            console.log("[intake] vendoo:build_payload:ok", { payload });
-            return payload;
-          } catch (err) {
-            console.error("[intake] vendoo:build_payload:error", err);
+          if (!detail || typeof detail !== "object") {
+            console.warn("[vendoo] rpBuildVendooPayload: invalid detail");
             return null;
           }
+      
+          const {
+            saveStatus,
+            intent,
+            marketplaces_selected,
+            item,
+            listing,
+            inventory_meta,
+            images,
+            ebay_payload_snapshot,
+          } = detail;
+      
+          const normalizedSaveStatus = String(saveStatus || "").toLowerCase();
+          if (normalizedSaveStatus !== "active") {
+            console.log("[vendoo] rpBuildVendooPayload: skipping non-active save", {
+              saveStatus,
+            });
+            return null;
+          }
+      
+          // Prefer intent.marketplaces from the server; fall back to marketplaces_selected.
+          const intentMarketplaces = Array.isArray(intent?.marketplaces)
+            ? intent.marketplaces
+            : Array.isArray(marketplaces_selected)
+            ? marketplaces_selected
+            : [];
+      
+          // Marketplace id 13 is Vendoo in our schema.
+          const vendooIntent =
+            intentMarketplaces.find((m) => {
+              const slug = String(m?.slug || "").toLowerCase();
+              return slug === "vendoo" || String(m?.marketplace_id) === "13";
+            }) || null;
+      
+          if (!vendooIntent) {
+            console.log("[vendoo] rpBuildVendooPayload: no vendoo marketplace intent found", {
+              intentMarketplaces,
+            });
+            return null;
+          }
+      
+          const vendooOperation = String(vendooIntent.operation || "").toLowerCase() || "create";
+          if (vendooOperation !== "create") {
+            console.log("[vendoo] rpBuildVendooPayload: vendoo operation is not create; skip", {
+              vendooOperation,
+            });
+            return null;
+          }
+      
+          const payload = {
+            source: "resell-pro",
+            mode: "single",
+            save_status: normalizedSaveStatus,
+            // Core listing context
+            item: item || null,
+            listing: listing || null,
+            inventory_meta: inventory_meta || null,
+            images: Array.isArray(images) ? images : [],
+            // Marketplace selections (server-normalized)
+            marketplaces_selected: intentMarketplaces,
+            // eBay payload snapshot is the main bridge we’ll reuse for Vendoo mapping logic.
+            ebay_payload_snapshot: ebay_payload_snapshot || null,
+          };
+      
+          console.log("[vendoo] rpBuildVendooPayload: built payload", payload);
+          return payload;
         }
       
-        function __emitVendooReadyIfSafe(detail) {
+        async function __emitVendooReadyIfSafe(detail) {
           try {
-            console.log("[intake] vendoo:emit_ready_if_safe:start", { detail });
+            console.log("[vendoo] __emitVendooReadyIfSafe: entry", { detail });
       
-            if (!detail || !detail.ok) {
-              console.log("[intake] vendoo:emit_ready_if_safe:skip:not_ok");
+            if (!detail || typeof detail !== "object") {
+              console.warn("[vendoo] __emitVendooReadyIfSafe: missing or invalid detail");
               return;
             }
       
-            // Only fire for ACTIVE saves — same rule as Facebook / eBay ACTIVE listings.
-            if (detail.status !== "ACTIVE") {
-              console.log("[intake] vendoo:emit_ready_if_safe:skip:not_active", {
-                status: detail.status,
+            const { ok, status, marketplaces_selected } = detail || {};
+            if (ok !== true) {
+              console.log("[vendoo] __emitVendooReadyIfSafe: response not ok; skip", {
+                ok,
+                status,
               });
-              return;
-            }
-      
-            // Phase 1 guard: require that the Vendoo marketplace is actually selected in this save.
-            const selected = new Set(
-              (detail.marketplaces_selected || []).map((m) =>
-                typeof m === "string" ? m.toLowerCase() : m
-              )
-            );
-            const vendooSelected =
-              selected.has("vendoo") || selected.has("VENDOO") || selected.has(13);
-      
-            if (!vendooSelected) {
-              console.log(
-                "[intake] vendoo:emit_ready_if_safe:skip:vendoo_not_selected",
-                { marketplaces_selected: detail.marketplaces_selected }
-              );
               return;
             }
       
             const payload = rpBuildVendooPayload(detail);
             if (!payload) {
-              console.log("[intake] vendoo:emit_ready_if_safe:skip:no_payload");
+              console.log("[vendoo] __emitVendooReadyIfSafe: rpBuildVendooPayload returned null; skip");
               return;
             }
       
-            window.postMessage(
-              {
-                source: "resell_pro",
-                kind: "VENDOO_READY",
-                payload,
-              },
-              window.location.origin
-            );
+            const evDetail = {
+              type: "vendoo:emit_ready_if_safe",
+              payload,
+              marketplaces_selected: marketplaces_selected || null,
+            };
       
-            console.log("[intake] vendoo:emit_ready_if_safe:posted", { payload });
+            console.log("[vendoo] __emitVendooReadyIfSafe: dispatching CustomEvent", evDetail);
+            document.dispatchEvent(
+              new CustomEvent("intake:vendoo-ready", {
+                detail: evDetail,
+              })
+            );
           } catch (err) {
-            console.error("[intake] vendoo:emit_ready_if_safe:error", err);
+            console.warn("[vendoo] __emitVendooReadyIfSafe: error", err);
           }
         }
+      
+        // Vendoo: bridge to Tampermonkey (same pattern as Facebook).
+        document.addEventListener("intake:vendoo-ready", (ev) => {
+          try {
+            const detail = ev?.detail || {};
+            console.log("[vendoo] intake:vendoo-ready event", detail);
+      
+            // The Tampermonkey script listens for this postMessage.
+            const message = {
+              type: "vendoo:emit_ready_if_safe",
+              payload: detail.payload || null,
+              marketplaces_selected: detail.marketplaces_selected || null,
+            };
+      
+            console.log("[vendoo] posting message to window for Tampermonkey", message);
+            window.postMessage(message, window.location.origin || "*");
+          } catch (err) {
+            console.warn("[vendoo] intake:vendoo-ready handler error", err);
+          }
+        });
+
         //end vendoo process 
 
 
