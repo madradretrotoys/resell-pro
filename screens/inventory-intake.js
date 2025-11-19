@@ -1493,25 +1493,68 @@ function setMarketplaceVisibility() {
         btn.setAttribute("aria-pressed", "false");
       }
 
-       // click toggles selection if selectable
+      // click toggles selection if selectable
       if (enabledSelectable) {
         btn.addEventListener("click", () => {
           const id = Number(btn.dataset.marketplaceId);
-          const isSel = selectedMarketplaceIds.has(id);
-          if (isSel) {
-            selectedMarketplaceIds.delete(id);
-            btn.classList.remove("btn-primary");
-            btn.classList.add("btn-ghost");
-            btn.setAttribute("aria-pressed", "false");
+          const slug = String(m.slug || "").toLowerCase();
+          const isVendooTile = slug === "vendoo";
+
+          // Snapshot current selection so we can reason about Vendoo/eBay rules
+          const currentIds = new Set(Array.from(selectedMarketplaceIds));
+
+          if (isVendooTile) {
+            const alreadySelected = currentIds.has(id);
+
+            if (alreadySelected) {
+              // Deselect Vendoo → revert to "normal" mode (no special rules)
+              currentIds.delete(id);
+            } else {
+              // Select Vendoo → single-tenant mode:
+              //  - clear all other marketplace selections
+              //  - only Vendoo remains selected
+              currentIds.clear();
+              currentIds.add(id);
+            }
           } else {
-            selectedMarketplaceIds.add(id);
-            btn.classList.remove("btn-ghost");
-            btn.classList.add("btn-primary");
-            btn.setAttribute("aria-pressed", "true");
+            // Non-Vendoo tiles:
+            //  - if Vendoo is currently selected, clicking another tile will
+            //    drop Vendoo and behave like normal multi-select.
+            let vendooId = null;
+            for (const row of (__metaCache?.marketplaces || [])) {
+              const s = String(row.slug || "").toLowerCase();
+              if (s === "vendoo") {
+                vendooId = Number(row.id);
+                break;
+              }
+            }
+            if (vendooId != null && currentIds.has(vendooId)) {
+              currentIds.delete(vendooId);
+            }
+
+            const alreadySelected = currentIds.has(id);
+            if (alreadySelected) {
+              currentIds.delete(id);
+            } else {
+              currentIds.add(id);
+            }
           }
-          // live-validate after any toggle
-          computeValidity();
-          // Delta-mode: add/remove cards without resetting existing card inputs
+
+          // Write back to the shared selection set
+          selectedMarketplaceIds.clear();
+          for (const v of currentIds) {
+            selectedMarketplaceIds.add(v);
+          }
+
+          // Re-style all tiles by re-rendering from the updated selection
+          try {
+            renderMarketplaceTiles(__metaCache);
+          } catch (e) {
+            console.error("marketplaces:vendoo-tiles:rerender:error", e);
+          }
+
+          // Re-validate + update cards (delta mode retains card input values)
+          try { computeValidity(); } catch {}
           try { renderMarketplaceCards(__metaCache, { mode: "delta" }); } catch {}
         });
       } else {
