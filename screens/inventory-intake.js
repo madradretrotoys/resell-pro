@@ -1385,6 +1385,23 @@ function setMarketplaceVisibility() {
 
     const rows = (meta?.marketplaces || []).filter(m => m.is_active !== false);
 
+    / Discover marketplace ids for helpful logging / future rules
+    let ebayMarketplaceId = null;
+    let vendooMarketplaceId = null;
+    try {
+      for (const m of rows) {
+        const slug = String(m.slug || "").toLowerCase();
+        if (slug === "ebay") ebayMarketplaceId = Number(m.id);
+        if (slug === "vendoo") vendooMarketplaceId = Number(m.id);
+      }
+      console.log("[intake] marketplaces:ids", {
+        ebayMarketplaceId,
+        vendooMarketplaceId,
+      });
+    } catch (e) {
+      console.warn("[intake] marketplaces:ids:discover_error", e);
+    }
+    
     // PROTOTYPE RULE:
     // If ZERO marketplaces are connected for this tenant, allow selecting ALL active marketplaces.
     const anyConnected = rows.some(r => r.enabled_for_tenant && r.is_connected);
