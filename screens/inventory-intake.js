@@ -1647,7 +1647,26 @@ function setMarketplaceVisibility() {
     const rows = (meta?.marketplaces || []).filter(m => m.is_active !== false);
     const byId = new Map(rows.map(r => [Number(r.id), r]));
     const desiredIds = Array.from(selectedMarketplaceIds).map(Number);
+    // Vendoo path: if Vendoo is selected, always render the eBay card as well
+    try {
+      let vendooId = null;
+      let ebayId = null;
 
+      for (const r of rows) {
+        const slug = String(r.slug || "").toLowerCase();
+        if (slug === "vendoo") vendooId = Number(r.id);
+        if (slug === "ebay") ebayId = Number(r.id);
+      }
+
+      const vendooSelected =
+        vendooId != null && desiredIds.includes(vendooId);
+
+      if (vendooSelected && ebayId != null && !desiredIds.includes(ebayId)) {
+        desiredIds.push(ebayId);
+      }
+    } catch (e) {
+      console.error("marketplaces:vendoo-ebay-card-sync:error", e);
+    }
     // Capture existing per-card statuses (by marketplace id) before a full rebuild
     const prevStatuses = new Map();
     if (mode === "full") {
