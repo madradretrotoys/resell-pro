@@ -814,7 +814,7 @@ export async function init() {
           vendooOp = vendooIntent?.operation || null;
         }
         
-        const shouldEmitVendoo =
+         const shouldEmitVendoo =
           saveStatus === "active" && (
             // If we don’t have intent yet, preserve legacy behavior.
             !vendooOp ||
@@ -832,14 +832,65 @@ export async function init() {
         // Vendoo should be created, this will feed the Tampermonkey bridge.
         if (shouldEmitVendoo) {
           try {
+            // Prefer an existing snapshot (Facebook gate may have already loaded it)
+            let snap = null;
+            try {
+              snap = window.__intakeSnap || null;
+            } catch {
+              snap = null;
+            }
+
+            // If we don't have a snapshot yet, load a fresh one for this item.
+            if (!snap && __currentItemId) {
+              console.log("[intake.js] vendoo: loading snapshot for payload enrich", {
+                item_id: __currentItemId,
+              });
+              snap = await api(
+                `/api/inventory/intake?item_id=${encodeURIComponent(__currentItemId)}`,
+                { method: "GET" }
+              );
+              try { window.__intakeSnap = snap; } catch {}
+            }
+
             const vendooDetail = {
               ...ev.detail,
               // 🔑 Make sure rpBuildVendooPayload sees an ACTIVE status
-              saveStatus,                          // camelCase for rpBuildVendooPayload
-              save_status: saveStatus,             // keep the original too
+              saveStatus,              // camelCase for rpBuildVendooPayload
+              save_status: saveStatus, // keep the original too
               intent,
               intentMarketplaces,
             };
+
+            // Enrich detail with images + inventory_meta + ebay_payload_snapshot
+            if (snap && typeof snap === "object") {
+              vendooDetail.inventory_meta =
+                snap.inventory_meta ||
+                snap.inventory ||
+                snap.item ||
+                null;
+
+              vendooDetail.images =
+                snap.images ||
+                snap.item_images ||
+                snap.photos ||
+                null;
+
+              vendooDetail.ebay_payload_snapshot =
+                snap.ebay_payload_snapshot ||
+                snap.ebay_payload ||
+                (snap.marketplace_payloads &&
+                  (snap.marketplace_payloads.ebay ||
+                   snap.marketplace_payloads["ebay"])) ||
+                null;
+
+              // Preserve any existing vendoo_mapping on detail, but
+              // also thread through mapping derived server-side if present.
+              vendooDetail.vendoo_mapping =
+                vendooDetail.vendoo_mapping ||
+                snap.vendoo_mapping ||
+                snap.vendoo ||
+                null;
+            }
         
             console.log("[intake.js] vendoo emit detail", vendooDetail);
             await __emitVendooReadyIfSafe(vendooDetail);
