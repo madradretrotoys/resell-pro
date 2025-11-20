@@ -666,18 +666,117 @@ export async function init() {
            }
         }
 
-        // Derive Facebook intent from the server’s normalized intent.marketplaces, if present.
-        // This lets us avoid re-creating Facebook listings when they are already live.
+        //---------------------------------------------
+        // Inject Vendoo intent when selected in UI
+        //---------------------------------------------
+        (function injectVendooIntent() {
+          console.groupCollapsed("%c[intake.js] injectVendooIntent START", "color:#0af; font-weight:bold;");
+          try {
+            console.log("[injectVendooIntent] incoming state", {
+              saveStatus,
+              selectedMarketplaceIds: Array.from(selectedMarketplaceIds),
+              intentBefore: intent,
+              intentMarketplacesBefore: intent?.marketplaces || null
+            });
+        
+            // Vendoo marketplace_id is 13 in your schema
+            const vendooId = 13;
+            console.log("[injectVendooIntent] vendooId", vendooId);
+        
+            // Determine if the Vendoo tile is selected in the UI
+            const vendooSelected =
+              Array.from(selectedMarketplaceIds).some((id) => Number(id) === vendooId);
+        
+            console.log("[injectVendooIntent] vendooSelected?", vendooSelected);
+        
+            // Only inject intent for ACTIVE saves and when Vendoo tile is selected
+            if (!vendooSelected) {
+              console.warn("[injectVendooIntent] EXIT — Vendoo tile not selected.");
+              console.groupEnd();
+              return;
+            }
+        
+            if (saveStatus !== "active") {
+              console.warn("[injectVendooIntent] EXIT — saveStatus is NOT active:", saveStatus);
+              console.groupEnd();
+              return;
+            }
+        
+            // Ensure intent + marketplaces array exists
+            if (!intent) {
+              console.log("[injectVendooIntent] intent missing → creating ev.detail.intent");
+              ev.detail.intent = intent = {};
+            }
+        
+            if (!intent.marketplaces) {
+              console.log("[injectVendooIntent] intent.marketplaces missing → creating []");
+              intent.marketplaces = [];
+            }
+        
+            // When Vendoo intent is missing, add a fresh create-op
+            const already = intent.marketplaces.find(
+              (m) => String(m.slug || "").toLowerCase() === "vendoo"
+            );
+        
+            console.log("[injectVendooIntent] vendoo intent already present?", already);
+        
+            if (!already) {
+              const payload = {
+                slug: "vendoo",
+                marketplace_id: vendooId,
+                selected: true,
+                operation: "create"
+              };
+        
+              intent.marketplaces.push(payload);
+        
+              console.log("%c[injectVendooIntent] Vendoo intent ADDED", "color:#0f0; font-weight:bold;", {
+                addedPayload: payload,
+                saveStatus,
+                marketplace_id: vendooId,
+                operation: "create"
+              });
+            } else {
+              console.log("%c[injectVendooIntent] Vendoo intent ALREADY EXISTS — no action taken", "color:#ff0;");
+            }
+        
+            console.log("[injectVendooIntent] final intent state:", {
+              intent,
+              intentMarketplaces: intent.marketplaces
+            });
+        
+          } catch (e) {
+            console.error("%c[injectVendooIntent ERROR]", "color:#f00; font-weight:bold;", e);
+          }
+          console.groupEnd();
+        })();
+        
+        //---------------------------------------------
+        // Derive Facebook intent from the server’s normalized intent.marketplaces
+        //---------------------------------------------
         let facebookOp = null;
-        if (intentMarketplaces) {
-          const facebookIntent = intentMarketplaces.find((m) => {
-            const slug = String(m?.slug || "").toLowerCase();
-            // Marketplace id "2" is Facebook in our current schema; keep slug as primary key.
-            return slug === "facebook" || String(m?.marketplace_id) === "2";
-          }) || null;
-          facebookOp = facebookIntent?.operation || null;
+        console.groupCollapsed("%c[intake.js] Derive Facebook Intent", "color:#0af; font-weight:bold;");
+        try {
+          if (intentMarketplaces) {
+            console.log("[facebookIntent] examining intent.marketplaces:", intentMarketplaces);
+        
+            const facebookIntent = intentMarketplaces.find((m) => {
+              const slug = String(m?.slug || "").toLowerCase();
+              return slug === "facebook" || String(m?.marketplace_id) === "2";
+            }) || null;
+        
+            facebookOp = facebookIntent?.operation || null;
+        
+            console.log("[facebookIntent] derived facebookOp:", facebookOp, {
+              facebookIntent
+            });
+          } else {
+            console.warn("[facebookIntent] intentMarketplaces is NULL — skipping Facebook op derivation");
+          }
+        } catch (e) {
+          console.error("[facebookIntent ERROR]", e);
         }
-
+        console.groupEnd();
         const shouldEmitFacebook =
           saveStatus === "active" && (
             // If we don’t have intent yet, preserve legacy behavior.
