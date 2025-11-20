@@ -808,6 +808,7 @@ export async function init() {
         if (intentMarketplaces) {
           const vendooIntent = intentMarketplaces.find((m) => {
             const slug = String(m?.slug || "").toLowerCase();
+            // Marketplace id "13" is Vendoo in our current schema; keep slug as primary key as well.
             return slug === "vendoo" || String(m?.marketplace_id) === "13";
           }) || null;
           vendooOp = vendooIntent?.operation || null;
@@ -815,17 +816,11 @@ export async function init() {
         
         const shouldEmitVendoo =
           saveStatus === "active" && (
+            // If we don’t have intent yet, preserve legacy behavior.
             !vendooOp ||
+            // When the server explicitly says "create", we allow the Vendoo-ready event.
             String(vendooOp).toLowerCase() === "create"
           );
-        
-        // 🔍 ADDED DIAGNOSTIC LOGGING (SAFE)
-        console.group("[vendoo] intent-gate");
-        console.log("saveStatus:", saveStatus);
-        console.log("intentMarketplaces:", intentMarketplaces);
-        console.log("vendooOp:", vendooOp);
-        console.log("shouldEmitVendoo:", shouldEmitVendoo);
-        console.groupEnd();
         
         console.log("[intake.js] vendoo intent gate", {
           saveStatus,
@@ -836,11 +831,18 @@ export async function init() {
         // When the save is Active, photos are flushed, and the server indicates that
         // Vendoo should be created, this will feed the Tampermonkey bridge.
         if (shouldEmitVendoo) {
-          // 🔍 ADDED DIAGNOSTIC LOG
-          console.log("[vendoo] emitting vendoo-ready event with:", ev.detail);
-        
           try {
-            await __emitVendooReadyIfSafe(ev.detail);
+            const vendooDetail = {
+              ...ev.detail,
+              // 🔑 Make sure rpBuildVendooPayload sees an ACTIVE status
+              saveStatus,                          // camelCase for rpBuildVendooPayload
+              save_status: saveStatus,             // keep the original too
+              intent,
+              intentMarketplaces,
+            };
+        
+            console.log("[intake.js] vendoo emit detail", vendooDetail);
+            await __emitVendooReadyIfSafe(vendooDetail);
           } catch (err) {
             console.warn("[intake.js] __emitVendooReadyIfSafe failed", err);
           }
@@ -850,7 +852,8 @@ export async function init() {
               ? "non-active-save"
               : "vendoo-op-not-create (likely already live / skip)",
           });
-        }        
+        }
+    
         // Immediately reconcile the Facebook card with the DB snapshot
         try { await refreshFacebookTile(); } catch {}
 
@@ -2795,10 +2798,17 @@ function setMarketplaceVisibility() {
             
           } = detail;
       
-          const normalizedSaveStatus = String(saveStatus || "").toLowerCase();
+          const normalizedSaveStatus = String(saveStatus || save_status || "").toLowerCase();
+          console.log("[vendoo] rpBuildVendooPayload: normalizedSaveStatus", {
+            saveStatus,
+            save_status,
+            normalizedSaveStatus,
+          });
+        
           if (normalizedSaveStatus !== "active") {
             console.log("[vendoo] rpBuildVendooPayload: skipping non-active save", {
               saveStatus,
+              save_status,
             });
             return null;
           }
