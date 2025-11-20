@@ -3871,24 +3871,7 @@ document.addEventListener("intake:item-changed", () => refreshInventory({ force:
           const id = Number(m.id);
           const isSelected = selectedIds.has(id);
 
-          // ───────────────────────────────
-          // VENDOO LOGIC
-          // Only set intent when selected AND not already live/listed
-          // meta.marketplaces contains per-marketplace status under m.status
-          if (slug === "vendoo") {
-            const status = String(m.status || "").toLowerCase();
-            const isBlocked = (status === "live" || status === "listed");
-            if (!isSelected || isBlocked) {
-              // Not selected OR already live/listed → ignore
-              intent[slug] = "ignore";
-            } else {
-              // Selected and NOT live/listed → perform create/upsert
-              intent[slug] = "upsert";
-            }
-            continue; // skip to next marketplace
-          }
-          // ───────────────────────────────
-
+          
           if (slug === "ebay") {
             // Decision: deselecting the eBay tile == delete the eBay listing
             intent[slug] = isSelected ? "upsert" : "delete";
@@ -3896,6 +3879,10 @@ document.addEventListener("intake:item-changed", () => refreshInventory({ force:
             // Decision: for Facebook we only have create logic right now.
             // Deselecting should NOT delete in v1 → just ignore.
             intent[slug] = isSelected ? "upsert" : "ignore";
+          } else if (slug === "vendoo") {
+            // Decision: for vendoo we only have create logic right now.
+            // Deselecting should NOT delete in v1 → just ignore.
+            intent[slug] = isSelected ? "upsert" : "ignore";  
           } else {
             // Future marketplaces: default to upsert when selected, ignore when not.
             intent[slug] = isSelected ? "upsert" : "ignore";
