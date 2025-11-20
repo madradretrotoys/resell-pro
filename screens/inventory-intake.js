@@ -3819,7 +3819,7 @@ document.addEventListener("intake:item-changed", () => refreshInventory({ force:
           const id = Number(m.id);
           const isSelected = selectedIds.has(id);
 
-          / ───────────────────────────────
+          // ───────────────────────────────
           // VENDOO LOGIC
           // Only set intent when selected AND not already live/listed
           // meta.marketplaces contains per-marketplace status under m.status
