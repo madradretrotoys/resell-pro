@@ -164,6 +164,10 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
      * - For active: insert/replace a plain footer with current SKU/location/bin data.
      */
     function composeLongDescription(opts: {
+      console.log("[DIAG] composeLongDescription entered", {
+        existing_type: typeof args.existing,
+        existing_preview: args.existing?.slice?.(0, 50) ?? args.existing,
+      });
       existing: string | null | undefined,
       status: "draft" | "active",
       sku?: string | null,
@@ -190,7 +194,10 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
       if (status === "draft") {
         return body; // no footer for drafts
       }
-
+      console.log("[DIAG] composeLongDescription entered", {
+        existing_type: typeof args.existing,
+        existing_preview: args.existing?.slice?.(0, 50) ?? args.existing,
+      });
       // Active: append fresh footer (upsertFooter will strip any existing footer)
       return upsertFooter(body, sku, instore_loc, case_bin_shelf);
     }
@@ -1220,7 +1227,13 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
           const isStoreOnly = String(inv?.instore_online || "").toLowerCase().includes("store only");
 
           if (!isStoreOnly) {
+            console.log("[DIAG] CREATE_ACTIVE compose input", {
+              existing: lst?.product_description,
+              lst_keys: Object.keys(lst || {}),
+              inv_keys: Object.keys(inv || {}),
+            });
             const descActive = composeLongDescription({
+              console.log("[DIAG] CREATE_ACTIVE compose output length", descActive?.length ?? null);
               existing: lst.product_description,
               status: "active",
               sku: retSku,
