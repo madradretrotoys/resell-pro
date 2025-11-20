@@ -164,10 +164,6 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
      * - For active: insert/replace a plain footer with current SKU/location/bin data.
      */
     function composeLongDescription(opts: {
-      console.log("[DIAG] composeLongDescription entered", {
-        existing_type: typeof args.existing,
-        existing_preview: args.existing?.slice?.(0, 50) ?? args.existing,
-      });
       existing: string | null | undefined,
       status: "draft" | "active",
       sku?: string | null,
@@ -175,6 +171,11 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
       case_bin_shelf?: string | null,
       product_short_title?: string | null
     }): string {
+      console.log("[DIAG] composeLongDescription entered", {
+        existing_type: typeof opts.existing,
+        existing_preview: opts.existing?.slice?.(0, 50) ?? opts.existing,
+      });
+
       const {
         existing,
         status,
@@ -1233,7 +1234,6 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
               inv_keys: Object.keys(inv || {}),
             });
             const descActive = composeLongDescription({
-              console.log("[DIAG] CREATE_ACTIVE compose output length", descActive?.length ?? null);
               existing: lst.product_description,
               status: "active",
               sku: retSku,
@@ -1241,6 +1241,7 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
               case_bin_shelf: inv?.case_bin_shelf ?? null,
               product_short_title: inv?.product_short_title ?? null
             });
+            console.log("[DIAG] CREATE_ACTIVE compose output length", descActive?.length ?? null);
             
             // Upsert listing profile for this item_id
             await sql/*sql*/`
