@@ -2819,12 +2819,12 @@ function setMarketplaceVisibility() {
         // ===== Vendoo: payload builder + emit helper (Tampermonkey bridge) =====
         function rpBuildVendooPayload(detail) {
           console.log("[vendoo] rpBuildVendooPayload: incoming detail", detail);
-      
+        
           if (!detail || typeof detail !== "object") {
             console.warn("[vendoo] rpBuildVendooPayload: invalid detail");
             return null;
           }
-      
+        
           const {
             saveStatus,
             save_status,
@@ -2847,10 +2847,8 @@ function setMarketplaceVisibility() {
             vendoo_condition_ebay,
             vendoo_condition_ebay_option,
             vendoo_mapping: vendoo_mapping_incoming,
-
-            
           } = detail;
-      
+        
           const normalizedSaveStatus = String(saveStatus || save_status || "").toLowerCase();
           console.log("[vendoo] rpBuildVendooPayload: normalizedSaveStatus", {
             saveStatus,
@@ -2865,12 +2863,13 @@ function setMarketplaceVisibility() {
             });
             return null;
           }
+        
           // Normalize Vendoo mapping coming back from the server (Phase 2).
           const vendooMappingFromDetail =
             vendoo_mapping_incoming && typeof vendoo_mapping_incoming === "object"
               ? vendoo_mapping_incoming
               : null;
-
+        
           const vendoo_mapping = {
             // Category mapping
             category_key:
@@ -2893,7 +2892,7 @@ function setMarketplaceVisibility() {
               vendoo_category_depop ||
               (vendooMappingFromDetail && vendooMappingFromDetail.category_depop) ||
               null,
-
+        
             // Condition mapping
             condition_main:
               vendoo_condition_main ||
@@ -2916,7 +2915,7 @@ function setMarketplaceVisibility() {
               (vendooMappingFromDetail && vendooMappingFromDetail.condition_ebay_option) ||
               null,
           };
-
+        
           console.log("[vendoo] rpBuildVendooPayload: normalized vendoo_mapping", {
             vendoo_mapping,
             vendoo_mapping_incoming,
@@ -2931,21 +2930,21 @@ function setMarketplaceVisibility() {
             vendoo_condition_ebay,
             vendoo_condition_ebay_option,
           });
-          
+        
           // Prefer intent.marketplaces from the server; fall back to marketplaces_selected.
           const rawIntentMarketplaces = Array.isArray(intent?.marketplaces)
             ? intent.marketplaces
             : Array.isArray(marketplaces_selected)
             ? marketplaces_selected
             : [];
-          
+        
           console.log("[vendoo] rpBuildVendooPayload: raw intent sources", {
             intentFromServer: intent?.marketplaces || null,
             marketplaces_selected: marketplaces_selected || null,
             rawIntentMarketplaces,
             intentType: intent?.type || null,
           });
-          
+        
           // Normalize to objects so fallback string arrays like ["vendoo"] still work.
           const intentMarketplaces = (rawIntentMarketplaces || []).map((m) => {
             if (typeof m === "string") {
@@ -2961,7 +2960,7 @@ function setMarketplaceVisibility() {
               });
               return normalized;
             }
-          
+        
             const normalized = m || {};
             console.log("[vendoo] rpBuildVendooPayload: normalized marketplace object", {
               original: m,
@@ -2969,11 +2968,11 @@ function setMarketplaceVisibility() {
             });
             return normalized;
           });
-          
+        
           console.log("[vendoo] rpBuildVendooPayload: normalized intentMarketplaces", {
             intentMarketplaces,
           });
-          
+        
           // Marketplace id 13 is Vendoo in our schema.
           const vendooIntent =
             intentMarketplaces.find((m) => {
@@ -2993,18 +2992,18 @@ function setMarketplaceVisibility() {
               }
               return isVendoo;
             }) || null;
-          
+        
           if (!vendooIntent) {
             console.log("[vendoo] rpBuildVendooPayload: no vendoo marketplace intent found", {
               intentMarketplaces,
             });
             return null;
           }
-          
+        
           console.log("[vendoo] rpBuildVendooPayload: using vendooIntent", {
             vendooIntent,
           });
-      
+        
           const vendooOperation = String(vendooIntent.operation || "").toLowerCase() || "create";
           if (vendooOperation !== "create") {
             console.log("[vendoo] rpBuildVendooPayload: vendoo operation is not create; skip", {
@@ -3012,28 +3011,159 @@ function setMarketplaceVisibility() {
             });
             return null;
           }
-      
+        
+          // ---------- NEW: normalize snapshot + inventory + images ----------
+          const snapshot =
+            ebay_payload_snapshot && typeof ebay_payload_snapshot === "object"
+              ? ebay_payload_snapshot
+              : null;
+        
+          const listingProfile =
+            snapshot && typeof snapshot.listing_profile === "object"
+              ? snapshot.listing_profile
+              : null;
+        
+          const marketplaceListing =
+            snapshot && typeof snapshot.marketplace_listing === "object"
+              ? snapshot.marketplace_listing
+              : null;
+        
+          const inventory =
+            inventory_meta && typeof inventory_meta === "object"
+              ? inventory_meta
+              : null;
+        
+          const normalizedImages = Array.isArray(images) ? images : [];
+        
+          // Flatten fields expected by Vendoo userscript (p.xxx).
+          const flattened = {
+            // Title + description
+            title:
+              (listingProfile && listingProfile.product_short_title) ||
+              (inventory && inventory.product_short_title) ||
+              null,
+            description:
+              (listingProfile && listingProfile.product_description) ||
+              null,
+        
+            // Brand
+            brand:
+              (listingProfile && listingProfile.brand_name) ||
+              (inventory && inventory.brand_name) ||
+              null,
+        
+            // Condition (favor Vendoo mapping if present)
+            condition:
+              (vendoo_mapping && vendoo_mapping.condition_main) ||
+              (listingProfile && listingProfile.item_condition) ||
+              null,
+        
+            // Primary color
+            primaryColor:
+              (listingProfile && listingProfile.primary_color) ||
+              null,
+        
+            // Category: prefer Vendoo mapping, then RP listing category
+            category:
+              (vendoo_mapping && (vendoo_mapping.category_vendoo || vendoo_mapping.category_key)) ||
+              (listingProfile && listingProfile.listing_category) ||
+              null,
+        
+            // SKU from inventory or item
+            sku:
+              (inventory && (inventory.sku || inventory.SKU)) ||
+              (item && (item.sku || item.SKU)) ||
+              null,
+        
+            // ZIP: marketplace listing shipping ZIP, fall back to inventory_meta if present
+            zip:
+              (marketplaceListing && marketplaceListing.shipping_zip) ||
+              (inventory && inventory.shipping_zip) ||
+              null,
+        
+            // Quantity from inventory
+            quantity:
+              (inventory && typeof inventory.quantity === "number" && inventory.quantity) ||
+              (inventory && typeof inventory.stock === "number" && inventory.stock) ||
+              null,
+        
+            // Price from eBay marketplace listing snapshot
+            price:
+              (marketplaceListing &&
+                typeof marketplaceListing.buy_it_now_price !== "undefined" &&
+                marketplaceListing.buy_it_now_price) ||
+              null,
+        
+            // Cost of goods from inventory
+            costOfGoods:
+              (inventory &&
+                typeof inventory.cost_of_goods !== "undefined" &&
+                inventory.cost_of_goods) ||
+              null,
+        
+            // Weight + dimensions from listing profile
+            weightLb:
+              (listingProfile &&
+                typeof listingProfile.weight_lb !== "undefined" &&
+                listingProfile.weight_lb) ||
+              null,
+            weightOz:
+              (listingProfile &&
+                typeof listingProfile.weight_oz !== "undefined" &&
+                listingProfile.weight_oz) ||
+              null,
+            length:
+              (listingProfile &&
+                typeof listingProfile.shipbx_length !== "undefined" &&
+                listingProfile.shipbx_length) ||
+              null,
+            width:
+              (listingProfile &&
+                typeof listingProfile.shipbx_width !== "undefined" &&
+                listingProfile.shipbx_width) ||
+              null,
+            height:
+              (listingProfile &&
+                typeof listingProfile.shipbx_height !== "undefined" &&
+                listingProfile.shipbx_height) ||
+              null,
+          };
+        
+          console.log("[vendoo] rpBuildVendooPayload: flattened fields for Vendoo script", flattened);
+        
+          // ---------- Build final payload ----------
           const payload = {
             __token: "MRAD_VENDOO_V1",       // ⭐ REQUIRED BY TAMPERMONKEY
             source: "resell-pro",
             mode: "single",
             save_status: normalizedSaveStatus,
-            // Core listing context
+        
+            // Core listing context (still passed through)
             item: item || null,
             listing: listing || null,
             inventory_meta: inventory_meta || null,
-            images: Array.isArray(images) ? images : [],
+        
+            // Images (metadata only; Tampermonkey can use later)
+            images: normalizedImages,
+        
             // Marketplace selections (server-normalized)
             marketplaces_selected: intentMarketplaces,
+        
             // eBay payload snapshot is the main bridge we’ll reuse for Vendoo mapping logic.
-            ebay_payload_snapshot: ebay_payload_snapshot || null,
+            ebay_payload_snapshot: snapshot,
+        
             // Normalized Vendoo mapping so Tampermonkey doesn't need to hit Neon.
             vendoo_mapping,
+        
+            // Flattened top-level fields consumed by the Vendoo userscript.
+            // These match the "p.xxx" expectations in the Tampermonkey code.
+            ...flattened,
           };
-      
+        
           console.log("[vendoo] rpBuildVendooPayload: built payload", payload);
           return payload;
         }
+
       
         async function __emitVendooReadyIfSafe(detail) {
           try {
