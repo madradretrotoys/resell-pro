@@ -196,8 +196,8 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
         return body; // no footer for drafts
       }
       console.log("[DIAG] composeLongDescription entered", {
-        existing_type: typeof args.existing,
-        existing_preview: args.existing?.slice?.(0, 50) ?? args.existing,
+        existing_type: typeof opts.existing,
+        existing_preview: opts.existing?.slice?.(0, 50) ?? opts.existing,
       });
       // Active: append fresh footer (upsertFooter will strip any existing footer)
       return upsertFooter(body, sku, instore_loc, case_bin_shelf);
