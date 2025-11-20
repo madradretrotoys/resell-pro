@@ -169,7 +169,7 @@ export async function init() {
           <input type="file" accept="image/*" class="hidden" data-act="replace">
         </label>
         <button class="btn btn-ghost btn-sm" data-act="primary" ${pending ? "disabled" : ""} title="Set Primary">Primary</button>
-        <button class="btn btn-ghost btn-sm" data-act="delete" title="Delete">Delete</button>
+        <button class="btn btn-ghost btn-sm" data-act="delete" title="Delete">DeleteforJSTest</button>
       </div>
     `;
     wrap.appendChild(bar);
