@@ -4034,7 +4034,16 @@ document.addEventListener("intake:item-changed", () => refreshInventory({ force:
         source: "intake",
         mode: isDraft ? "draft" : "active",
         inventory: __currentItemId ? "update" : "create",
-        marketplaces: marketplaces_intent
+        // marketplaces: marketplaces_intent
+        // 🔥 TEMPORARY HARD-CODE to unblock Vendoo flow
+        marketplaces: [
+          {
+            slug: "vendoo",
+            marketplace_id: 13,
+            selected: true,
+            operation: "create"
+          }
+        ]
       });
     
       // --------------------
