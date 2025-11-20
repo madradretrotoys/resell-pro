@@ -2827,6 +2827,7 @@ function setMarketplaceVisibility() {
       
           const {
             saveStatus,
+            save_status,
             intent,
             marketplaces_selected,
             item,
