@@ -171,11 +171,6 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
       case_bin_shelf?: string | null,
       product_short_title?: string | null
     }): string {
-      console.log("[DIAG] composeLongDescription entered", {
-        existing_type: typeof opts.existing,
-        existing_preview: opts.existing?.slice?.(0, 50) ?? opts.existing,
-      });
-
       const {
         existing,
         status,
@@ -195,10 +190,7 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
       if (status === "draft") {
         return body; // no footer for drafts
       }
-      console.log("[DIAG] composeLongDescription entered", {
-        existing_type: typeof opts.existing,
-        existing_preview: opts.existing?.slice?.(0, 50) ?? opts.existing,
-      });
+
       // Active: append fresh footer (upsertFooter will strip any existing footer)
       return upsertFooter(body, sku, instore_loc, case_bin_shelf);
     }
@@ -1142,9 +1134,6 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
             item_id,
             sku: updInv[0].sku,
             status,
-            marketplaces_selected: Array.isArray(body?.marketplaces_selected)
-              ? body.marketplaces_selected
-              : null,
             intent: { marketplaces: intentMarketplaces },
             ms: Date.now() - t0
           }, 200);
@@ -1228,11 +1217,6 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
           const isStoreOnly = String(inv?.instore_online || "").toLowerCase().includes("store only");
 
           if (!isStoreOnly) {
-            console.log("[DIAG] CREATE_ACTIVE compose input", {
-              existing: lst?.product_description,
-              lst_keys: Object.keys(lst || {}),
-              inv_keys: Object.keys(inv || {}),
-            });
             const descActive = composeLongDescription({
               existing: lst.product_description,
               status: "active",
@@ -1241,7 +1225,6 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
               case_bin_shelf: inv?.case_bin_shelf ?? null,
               product_short_title: inv?.product_short_title ?? null
             });
-            console.log("[DIAG] CREATE_ACTIVE compose output length", descActive?.length ?? null);
             
             // Upsert listing profile for this item_id
             await sql/*sql*/`
@@ -1588,13 +1571,11 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
             status,
             published: false,
             job_ids: job_ids_upd,
-            marketplaces_selected: Array.isArray(body?.marketplaces_selected)
-              ? body.marketplaces_selected
-              : null,
             intent: { marketplaces: intentMarketplaces },
             ms: Date.now() - t0
           }, 200);
         }
+
 
     
         // Begin "transaction" (serverless best-effort: use explicit locks/constraints)
@@ -1783,11 +1764,8 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
       return json({
         ok: true,
         item_id,
-        sku: updInv[0].sku,
-        status,
-        marketplaces_selected: Array.isArray(body?.marketplaces_selected)
-          ? body.marketplaces_selected
-          : null,
+        sku: null,
+        status: "draft",
         intent: { marketplaces: intentMarketplaces },
         ms: Date.now() - t0
       }, 200);
@@ -1978,9 +1956,6 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
       status,
       published: false,
       job_ids,
-      marketplaces_selected: Array.isArray(body?.marketplaces_selected)
-          ? body.marketplaces_selected
-          : null,
       intent: { marketplaces: intentMarketplaces },
       ms: Date.now() - t0
     }, 200);
