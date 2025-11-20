@@ -875,6 +875,7 @@ export async function init() {
                 snap.photos ||
                 null;
 
+              // Prefer a full ebay_payload_snapshot if present
               vendooDetail.ebay_payload_snapshot =
                 snap.ebay_payload_snapshot ||
                 snap.ebay_payload ||
@@ -882,6 +883,31 @@ export async function init() {
                   (snap.marketplace_payloads.ebay ||
                    snap.marketplace_payloads["ebay"])) ||
                 null;
+
+              // If the server ever sends listing_profile / marketplace_listing
+              // separately instead of a combined snapshot, wrap them into a
+              // pseudo-snapshot so rpBuildVendooPayload can use them immediately.
+              if (!vendooDetail.ebay_payload_snapshot) {
+                const listingProfile =
+                  snap.listing_profile ||
+                  snap.item_listing_profile ||
+                  snap.item_listing ||
+                  null;
+
+                const marketplaceListing =
+                  snap.marketplace_listing ||
+                  (snap.marketplace_listings &&
+                    (snap.marketplace_listings.ebay ||
+                     snap.marketplace_listings["ebay"])) ||
+                  null;
+
+                if (listingProfile || marketplaceListing) {
+                  vendooDetail.ebay_payload_snapshot = {
+                    listing_profile: listingProfile || null,
+                    marketplace_listing: marketplaceListing || null,
+                  };
+                }
+              }
 
               // Preserve any existing vendoo_mapping on detail, but
               // also thread through mapping derived server-side if present.
@@ -3114,10 +3140,11 @@ function setMarketplaceVisibility() {
               (listingProfile && listingProfile.primary_color) ||
               null,
         
-            // Category: prefer Vendoo mapping, then RP listing category
+            // Category: prefer Vendoo mapping, then RP listing category, then inventory category_nm
             category:
               (vendoo_mapping && (vendoo_mapping.category_vendoo || vendoo_mapping.category_key)) ||
               (listingProfile && listingProfile.listing_category) ||
+              (inventory && (inventory.category_nm || inventory.category_name)) ||
               null,
         
             // SKU from inventory or item
@@ -3136,13 +3163,20 @@ function setMarketplaceVisibility() {
             quantity:
               (inventory && typeof inventory.quantity === "number" && inventory.quantity) ||
               (inventory && typeof inventory.stock === "number" && inventory.stock) ||
+              (inventory &&
+                typeof inventory.qty !== "undefined" &&
+                !Number.isNaN(Number(inventory.qty)) &&
+                Number(inventory.qty)) ||
               null,
         
-            // Price from eBay marketplace listing snapshot
+            // Price from eBay marketplace listing snapshot, fall back to inventory price
             price:
               (marketplaceListing &&
                 typeof marketplaceListing.buy_it_now_price !== "undefined" &&
                 marketplaceListing.buy_it_now_price) ||
+              (inventory &&
+                typeof inventory.price !== "undefined" &&
+                inventory.price) ||
               null,
         
             // Cost of goods from inventory
