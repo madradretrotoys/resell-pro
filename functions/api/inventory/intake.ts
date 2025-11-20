@@ -812,6 +812,13 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
       WHERE m.tenant_id = ${tenant_id} AND m.user_id = ${actor_user_id}
       LIMIT 1
     `;
+
+    console.log("[intake] auth.actor", {
+      tenant_id,
+      actor_user_id,
+      rows: actor
+    });
+    
     if (actor.length === 0 || actor[0].active === false) return json({ ok: false, error: "forbidden" }, 403);
     const allow = ["owner", "admin", "manager"].includes(actor[0].role) || !!actor[0].can_inventory_intake;
     if (!allow) return json({ ok: false, error: "forbidden" }, 403);
@@ -820,6 +827,14 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
     
     // Payload
     const body = await request.json();
+    console.log("[intake] body.raw_keys", {
+      has_inventory: !!body?.inventory,
+      has_listing: !!body?.listing,
+      has_marketplace_listing: !!body?.marketplace_listing,
+      status: body?.status,
+      item_status: body?.inventory?.item_status,
+      intent: body?.intent
+    });
     const inv = body?.inventory || {};
     const lst = body?.listing || {};
     const ebay = body?.marketplace_listing?.ebay || null;
@@ -828,6 +843,12 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
     const rawStatus = (body?.status || inv?.item_status || "active");
     const status = String(rawStatus).toLowerCase() === "draft" ? "draft" : "active";
     const isDraft = status === "draft";
+
+    console.log("[intake] status.normalized", {
+      rawStatus,
+      status,
+      isDraft
+    });
     
     // Optional: if present, we update instead of insert
     const item_id_in: string | null = body?.item_id ? String(body.item_id) : null;
@@ -854,6 +875,10 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
               selected: !!m.selected,
               operation: m.operation || null,
             };
+            console.log("[intake] intent.map_entry", {
+              raw: m,
+              mapped
+            });
           })
           .filter((m: any) => m && (m.marketplace_id != null || m.slug))
       : [];
@@ -868,7 +893,14 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
           return m.slug;
         })
         .filter((v: any) => v !== null && v !== undefined);
+        console.log("[intake] marketplaces_selected.from_intent", {
+          before: body.marketplaces_selected,
+          selectedForJobs
+        });
       body.marketplaces_selected = selectedForJobs;
+      console.log("[intake] intent.marketplaces.empty", {
+        marketplaces_selected: body.marketplaces_selected
+      });
     }
     
     // === DEBUG: show payload routing decisions ===
