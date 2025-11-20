@@ -4030,15 +4030,24 @@ document.addEventListener("intake:item-changed", () => refreshInventory({ force:
       };
 
       // Helper: build explicit intent object for the server
-      const buildIntent = () => ({
-        source: "intake",
-        mode: isDraft ? "draft" : "active",
-        inventory: __currentItemId ? "update" : "create",
-        marketplaces: marketplaces_intent
-        console.log("buildIntent intent:", intent);
-         
+      const buildIntent = () => {
+        const intent = {
+          source: "intake",
+          mode: isDraft ? "draft" : "active",
+          inventory: __currentItemId ? "update" : "create",
+          marketplaces: marketplaces_intent
+        };
+
+        console.log("[intake.js] buildIntent", {
+          mode: intent.mode,
+          inventoryOp: intent.inventory,
+          item_id: __currentItemId || null,
+          marketplaces_intent,
+          intent
+        });
+
         return intent;
-      });
+      };
     
       // --------------------
       // Draft items
