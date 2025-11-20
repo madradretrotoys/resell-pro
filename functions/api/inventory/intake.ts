@@ -1967,9 +1967,6 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
       marketplaces_selected: Array.isArray(body?.marketplaces_selected)
           ? body.marketplaces_selected
           : null,
-        marketplaces_selected: Array.isArray(body?.marketplaces_selected)
-        ? body.marketplaces_selected
-        : null,
       intent: { marketplaces: intentMarketplaces },
       ms: Date.now() - t0
     }, 200);
