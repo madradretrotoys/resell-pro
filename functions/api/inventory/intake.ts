@@ -1134,6 +1134,9 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
             item_id,
             sku: updInv[0].sku,
             status,
+            marketplaces_selected: Array.isArray(body?.marketplaces_selected)
+              ? body.marketplaces_selected
+              : null,
             intent: { marketplaces: intentMarketplaces },
             ms: Date.now() - t0
           }, 200);
@@ -1571,11 +1574,13 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
             status,
             published: false,
             job_ids: job_ids_upd,
+            marketplaces_selected: Array.isArray(body?.marketplaces_selected)
+              ? body.marketplaces_selected
+              : null,
             intent: { marketplaces: intentMarketplaces },
             ms: Date.now() - t0
           }, 200);
         }
-
 
     
         // Begin "transaction" (serverless best-effort: use explicit locks/constraints)
@@ -1764,8 +1769,11 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
       return json({
         ok: true,
         item_id,
-        sku: null,
-        status: "draft",
+        sku: updInv[0].sku,
+        status,
+        marketplaces_selected: Array.isArray(body?.marketplaces_selected)
+          ? body.marketplaces_selected
+          : null,
         intent: { marketplaces: intentMarketplaces },
         ms: Date.now() - t0
       }, 200);
@@ -1956,6 +1964,12 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
       status,
       published: false,
       job_ids,
+      marketplaces_selected: Array.isArray(body?.marketplaces_selected)
+          ? body.marketplaces_selected
+          : null,
+        marketplaces_selected: Array.isArray(body?.marketplaces_selected)
+        ? body.marketplaces_selected
+        : null,
       intent: { marketplaces: intentMarketplaces },
       ms: Date.now() - t0
     }, 200);
