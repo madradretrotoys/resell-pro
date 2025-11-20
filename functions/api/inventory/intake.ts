@@ -274,7 +274,8 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
       }
     }
     
-     // === Helper: enqueue marketplace publish jobs (create vs update + no-change short-circuit) ===
+     
+    // === Helper: enqueue marketplace publish jobs (create vs update + no-change short-circuit) ===
     async function enqueuePublishJobs(
       tenant_id: string,
       item_id: string,
@@ -282,8 +283,20 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
       status: "draft" | "active"
     ): Promise<void> {
       try {
+        console.log("[intake.enqueuePublishJobs] enter", {
+          tenant_id,
+          item_id,
+          status,
+          rawBodyMarketplacesSelected: body?.marketplaces_selected ?? null,
+        });
+    
         const rawSel = Array.isArray(body?.marketplaces_selected) ? body.marketplaces_selected : [];
-
+        console.log("[intake.enqueuePublishJobs] rawSel.normalized", {
+          type: Array.isArray(rawSel) ? "array" : typeof rawSel,
+          length: Array.isArray(rawSel) ? rawSel.length : null,
+          rawSel,
+        });
+    
         // Accept slugs (strings) and numeric ids (numbers OR numeric strings)
         let slugs = rawSel
           .filter((v: any) => typeof v === "string" && isNaN(Number(v)) && v.trim() !== "")
@@ -297,10 +310,19 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
               : null
           )
           .filter((n: number | null): n is number => n !== null);
-
+    
+        console.log("[intake.enqueuePublishJobs] selection.parsed", {
+          slugs,
+          ids,
+        });
+    
         // Derive a canonical per-marketplace action map (slug -> upsert|delete|ignore)
         const actionsBySlug: Record<string, MarketplaceAction> = {};
         if (Array.isArray(intentMarketplaces) && intentMarketplaces.length > 0) {
+          console.log("[intake.enqueuePublishJobs] intentMarketplaces.raw", {
+            count: intentMarketplaces.length,
+            intentMarketplaces,
+          });
           for (const m of intentMarketplaces as any[]) {
             if (!m) continue;
             const slug = String(m.slug || "").toLowerCase();
@@ -311,18 +333,33 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
             else if (opRaw === "ignore") action = "ignore";
             actionsBySlug[slug] = action;
           }
+        } else {
+          console.log("[intake.enqueuePublishJobs] intentMarketplaces.empty_or_missing", {
+            intentMarketplacesType: Array.isArray(intentMarketplaces) ? "array" : typeof intentMarketplaces,
+          });
         }
-
+    
+        console.log("[intake.enqueuePublishJobs] actionsBySlug.derived", {
+          actionsBySlug,
+        });
+    
         // Merge in marketplaces from intent (any non-"ignore" actions)
         const intentSlugs = Object.entries(actionsBySlug)
           .filter(([, action]) => action && action !== "ignore")
           .map(([slug]) => slug.toLowerCase());
-
+    
+        console.log("[intake.enqueuePublishJobs] intentSlugs.filtered", {
+          intentSlugs,
+        });
+    
         if (intentSlugs.length > 0) {
           const merged = new Set<string>([...slugs, ...intentSlugs]);
           slugs = Array.from(merged);
+          console.log("[intake.enqueuePublishJobs] slugs.merged_with_intent", {
+            slugs,
+          });
         }
-
+    
         console.log("[intake] enqueue.start", {
           item_id,
           status,
@@ -332,12 +369,20 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
           intentMarketplaces,
           actionsBySlug,
         });
-
+    
         if (slugs.length === 0 && ids.length === 0) {
-          console.log("[intake] enqueue.skip_no_selection");
+          console.log("[intake] enqueue.skip_no_selection", {
+            reason: "no slugs and no ids after normalization",
+          });
           return;
         }
-
+    
+        console.log("[intake.enqueuePublishJobs] querying_enabled_marketplaces", {
+          tenant_id,
+          slugs,
+          ids,
+        });
+    
         // Resolve tenant-enabled marketplaces by either slug OR id
         const rows = await sql/*sql*/`
           SELECT ma.id, ma.slug
@@ -349,8 +394,16 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
           WHERE (${slugs.length > 0} AND ma.slug = ANY(${slugs}))
              OR (${ids.length > 0}   AND ma.id   = ANY(${ids}))
         `;
-        console.log("[intake] enqueue.match_enabled", { count: rows.length, rows });
-
+        console.log("[intake] enqueue.match_enabled", {
+          count: Array.isArray(rows) ? rows.length : null,
+          rows,
+        });
+    
+        console.log("[intake.enqueuePublishJobs] loading_canonical_fields", {
+          item_id,
+          tenant_id,
+        });
+    
         // Load canonical fields we map to marketplaces (schema-backed)
         const inv = await sql/*sql*/`
           SELECT product_short_title
@@ -376,7 +429,15 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
           FROM app.item_marketplace_listing
           WHERE item_id = ${item_id} AND tenant_id = ${tenant_id}
         `;
-
+    
+        console.log("[intake.enqueuePublishJobs] canonical_fields.loaded", {
+          hasInventory: Array.isArray(inv) && inv.length > 0,
+          hasListingProfile: Array.isArray(lst) && lst.length > 0,
+          marketplaceListingCount: Array.isArray(imlRows) ? imlRows.length : null,
+          invSample: Array.isArray(inv) && inv.length > 0 ? inv[0] : null,
+          lstSample: Array.isArray(lst) && lst.length > 0 ? lst[0] : null,
+        });
+    
         // Stable JSON stringify (keys sorted) for hashing
         const stableStringify = (obj: any) => {
           const seen = new WeakSet();
@@ -396,14 +457,25 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
           const hash = await crypto.subtle.digest("SHA-256", data);
           return Array.from(new Uint8Array(hash)).map(b => b.toString(16).padStart(2,"0")).join("");
         };
-
+    
+        console.log("[intake.enqueuePublishJobs] prepared_hash_helpers", {
+          rowsCount: Array.isArray(rows) ? rows.length : null,
+        });
+    
         for (const r of rows) {
           const slug = String(r.slug || "").toLowerCase();
-
+    
           // Desired action from unified intent (default: "upsert")
           const desiredAction: MarketplaceAction =
             (actionsBySlug[slug] as MarketplaceAction) || "upsert";
-
+    
+          console.log("[intake.enqueuePublishJobs] loop.marketplace.start", {
+            item_id,
+            marketplace_id: r.id,
+            slug,
+            desiredAction,
+          });
+    
           // If the client explicitly said "ignore", skip this marketplace entirely.
           if (desiredAction === "ignore") {
             console.log("[intake] enqueue.skip_intent_ignore", {
@@ -413,7 +485,7 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
             });
             continue;
           }
-
+    
           // If the client requested a delete, the delete path above handles it.
           // Do NOT enqueue create/update jobs here.
           if (desiredAction === "delete") {
@@ -424,10 +496,18 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
             });
             continue;
           }
-
+    
           // Pull the marketplace row (if present) to know current identifiers/status
           const iml = Array.isArray(imlRows) ? imlRows.find((x: any) => x.marketplace_id === r.id) : null;
-
+          console.log("[intake.enqueuePublishJobs] loop.marketplace.iml", {
+            item_id,
+            marketplace_id: r.id,
+            slug,
+            hasIml: !!iml,
+            imlStatus: iml?.status ?? null,
+            imlMpOfferId: iml?.mp_offer_id ?? null,
+          });
+    
           if (slug === "vendoo") {
             console.log("[intake] vendoo.skip_enqueue_tampermonkey", {
               item_id,
@@ -435,7 +515,7 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
               slug,
               desiredAction,
             });
-
+    
             // Ensure stub exists so UI can reflect progress while Tampermonkey/Vendoo runs
             await sql/*sql*/`
               INSERT INTO app.item_marketplace_listing
@@ -447,23 +527,37 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
                 status = 'publishing',
                 updated_at = now()
             `;
-
+    
             await sql/*sql*/`
               INSERT INTO app.item_marketplace_events
                 (item_id, tenant_id, marketplace_id, kind, payload)
               VALUES
                 (${item_id}, ${tenant_id}, ${r.id}, 'publish_started', jsonb_build_object('source','vendoo_enqueue'))
             `;
-
+    
+            console.log("[intake.enqueuePublishJobs] vendoo.stub_upserted_and_event_logged", {
+              item_id,
+              marketplace_id: r.id,
+              slug,
+            });
+    
             // No server-runner job for Vendoo; browser/Tampermonkey flow will complete it.
             continue;
           }
-
+    
           
           if (slug === "facebook") {
             const statusNorm = String(iml?.status || "").toLowerCase();
             const isLiveLike = statusNorm === "active" || statusNorm === "live";
-
+    
+            console.log("[intake.enqueuePublishJobs] facebook.status_check", {
+              item_id,
+              marketplace_id: r.id,
+              current_status: statusNorm,
+              desiredAction,
+              isLiveLike,
+            });
+    
             // If Facebook is already live/active and we're not explicitly deleting,
             // don't keep flipping it back to "publishing" or emitting new publish_started events.
             if (isLiveLike && desiredAction !== "delete") {
@@ -475,7 +569,7 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
               });
               continue;
             }
-
+    
             // Ensure stub exists so UI reflects progress for first-time or non-live publishes
             await sql/*sql*/`
               INSERT INTO app.item_marketplace_listing
@@ -487,7 +581,7 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
                 status = 'publishing',
                 updated_at = now()
             `;
-
+    
             // Emit a progress event (no server-runner for FB; browser/Tampermonkey will finish)
             await sql/*sql*/`
               INSERT INTO app.item_marketplace_events
@@ -495,10 +589,22 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
               VALUES
                 (${item_id}, ${tenant_id}, ${r.id}, 'publish_started', jsonb_build_object('source','enqueue'))
             `;
-
+    
+            console.log("[intake.enqueuePublishJobs] facebook.stub_upserted_and_event_logged", {
+              item_id,
+              marketplace_id: r.id,
+              slug,
+            });
+    
             continue;
           }
-
+    
+          console.log("[intake.enqueuePublishJobs] snapshot.building", {
+            item_id,
+            marketplace_id: r.id,
+            slug,
+          });
+    
           // Build canonical snapshot for this marketplace
           const snapshot = {
             item_id,
@@ -511,7 +617,18 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
           const snapshotStr = stableStringify(snapshot);
           const hash = await sha256Hex(snapshotStr);
           const payload_snapshot = { ...snapshot, _hash: hash };
-
+    
+          console.log("[intake.enqueuePublishJobs] snapshot.built", {
+            item_id,
+            marketplace_id: r.id,
+            slug: r.slug,
+            hash,
+            snapshotPreview: {
+              product_short_title: snapshot.product_short_title,
+              listing_profile: snapshot.listing_profile ? { listing_category: snapshot.listing_profile.listing_category } : null,
+            },
+          });
+    
                      // Determine desired op 
           // Option A: treat 'live' the same as 'active' so edits enqueue 'update' after first publish.
           // IMPORTANT:
@@ -520,7 +637,7 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
           const statusNorm = String(iml?.status || "").toLowerCase();
           const isLiveLike = statusNorm === "active" || statusNorm === "live";
           const hasMpOffer = !!(iml?.mp_offer_id);
-
+    
           console.log("[intake.enqueuePublishJobs] decide-op: pre", {
             tenant_id,
             item_id,
@@ -533,7 +650,7 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
             mp_offer_id: iml?.mp_offer_id ?? null,
             payload_marketplace_listing_status: (body as any)?.marketplace_listing?.status ?? null
           });
-
+    
           let op: "create" | "update";
           if (isLiveLike && hasMpOffer) {
             // Live/active offer on the marketplace → update the existing listing.
@@ -543,7 +660,7 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
             // This covers the case where a row exists but status is NOT live.
             op = "create";
           }
-
+    
           console.log("[intake.enqueuePublishJobs] decide-op: selected", {
             tenant_id,
             item_id,
@@ -551,7 +668,15 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
             slug: r.slug,
             op
           });
-
+    
+          console.log("[intake.enqueuePublishJobs] last-job.query", {
+            tenant_id,
+            item_id,
+            marketplace_id: r.id,
+            slug: r.slug,
+            op,
+          });
+    
           // Compare vs most recent *succeeded* snapshot to short-circuit no-ops
           const last = await sql/*sql*/`
             SELECT status, payload_snapshot
@@ -562,7 +687,7 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
             ORDER BY created_at DESC
             LIMIT 1
           `;
-
+    
           const lastRow = Array.isArray(last) && last.length ? last[0] : null;
           console.log("[intake.enqueuePublishJobs] last-job", {
             tenant_id,
@@ -573,11 +698,24 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
             last_status: lastRow ? lastRow.status : null,
             has_last: !!lastRow
           });
-
+    
           const lastStatus = String(lastRow?.status || "");
           const lastHash = String(lastRow?.payload_snapshot?._hash || "");
           const isLastSucceeded = lastStatus === "succeeded";
-
+    
+          console.log("[intake.enqueuePublishJobs] no-change-check", {
+            item_id,
+            marketplace_id: r.id,
+            slug: r.slug,
+            isLiveLike,
+            hasMpOffer,
+            isLastSucceeded,
+            lastHash,
+            currentHash: hash,
+            willSkip:
+              isLiveLike && hasMpOffer && isLastSucceeded && lastHash && lastHash === hash,
+          });
+    
           // Only skip when:
           //  - this listing already has a live/active offer, AND
           //  - the most recent job for this marketplace actually succeeded, AND
@@ -595,8 +733,14 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
             });
             continue;
           }
-
-          console.log("[intake] enqueue.insert_job", { marketplace_id: r.id, slug: r.slug, item_id, op });
+    
+          console.log("[intake] enqueue.insert_job", {
+            marketplace_id: r.id,
+            slug: r.slug,
+            item_id,
+            op,
+          });
+    
           await sql/*sql*/`
             INSERT INTO app.marketplace_publish_jobs
               (tenant_id, item_id, marketplace_id, op, status, payload_snapshot)
@@ -610,7 +754,15 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
                 AND j.status IN ('queued','running')
             )
           `;
-
+    
+          console.log("[intake.enqueuePublishJobs] insert_job.completed", {
+            tenant_id,
+            item_id,
+            marketplace_id: r.id,
+            slug: r.slug,
+            op,
+          });
+    
           // Touch listing row (useful for dashboards; do not flip status here)
           // NOTE: status normalization happens in enqueue decision (active|live => update)
           await sql/*sql*/`
@@ -620,11 +772,28 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
                AND item_id = ${item_id}
                AND marketplace_id = ${r.id}
           `;
+    
+          console.log("[intake.enqueuePublishJobs] listing_row.touched", {
+            tenant_id,
+            item_id,
+            marketplace_id: r.id,
+            slug: r.slug,
+          });
         }
-
+    
         console.log("[intake] enqueue.done", { item_id });
+        console.log("[intake.enqueuePublishJobs] exit.success", {
+          item_id,
+          tenant_id,
+          status,
+        });
       } catch (enqueueErr) {
-        console.error("[intake] enqueue.error", { item_id, error: String(enqueueErr) });
+        const err: any = enqueueErr;
+        console.error("[intake] enqueue.error", {
+          item_id,
+          error: String(err),
+          stack: err?.stack || null,
+        });
         // Best-effort event log
         await sql/*sql*/`
           INSERT INTO app.item_marketplace_events
@@ -633,6 +802,7 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
         `;
       }
     }
+
     
     // AuthZ (creation requires can_inventory_intake or elevated role)
     const actor = await sql<{ role: Role; active: boolean; can_inventory_intake: boolean | null }[]>`
