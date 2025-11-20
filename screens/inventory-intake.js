@@ -803,7 +803,7 @@ export async function init() {
           });
         }
 
-        // —— Vendoo intent gate (mirrors Facebook pattern) ——
+                // —— Vendoo intent gate (mirrors Facebook pattern) ——
         let vendooOp = null;
         if (intentMarketplaces) {
           const vendooIntent = intentMarketplaces.find((m) => {
@@ -814,7 +814,7 @@ export async function init() {
           vendooOp = vendooIntent?.operation || null;
         }
         
-         const shouldEmitVendoo =
+        const shouldEmitVendoo =
           saveStatus === "active" && (
             // If we don’t have intent yet, preserve legacy behavior.
             !vendooOp ||
@@ -861,7 +861,7 @@ export async function init() {
               intentMarketplaces,
             };
 
-            // Enrich detail with images + inventory_meta + ebay_payload_snapshot
+            // Enrich detail with images + inventory_meta + ebay_payload_snapshot + vendoo_mapping
             if (snap && typeof snap === "object") {
               vendooDetail.inventory_meta =
                 snap.inventory_meta ||
@@ -875,7 +875,6 @@ export async function init() {
                 snap.photos ||
                 null;
 
-              // Prefer a full ebay_payload_snapshot if present
               vendooDetail.ebay_payload_snapshot =
                 snap.ebay_payload_snapshot ||
                 snap.ebay_payload ||
@@ -883,31 +882,6 @@ export async function init() {
                   (snap.marketplace_payloads.ebay ||
                    snap.marketplace_payloads["ebay"])) ||
                 null;
-
-              // If the server ever sends listing_profile / marketplace_listing
-              // separately instead of a combined snapshot, wrap them into a
-              // pseudo-snapshot so rpBuildVendooPayload can use them immediately.
-              if (!vendooDetail.ebay_payload_snapshot) {
-                const listingProfile =
-                  snap.listing_profile ||
-                  snap.item_listing_profile ||
-                  snap.item_listing ||
-                  null;
-
-                const marketplaceListing =
-                  snap.marketplace_listing ||
-                  (snap.marketplace_listings &&
-                    (snap.marketplace_listings.ebay ||
-                     snap.marketplace_listings["ebay"])) ||
-                  null;
-
-                if (listingProfile || marketplaceListing) {
-                  vendooDetail.ebay_payload_snapshot = {
-                    listing_profile: listingProfile || null,
-                    marketplace_listing: marketplaceListing || null,
-                  };
-                }
-              }
 
               // Preserve any existing vendoo_mapping on detail, but
               // also thread through mapping derived server-side if present.
@@ -930,6 +904,7 @@ export async function init() {
               : "vendoo-op-not-create (likely already live / skip)",
           });
         }
+
     
         // Immediately reconcile the Facebook card with the DB snapshot
         try { await refreshFacebookTile(); } catch {}
