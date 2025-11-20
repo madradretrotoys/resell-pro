@@ -1685,27 +1685,46 @@ function setMarketplaceVisibility() {
   // Apply per-item marketplace selection (e.g., when loading an existing item).
   // meta: inventory meta (usually __metaCache)
   // marketplaceListing: res.marketplace_listing from GET /api/inventory/intake
-    function applyMarketplaceSelectionForItem(meta, marketplaceListing) {
+  function applyMarketplaceSelectionForItem(meta, marketplaceListing) { 
     try {
+      console.group("[intake] marketplaces:applySelectionForItem");
+
+      console.log("[applySelection] meta.marketplaces raw:", meta?.marketplaces);
+      console.log("[applySelection] marketplaceListing raw:", marketplaceListing);
+      console.log("[applySelection] selectedMarketplaceIds (BEFORE clear):", Array.from(selectedMarketplaceIds));
+
       const rows = (meta?.marketplaces || []);
       const bySlug = new Map(
         rows.map(r => [String(r.slug || "").toLowerCase(), r])
       );
 
+      console.log("[applySelection] marketplaces rows.length:", rows.length);
+      console.log("[applySelection] bySlug keys:", Array.from(bySlug.keys()));
+
       selectedMarketplaceIds.clear();
+      console.log("[applySelection] selectedMarketplaceIds after clear:", Array.from(selectedMarketplaceIds));
 
       if (marketplaceListing) {
         const ids = [];
+        console.log("[applySelection] marketplaceListing present, starting id collection");
 
         // eBay row present -> include eBay marketplace id
         if (marketplaceListing.ebay) {
           const rawId =
             marketplaceListing.ebay_marketplace_id ??
             (bySlug.get("ebay") && bySlug.get("ebay").id);
+          console.log("[applySelection] eBay branch hit:", {
+            listingFlag: marketplaceListing.ebay,
+            rawId,
+            bySlugEbay: bySlug.get("ebay")
+          });
           if (rawId != null) {
             const id = Number(rawId);
+            console.log("[applySelection] eBay numeric id:", id, "isNaN?", Number.isNaN(id));
             if (!Number.isNaN(id)) ids.push(id);
           }
+        } else {
+          console.log("[applySelection] eBay branch skipped (no marketplaceListing.ebay)");
         }
 
         // Facebook row present -> include Facebook marketplace id
@@ -1713,10 +1732,18 @@ function setMarketplaceVisibility() {
           const rawId =
             marketplaceListing.facebook_marketplace_id ??
             (bySlug.get("facebook") && bySlug.get("facebook").id);
+          console.log("[applySelection] Facebook branch hit:", {
+            listingFlag: marketplaceListing.facebook,
+            rawId,
+            bySlugFacebook: bySlug.get("facebook")
+          });
           if (rawId != null) {
             const id = Number(rawId);
+            console.log("[applySelection] Facebook numeric id:", id, "isNaN?", Number.isNaN(id));
             if (!Number.isNaN(id)) ids.push(id);
           }
+        } else {
+          console.log("[applySelection] Facebook branch skipped (no marketplaceListing.facebook)");
         }
 
         // ⭐ Vendoo row present -> include Vendoo marketplace id
@@ -1724,15 +1751,29 @@ function setMarketplaceVisibility() {
           const rawId =
             marketplaceListing.vendoo_marketplace_id ??
             (bySlug.get("vendoo") && bySlug.get("vendoo").id);
+          console.log("[applySelection] Vendoo branch hit:", {
+            listingFlag: marketplaceListing.vendoo,
+            rawId,
+            bySlugVendoo: bySlug.get("vendoo")
+          });
           if (rawId != null) {
             const id = Number(rawId);
+            console.log("[applySelection] Vendoo numeric id:", id, "isNaN?", Number.isNaN(id));
             if (!Number.isNaN(id)) ids.push(id);
           }
+        } else {
+          console.log("[applySelection] Vendoo branch skipped (no marketplaceListing.vendoo)");
         }
-        
+
+        console.log("[applySelection] collected ids before Set add:", ids);
+
         for (const id of ids) {
           selectedMarketplaceIds.add(id);
         }
+
+        console.log("[applySelection] selectedMarketplaceIds after add:", Array.from(selectedMarketplaceIds));
+      } else {
+        console.log("[applySelection] marketplaceListing is falsy; no ids collected");
       }
 
       renderMarketplaceTiles(meta);
