@@ -1719,6 +1719,17 @@ function setMarketplaceVisibility() {
           }
         }
 
+        // ⭐ Vendoo row present -> include Vendoo marketplace id
+        if (marketplaceListing.vendoo) {
+          const rawId =
+            marketplaceListing.vendoo_marketplace_id ??
+            (bySlug.get("vendoo") && bySlug.get("vendoo").id);
+          if (rawId != null) {
+            const id = Number(rawId);
+            if (!Number.isNaN(id)) ids.push(id);
+          }
+        }
+        
         for (const id of ids) {
           selectedMarketplaceIds.add(id);
         }
