@@ -2147,20 +2147,114 @@ export const onRequestGet: PagesFunction = async ({ request, env }) => {
       listingOut = { ...(listingOut || {}), product_description: BASE_SENTENCE_GET };
     }
 
+    // ---------------------------------------------------------------------
+    // VENDOO CATEGORY + CONDITION MAPPING
+    // ---------------------------------------------------------------------
+
+    let vendoo_mapping: any = {};
+    try {
+      // IMPORTANT INPUTS FOR MAPPING
+      const listingCategoryKey =
+        listingOut?.listing_category_key || listingOut?.listing_category || null;
+      const conditionName =
+        listingOut?.item_condition || null;
+
+      // 1) CATEGORY MAPPING (vendoo, ebay, facebook, depop)
+      const catRows = await loadVendooCategoryMap(
+        sql,
+        Number(tenant_id),
+        listingCategoryKey
+      );
+
+      let category_vendoo = null;
+      let category_ebay = null;
+      let category_facebook = null;
+      let category_depop = null;
+      let condition_options = null; // used later for the vendoo–ebay condition mapping
+
+      for (const r of catRows) {
+        const mp = Number(r.marketplace_id);
+        if (mp === 13) category_vendoo = r.vendoo_category_path || null;
+        if (mp === 1) {
+          category_ebay = r.vendoo_category_path || null;
+          condition_options = r.condition_options || null;
+        }
+        if (mp === 2) category_facebook = r.vendoo_category_path || null;
+        if (mp === 4) category_depop = r.vendoo_category_path || null;
+      }
+
+      // 2) BASE CONDITION MAPPING (vendoo, facebook, depop)
+      let condition_main = null;
+      let condition_fb = null;
+      let condition_depop = null;
+
+      const condRows = await loadMarketplaceConditions(
+        sql,
+        Number(tenant_id),
+        conditionName
+      );
+
+      if (Array.isArray(condRows) && condRows.length > 0) {
+        const r = condRows[0];
+        condition_main = r.vendoo_map || null;
+        condition_fb = r.fb_map || null;
+        condition_depop = r.depop_map || null;
+      }
+
+      // 3) SPECIAL VENDOO–EBAY CONDITION MAPPING
+      let condition_ebay = null;
+      let condition_ebay_option = null;
+
+      if (conditionName && condition_options) {
+        const ebayCondRows = await loadVendooEbayConditionMap(
+          sql,
+          Number(tenant_id),
+          conditionName,
+          condition_options
+        );
+
+        if (Array.isArray(ebayCondRows) && ebayCondRows.length > 0) {
+          const r = ebayCondRows[0];
+          condition_ebay = r.ebay_conditions || null;
+          condition_ebay_option = r.condition_options || null;
+        }
+      }
+
+      vendoo_mapping = {
+        category_key: listingCategoryKey || null,
+        category_vendoo,
+        category_ebay,
+        category_facebook,
+        category_depop,
+
+        condition_main,
+        condition_fb,
+        condition_depop,
+        condition_ebay,
+        condition_ebay_option
+      };
+    } catch (err) {
+      console.error("vendoo_mapping_build_error", String(err));
+      vendoo_mapping = {};
+    }
+
+    // ---------------------------------------------------------------------
+    // FINAL RESPONSE (unchanged except vendoo_mapping injected)
+    // ---------------------------------------------------------------------
     return new Response(JSON.stringify({
       ok: true,
-    
+
       // inventory info
       inventory: invRows[0],
       inventory_meta: invRows[0],
-    
+
       // listing profile (marketplace listing details)
       listing: listingOut,
       listing_profile: listingOut,
-    
+
       // images
       images: imgRows,
-    
+
       // structured marketplace listings
       marketplace_listing: {
         ebay: ebayListing,
@@ -2168,15 +2262,18 @@ export const onRequestGet: PagesFunction = async ({ request, env }) => {
         facebook: facebookListing,
         facebook_marketplace_id: FACEBOOK_ID
       },
-    
+
       // flat ebay listing for convenience
       marketplace_listing_flat: ebayListing,
-    
-      // CRITICAL: give Vendoo a valid snapshot just like the eBay runner uses
+
+      // snapshot for eBay-style payload
       ebay_payload_snapshot: {
         listing_profile: listingOut,
         marketplace_listing: ebayListing
-      }
+      },
+
+      // NEW: Fully-hydrated Vendoo mapping block
+      vendoo_mapping
     }), {
       status: 200,
       headers: {
