@@ -2149,16 +2149,41 @@ export const onRequestGet: PagesFunction = async ({ request, env }) => {
 
     return new Response(JSON.stringify({
       ok: true,
+    
+      // inventory info
       inventory: invRows[0],
+      inventory_meta: invRows[0],
+    
+      // listing profile (marketplace listing details)
       listing: listingOut,
+      listing_profile: listingOut,
+    
+      // images
       images: imgRows,
+    
+      // structured marketplace listings
       marketplace_listing: {
         ebay: ebayListing,
         ebay_marketplace_id: EBAY_ID,
         facebook: facebookListing,
         facebook_marketplace_id: FACEBOOK_ID
+      },
+    
+      // flat ebay listing for convenience
+      marketplace_listing_flat: ebayListing,
+    
+      // CRITICAL: give Vendoo a valid snapshot just like the eBay runner uses
+      ebay_payload_snapshot: {
+        listing_profile: listingOut,
+        marketplace_listing: ebayListing
       }
-    }), { status: 200, headers: { "content-type": "application/json", "cache-control": "no-store" } });
+    }), {
+      status: 200,
+      headers: {
+        "content-type": "application/json",
+        "cache-control": "no-store"
+      }
+    });
 
 
     
