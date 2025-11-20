@@ -4035,7 +4035,8 @@ document.addEventListener("intake:item-changed", () => refreshInventory({ force:
         mode: isDraft ? "draft" : "active",
         inventory: __currentItemId ? "update" : "create",
         marketplaces: marketplaces_intent
-        console.log("📝 buildIntent()", intent);
+        console.log("buildIntent intent:", intent);
+         
         return intent;
       });
     
