@@ -803,14 +803,27 @@ export async function init() {
           });
         }
 
-                // —— Vendoo intent gate (mirrors Facebook pattern) ——
+       // —— Vendoo intent gate (mirrors Facebook pattern) —— 
         let vendooOp = null;
+        let vendooIntentDebug = null;
+        
         if (intentMarketplaces) {
+          console.log("[intake.js] vendoo intent: raw intentMarketplaces", {
+            intentMarketplaces,
+          });
+        
           const vendooIntent = intentMarketplaces.find((m) => {
             const slug = String(m?.slug || "").toLowerCase();
-            // Marketplace id "13" is Vendoo in our current schema; keep slug as primary key as well.
-            return slug === "vendoo" || String(m?.marketplace_id) === "13";
+            const isVendoo = slug === "vendoo" || String(m?.marketplace_id) === "13";
+            console.log("[intake.js] vendoo intent: candidate", {
+              candidate: m,
+              slug,
+              isVendoo,
+            });
+            return isVendoo;
           }) || null;
+        
+          vendooIntentDebug = vendooIntent;
           vendooOp = vendooIntent?.operation || null;
         }
         
@@ -826,6 +839,8 @@ export async function init() {
           saveStatus,
           vendooOp,
           shouldEmitVendoo,
+          vendooIntent: vendooIntentDebug,
+          intentMarketplaces,
         });
         
         // When the save is Active, photos are flushed, and the server indicates that
@@ -836,10 +851,21 @@ export async function init() {
             let snap = null;
             try {
               snap = window.__intakeSnap || null;
-            } catch {
+            } catch (e) {
+              console.warn("[intake.js] vendoo: error reading window.__intakeSnap", e);
               snap = null;
             }
-
+        
+            console.log("[intake.js] vendoo: initial snap from window.__intakeSnap", {
+              hasSnap: !!snap,
+              snapKeys: snap ? Object.keys(snap) : null,
+              snapPreview: snap ? {
+                inventory_meta: snap.inventory_meta,
+                listing: snap.listing || snap.listing_profile,
+                vendoo_mapping: snap.vendoo_mapping || null,
+              } : null,
+            });
+        
             // If we don't have a snapshot yet, load a fresh one for this item.
             if (!snap && __currentItemId) {
               console.log("[intake.js] vendoo: loading snapshot for payload enrich", {
@@ -849,9 +875,21 @@ export async function init() {
                 `/api/inventory/intake?item_id=${encodeURIComponent(__currentItemId)}`,
                 { method: "GET" }
               );
-              try { window.__intakeSnap = snap; } catch {}
+              console.log("[intake.js] vendoo: snapshot loaded from /api/inventory/intake", {
+                snapRaw: snap,
+                snapKeys: snap ? Object.keys(snap) : null,
+                inventory_meta: snap?.inventory_meta || snap?.inventory || null,
+                listing_profile: snap?.listing_profile || snap?.listing || null,
+                vendoo_mapping: snap?.vendoo_mapping || null,
+                ebay_payload_snapshot: snap?.ebay_payload_snapshot || null,
+              });
+              try {
+                window.__intakeSnap = snap;
+              } catch (e) {
+                console.warn("[intake.js] vendoo: failed to write window.__intakeSnap", e);
+              }
             }
-
+        
             const vendooDetail = {
               ...ev.detail,
               // 🔑 Make sure rpBuildVendooPayload sees an ACTIVE status
@@ -860,7 +898,15 @@ export async function init() {
               intent,
               intentMarketplaces,
             };
-
+        
+            console.log("[intake.js] vendoo: base vendooDetail before enrich", {
+              evDetail: ev.detail,
+              saveStatus,
+              intent,
+              intentMarketplaces,
+              existing_vendoo_mapping: (ev.detail as any)?.vendoo_mapping || null,
+            });
+        
             // Enrich detail with images + inventory_meta + ebay_payload_snapshot + vendoo_mapping
             if (snap && typeof snap === "object") {
               vendooDetail.inventory_meta =
@@ -868,31 +914,59 @@ export async function init() {
                 snap.inventory ||
                 snap.item ||
                 null;
-
+        
               vendooDetail.images =
                 snap.images ||
                 snap.item_images ||
                 snap.photos ||
                 null;
-
+        
               vendooDetail.ebay_payload_snapshot =
                 snap.ebay_payload_snapshot ||
                 snap.ebay_payload ||
                 (snap.marketplace_payloads &&
                   (snap.marketplace_payloads.ebay ||
                    snap.marketplace_payloads["ebay"])) ||
-                null;
-
+                {
+                  // fallback pseudo-snapshot using listing + ebay marketplace listing if present
+                  listing_profile: snap.listing_profile || snap.listing || null,
+                  marketplace_listing:
+                    (snap.marketplace_listing && snap.marketplace_listing.ebay) ||
+                    snap.marketplace_listing ||
+                    null,
+                };
+        
               // Preserve any existing vendoo_mapping on detail, but
               // also thread through mapping derived server-side if present.
-              vendooDetail.vendoo_mapping =
-                vendooDetail.vendoo_mapping ||
+              const beforeVendooMapping =
+                vendooDetail.vendoo_mapping || null;
+        
+              const fromSnapVendooMapping =
                 snap.vendoo_mapping ||
                 snap.vendoo ||
                 null;
+        
+              vendooDetail.vendoo_mapping =
+                beforeVendooMapping ||
+                fromSnapVendooMapping ||
+                null;
+        
+              console.log("[intake.js] vendoo: enrich from snap", {
+                inventory_meta: vendooDetail.inventory_meta,
+                images: vendooDetail.images,
+                ebay_payload_snapshot: vendooDetail.ebay_payload_snapshot,
+                vendoo_mapping_before: beforeVendooMapping,
+                vendoo_mapping_from_snap: fromSnapVendooMapping,
+                vendoo_mapping_final: vendooDetail.vendoo_mapping,
+              });
+            } else {
+              console.log("[intake.js] vendoo: no usable snap object; skipping enrich", {
+                snapType: typeof snap,
+                snap,
+              });
             }
         
-            console.log("[intake.js] vendoo emit detail", vendooDetail);
+            console.log("[intake.js] vendoo emit detail (pre-emit)", vendooDetail);
             await __emitVendooReadyIfSafe(vendooDetail);
           } catch (err) {
             console.warn("[intake.js] __emitVendooReadyIfSafe failed", err);
@@ -904,6 +978,7 @@ export async function init() {
               : "vendoo-op-not-create (likely already live / skip)",
           });
         }
+
 
     
         // Immediately reconcile the Facebook card with the DB snapshot
