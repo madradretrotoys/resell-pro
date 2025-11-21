@@ -291,7 +291,7 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
   
     async function loadVendooEbayConditionMap(
       sql: any,
-      tenantId: number | null | undefined,
+      tenantId: string | null | undefined,
       conditionName: string | null | undefined,
       conditionOption: string | null | undefined
     ) {
