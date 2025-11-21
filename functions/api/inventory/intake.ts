@@ -1370,6 +1370,55 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
                 listing_category_key: lst.listing_category_key,
                 condition_key: lst.condition_key
               });
+
+              // ⭐ NEW: Fetch Vendoo mappings for POST payload
+              const vendooCategoryRows = await loadVendooCategoryMap(
+                sql,
+                Number(tenant_id),
+                lst.listing_category_key
+              );
+              
+              const vendooConditionRows = await loadMarketplaceConditions(
+                sql,
+                Number(tenant_id),
+                lst.item_condition || null
+              );
+              
+              const vendooEbayConditionRows = await loadVendooEbayConditionMap(
+                sql,
+                Number(tenant_id),
+                lst.item_condition || null,
+                lst.condition_options || null
+              );
+              
+              // ⭐ NEW: Shape Vendoo mapping (Option A)
+              const vendoo_mapping = {
+                vendoo_category_key:
+                  vendooCategoryRows?.[0]?.category_key_uuid || null,
+                vendoo_category_vendoo:
+                  vendooCategoryRows?.[0]?.vendoo_category_path || null,
+                vendoo_category_ebay:
+                  vendooCategoryRows?.[0]?.category_ebay || null,
+                vendoo_category_facebook:
+                  vendooCategoryRows?.[0]?.category_facebook || null,
+                vendoo_category_depop:
+                  vendooCategoryRows?.[0]?.category_depop || null,
+              
+                vendoo_condition_main:
+                  vendooConditionRows?.[0]?.vendoo_map || null,
+                vendoo_condition_fb:
+                  vendooConditionRows?.[0]?.fb_map || null,
+                vendoo_condition_depop:
+                  vendooConditionRows?.[0]?.depop_map || null,
+              
+                vendoo_condition_ebay:
+                  vendooEbayConditionRows?.[0]?.ebay_conditions || null,
+                vendoo_condition_ebay_option:
+                  vendooEbayConditionRows?.[0]?.condition_options || null
+              };
+              
+              console.log("[intake.ACTIVE] vendoo_mapping (POST)", vendoo_mapping);
+            
               // Handle per-marketplace DELETE intent (e.g., deselecting the eBay tile on update)
              if (EBAY_MARKETPLACE_ID && intentMarketplaces.length) {
                const ebayIntent = intentMarketplaces.find((m: any) => {
@@ -1672,6 +1721,8 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
             job_ids: job_ids_upd,
             intent: { marketplaces: intentMarketplaces },
             ms: Date.now() - t0
+            // ⭐ NEW
+            vendoo_mapping,
           }, 200);
         }
 
