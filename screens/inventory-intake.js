@@ -3311,14 +3311,24 @@ function setMarketplaceVisibility() {
               return;
             }
       
-            const { ok, status, marketplaces_selected } = detail || {};
-            if (ok !== true) {
-              console.log("[vendoo] __emitVendooReadyIfSafe: response not ok; skip", {
-                ok,
-                status,
-              });
-              return;
-            }
+           const { ok, status, marketplaces_selected } = detail || {};
+
+          /
+          // If ok is undefined (because this isn't a raw API response),
+          // we allow the Vendoo flow to continue.
+          if (ok === false) {
+            console.log("[vendoo] __emitVendooReadyIfSafe: explicit failure; skip", {
+              ok,
+              status,
+            });
+            return;
+          }
+          
+          console.log("[vendoo] __emitVendooReadyIfSafe: OK-check passed", {
+            ok,
+            status,
+            hasMarketplacesSelected: !!marketplaces_selected,
+          });
       
             const payload = rpBuildVendooPayload(detail);
             if (!payload) {
