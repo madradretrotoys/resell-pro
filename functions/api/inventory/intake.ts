@@ -2100,46 +2100,74 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
 
     // ⭐ NEW — build Vendoo mapping for POST responses
 
-    // Load category mapping
+    // Prefer the UUID key, fall back to listing_category only for logging
+    const listingCategoryKey =
+      lst.listing_category_key || lst.listing_category || null;
+
+    // Load category mapping (expects category_key_uuid)
     const vendooCatRows = await loadVendooCategoryMap(
       sql,
       tenant_id,
-      lst.listing_category
+      listingCategoryKey
     );
-    
+
     // Load base condition mapping
     const vendooCondRows = await loadMarketplaceConditions(
       sql,
       tenant_id,
-      lst.item_condition
+      lst.item_condition || null
     );
-    
-    // Load Vendoo–eBay condition mapping
+
+    // Load Vendoo–eBay condition mapping, using condition_options from the category row
     let vendooEbayRows: any[] = [];
-    if (lst.item_condition && vendooCatRows?.[0]?.condition_options) {
+    let conditionOptions: string | null = null;
+
+    if (Array.isArray(vendooCatRows) && vendooCatRows.length > 0) {
+      const ebayRow = vendooCatRows.find(
+        (r: any) => Number(r.marketplace_id) === 1
+      );
+      conditionOptions = ebayRow?.condition_options || null;
+    }
+
+    if (lst.item_condition && conditionOptions) {
       vendooEbayRows = await loadVendooEbayConditionMap(
         sql,
         tenant_id,
         lst.item_condition,
-        vendooCatRows[0].condition_options
+        conditionOptions
       );
     }
-    
-    // Shape Option A output
+
+    // Shape mapping in the SAME format as GET /api/inventory/intake
     const vendoo_mapping = {
-      vendoo_category_key: lst.listing_category_key || null,
-      vendoo_category_vendoo: vendooCatRows?.[0]?.vendoo_category_path || null,
-      vendoo_category_ebay: vendooCatRows?.[0]?.category_ebay || null,
-      vendoo_category_facebook: vendooCatRows?.[0]?.category_facebook || null,
-      vendoo_category_depop: vendooCatRows?.[0]?.category_depop || null,
-    
-      vendoo_condition_main: vendooCondRows?.[0]?.vendoo_map || null,
-      vendoo_condition_fb: vendooCondRows?.[0]?.fb_map || null,
-      vendoo_condition_depop: vendooCondRows?.[0]?.depop_map || null,
-    
-      vendoo_condition_ebay: vendooEbayRows?.[0]?.ebay_conditions || null,
-      vendoo_condition_ebay_option: vendooEbayRows?.[0]?.condition_options || null,
+      // Category mapping
+      category_key: listingCategoryKey || null,
+      category_vendoo:
+        vendooCatRows?.[0]?.vendoo_category_path || null,
+      category_ebay:
+        vendooCatRows?.[0]?.category_ebay || null,
+      category_facebook:
+        vendooCatRows?.[0]?.category_facebook || null,
+      category_depop:
+        vendooCatRows?.[0]?.category_depop || null,
+
+      // Base condition mapping
+      condition_main: vendooCondRows?.[0]?.vendoo_map || null,
+      condition_fb: vendooCondRows?.[0]?.fb_map || null,
+      condition_depop: vendooCondRows?.[0]?.depop_map || null,
+
+      // Vendoo–eBay condition mapping
+      condition_ebay: vendooEbayRows?.[0]?.ebay_conditions || null,
+      condition_ebay_option: vendooEbayRows?.[0]?.condition_options || null,
     };
+
+    console.log("[intake.ACTIVE] vendoo_mapping (POST)", {
+      tenant_id,
+      item_id,
+      listingCategoryKey,
+      item_condition: lst.item_condition,
+      vendoo_mapping,
+    });
     const job_ids = Array.isArray(enqueued) ? enqueued.map((r: any) => String(r.job_id)) : [];
 
     return json({
@@ -2316,8 +2344,7 @@ export const onRequestGet: PagesFunction = async ({ request, env }) => {
     let vendoo_mapping: any = {};
     try {
       // IMPORTANT INPUTS FOR MAPPING
-      const listingCategoryKey =
-        listingOut?.listing_category_key || listingOut?.listing_category || null;
+      const listingCategoryKey = listingOut?.listing_category_key || null; 
       const conditionName =
         listingOut?.item_condition || null;
 
