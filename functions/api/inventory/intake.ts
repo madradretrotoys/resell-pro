@@ -1375,7 +1375,7 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
               const vendooCategoryRows = await loadVendooCategoryMap(
                 sql,
                 tenant_id,
-                lst.listing_category_key
+                lst.listing_category
               );
               
               const vendooConditionRows = await loadMarketplaceConditions(
@@ -2103,14 +2103,14 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
     // Load category mapping
     const vendooCatRows = await loadVendooCategoryMap(
       sql,
-      Number(tenant_id),
-      lst.listing_category_key
+      tenant_id,
+      lst.listing_category
     );
     
     // Load base condition mapping
     const vendooCondRows = await loadMarketplaceConditions(
       sql,
-      Number(tenant_id),
+      tenant_id,
       lst.item_condition
     );
     
@@ -2119,7 +2119,7 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
     if (lst.item_condition && vendooCatRows?.[0]?.condition_options) {
       vendooEbayRows = await loadVendooEbayConditionMap(
         sql,
-        Number(tenant_id),
+        tenant_id,
         lst.item_condition,
         vendooCatRows[0].condition_options
       );
@@ -2331,7 +2331,7 @@ export const onRequestGet: PagesFunction = async ({ request, env }) => {
 
       // 1) CATEGORY MAPPING (vendoo, ebay, facebook, depop)
       console.log("GET /api/inventory/intake: loading category map", {
-        tenant_id: Number(tenant_id),
+        tenant_id: tenant_id,
         listingCategoryKey,
       });
 
@@ -2385,13 +2385,13 @@ export const onRequestGet: PagesFunction = async ({ request, env }) => {
       let condition_depop: string | null = null;
 
       console.log("GET /api/inventory/intake: loading base condition map", {
-        tenant_id: Number(tenant_id),
+        tenant_id: tenant_id,
         conditionName,
       });
 
       const condRows = await loadMarketplaceConditions(
         sql,
-        Number(tenant_id),
+        tenant_id,
         conditionName
       );
 
@@ -2424,14 +2424,14 @@ export const onRequestGet: PagesFunction = async ({ request, env }) => {
 
       if (conditionName && condition_options) {
         console.log("GET /api/inventory/intake: loading vendoo-ebay condition map", {
-          tenant_id: Number(tenant_id),
+          tenant_id: tenant_id,
           conditionName,
           condition_options,
         });
 
         const ebayCondRows = await loadVendooEbayConditionMap(
           sql,
-          Number(tenant_id),
+          tenant_id,
           conditionName,
           condition_options
         );
