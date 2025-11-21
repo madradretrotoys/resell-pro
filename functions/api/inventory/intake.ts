@@ -196,7 +196,7 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
     }
 
 
-    // Vendoo mapping helpers (category + condition)
+        // Vendoo mapping helpers (category + condition)
     // These are intentionally generic and just return raw rows so the caller can
     // shape the payload as needed without over-coupling to schema details.
     async function loadVendooCategoryMap(
@@ -204,7 +204,20 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
       tenantId: number | null | undefined,
       listingCategory: string | null | undefined
     ) {
-      if (!tenantId || !listingCategory) return [];
+      if (!tenantId || !listingCategory) {
+        console.log("vendoo:category-map:skip", {
+          reason: "missing-tenant-or-category",
+          tenantId,
+          listingCategory,
+        });
+        return [];
+      }
+
+      console.log("vendoo:category-map:load:start", {
+        tenantId,
+        listingCategory,
+      });
+
       try {
         const rows = await sql`
           select *
@@ -212,6 +225,14 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
           where tenant_id = ${tenantId}
             and category_name = ${listingCategory}
         `;
+
+        console.log("vendoo:category-map:load:success", {
+          tenantId,
+          listingCategory,
+          rowCount: Array.isArray(rows) ? rows.length : null,
+          sampleRow: Array.isArray(rows) && rows.length > 0 ? rows[0] : null,
+        });
+
         return rows;
       } catch (err) {
         console.error("vendoo:category-map:load:error", {
@@ -228,7 +249,20 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
       tenantId: number | null | undefined,
       conditionName: string | null | undefined
     ) {
-      if (!tenantId || !conditionName) return [];
+      if (!tenantId || !conditionName) {
+        console.log("vendoo:conditions:skip", {
+          reason: "missing-tenant-or-condition",
+          tenantId,
+          conditionName,
+        });
+        return [];
+      }
+
+      console.log("vendoo:conditions:load:start", {
+        tenantId,
+        conditionName,
+      });
+
       try {
         const rows = await sql`
           select *
@@ -236,6 +270,14 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
           where tenant_id = ${tenantId}
             and condition_name = ${conditionName}
         `;
+
+        console.log("vendoo:conditions:load:success", {
+          tenantId,
+          conditionName,
+          rowCount: Array.isArray(rows) ? rows.length : null,
+          sampleRow: Array.isArray(rows) && rows.length > 0 ? rows[0] : null,
+        });
+
         return rows;
       } catch (err) {
         console.error("vendoo:conditions:load:error", {
@@ -253,7 +295,22 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
       conditionName: string | null | undefined,
       conditionOption: string | null | undefined
     ) {
-      if (!tenantId || !conditionName || !conditionOption) return [];
+      if (!tenantId || !conditionName || !conditionOption) {
+        console.log("vendoo:ebay-condition-map:skip", {
+          reason: "missing-tenant-or-condition-or-option",
+          tenantId,
+          conditionName,
+          conditionOption,
+        });
+        return [];
+      }
+
+      console.log("vendoo:ebay-condition-map:load:start", {
+        tenantId,
+        conditionName,
+        conditionOption,
+      });
+
       try {
         const rows = await sql`
           select *
@@ -262,6 +319,15 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
             and condition_name = ${conditionName}
             and condition_options = ${conditionOption}
         `;
+
+        console.log("vendoo:ebay-condition-map:load:success", {
+          tenantId,
+          conditionName,
+          conditionOption,
+          rowCount: Array.isArray(rows) ? rows.length : null,
+          sampleRow: Array.isArray(rows) && rows.length > 0 ? rows[0] : null,
+        });
+
         return rows;
       } catch (err) {
         console.error("vendoo:ebay-condition-map:load:error", {
@@ -273,6 +339,7 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
         return [];
       }
     }
+
     
      
     // === Helper: enqueue marketplace publish jobs (create vs update + no-change short-circuit) ===
