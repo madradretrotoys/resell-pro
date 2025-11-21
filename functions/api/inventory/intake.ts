@@ -1371,11 +1371,26 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
                 condition_key: lst.condition_key
               });
 
-              // ⭐ NEW: Fetch Vendoo mappings for POST payload
+              // ⭐ FIX: Hydrate listing profile BEFORE doing Vendoo mappings
+              const hydratedLstRows = await sql/*sql*/`
+                SELECT
+                  listing_category_key, condition_key, brand_key, color_key, shipping_box_key,
+                  listing_category, item_condition, brand_name, primary_color, shipping_box,
+                  weight_lb, weight_oz, shipbx_length, shipbx_width, shipbx_height,
+                  condition_options
+                FROM app.item_listing_profile
+                WHERE item_id = ${item_id} AND tenant_id = ${tenant_id}
+                LIMIT 1
+              `;
+              
+              const hydrated = hydratedLstRows[0] || {};
+              console.log("[intake.CREATE_ACTIVE] hydrated listing for Vendoo mapping", hydrated);
+              
+              // ⭐ Use hydrated.item_condition and hydrated.listing_category_key
               const vendooCategoryRows = await loadVendooCategoryMap(
                 sql,
                 tenant_id,
-                lst.listing_category
+                hydrated.listing_category_key || null
               );
               
               const vendooConditionRows = await loadMarketplaceConditions(
