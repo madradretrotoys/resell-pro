@@ -1374,19 +1374,19 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
               // ⭐ NEW: Fetch Vendoo mappings for POST payload
               const vendooCategoryRows = await loadVendooCategoryMap(
                 sql,
-                Number(tenant_id),
+                tenant_id,
                 lst.listing_category_key
               );
               
               const vendooConditionRows = await loadMarketplaceConditions(
                 sql,
-                Number(tenant_id),
+                tenant_id,
                 lst.item_condition || null
               );
               
               const vendooEbayConditionRows = await loadVendooEbayConditionMap(
                 sql,
-                Number(tenant_id),
+                tenant_id,
                 lst.item_condition || null,
                 lst.condition_options || null
               );
@@ -2337,7 +2337,7 @@ export const onRequestGet: PagesFunction = async ({ request, env }) => {
 
       const catRows = await loadVendooCategoryMap(
         sql,
-        Number(tenant_id),
+        tenant_id,
         listingCategoryKey
       );
 
