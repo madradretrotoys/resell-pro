@@ -1720,9 +1720,10 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
             published: false,
             job_ids: job_ids_upd,
             intent: { marketplaces: intentMarketplaces },
-            ms: Date.now() - t0
-            // ⭐ NEW
             vendoo_mapping,
+
+            ms: Date.now() - t0
+
           }, 200);
         }
 
