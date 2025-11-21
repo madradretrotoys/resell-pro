@@ -904,7 +904,7 @@ export async function init() {
               saveStatus,
               intent,
               intentMarketplaces,
-              existing_vendoo_mapping: (ev.detail as any)?.vendoo_mapping || null,
+              existing_vendoo_mapping: ev?.detail?.vendoo_mapping ?? null,
             });
         
             // Enrich detail with images + inventory_meta + ebay_payload_snapshot + vendoo_mapping
