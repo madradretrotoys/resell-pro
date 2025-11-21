@@ -2113,6 +2113,20 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
       ORDER BY created_at ASC
     `;
 
+    // ⭐ FIX: hydrate listing profile before computing Vendoo mappings (CREATE_ACTIVE)
+    const hydratedLstRows = await sql/*sql*/`
+      SELECT
+        listing_category_key, condition_key, brand_key, color_key, shipping_box_key,
+        listing_category, item_condition, brand_name, primary_color, shipping_box,
+        weight_lb, weight_oz, shipbx_length, shipbx_width, shipbx_height,
+        condition_options
+      FROM app.item_listing_profile
+      WHERE item_id = ${item_id} AND tenant_id = ${tenant_id}
+      LIMIT 1
+    `;
+    const hydrated = hydratedLstRows[0] || {};
+    console.log("[intake.CREATE_ACTIVE] hydrated listing for Vendoo mapping", hydrated);
+    
     // ⭐ NEW — build Vendoo mapping for POST responses
 
     // Prefer the UUID key, fall back to listing_category only for logging
