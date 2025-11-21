@@ -2006,7 +2006,7 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
           shipbx_height        = EXCLUDED.shipbx_height
       `;
     }
-
+    
     // Upsert eBay marketplace listing when present (active create)
     if (EBAY_MARKETPLACE_ID && ebay) {
       const e = normalizeEbay(ebay);
@@ -2098,6 +2098,48 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
       ORDER BY created_at ASC
     `;
 
+    // ⭐ NEW — build Vendoo mapping for POST responses
+
+    // Load category mapping
+    const vendooCatRows = await loadVendooCategoryMap(
+      sql,
+      Number(tenant_id),
+      lst.listing_category_key
+    );
+    
+    // Load base condition mapping
+    const vendooCondRows = await loadMarketplaceConditions(
+      sql,
+      Number(tenant_id),
+      lst.item_condition
+    );
+    
+    // Load Vendoo–eBay condition mapping
+    let vendooEbayRows: any[] = [];
+    if (lst.item_condition && vendooCatRows?.[0]?.condition_options) {
+      vendooEbayRows = await loadVendooEbayConditionMap(
+        sql,
+        Number(tenant_id),
+        lst.item_condition,
+        vendooCatRows[0].condition_options
+      );
+    }
+    
+    // Shape Option A output
+    const vendoo_mapping = {
+      vendoo_category_key: lst.listing_category_key || null,
+      vendoo_category_vendoo: vendooCatRows?.[0]?.vendoo_category_path || null,
+      vendoo_category_ebay: vendooCatRows?.[0]?.category_ebay || null,
+      vendoo_category_facebook: vendooCatRows?.[0]?.category_facebook || null,
+      vendoo_category_depop: vendooCatRows?.[0]?.category_depop || null,
+    
+      vendoo_condition_main: vendooCondRows?.[0]?.vendoo_map || null,
+      vendoo_condition_fb: vendooCondRows?.[0]?.fb_map || null,
+      vendoo_condition_depop: vendooCondRows?.[0]?.depop_map || null,
+    
+      vendoo_condition_ebay: vendooEbayRows?.[0]?.ebay_conditions || null,
+      vendoo_condition_ebay_option: vendooEbayRows?.[0]?.condition_options || null,
+    };
     const job_ids = Array.isArray(enqueued) ? enqueued.map((r: any) => String(r.job_id)) : [];
 
     return json({
