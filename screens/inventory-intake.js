@@ -939,25 +939,27 @@ export async function init() {
               // Preserve any existing vendoo_mapping on detail, but
               // also thread through mapping derived server-side if present.
               const beforeVendooMapping =
-                vendooDetail.vendoo_mapping || null;
-        
+                vendooDetail.vendoo_mapping ||
+                null;
+
               const fromSnapVendooMapping =
-                snap.vendoo_mapping ||
-                snap.vendoo ||
-                null;
-        
-              vendooDetail.vendoo_mapping =
-                beforeVendooMapping ||
-                fromSnapVendooMapping ||
-                null;
-        
-              console.log("[intake.js] vendoo: enrich from snap", {
+                (snap && typeof snap === "object" && snap.vendoo_mapping)
+                  ? snap.vendoo_mapping
+                  : null;
+
+              // Correct behavior: if snap provides a valid vendoo_mapping,
+              // it should always override the placeholder/null values.
+              if (fromSnapVendooMapping && typeof fromSnapVendooMapping === "object") {
+                vendooDetail.vendoo_mapping = fromSnapVendooMapping;
+              }
+
+              console.log("[intake.js] vendoo: enrich from snap (FIXED)", {
+                beforeVendooMapping,
+                fromSnapVendooMapping,
+                finalVendooMapping: vendooDetail.vendoo_mapping,
                 inventory_meta: vendooDetail.inventory_meta,
                 images: vendooDetail.images,
                 ebay_payload_snapshot: vendooDetail.ebay_payload_snapshot,
-                vendoo_mapping_before: beforeVendooMapping,
-                vendoo_mapping_from_snap: fromSnapVendooMapping,
-                vendoo_mapping_final: vendooDetail.vendoo_mapping,
               });
             } else {
               console.log("[intake.js] vendoo: no usable snap object; skipping enrich", {
