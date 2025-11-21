@@ -1376,8 +1376,8 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
                 SELECT
                   listing_category_key, condition_key, brand_key, color_key, shipping_box_key,
                   listing_category, item_condition, brand_name, primary_color, shipping_box,
-                  weight_lb, weight_oz, shipbx_length, shipbx_width, shipbx_height,
-                  condition_options
+                  weight_lb, weight_oz, shipbx_length, shipbx_width, shipbx_height
+                  
                 FROM app.item_listing_profile
                 WHERE item_id = ${item_id} AND tenant_id = ${tenant_id}
                 LIMIT 1
@@ -2118,8 +2118,8 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
       SELECT
         listing_category_key, condition_key, brand_key, color_key, shipping_box_key,
         listing_category, item_condition, brand_name, primary_color, shipping_box,
-        weight_lb, weight_oz, shipbx_length, shipbx_width, shipbx_height,
-        condition_options
+        weight_lb, weight_oz, shipbx_length, shipbx_width, shipbx_height
+        
       FROM app.item_listing_profile
       WHERE item_id = ${item_id} AND tenant_id = ${tenant_id}
       LIMIT 1
