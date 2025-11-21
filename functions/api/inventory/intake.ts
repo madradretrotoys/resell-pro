@@ -201,7 +201,7 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
     // shape the payload as needed without over-coupling to schema details.
     async function loadVendooCategoryMap(
       sql: any,
-      tenantId: number | null | undefined,
+      tenantId: string | null | undefined,
       listingCategory: string | null | undefined
     ) {
       if (!tenantId || !listingCategory) {
@@ -246,7 +246,7 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
   
     async function loadMarketplaceConditions(
       sql: any,
-      tenantId: number | null | undefined,
+      tenantId: string | null | undefined,
       conditionName: string | null | undefined
     ) {
       if (!tenantId || !conditionName) {
