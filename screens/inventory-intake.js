@@ -3313,7 +3313,7 @@ function setMarketplaceVisibility() {
       
            const { ok, status, marketplaces_selected } = detail || {};
 
-          /
+          
           // If ok is undefined (because this isn't a raw API response),
           // we allow the Vendoo flow to continue.
           if (ok === false) {
