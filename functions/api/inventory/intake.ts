@@ -2130,7 +2130,7 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
     const vendooCondRows = await loadMarketplaceConditions(
       sql,
       tenant_id,
-      lst.item_condition || null
+      hydrated.item_condition || null
     );
 
     // Load Vendoo–eBay condition mapping, using condition_options from the category row
@@ -2148,7 +2148,7 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
       vendooEbayRows = await loadVendooEbayConditionMap(
         sql,
         tenant_id,
-        lst.item_condition,
+        hydrated.item_condition,
         conditionOptions
       );
     }
