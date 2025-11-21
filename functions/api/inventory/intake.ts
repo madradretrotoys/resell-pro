@@ -2147,7 +2147,7 @@ export const onRequestGet: PagesFunction = async ({ request, env }) => {
       listingOut = { ...(listingOut || {}), product_description: BASE_SENTENCE_GET };
     }
 
-    // ---------------------------------------------------------------------
+       // ---------------------------------------------------------------------
     // VENDOO CATEGORY + CONDITION MAPPING
     // ---------------------------------------------------------------------
 
@@ -2159,34 +2159,73 @@ export const onRequestGet: PagesFunction = async ({ request, env }) => {
       const conditionName =
         listingOut?.item_condition || null;
 
+      console.log("GET /api/inventory/intake: vendoo mapping inputs", {
+        tenant_id,
+        item_id,
+        listingCategoryKey,
+        conditionName,
+        listingOut_raw: listingOut,
+      });
+
       // 1) CATEGORY MAPPING (vendoo, ebay, facebook, depop)
+      console.log("GET /api/inventory/intake: loading category map", {
+        tenant_id: Number(tenant_id),
+        listingCategoryKey,
+      });
+
       const catRows = await loadVendooCategoryMap(
         sql,
         Number(tenant_id),
         listingCategoryKey
       );
 
-      let category_vendoo = null;
-      let category_ebay = null;
-      let category_facebook = null;
-      let category_depop = null;
-      let condition_options = null; // used later for the vendoo–ebay condition mapping
+      console.log("GET /api/inventory/intake: category map rows", {
+        count: Array.isArray(catRows) ? catRows.length : null,
+        rows: catRows,
+      });
 
-      for (const r of catRows) {
-        const mp = Number(r.marketplace_id);
-        if (mp === 13) category_vendoo = r.vendoo_category_path || null;
-        if (mp === 1) {
-          category_ebay = r.vendoo_category_path || null;
-          condition_options = r.condition_options || null;
+      let category_vendoo: string | null = null;
+      let category_ebay: string | null = null;
+      let category_facebook: string | null = null;
+      let category_depop: string | null = null;
+      let condition_options: string | null = null; // used later for the vendoo–ebay condition mapping
+
+      if (Array.isArray(catRows)) {
+        for (const r of catRows) {
+          const mp = Number(r.marketplace_id);
+          console.log("GET /api/inventory/intake: category map row", {
+            marketplace_id: mp,
+            row: r,
+          });
+
+          if (mp === 13) category_vendoo = r.vendoo_category_path || null;
+          if (mp === 1) {
+            category_ebay = r.vendoo_category_path || null;
+            condition_options = r.condition_options || null;
+          }
+          if (mp === 2) category_facebook = r.vendoo_category_path || null;
+          if (mp === 4) category_depop = r.vendoo_category_path || null;
         }
-        if (mp === 2) category_facebook = r.vendoo_category_path || null;
-        if (mp === 4) category_depop = r.vendoo_category_path || null;
       }
 
+      console.log("GET /api/inventory/intake: category mapping result", {
+        listingCategoryKey,
+        category_vendoo,
+        category_ebay,
+        category_facebook,
+        category_depop,
+        condition_options_from_category: condition_options,
+      });
+
       // 2) BASE CONDITION MAPPING (vendoo, facebook, depop)
-      let condition_main = null;
-      let condition_fb = null;
-      let condition_depop = null;
+      let condition_main: string | null = null;
+      let condition_fb: string | null = null;
+      let condition_depop: string | null = null;
+
+      console.log("GET /api/inventory/intake: loading base condition map", {
+        tenant_id: Number(tenant_id),
+        conditionName,
+      });
 
       const condRows = await loadMarketplaceConditions(
         sql,
@@ -2194,18 +2233,40 @@ export const onRequestGet: PagesFunction = async ({ request, env }) => {
         conditionName
       );
 
+      console.log("GET /api/inventory/intake: base condition rows", {
+        count: Array.isArray(condRows) ? condRows.length : null,
+        rows: condRows,
+      });
+
       if (Array.isArray(condRows) && condRows.length > 0) {
         const r = condRows[0];
         condition_main = r.vendoo_map || null;
         condition_fb = r.fb_map || null;
         condition_depop = r.depop_map || null;
+
+        console.log("GET /api/inventory/intake: base condition mapping result", {
+          conditionName,
+          condition_main,
+          condition_fb,
+          condition_depop,
+        });
+      } else {
+        console.log("GET /api/inventory/intake: no base condition mapping found", {
+          conditionName,
+        });
       }
 
       // 3) SPECIAL VENDOO–EBAY CONDITION MAPPING
-      let condition_ebay = null;
-      let condition_ebay_option = null;
+      let condition_ebay: string | null = null;
+      let condition_ebay_option: string | null = null;
 
       if (conditionName && condition_options) {
+        console.log("GET /api/inventory/intake: loading vendoo-ebay condition map", {
+          tenant_id: Number(tenant_id),
+          conditionName,
+          condition_options,
+        });
+
         const ebayCondRows = await loadVendooEbayConditionMap(
           sql,
           Number(tenant_id),
@@ -2213,11 +2274,33 @@ export const onRequestGet: PagesFunction = async ({ request, env }) => {
           condition_options
         );
 
+        console.log("GET /api/inventory/intake: vendoo-ebay condition rows", {
+          count: Array.isArray(ebayCondRows) ? ebayCondRows.length : null,
+          rows: ebayCondRows,
+        });
+
         if (Array.isArray(ebayCondRows) && ebayCondRows.length > 0) {
           const r = ebayCondRows[0];
           condition_ebay = r.ebay_conditions || null;
           condition_ebay_option = r.condition_options || null;
+
+          console.log("GET /api/inventory/intake: vendoo-ebay condition mapping result", {
+            conditionName,
+            condition_options,
+            condition_ebay,
+            condition_ebay_option,
+          });
+        } else {
+          console.log("GET /api/inventory/intake: no vendoo-ebay condition mapping found", {
+            conditionName,
+            condition_options,
+          });
         }
+      } else {
+        console.log("GET /api/inventory/intake: skipping vendoo-ebay condition map", {
+          conditionName,
+          condition_options,
+        });
       }
 
       vendoo_mapping = {
@@ -2231,16 +2314,38 @@ export const onRequestGet: PagesFunction = async ({ request, env }) => {
         condition_fb,
         condition_depop,
         condition_ebay,
-        condition_ebay_option
+        condition_ebay_option,
       };
+
+      console.log("GET /api/inventory/intake: FINAL vendoo_mapping", {
+        tenant_id,
+        item_id,
+        vendoo_mapping,
+      });
     } catch (err) {
-      console.error("vendoo_mapping_build_error", String(err));
+      console.error("vendoo_mapping_build_error", {
+        tenant_id,
+        item_id,
+        error: String(err),
+        stack: (err as any)?.stack || null,
+      });
       vendoo_mapping = {};
     }
 
     // ---------------------------------------------------------------------
     // FINAL RESPONSE (unchanged except vendoo_mapping injected)
     // ---------------------------------------------------------------------
+    console.log("GET /api/inventory/intake: response summary with vendoo_mapping", {
+      tenant_id,
+      item_id,
+      inventory_present: !!invRows[0],
+      listing_present: !!listingOut,
+      images_count: imgRows?.length ?? 0,
+      ebayListing_present: !!ebayListing,
+      facebookListing_present: !!facebookListing,
+      vendoo_mapping,
+    });
+
     return new Response(JSON.stringify({
       ok: true,
 
