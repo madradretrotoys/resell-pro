@@ -1390,20 +1390,20 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
               const vendooCategoryRows = await loadVendooCategoryMap(
                 sql,
                 tenant_id,
-                hydrated.listing_category_key || null
+                lst.listing_category
               );
               
               const vendooConditionRows = await loadMarketplaceConditions(
                 sql,
                 tenant_id,
-                lst.item_condition || null
+                hydrated.item_condition || null
               );
               
               const vendooEbayConditionRows = await loadVendooEbayConditionMap(
                 sql,
                 tenant_id,
-                lst.item_condition || null,
-                lst.condition_options || null
+                hydrated.item_condition || null,
+                hydrated.condition_options || null
               );
               
               // ⭐ NEW: Shape Vendoo mapping (Option A)
@@ -2144,7 +2144,7 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
       conditionOptions = ebayRow?.condition_options || null;
     }
 
-    if (lst.item_condition && conditionOptions) {
+    if (hydrated.item_condition && conditionOptions) {
       vendooEbayRows = await loadVendooEbayConditionMap(
         sql,
         tenant_id,
@@ -2180,7 +2180,7 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
       tenant_id,
       item_id,
       listingCategoryKey,
-      item_condition: lst.item_condition,
+      item_condition: hydrated.item_condition,
       vendoo_mapping,
     });
     const job_ids = Array.isArray(enqueued) ? enqueued.map((r: any) => String(r.job_id)) : [];
