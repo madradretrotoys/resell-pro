@@ -210,7 +210,7 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
           select *
           from app.marketplace_category_vendoo_map
           where tenant_id = ${tenantId}
-            and category_key = ${listingCategory}
+            and category_name = ${listingCategory}
         `;
         return rows;
       } catch (err) {
