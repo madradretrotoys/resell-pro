@@ -2147,7 +2147,7 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
     let category_ebay: string | null = null;
     let category_facebook: string | null = null;
     let category_depop: string | null = null;
-    let conditionOptions: string | null = null; // for eBay condition mapping
+    //let conditionOptions: string | null = null; // for eBay condition mapping
 
     if (Array.isArray(vendooCatRows)) {
       for (const r of vendooCatRows) {
