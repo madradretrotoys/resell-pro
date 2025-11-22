@@ -576,7 +576,8 @@ export async function init() {
           item_id: ev?.detail?.item_id,
           action: ev?.detail?.action,
           save_status: ev?.detail?.save_status,
-          job_ids: ev?.detail?.job_ids
+          job_ids: ev?.detail?.job_ids,
+          vendoo_mapping: ev?.detail?.vendoo_mapping ?? null
         });
         
         const id         = ev?.detail?.item_id;
@@ -5180,7 +5181,8 @@ document.addEventListener("intake:item-changed", () => refreshInventory({ force:
                   ok: (typeof res?.ok === "boolean" ? res.ok : true),
                   status: res?.status || saveStatus,
                   intent: res?.intent || null,
-                  marketplaces_selected: res?.marketplaces_selected || null
+                  marketplaces_selected: res?.marketplaces_selected || null,
+                  vendoo_mapping: res?.vendoo_mapping || null
                 }
               })
             );
