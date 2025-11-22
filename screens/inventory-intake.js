@@ -3139,7 +3139,7 @@ function setMarketplaceVisibility() {
         
             // Condition (favor Vendoo mapping if present)
             condition:
-              (vendoo_mapping && vendoo_mapping.condition_main) ||
+              (vendoo_mapping && vendoo_mapping.vendoo_condition_main) ||
               (listingProfile && listingProfile.item_condition) ||
               null,
         
@@ -3150,7 +3150,7 @@ function setMarketplaceVisibility() {
         
             // Category: prefer Vendoo mapping, then RP listing category, then inventory category_nm
             category:
-              (vendoo_mapping && (vendoo_mapping.category_vendoo || vendoo_mapping.category_key)) ||
+              (vendoo_mapping && (vendoo_mapping.vendoo_category_vendoo || vendoo_mapping.vendoo_category_key)) ||
               (listingProfile && listingProfile.listing_category) ||
               (inventory && (inventory.category_nm || inventory.category_name)) ||
               null,
