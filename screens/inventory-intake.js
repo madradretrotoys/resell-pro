@@ -2972,12 +2972,23 @@ function setMarketplaceVisibility() {
             ebay_payload_snapshot,
             vendoo_mapping: vendoo_mapping_incoming,
           } = detail;
-          
+          // 🟦 LOG: Incoming mapping from server (direct POST response)
+          console.log("[vendoo] incoming vendoo_mapping_incoming (from detail)", vendoo_mapping_incoming);
+
           // MUST BE OUTSIDE the destructuring
           const rawMap =
             vendoo_mapping_incoming && typeof vendoo_mapping_incoming === "object"
               ? vendoo_mapping_incoming
               : {};
+
+          // 🟪 LOG: Normalized rawMap
+          console.log("[vendoo] normalized rawMap (safe mapping)", rawMap);  
+          
+          // ⭐ NEW: Ensure detail.vendoo_mapping contains the raw server mapping
+          detail.vendoo_mapping = rawMap;
+
+          // 🟩 LOG: After assignment
+          console.log("[vendoo] detail.vendoo_mapping (after assignment)", detail.vendoo_mapping);
           
           const vendoo_mapping = {
             vendoo_category_key: rawMap.category_key || null,
@@ -2994,6 +3005,9 @@ function setMarketplaceVisibility() {
             vendoo_condition_ebay_option: rawMap.condition_ebay_option || null,
           };
 
+          // 🟧 LOG: Final transformed mapping used by rpBuildVendooPayload
+          console.log("[vendoo] final vendoo_mapping (transformed for payload)", vendoo_mapping);
+          
           const normalizedSaveStatus = String(saveStatus || save_status || "").toLowerCase();
           console.log("[vendoo] rpBuildVendooPayload: normalizedSaveStatus", {
             saveStatus,
