@@ -1405,19 +1405,21 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
                 hydrated.item_condition || null,
                 hydrated.condition_options || null
               );
+
+              // Derive per-marketplace categories from rows
+              let vendoo_category_vendoo: string | null = null;
+              let vendoo_category_ebay: string | null = null;
+              let vendoo_category_facebook: string | null = null;
+              let vendoo_category_depop: string | null = null;
               
               // ⭐ NEW: Shape Vendoo mapping (Option A)
               const vendoo_mapping = {
-                vendoo_category_key:
-                  vendooCategoryRows?.[0]?.category_key_uuid || null,
-                vendoo_category_vendoo:
-                  vendooCategoryRows?.[0]?.vendoo_category_path || null,
-                vendoo_category_ebay:
-                  vendooCategoryRows?.[0]?.category_ebay || null,
-                vendoo_category_facebook:
-                  vendooCategoryRows?.[0]?.category_facebook || null,
-                vendoo_category_depop:
-                  vendooCategoryRows?.[0]?.category_depop || null,
+              vendoo_category_key:
+                vendooCategoryRows?.[0]?.category_key_uuid || null,
+              vendoo_category_vendoo,
+              vendoo_category_ebay,
+              vendoo_category_facebook,
+              vendoo_category_depop,
               
                 vendoo_condition_main:
                   vendooConditionRows?.[0]?.vendoo_map || null,
@@ -2129,17 +2131,45 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
     
     // ⭐ NEW — build Vendoo mapping for POST responses
 
-    // Prefer the UUID key, fall back to listing_category only for logging
+    // Prefer the UUID key; we key mappings by this
     const listingCategoryKey =
-      lst.listing_category_key || lst.listing_category || null;
-
+      lst.listing_category_key || null;
+    
     // Load category mapping (expects category_key_uuid)
     const vendooCatRows = await loadVendooCategoryMap(
       sql,
       tenant_id,
-      lst.listing_category_key || lst.listing_category || null;
+      listingCategoryKey
     );
+    
+    // Derive per-marketplace categories from rows
+    let category_vendoo: string | null = null;
+    let category_ebay: string | null = null;
+    let category_facebook: string | null = null;
+    let category_depop: string | null = null;
+    let conditionOptions: string | null = null; // for eBay condition mapping
 
+    if (Array.isArray(vendooCatRows)) {
+      for (const r of vendooCatRows) {
+        const mp = Number(r.marketplace_id);
+        if (mp === 13) {
+          category_vendoo = r.vendoo_category_path || null;
+        }
+        if (mp === 1) {
+          category_ebay = r.vendoo_category_path || null;
+          // eBay row also carries condition_options we use below
+          conditionOptions = conditionOptions || r.condition_options || null;
+        }
+        if (mp === 2) {
+          category_facebook = r.vendoo_category_path || null;
+        }
+        if (mp === 4) {
+          category_depop = r.vendoo_category_path || null;
+        }
+      }
+    }
+    
+    
     // Load base condition mapping
     const vendooCondRows = await loadMarketplaceConditions(
       sql,
@@ -2167,19 +2197,14 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
       );
     }
 
-    // Shape mapping in the SAME format as GET /api/inventory/intake
+   // Shape mapping in the SAME format as GET /api/inventory/intake
     const vendoo_mapping = {
       // Category mapping
       category_key: listingCategoryKey || null,
-      category_vendoo:
-        vendooCatRows?.[0]?.vendoo_category_path || null,
-      category_ebay:
-        vendooCatRows?.[0]?.category_ebay || null,
-      category_facebook:
-        vendooCatRows?.[0]?.category_facebook || null,
-      category_depop:
-        vendooCatRows?.[0]?.category_depop || null,
-
+      category_vendoo,
+      category_ebay,
+      category_facebook,
+      category_depop,
       // Base condition mapping
       condition_main: vendooCondRows?.[0]?.vendoo_map || null,
       condition_fb: vendooCondRows?.[0]?.fb_map || null,
