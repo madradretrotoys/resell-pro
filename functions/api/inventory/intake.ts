@@ -1390,7 +1390,7 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
               const vendooCategoryRows = await loadVendooCategoryMap(
                 sql,
                 tenant_id,
-                lst.listing_category
+                lst.listing_category_key
               );
               
               const vendooConditionRows = await loadMarketplaceConditions(
@@ -2137,7 +2137,7 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
     const vendooCatRows = await loadVendooCategoryMap(
       sql,
       tenant_id,
-      listingCategoryKey
+      lst.listing_category_key || lst.listing_category || null;
     );
 
     // Load base condition mapping
