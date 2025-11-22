@@ -1,5329 +1,2640 @@
-import { api } from "/assets/js/api.js";
-import { wireInventoryImageLightbox } from "/assets/js/ui.js";
+// functions/api/inventory/intake.ts
+import { neon } from "@neondatabase/serverless";
 
-// Exported so router can call it: router awaits `mod.init(...)` after importing this module.
-// (See assets/js/router.js for the dynamic import and named-export call.)
-export async function init() {
-  // Lightweight loading flag
-  try { document.body.classList.add("loading"); } catch {}
 
-  // ——— Local helpers (screen-scoped) ———
-  const $ = (id) => document.getElementById(id);
-  // --- Default Long Description for new items ---
-  const BASE_DESCRIPTION =
-    "The photos are part of the description. Be sure to look them over for condition and details. This is sold as is, and it's ready for a new home.";
+type Role = "owner" | "admin" | "manager" | "clerk";
+
+type MarketplaceAction = "upsert" | "delete" | "ignore";
+type IntakeIntent = {
+  source?: string; // e.g., "intake"
+  mode?: "draft" | "active";
+  inventory?: "create" | "update";
+  marketplaces?: Record<string, MarketplaceAction>;
+};
+
+const json = (data: any, status = 200) =>
+
   
-  function ensureDefaultLongDescription() {
-    const el =
-      document.getElementById("longDescriptionTextarea") ||
-      findControlByLabel("Long Description");
-    if (!el) return;
-  
-    const val = String(el.value || "").trim();
-    // If user/server already filled it, leave it alone
-    if (val && val !== "Enter a detailed description…") return;
-  
-    // Pull Item Name / Description and prepend it above the base sentence
-    const titleEl = document.getElementById("titleInput") || findControlByLabel("Item Name / Description");
-    const title = String(titleEl?.value || "").trim();
-  
-    el.value = title ? `${title}\n\n${BASE_DESCRIPTION}` : BASE_DESCRIPTION;
-  }
-  
-  // ====== Photos state & helpers (NEW) ======
-  const MAX_PHOTOS = 15;
-  let __photos = [];              // [{image_id, cdn_url, is_primary, sort_order, r2_key, width, height, bytes, content_type}]
-  let __pendingFiles = [];        // Files awaiting upload (before item_id exists)
-  let __currentItemId = null;     // sync with existing flow
-  let __reorderMode = false;
-  let __lockDraft = false;        // Phase 0: once Active, we never allow reverting to Draft (UI lock)
-  // Stash the tenant id once we learn it (from /api/inventory/meta or DOM)
-  let __tenantId = "";
-  let __duplicateSourceImages = [];
-  
-   // When duplicating an item, this flag controls whether we carry photos from the template.
-      // Default is true; the duplicate prompt can flip it off for the new item.
-      let __duplicateCarryPhotos = true;
-  
-  console.log("[photos:init]", {
-    MAX_PHOTOS,
-    __photosLen: __photos.length,
-    __pendingLen: __pendingFiles.length,
-    __currentItemId,
-    __tenantId,
+  new Response(JSON.stringify(data), {
+    status,
+    headers: { "content-type": "application/json", "cache-control": "no-store" },
   });
-  
-  // Utility: update counter + disable add when maxed
-  function updatePhotosUIBasic() {
-    const count = __photos.length + __pendingFiles.length;
-    const cap = `${count} / ${MAX_PHOTOS}`;
-    const el = $("photosCount");
-    if (el) el.textContent = cap;
 
-    console.log("[photos] updatePhotosUIBasic", {
-      count,
-      photosLen: __photos.length,
-      pendingLen: __pendingFiles.length,
-      currentItemId: __currentItemId,
-    });
-    
-    const canAdd = count < MAX_PHOTOS;
-    const cam = $("photoCameraInput");
-    const fil = $("photoFileInput");
-    if (cam) cam.disabled = !canAdd;
-    if (fil) fil.disabled = !canAdd;
+function readCookie(header: string, name: string): string | null {
+  if (!header) return null;
+  for (const part of header.split(/; */)) {
+    const [k, ...rest] = part.split("=");
+    if (k === name) return decodeURIComponent(rest.join("="));
   }
-  
-// Render thumbnails
-  function renderPhotosGrid() {
-    const host = $("photosGrid");
-    if (!host) {
-      console.warn("[photos] renderPhotosGrid: host #photosGrid not found", {
-        photosLen: __photos.length,
-        pendingLen: __pendingFiles.length,
-        currentItemId: __currentItemId,
-      });
-      return;
-    }
-    console.log("[photos] renderPhotosGrid", {
-      photosLen: __photos.length,
-      pendingLen: __pendingFiles.length,
-      currentItemId: __currentItemId,
-      duplicateSourceCount: Array.isArray(__duplicateSourceImages) ? __duplicateSourceImages.length : 0,
-    });
-    // safety: fixed-size columns
-    // safety: fixed-size columns + consistent row height
-    try {
-      host.style.gridTemplateColumns = "repeat(auto-fill, 140px)";
-      host.style.gridAutoRows = "140px";
-      host.style.alignItems = "start";
-      host.style.justifyItems = "start";
-    } catch {}
-    host.innerHTML = "";
-  
-    // Existing images (from DB)
-    for (const img of __photos.sort((a,b)=>a.sort_order-b.sort_order)) {
-      host.appendChild(renderThumb(img, { persisted: true }));
-    }
-  
-    // Pending files (preview only)
-    for (const f of __pendingFiles) {
-      // Reuse the persistent preview URL and carry a stable pending_id
-      const preview = f._previewUrl || URL.createObjectURL(f);
-      host.appendChild(
-        renderThumb({ cdn_url: preview, pending_id: f._rpId, is_primary: false }, { pending: true })
-      );
-    }
-  
-    updatePhotosUIBasic();
-    // Nudge gating when photo count changes (add/replace/delete/reorder)
-    try { computeValidity(); } catch {}
-    // NEW: wire the shared inventory image lightbox for photo thumbnails
-    try {
-      // Limit binding to this grid so we don’t touch other screens unnecessarily
-      wireInventoryImageLightbox(host);
-    } catch (err) {
-      console.warn("[photos] wireInventoryImageLightbox failed for photosGrid", err);
-    }
-  }
-  
-    // Thumb element
-  function renderThumb(model, flags) {
-    const { persisted = false, pending = false } = flags || {};
-    const wrap = document.createElement("div");
-    // fixed 140x140 thumb box (pure CSS styles; no Tailwind utilities)
-    wrap.className = "relative group border rounded-xl overflow-hidden";
-    wrap.style.width = "140px";
-    wrap.style.height = "140px";
-    wrap.style.display = "inline-block"; // ensure the grid cell stays compact
-    wrap.tabIndex = 0;
-
-    // NEW: clickable button wrapper that the shared lightbox helper can bind to.
-    // This keeps the Crop/Replace/Primary/Delete bar separate so it doesn’t trigger the viewer.
-    const btn = document.createElement("button");
-    btn.type = "button";
-    btn.className = "inventory-thumb-btn block w-full h-full";
-    btn.title = "Click to view larger";
-    btn.dataset.imageUrl = model.cdn_url || "";
-
-    const img = new Image();
-    img.src = model.cdn_url || "";
-    img.alt = "Item photo";
-    img.loading = "lazy";
-    img.className = "block";
-    img.style.width = "140px";
-    img.style.height = "140px";
-    img.style.objectFit = "cover";
-    img.style.display = "block";
-
-    btn.appendChild(img);
-    wrap.appendChild(btn);
-
-    const bar = document.createElement("div");
-    bar.className = "absolute inset-x-0 bottom-0 p-1 bg-black/50 opacity-0 group-hover:opacity-100 transition";
-    bar.innerHTML = `
-      <div class="flex gap-1 justify-center">
-        <button class="btn btn-ghost btn-sm" data-act="crop" title="Crop">Crop</button>
-        <label class="btn btn-ghost btn-sm cursor-pointer" title="Replace">
-          Replace
-          <input type="file" accept="image/*" class="hidden" data-act="replace">
-        </label>
-        <button class="btn btn-ghost btn-sm" data-act="primary" ${pending ? "disabled" : ""} title="Set Primary">Primary</button>
-        <button class="btn btn-ghost btn-sm" data-act="delete" title="Delete">Delete</button>
-      </div>
-    `;
-    wrap.appendChild(bar);
-  
-    // Drag handle in reorder mode
-    if (__reorderMode && persisted) {
-      wrap.draggable = true;
-      wrap.dataset.imageId = model.image_id;
-      wrap.classList.add("cursor-move");
-      wrap.addEventListener("dragstart", (e) => {
-        e.dataTransfer.setData("text/plain", model.image_id);
-      });
-      hostDragEnable();
-    }
-  
-    // Wire actions
-    bar.addEventListener("click", async (e) => {
-      const btn = e.target.closest("button");
-      if (!btn) return;
-      const act = btn.dataset.act;
-    
-      if (act === "crop") {
-        await openCropper(model, { pending });
-      } else if (act === "primary" && persisted) {
-        await setPrimary(model.image_id);
-      } else if (act === "delete") {
-        if (pending) {
-          // remove THE clicked pending file by its stable id
-          const idx = __pendingFiles.findIndex(f => f && f._rpId && f._rpId === model.pending_id);
-          if (idx >= 0) {
-            try { if (__pendingFiles[idx]._previewUrl) URL.revokeObjectURL(__pendingFiles[idx]._previewUrl); } catch {}
-            __pendingFiles.splice(idx, 1);
-          }
-          renderPhotosGrid();
-        
-        } else if (persisted) {
-          await deleteImage(model.image_id);
-        }
-      }
-    });
-    // Replace (separate input)
-    bar.querySelector('input[type="file"][data-act="replace"]')?.addEventListener("change", async (ev) => {
-      const f = ev.target.files?.[0];
-      if (!f) return;
-      await replaceImage(model, f);
-    });
-  
-    return wrap;
-  }
-
-  
-  // Enable drop targets to reorder cards
-  function hostDragEnable() {
-    const host = $("photosGrid");
-    if (!host) return;
-    host.addEventListener("dragover", (e) => { if (__reorderMode) e.preventDefault(); });
-    host.addEventListener("drop", async (e) => {
-      if (!__reorderMode) return;
-      e.preventDefault();
-      const draggingId = e.dataTransfer.getData("text/plain");
-      const target = e.target.closest("[data-image-id]");
-      const targetId = target?.dataset.imageId;
-      if (!draggingId || !targetId || draggingId === targetId) return;
-  
-      // compute new order: move dragging before target
-      const order = __photos.slice().sort((a,b)=>a.sort_order-b.sort_order);
-      const fromIdx = order.findIndex(r => r.image_id === draggingId);
-      const toIdx   = order.findIndex(r => r.image_id === targetId);
-      if (fromIdx < 0 || toIdx < 0) return;
-  
-      const [moved] = order.splice(fromIdx, 1);
-      order.splice(toIdx, 0, moved);
-      order.forEach((r, i) => r.sort_order = i);
-  
-      // persist
-      try {
-        await api("/api/images/reorder", {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({
-            item_id: __currentItemId,
-            orders: order.map(r => ({ image_id: r.image_id, sort_order: r.sort_order }))
-          })
-        });
-        __photos = order;
-        renderPhotosGrid();
-      } catch { alert("Failed to reorder."); }
-    }, { once: true });
-  }
-  
-  // Simple browser-side resize/compress to keep uploads fast
-  async function downscaleToBlob(file, maxEdge = 2048, quality = 0.9) {
-    const img = await createImageBitmap(file);
-    const scale = Math.min(1, maxEdge / Math.max(img.width, img.height));
-    const w = Math.round(img.width * scale);
-    const h = Math.round(img.height * scale);
-  
-    const cnv = document.createElement("canvas");
-    cnv.width = w; cnv.height = h;
-    const ctx = cnv.getContext("2d");
-    ctx.drawImage(img, 0, 0, w, h);
-    const type = /image\/(png|webp)/i.test(file.type) ? file.type : "image/jpeg";
-    const blob = await new Promise(res => cnv.toBlob(res, type, quality));
-    return new File([blob], file.name.replace(/\.(heic|heif)$/i, ".jpg"), { type });
-  }
-  
-  // Upload + attach (requires item_id)
-  async function uploadAndAttach(file, { cropOfImageId = null } = {}) {
-    console.log("[photos] uploadAndAttach called", {
-      hasItemId: !!__currentItemId,
-      fileName: file?.name,
-      size: file?.size,
-      pendingId: file?._rpId || null,
-      cropOfImageId,
-    });
-    if (!__currentItemId) {
-      // Give each pending file a stable identity and a persistent preview URL.
-      if (!file._rpId) {
-        file._rpId = (crypto?.randomUUID ? crypto.randomUUID() : String(Date.now() + Math.random()));
-      }
-      if (!file._previewUrl) {
-        file._previewUrl = URL.createObjectURL(file);
-      }
-      const before = __pendingFiles.length;
-      __pendingFiles.push(file);
-      console.log("[photos] queued file in __pendingFiles (no item_id yet)", {
-        before,
-        after: __pendingFiles.length,
-        _rpId: file._rpId,
-      });
-      renderPhotosGrid();
-      return;
-    }
-    const body = new FormData();
-    body.append("file", file);
-    
-    // IMPORTANT: bypass api() for multipart so the browser sets the boundary.
-    // Do NOT set content-type here.
-    // Resolve tenant id the same way other calls do (fallbacks are safe if api() isn’t available here)
-    // Resolve tenant id (prefer what we got from the meta API)
-    const metaTag = document.querySelector('meta[name="x-tenant-id"]');
-    const TENANT_ID =
-      __tenantId ||
-      (metaTag && metaTag.getAttribute("content")) ||
-      document.documentElement.getAttribute("data-tenant-id") ||
-      localStorage.getItem("rp:tenant_id") ||
-      "";
-    
-    // Upload via centralized api(); it will keep FormData boundaries and add x-tenant-id automatically.
-    const up = await api(
-      `/api/images/upload?item_id=${encodeURIComponent(__currentItemId)}&filename=${encodeURIComponent(file.name)}`,
-      { method: "POST", body }
-    );
-    if (!up || up.ok === false) throw new Error(up?.error || "upload_failed");
-
-    const at = await api("/api/images/attach", {
-      method: "POST",
-      body: {
-        item_id: __currentItemId,
-        ...up
-      }
-    });
-   
-
-  
-    
-    if (!at || at.ok === false) throw new Error(at?.error || "attach_failed");
-  
-    // If this was a crop-replace, consider deleting the original
-    if (cropOfImageId) {
-      try { await deleteImage(cropOfImageId, { silent: true }); } catch {}
-    }
-  
-    // Refresh in-memory list
-    __photos.push({
-      image_id: at.image_id,
-      cdn_url: up.cdn_url,
-      is_primary: at.is_primary,
-      sort_order: (__photos.length),
-      r2_key: up.r2_key,
-      width: up.width, height: up.height, bytes: up.bytes, content_type: up.content_type,
-    });
-    console.log("[photos] __photos updated after upload", {
-      photosLen: __photos.length,
-      lastImageId: at.image_id,
-    });
-    renderPhotosGrid();
-    try { computeValidity(); } catch {}
-  }
-  
-  // Set primary
-  async function setPrimary(image_id) {
-    if (!__currentItemId) return alert("Save the item first.");
-    const res = await api("/api/images/set-primary", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ item_id: __currentItemId, image_id })
-    });
-    if (!res || res.ok === false) return alert(res?.error || "Failed to set primary.");
-    __photos.forEach(p => p.is_primary = (p.image_id === image_id));
-    renderPhotosGrid();
-  }
-  
-  // Delete
-  async function deleteImage(image_id, { silent = false } = {}) {
-    if (!__currentItemId) return;
-    const res = await api("/api/images/delete", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ item_id: __currentItemId, image_id })
-    });
-    if (!res || res.ok === false) { if (!silent) alert(res?.error || "Failed to delete."); return; }
-    __photos = __photos.filter(p => p.image_id !== image_id);
-    renderPhotosGrid();
-  }
-  
-  // Replace
-  async function replaceImage(oldModel, newFile) {
-    if (!newFile) return;
-
-    // Downscale the newly selected file
-    const ds = await downscaleToBlob(newFile);
-
-    // Ensure this file has a stable id + preview URL (for consistency with pending uploads)
-    if (!ds._rpId) {
-      ds._rpId = (crypto?.randomUUID ? crypto.randomUUID() : String(Date.now() + Math.random()));
-    }
-    if (!ds._previewUrl) {
-      ds._previewUrl = URL.createObjectURL(ds);
-    }
-
-    // If we're replacing an existing persisted image, tell uploadAndAttach which image to retire.
-    const cropOfImageId = oldModel && oldModel.image_id ? oldModel.image_id : null;
-
-    await uploadAndAttach(
-      ds,
-      cropOfImageId ? { cropOfImageId } : {}
-    );
-  }
-  
-  // Minimal cropper: square crop with zoom+drag
-  let __cropState = { img: null, zoom: 1, dx: 0, dy: 0, baseW: 0, baseH: 0, targetId: null };
-  async function openCropper(model, { pending = false } = {}) {
-    // load source
-    const src = model.cdn_url;
-    const img = await (async () => {
-      const i = new Image();
-      i.crossOrigin = "anonymous";
-      i.src = src;
-      await new Promise((r, j) => { i.onload = r; i.onerror = j; });
-      return i;
-    })();
-  
-    __cropState.img = img;
-    __cropState.zoom = 1;
-    __cropState.dx = 0;
-    __cropState.dy = 0;
-    __cropState.targetId = model.image_id || null;
-  
-    const dlg  = $("cropDialog");
-    const cnv  = $("cropCanvas");
-    const zoom = $("cropZoom");
-    const ctx  = cnv.getContext("2d");
-  
-    function redraw() {
-      const Z = Number(zoom.value || 1);
-      __cropState.zoom = Z;
-      ctx.clearRect(0, 0, cnv.width, cnv.height);
-      // cover-fit draw
-      const baseScale = Math.max(cnv.width / img.width, cnv.height / img.height);
-      const s = baseScale * Z;
-      const drawW = img.width * s;
-      const drawH = img.height * s;
-      const x = (cnv.width - drawW) / 2 + __cropState.dx;
-      const y = (cnv.height - drawH) / 2 + __cropState.dy;
-      ctx.drawImage(img, x, y, drawW, drawH);
-    }
-  
-    let dragging = false, lastX = 0, lastY = 0;
-    cnv.onmousedown  = (e) => { dragging = true; lastX = e.clientX; lastY = e.clientY; };
-    cnv.onmouseup    = ()  => { dragging = false; };
-    cnv.onmouseleave = ()  => { dragging = false; };
-    cnv.onmousemove  = (e) => {
-      if (!dragging) return;
-      __cropState.dx += (e.clientX - lastX);
-      __cropState.dy += (e.clientY - lastY);
-      lastX = e.clientX; lastY = e.clientY;
-      redraw();
-    };
-    zoom.oninput = redraw;
-  
-    dlg.showModal();
-    redraw();
-  
-    $("cropCancelBtn").onclick = () => dlg.close();
-  
-    $("cropSaveBtn").onclick = async () => {
-      cnv.toBlob(async (blob) => {
-        if (!blob) return;
-        const f = new File([blob], "crop.jpg", { type: "image/jpeg" });
-  
-        if (pending) {
-          // Pending image (no image_id yet):
-          // 1) If we already have an item_id, upload now and remove one pending preview.
-          // 2) If we don't yet have an item_id, replace one pending slot with the cropped file.
-          if (__currentItemId) {
-            try {
-              await uploadAndAttach(f);
-              // best-effort: remove one pending placeholder to avoid duplicates
-              if (Array.isArray(__pendingFiles) && __pendingFiles.length) {
-                __pendingFiles.splice(0, 1);
-              }
-              renderPhotosGrid();
-            } catch (e) {
-              alert("Failed to upload cropped image.");
-            }
-          } else {
-            // Replace one pending entry locally
-            if (Array.isArray(__pendingFiles) && __pendingFiles.length) {
-              __pendingFiles.splice(0, 1, f);
-            } else {
-              __pendingFiles.push(f);
-            }
-            renderPhotosGrid();
-          }
-        } else {
-          // Persisted image: upload the cropped version and delete the original server-side
-          await uploadAndAttach(f, { cropOfImageId: __cropState.targetId });
-        }
-  
-        dlg.close();
-      }, "image/jpeg", 0.92);
-    };
-  }
-
-  
-  // Wire inputs
-  function wirePhotoPickers() {
-    // Camera modal open
-    $("openCameraBtn")?.addEventListener("click", async ()=>{
-      const dlg = $("cameraDialog");
-      const video = $("cameraVideo");
-      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" }, audio: false }).catch(()=>null);
-      if (!stream) { alert("Camera not available. Use Upload Photo."); return; }
-      video.srcObject = stream;
-      dlg.showModal();
-  
-      const stop = ()=>{ try { stream.getTracks().forEach(t=>t.stop()); } catch {} };
-  
-      $("cameraCancelBtn").onclick = ()=>{ stop(); dlg.close(); };
-      $("cameraSnapBtn").onclick   = async ()=>{
-        const canvas = $("cameraCanvas");
-        const ctx = canvas.getContext("2d");
-        // draw current frame
-        const vw = video.videoWidth || 1280, vh = video.videoHeight || 720;
-        canvas.width = vw; canvas.height = vh;
-        ctx.drawImage(video, 0, 0, vw, vh);
-        canvas.toBlob(async (blob)=>{
-          if (!blob) return;
-          stop();
-          dlg.close();
-          const file = new File([blob], `camera_${Date.now()}.jpg`, { type: "image/jpeg" });
-          const ds = await downscaleToBlob(file);
-          await uploadAndAttach(ds);
-        }, "image/jpeg", 0.92);
-      };
-    });
-  
-    // Fallback “camera” input (kept hidden)
-    $("photoCameraInput")?.addEventListener("change", async (e) => {
-      const files = Array.from(e.target.files || []);
-      for (const f of files) {
-        if (__photos.length + __pendingFiles.length >= MAX_PHOTOS) break;
-        const ds = await downscaleToBlob(f);
-        await uploadAndAttach(ds);
-      }
-      e.target.value = "";
-      try { computeValidity(); } catch {}
-    });
-  
-    // Upload from gallery/files
-    $("photoFileInput")?.addEventListener("change", async (e) => {
-      const files = Array.from(e.target.files || []);
-      for (const f of files) {
-        if (__photos.length + __pendingFiles.length >= MAX_PHOTOS) break;
-        const ds = await downscaleToBlob(f);
-        await uploadAndAttach(ds);
-      }
-      e.target.value = "";
-      try { computeValidity(); } catch {}
-    });
-  
-    $("photoReorderToggle")?.addEventListener("click", ()=>{
-      __reorderMode = !__reorderMode;
-      renderPhotosGrid();
-      alert(__reorderMode ? "Reorder ON: drag photos to rearrange." : "Reorder OFF");
-    });
-  
-      document.addEventListener("intake:item-saved", async (ev) => {
-      try {
-
-        console.groupCollapsed("[intake.js] intake:item-saved");
-        console.log("detail", {
-          item_id: ev?.detail?.item_id,
-          action: ev?.detail?.action,
-          save_status: ev?.detail?.save_status,
-          job_ids: ev?.detail?.job_ids
-        });
-        
-        const id         = ev?.detail?.item_id;
-        const saveStatus = String(ev?.detail?.save_status || "").toLowerCase(); // "active" | "draft" | "delete"
-        const action     = String(ev?.detail?.action || (saveStatus === "delete" ? "delete" : "save")).toLowerCase();
-        const jobIds     = Array.isArray(ev?.detail?.job_ids) ? ev.detail.job_ids : [];
-        const intent     = ev?.detail?.intent || null;
-        const intentMarketplaces = Array.isArray(intent?.marketplaces) ? intent.marketplaces : null;
-
-        if (!id) { console.warn("[intake.js] intake:item-saved missing item_id"); console.groupEnd?.(); return; }
-        __currentItemId = id;
-
-        // Debug: confirm that UI → API → response intent is flowing, especially for eBay deletes
-        if (intentMarketplaces) {
-          const ebayIntent = intentMarketplaces.find((m) => {
-            const slug = String(m?.slug || "").toLowerCase();
-            return slug === "ebay";
-          }) || null;
-
-          console.log("[intake.js] marketplace intent (response)", {
-            saveStatus,
-            action,
-            marketplaces: intentMarketplaces,
-            ebayIntent,
-          });
-        } else {
-          console.log("[intake.js] marketplace intent (response) missing or empty", {
-            saveStatus,
-            action,
-            rawIntent: intent,
-          });
-        }
-        
-        
-        // Phase 0: once Active, permanently lock Draft action for this listing (UI)
-        if (saveStatus === "active") {
-          __lockDraft = true;
-          const draftBtn = document.getElementById("intake-draft");
-          if (draftBtn) {
-            draftBtn.disabled = true;
-            draftBtn.classList.add("opacity-60", "cursor-not-allowed");
-            draftBtn.title = "Draft save is disabled for Active listings.";
-          }
-          // Also enable the Xeasy copy button after successful Active save (create/update)
-          try { enableCopyXeasy(true); } catch {}
-        }
-        
-        
-       if (__pendingFiles.length > 0) {
-          console.log("[photos] flushing pending files after save", {
-            pendingCount: __pendingFiles.length,
-            currentItemId: __currentItemId,
-            pendingIds: __pendingFiles.map(f => f?._rpId || null),
-          });
-          const pending = __pendingFiles.splice(0, __pendingFiles.length);
-          for (const f of pending) {
-            console.log("[photos] uploading pending file", {
-              _rpId: f?._rpId || null,
-              name: f?.name,
-              size: f?.size,
-            });
-            await uploadAndAttach(f);
-          }
-          console.log("[photos] pending flush complete", {
-            remainingPending: __pendingFiles.length,
-            photosLen: __photos.length,
-          });
-        } else {
-          console.log("[photos] no pending files to flush on save", {
-            currentItemId: __currentItemId,
-          });
-        }
-    
-       // If server returned marketplace job_ids, kick the runner regardless of action
-      if (jobIds.length > 0) {
-        const isDelete = action === "delete" || saveStatus === "delete";
-        setEbayStatus(isDelete ? "Deleting…" : "Publishing…", { tone: "info" });
-    
-          for (const jid of jobIds) {
-            try {
-              console.log("[intake.js] kick job", { job_id: jid });
-              fetch(`/api/marketplaces/publish/run?job_id=${encodeURIComponent(jid)}`, { method: "POST" })
-                .then((r) => r.ok ? null : r.text().then(t => console.warn("[intake.js] job kick non-200", { job_id: jid, status: r.status, body: t })))
-                .catch((e) => console.warn("[intake.js] job kick error", { job_id: jid, error: String(e) }));
-            } catch {}
-            trackPublishJob(jid);
-           }
-        }
-
-        //---------------------------------------------
-        // Inject Vendoo intent when selected in UI
-        //---------------------------------------------
-        (function injectVendooIntent() {
-          console.groupCollapsed("%c[intake.js] injectVendooIntent START", "color:#0af; font-weight:bold;");
-          try {
-            console.log("[injectVendooIntent] incoming state", {
-              saveStatus,
-              selectedMarketplaceIds: Array.from(selectedMarketplaceIds),
-              intentBefore: intent,
-              intentMarketplacesBefore: intent?.marketplaces || null
-            });
-        
-            // Vendoo marketplace_id is 13 in your schema
-            const vendooId = 13;
-            console.log("[injectVendooIntent] vendooId", vendooId);
-        
-            // Determine if the Vendoo tile is selected in the UI
-            const vendooSelected =
-              Array.from(selectedMarketplaceIds).some((id) => Number(id) === vendooId);
-        
-            console.log("[injectVendooIntent] vendooSelected?", vendooSelected);
-        
-            // Only inject intent for ACTIVE saves and when Vendoo tile is selected
-            if (!vendooSelected) {
-              console.warn("[injectVendooIntent] EXIT — Vendoo tile not selected.");
-              console.groupEnd();
-              return;
-            }
-        
-            if (saveStatus !== "active") {
-              console.warn("[injectVendooIntent] EXIT — saveStatus is NOT active:", saveStatus);
-              console.groupEnd();
-              return;
-            }
-        
-            // Ensure intent + marketplaces array exists
-            if (!intent) {
-              console.log("[injectVendooIntent] intent missing → creating ev.detail.intent");
-              ev.detail.intent = intent = {};
-            }
-        
-            if (!intent.marketplaces) {
-              console.log("[injectVendooIntent] intent.marketplaces missing → creating []");
-              intent.marketplaces = [];
-            }
-        
-            // When Vendoo intent is missing, add a fresh create-op
-            const already = intent.marketplaces.find(
-              (m) => String(m.slug || "").toLowerCase() === "vendoo"
-            );
-        
-            console.log("[injectVendooIntent] vendoo intent already present?", already);
-        
-            if (!already) {
-              const payload = {
-                slug: "vendoo",
-                marketplace_id: vendooId,
-                selected: true,
-                operation: "create"
-              };
-        
-              intent.marketplaces.push(payload);
-        
-              console.log("%c[injectVendooIntent] Vendoo intent ADDED", "color:#0f0; font-weight:bold;", {
-                addedPayload: payload,
-                saveStatus,
-                marketplace_id: vendooId,
-                operation: "create"
-              });
-            } else {
-              console.log("%c[injectVendooIntent] Vendoo intent ALREADY EXISTS — no action taken", "color:#ff0;");
-            }
-        
-            console.log("[injectVendooIntent] final intent state:", {
-              intent,
-              intentMarketplaces: intent.marketplaces
-            });
-        
-          } catch (e) {
-            console.error("%c[injectVendooIntent ERROR]", "color:#f00; font-weight:bold;", e);
-          }
-          console.groupEnd();
-        })();
-        
-        //---------------------------------------------
-        // Derive Facebook intent from the server’s normalized intent.marketplaces
-        //---------------------------------------------
-        let facebookOp = null;
-        console.groupCollapsed("%c[intake.js] Derive Facebook Intent", "color:#0af; font-weight:bold;");
-        try {
-          if (intentMarketplaces) {
-            console.log("[facebookIntent] examining intent.marketplaces:", intentMarketplaces);
-        
-            const facebookIntent = intentMarketplaces.find((m) => {
-              const slug = String(m?.slug || "").toLowerCase();
-              return slug === "facebook" || String(m?.marketplace_id) === "2";
-            }) || null;
-        
-            facebookOp = facebookIntent?.operation || null;
-        
-            console.log("[facebookIntent] derived facebookOp:", facebookOp, {
-              facebookIntent
-            });
-          } else {
-            console.warn("[facebookIntent] intentMarketplaces is NULL — skipping Facebook op derivation");
-          }
-        } catch (e) {
-          console.error("[facebookIntent ERROR]", e);
-        }
-        console.groupEnd();
-        const shouldEmitFacebook =
-          saveStatus === "active" && (
-            // If we don’t have intent yet, preserve legacy behavior.
-            !facebookOp ||
-            // When the server explicitly says "create", we allow the ready event.
-            String(facebookOp).toLowerCase() === "create"
-          );
-
-        console.log("[intake.js] facebook intent gate", {
-          saveStatus,
-          facebookOp,
-          shouldEmitFacebook,
-        });
-
-        // When the save is Active, photos are flushed, and the server indicates that
-        // Facebook should be created, this will emit `intake:facebook-ready`.
-        if (shouldEmitFacebook) {
-          await __emitFacebookReadyIfSafe({ saveStatus, jobIds, intentMarketplaces });
-        } else {
-          console.log("[intake.js] skip facebook-ready emit", {
-            reason: saveStatus !== "active"
-              ? "non-active-save"
-              : "facebook-op-not-create (likely already live / skip)",
-          });
-        }
-
-       // —— Vendoo intent gate (mirrors Facebook pattern) —— 
-        let vendooOp = null;
-        let vendooIntentDebug = null;
-        
-        if (intentMarketplaces) {
-          console.log("[intake.js] vendoo intent: raw intentMarketplaces", {
-            intentMarketplaces,
-          });
-        
-          const vendooIntent = intentMarketplaces.find((m) => {
-            const slug = String(m?.slug || "").toLowerCase();
-            const isVendoo = slug === "vendoo" || String(m?.marketplace_id) === "13";
-            console.log("[intake.js] vendoo intent: candidate", {
-              candidate: m,
-              slug,
-              isVendoo,
-            });
-            return isVendoo;
-          }) || null;
-        
-          vendooIntentDebug = vendooIntent;
-          vendooOp = vendooIntent?.operation || null;
-        }
-        
-        const shouldEmitVendoo =
-          saveStatus === "active" && (
-            // If we don’t have intent yet, preserve legacy behavior.
-            !vendooOp ||
-            // When the server explicitly says "create", we allow the Vendoo-ready event.
-            String(vendooOp).toLowerCase() === "create"
-          );
-        
-        console.log("[intake.js] vendoo intent gate", {
-          saveStatus,
-          vendooOp,
-          shouldEmitVendoo,
-          vendooIntent: vendooIntentDebug,
-          intentMarketplaces,
-        });
-        
-        // When the save is Active, photos are flushed, and the server indicates that
-        // Vendoo should be created, this will feed the Tampermonkey bridge.
-        if (shouldEmitVendoo) {
-          try {
-            // Prefer an existing snapshot (Facebook gate may have already loaded it)
-            let snap = null;
-            try {
-              snap = window.__intakeSnap || null;
-            } catch (e) {
-              console.warn("[intake.js] vendoo: error reading window.__intakeSnap", e);
-              snap = null;
-            }
-        
-            console.log("[intake.js] vendoo: initial snap from window.__intakeSnap", {
-              hasSnap: !!snap,
-              snapKeys: snap ? Object.keys(snap) : null,
-              snapPreview: snap ? {
-                inventory_meta: snap.inventory_meta,
-                listing: snap.listing || snap.listing_profile,
-                vendoo_mapping: snap.vendoo_mapping || null,
-              } : null,
-            });
-        
-            // If we don't have a snapshot yet, load a fresh one for this item.
-            if (!snap && __currentItemId) {
-              console.log("[intake.js] vendoo: loading snapshot for payload enrich", {
-                item_id: __currentItemId,
-              });
-              snap = await api(
-                `/api/inventory/intake?item_id=${encodeURIComponent(__currentItemId)}`,
-                { method: "GET" }
-              );
-              console.log("[intake.js] vendoo: snapshot loaded from /api/inventory/intake", {
-                snapRaw: snap,
-                snapKeys: snap ? Object.keys(snap) : null,
-                inventory_meta: snap?.inventory_meta || snap?.inventory || null,
-                listing_profile: snap?.listing_profile || snap?.listing || null,
-                vendoo_mapping: snap?.vendoo_mapping || null,
-                ebay_payload_snapshot: snap?.ebay_payload_snapshot || null,
-              });
-              try {
-                window.__intakeSnap = snap;
-              } catch (e) {
-                console.warn("[intake.js] vendoo: failed to write window.__intakeSnap", e);
-              }
-            }
-        
-            const vendooDetail = {
-              ...ev.detail,
-              // 🔑 Make sure rpBuildVendooPayload sees an ACTIVE status
-              saveStatus,              // camelCase for rpBuildVendooPayload
-              save_status: saveStatus, // keep the original too
-              intent,
-              intentMarketplaces,
-            };
-        
-            console.log("[intake.js] vendoo: base vendooDetail before enrich", {
-              evDetail: ev.detail,
-              saveStatus,
-              intent,
-              intentMarketplaces,
-              existing_vendoo_mapping: ev?.detail?.vendoo_mapping ?? null,
-            });
-        
-            // Enrich detail with images + inventory_meta + ebay_payload_snapshot + vendoo_mapping
-            if (snap && typeof snap === "object") {
-              vendooDetail.inventory_meta =
-                snap.inventory_meta ||
-                snap.inventory ||
-                snap.item ||
-                null;
-        
-              vendooDetail.images =
-                snap.images ||
-                snap.item_images ||
-                snap.photos ||
-                null;
-        
-              vendooDetail.ebay_payload_snapshot =
-                snap.ebay_payload_snapshot ||
-                snap.ebay_payload ||
-                (snap.marketplace_payloads &&
-                  (snap.marketplace_payloads.ebay ||
-                   snap.marketplace_payloads["ebay"])) ||
-                {
-                  // fallback pseudo-snapshot using listing + ebay marketplace listing if present
-                  listing_profile: snap.listing_profile || snap.listing || null,
-                  marketplace_listing:
-                    (snap.marketplace_listing && snap.marketplace_listing.ebay) ||
-                    snap.marketplace_listing ||
-                    null,
-                };
-        
-              // Preserve any existing vendoo_mapping on detail, but
-              // also thread through mapping derived server-side if present.
-              const beforeVendooMapping =
-              vendooDetail.vendoo_mapping ||
-              null;
-            
-            // ⭐ Ensure the field ALWAYS exists so it survives the emit
-            vendooDetail.vendoo_mapping = beforeVendooMapping;
-            
-            const fromSnapVendooMapping =
-              (snap && typeof snap === "object" && snap.vendoo_mapping)
-                ? snap.vendoo_mapping
-                : null;
-              // Correct behavior: if snap provides a valid vendoo_mapping,
-              // it should always override the placeholder/null values.
-              if (fromSnapVendooMapping && typeof fromSnapVendooMapping === "object") {
-                vendooDetail.vendoo_mapping = fromSnapVendooMapping;
-              }
-
-              console.log("[intake.js] vendoo: enrich from snap (FIXED)", {
-                beforeVendooMapping,
-                fromSnapVendooMapping,
-                finalVendooMapping: vendooDetail.vendoo_mapping,
-                inventory_meta: vendooDetail.inventory_meta,
-                images: vendooDetail.images,
-                ebay_payload_snapshot: vendooDetail.ebay_payload_snapshot,
-              });
-            } else {
-              console.log("[intake.js] vendoo: no usable snap object; skipping enrich", {
-                snapType: typeof snap,
-                snap,
-              });
-            }
-        
-           console.log("[intake.js] vendoo emit detail (pre-emit)", vendooDetail);
-
-          // ⭐ Ensure vendoo_mapping is attached
-          vendooDetail.vendoo_mapping = vendooDetail.vendoo_mapping || null;
-          
-          await __emitVendooReadyIfSafe(vendooDetail);
-          } catch (err) {
-            console.warn("[intake.js] __emitVendooReadyIfSafe failed", err);
-          }
-        } else {
-          console.log("[intake.js] skip vendoo-ready emit", {
-            reason: saveStatus !== "active"
-              ? "non-active-save"
-              : "vendoo-op-not-create (likely already live / skip)",
-          });
-        }
-
-
-    
-        // Immediately reconcile the Facebook card with the DB snapshot
-        try { await refreshFacebookTile(); } catch {}
-
-        // Immediately reconcile the vendoo card with the DB snapshot
-        try { await refreshVendooTile(); } catch {}
-      
-      } catch (e) {
-        console.error("photos:flush:error", e);
-      } finally {
-        console.groupEnd?.();
-      }
-    });
-  }
-
-
-
-
-  
-  async function loadMeta() {
-    const res = await api("/api/inventory/meta", { method: "GET" });
-    if (!res || res.ok === false) throw new Error(res?.error || "meta_failed");
-    return res;
-  }
-
-  // Generic select filler; supports arrays of strings OR objects.
-  // Adds a placeholder at the top and leaves the select unselected.
-  function fillSelect(selectEl, rows = [], opts = {}) {
-    if (!selectEl) return;
-    const { textKey = null, valueKey = null, extras = null } = opts;
-    selectEl.innerHTML = "";
-  
-    // 1) placeholder first
-    const ph = document.createElement("option");
-    ph.value = "";
-    ph.textContent = "<select>";
-    selectEl.appendChild(ph);
-  
-    // 2) then options
-    for (const row of rows || []) {
-      const opt = document.createElement("option");
-      const text = textKey ? row?.[textKey] : String(row ?? "");
-      const value = valueKey ? row?.[valueKey] : String(row ?? "");
-      opt.textContent = text ?? "";
-      opt.value = value ?? "";
-      if (extras && typeof extras === "function") {
-        const ex = extras(row) || {};
-        for (const k in ex) opt.dataset[k] = ex[k];
-      }
-      selectEl.appendChild(opt);
-    }
-  
-    // 3) keep placeholder selected
-    selectEl.value = "";
-  }
-
- 
-  function getMarketplaceSection() {
-    // Anchor on any known marketplace control; expand to its nearest section-like container
-    const anchor = document.getElementById("marketplaceCategorySelect")
-      || document.getElementById("conditionSelect")
-      || document.getElementById("brandSelect")
-      || document.getElementById("colorSelect");
-    if (!anchor) return null;
-    return anchor.closest("section, .card, .group, fieldset, .panel, .container, div") || anchor.parentElement;
-  }
-  function getBasicSection() {
-    const anchor = document.getElementById("categorySelect")
-      || document.getElementById("storeLocationSelect")
-      || document.getElementById("salesChannelSelect");
-    if (!anchor) return null;
-    return anchor.closest("section, .card, .group, fieldset, .panel, .container, div") || anchor.parentElement;
-  }
-
-  // Explicitly toggle each Marketplace field container by ID (no wrappers needed)
-  const MARKETPLACE_FIELD_IDS = [
-    "marketplaceCategorySelect",
-    "conditionSelect",
-    "brandSelect",
-    "colorSelect",
-    // Also hide the path display element if present
-    "marketplaceCategoryPath",
-    "categoryPath"
-  ];
-  
-  function hideShowFieldById(id, hide) {
-    const el = document.getElementById(id);
-    if (!el) return;
-    // Prefer the `.field` wrapper if present; otherwise use the nearest block-level container
-    const container =
-      el.closest(".field") ||
-      el.closest("div, section, fieldset, .group, .card") ||
-      el.parentElement;
-    if (container) {
-      container.classList.toggle("hidden", hide);
-    }
-  }
-  
-  // Helper: find a control by its label text (fallback when no ID exists)
-  function findControlByLabel(labelText) {
-    // normalize: remove colons, asterisks and collapse whitespace
-    const norm = (s) => String(s || "")
-      .replace(/[:*]/g, "")
-      .replace(/\s+/g, " ")
-      .trim()
-      .toLowerCase();
-  
-    const want = norm(labelText);
-    const labels = Array.from(document.querySelectorAll("label"));
-    const lbl = labels.find(l => norm(l.textContent) === want);
-    if (!lbl) return null;
-  
-    if (lbl.htmlFor) {
-      const byId = document.getElementById(lbl.htmlFor);
-      if (byId) return byId;
-    }
-    // fallback: the first input/select/textarea after the label
-    let n = lbl.nextElementSibling;
-    while (n && !(n instanceof HTMLInputElement || n instanceof HTMLSelectElement || n instanceof HTMLTextAreaElement)) {
-      n = n.nextElementSibling;
-    }
-    return n || null;
-  }
-
-// Helper: hide/show a field container by its label text
-function hideShowFieldByLabel(labelText, hide) {
-  const ctl = findControlByLabel(labelText);
-  if (!ctl) return;
-  const container = ctl.closest(".field") || ctl.closest("div, section, fieldset, .group, .card") || ctl.parentElement;
-  if (container) container.classList.toggle("hidden", hide);
+  return null;
 }
 
-// Helper: hide/show a section/card by heading text (e.g., "Shipping")
-function hideShowSectionByHeading(headingText, hide) {
-  const candidates = Array.from(document.querySelectorAll("h1,h2,h3,h4,h5,h6,.card-title,.section-title"));
-  const h = candidates.find(el => (el.textContent || "").trim().toLowerCase() === headingText.toLowerCase());
-  const container = h ? (h.closest(".card") || h.closest("section, .group, fieldset, div")) : null;
-  if (container) container.classList.toggle("hidden", hide);
+// Minimal HS256 verify (same pattern as other API files)
+async function verifyJwt(token: string, secret: string): Promise<any> {
+  const enc = new TextEncoder();
+  const [h, p, s] = token.split(".");
+  if (!h || !p || !s) throw new Error("bad_token");
+  const base64urlToBytes = (str: string) => {
+    const pad = "=".repeat((4 - (str.length % 4)) % 4);
+    const b64 = (str + pad).replace(/-/g, "+").replace(/_/g, "/");
+    const bin = atob(b64);
+    return Uint8Array.from(bin, (c) => c.charCodeAt(0));
+  };
+  const data = `${h}.${p}`;
+  const key = await crypto.subtle.importKey("raw", enc.encode(secret), { name: "HMAC", hash: "SHA-256" }, false, ["verify"]);
+  const ok = await crypto.subtle.verify("HMAC", key, base64urlToBytes(s), enc.encode(data));
+  if (!ok) throw new Error("bad_sig");
+  const payload = JSON.parse(new TextDecoder().decode(base64urlToBytes(p)));
+  if ((payload as any)?.exp && Date.now() / 1000 > (payload as any).exp) throw new Error("expired");
+  return payload;
 }
 
-// Expanded toggle: include Marketplace Long Description + all Shipping fields + Shipping card
-function setMarketplaceVisibility() {
-  const hide = !marketplaceActive();
-
-  // Previous ID-based fields
-  const MARKETPLACE_FIELD_IDS = [
-    "marketplaceCategorySelect", "conditionSelect", "brandSelect", "colorSelect",
-    "marketplaceCategoryPath", "categoryPath"
-  ];
-  MARKETPLACE_FIELD_IDS.forEach((id) => hideShowFieldById(id, hide));
-
-  // Include the new Crosslist to Marketplaces block
-  hideShowFieldById("marketplaceCrosslistBlock", hide);
-
-  // Fields that don’t have stable IDs — target by label text:
-  hideShowFieldByLabel("Long Description", hide);
-
-  // Shipping group: individual fields + the Shipping section/card
-  hideShowFieldById("shippingBoxSelect", hide);
-  hideShowFieldByLabel("Weight (lb)", hide);
-  hideShowFieldByLabel("Weight (oz)", hide);
-  hideShowFieldByLabel("Length", hide);
-  hideShowFieldByLabel("Width", hide);
-  hideShowFieldByLabel("Height", hide);
-  hideShowSectionByHeading("Shipping", hide); // hide the container/card that holds shipping fields
-}
-
-  
-
-  
-  function ensurePlaceholder(selectEl, placeholderText = "— Select —") {
-    if (!selectEl) return;
-    const hasOptions = selectEl.options && selectEl.options.length > 0;
-    if (hasOptions) return;
-    const opt = document.createElement("option");
-    opt.value = "";
-    opt.textContent = placeholderText;
-    selectEl.appendChild(opt);
-    selectEl.value = "";
-  }
-
-  // Small no-op wires (safe if elements aren’t present)
-  function wireCategoryCodeHint(meta) {
-    const sel = $("categorySelect");
-    const hint = $("categoryCodeHint");
-    if (!sel || !hint) return;
-    const update = () => {
-      const opt = sel.options[sel.selectedIndex];
-      const code = opt?.dataset?.code || "";
-      hint.textContent = code ? `Code: ${code}` : "";
-    };
-    sel.addEventListener("change", update);
-    update();
-  }
-
-  function wireMarketplaceCategoryPath() {
-    const sel = $("marketplaceCategorySelect");
-    const pathEl =
-      $("marketplaceCategoryPath") ||
-      document.querySelector("[data-category-path]") ||
-      document.getElementById("categoryPath");
-    if (!sel || !pathEl) return;
-    const update = () => {
-      const opt = sel.options[sel.selectedIndex];
-      const path = opt?.dataset?.path || "—";
-      pathEl.textContent = path;
-    };
-    sel.addEventListener("change", update);
-    update();
-  }
-
-  function wireShippingBoxAutofill(meta) {
-    const sel = document.getElementById("shippingBoxSelect");
-    if (!sel) return;
-  
-    // Resolve controls by ID OR label text (robust to markup differences)
-    const resolve = (id, labelText) =>
-      document.getElementById(id) || findControlByLabel(labelText);
-  
-    const lb  = resolve("shipWeightLb", "Weight (lb)");
-    const oz  = resolve("shipWeightOz", "Weight (oz)");
-    const len = resolve("shipLength",   "Length");
-    const wid = resolve("shipWidth",    "Width");
-    const hei = resolve("shipHeight",   "Height");
-  
-    const inputs = [lb, oz, len, wid, hei].filter(Boolean);
-  
-    const map = Object.create(null);
-    for (const r of (meta.shipping_boxes || [])) {
-      // Key by UUID so it matches <option value="box_key">
-      map[r.box_key] = {
-        lb: r.weight_lb, oz: r.weight_oz, len: r.length, wid: r.width, hei: r.height,
-      };
-    }
-  
-    const enableAll = () => { inputs.forEach((el) => { el.disabled = false; el.readOnly = false; }); };
-    const clearAll  = () => { inputs.forEach((el) => { el.value = ""; }); };
-  
-    const hasMetaValues = (m) => !!m && ![m.lb, m.oz, m.len, m.wid, m.hei].every(v => v == null || v === "");
-
-    const update = () => {
-      enableAll(); // always allow typing
-      const key = sel.value; // this is box_key
-      const m = map[key];
-    
-      // No selection or unknown row => manual
-      if (!key || !m) { clearAll(); try { computeValidity(); } catch {} return; }
-    
-      // Row exists but empty (e.g., "Custom Box") => manual
-      if (!hasMetaValues(m)) { clearAll(); try { computeValidity(); } catch {} return; }
-    
-      // Prefill numbers (still editable)
-      if (lb)  lb.value  = `${m.lb ?? ""}`;
-      if (oz)  oz.value  = `${m.oz ?? ""}`;
-      if (len) len.value = `${m.len ?? ""}`;
-      if (wid) wid.value = `${m.wid ?? ""}`;
-      if (hei) hei.value = `${m.hei ?? ""}`;
-    
-      // Re-validate so CTAs can enable immediately after selection
-      try { computeValidity(); } catch {}
-    };
-
-    // run on change + once on load
-    sel.addEventListener("change", update);
-    try { update(); } catch {}
-    
-    // CLOSE wireShippingBoxAutofill(meta)
-    }
-
-    /** Populate intake form controls from saved inventory + listing profile */
-    function populateFromSaved(inv, listing) {
-      // Basic Item Details
-      const title = document.getElementById("titleInput") || findControlByLabel("Item Name / Description");
-      if (title) title.value = inv?.product_short_title ?? "";
-    
-      const price = document.getElementById("priceInput") || findControlByLabel("Price (USD)");
-      if (price) price.value = inv?.price ?? "";
-    
-      const qty = document.getElementById("qtyInput") || findControlByLabel("Qty");
-      if (qty) qty.value = inv?.qty ?? "";
-    
-      const cat = document.getElementById("categorySelect") || findControlByLabel("Category");
-      if (cat) cat.value = inv?.category_nm ?? "";
-    
-      const store = document.getElementById("storeLocationSelect") || findControlByLabel("Store Location");
-      if (store) store.value = inv?.instore_loc ?? "";
-    
-      const cogs = document.getElementById("costInput") || findControlByLabel("Cost of Goods (USD)");
-      if (cogs) cogs.value = inv?.cost_of_goods ?? "";
-    
-      const bin = document.getElementById("caseBinShelfInput") || findControlByLabel("Case#/Bin#/Shelf#");
-      if (bin) bin.value = inv?.case_bin_shelf ?? "";
-    
-      const sales = document.getElementById("salesChannelSelect") || findControlByLabel("Sales Channel");
-      if (sales) sales.value = inv?.instore_online ?? "";
-    
-            // Marketplace Listing Details (optional for drafts)
-      if (listing) {
-        
-          const mpCat = document.getElementById("marketplaceCategorySelect") || findControlByLabel("Marketplace Category");
-          if (mpCat) mpCat.value = listing.listing_category_key ?? "";
-        
-          const cond = document.getElementById("conditionSelect") || findControlByLabel("Condition");
-          if (cond) cond.value = listing.condition_key ?? "";
-        
-          const brand = document.getElementById("brandSelect") || findControlByLabel("Brand");
-          if (brand) brand.value = listing.brand_key ?? "";
-        
-          const color = document.getElementById("colorSelect") || findControlByLabel("Primary Color");
-          if (color) color.value = listing.color_key ?? "";
-        
-          const shipBox = document.getElementById("shippingBoxSelect") || findControlByLabel("Shipping Box");
-          if (shipBox) shipBox.value = listing.shipping_box_key ?? "";
-
-         // Long Description (textarea)
-        const longDesc = document.getElementById("longDescriptionTextarea") || findControlByLabel("Long Description");
-        if (longDesc) {
-          const current = String(listing?.product_description ?? "").trim();
-          if (current) {
-            // If server already has a description, use it as-is
-            longDesc.value = current;
-          } else {
-            // Otherwise, compose: <Title> + blank line + base sentence
-            const titleEl = document.getElementById("titleInput") || findControlByLabel("Item Name / Description");
-            const title = String(titleEl?.value || inv?.product_short_title || "").trim();
-            longDesc.value = title ? `${title}\n\n${BASE_DESCRIPTION}` : BASE_DESCRIPTION;
-          }
-        }
-          
-    
-
-        const lb  = document.getElementById("weightLbInput") || findControlByLabel("Weight (lb)");
-        const oz  = document.getElementById("weightOzInput") || findControlByLabel("Weight (oz)");
-        const len = document.getElementById("lengthInput")   || findControlByLabel("Length");
-        const wid = document.getElementById("widthInput")    || findControlByLabel("Width");
-        const hei = document.getElementById("heightInput")   || findControlByLabel("Height");
-        if (lb)  lb.value  = listing.weight_lb ?? "";
-        if (oz)  oz.value  = listing.weight_oz ?? "";
-        if (len) len.value = listing.shipbx_length ?? "";
-        if (wid) wid.value = listing.shipbx_width ?? "";
-        if (hei) hei.value = listing.shipbx_height ?? "";
-      }
-    
-      // Recompute validity / show or hide marketplace fields as needed
-      try { setMarketplaceVisibility(); } catch {}
-      try { computeValidity(); } catch {}
-    }
-
-  
-    // Hydrate UI from a duplicate seed stashed in sessionStorage (if any)
-      function maybePromptDuplicatePhotos() {
-        try {
-          if (!Array.isArray(__duplicateSourceImages) || __duplicateSourceImages.length === 0) return;
-
-          const dlg   = $("duplicatePhotosDialog");
-          const yesBtn = $("duplicatePhotosYes");
-          const noBtn  = $("duplicatePhotosNo");
-
-          if (!dlg || !yesBtn || !noBtn) return;
-
-          // Avoid wiring twice if called again
-          if (dlg.dataset.wired === "1") {
-            try { dlg.showModal(); } catch {}
-            return;
-          }
-
-          dlg.dataset.wired = "1";
-
-          yesBtn.onclick = () => {
-            __duplicateCarryPhotos = true;
-            try { dlg.close(); } catch {}
-          };
-
-          noBtn.onclick = () => {
-            __duplicateCarryPhotos = false;
-            // Clear duplicated photos so the user starts fresh
-            __duplicateSourceImages = [];
-            __photos = [];
-            try { renderPhotosGrid(); } catch {}
-            try { computeValidity(); } catch {}
-            try { dlg.close(); } catch {}
-          };
-
-          try { dlg.showModal(); } catch {}
-        } catch (e) {
-          console.warn("[duplicateSeed] photo prompt failed", e);
-        }
-      }
-      function hydrateFromDuplicateSeed() {
-        console.groupCollapsed?.("[duplicateSeed] hydrateFromDuplicateSeed:start");
-        let raw = null;
-        try {
-          raw = sessionStorage.getItem("rp:intake:duplicateSeed");
-        } catch (e) {
-          console.warn("[intake.js] duplicateSeed: sessionStorage unavailable", e);
-          console.groupEnd?.();
-          return false;
-        }
-        if (!raw) return false;
-
-        let seed;
-        try {
-          seed = JSON.parse(raw);
-        } catch (e) {
-          console.error("[intake.js] duplicateSeed: parse failed", e);
-          try { sessionStorage.removeItem("rp:intake:duplicateSeed"); } catch {}
-          console.groupEnd?.();
-          return false;
-        }
-
-        // Consume the seed so it only applies once
-        try { sessionStorage.removeItem("rp:intake:duplicateSeed"); } catch {}
-        
-        const inv     = seed?.inventory || {};
-        const listing = seed?.listing   || null;
-        const images  = Array.isArray(seed?.images) ? seed.images : [];
-
-        console.log("[duplicateSeed] parsed", {
-          hasInventory: !!inv,
-          hasListing: !!listing,
-          imageCount: images.length,
-          cdnSample: images.slice(0, 5).map(i => i?.cdn_url || null),
-        });
-
-        // Force "new item" state
-        __currentItemId    = null;
-        __pendingFiles     = [];
-        __duplicateSourceImages = images.map((img, idx) => ({
-          r2_key: img.r2_key,
-          cdn_url: img.cdn_url,
-          bytes: img.bytes,
-          content_type: img.content_type,
-          width: img.width ?? img.width_px ?? null,
-          height: img.height ?? img.height_px ?? null,
-          sha256: img.sha256 ?? img.sha256_hex ?? null,
-          sort_order: typeof img.sort_order === "number" ? img.sort_order : idx,
-          is_primary: !!img.is_primary,
-        }));
-        console.log("[duplicateSeed] mapped duplicateSourceImages", {
-          duplicateSourceCount: __duplicateSourceImages.length,
-        });
-        
-        // Thumbnails only – no uploads yet
-        __photos = __duplicateSourceImages.map((img, idx) => ({
-          image_id: "dup-" + (typeof crypto !== "undefined" && crypto.randomUUID
-            ? crypto.randomUUID()
-            : `${Date.now()}-${idx}`),
-          cdn_url: img.cdn_url,
-          is_primary: !!img.is_primary,
-          sort_order: typeof img.sort_order === "number" ? img.sort_order : idx,
-        }));
-
-        console.log("[duplicateSeed] initial thumbnails populated", {
-          photosLen: __photos.length,
-        });
-
-        // Hydrate form + photos (thumbnails only; originals will be cloned on the server)
-        try {
-          populateFromSaved(inv, listing);
-        } catch (e) {
-          console.error("[intake.js] populateFromSaved failed for duplicateSeed", e);
-        }
-
-        try {
-          renderPhotosGrid();
-        } catch (e) {
-          console.error("[intake.js] renderPhotosGrid failed for duplicateSeed", e);
-        }
-        
-        // NEW: prompt user whether to keep or drop template photos
-        try {
-          maybePromptDuplicatePhotos();
-        } catch (e) {
-          console.warn("[duplicateSeed] maybePromptDuplicatePhotos failed", e);
-        }
-        
-        try {
-          computeValidity();
-        } catch {}
-
-        console.log("[intake.js] hydrated from duplicateSeed", {
-          hasListing: !!listing,
-          imageCount: __photos.length,
-          pendingLen: __pendingFiles.length,
-        });
-        console.groupEnd?.();
-        return true;
-      }
-  
-
-   // --- Validation helpers (HOISTED so computeValidity can see them) ---
-  function getEl(id) { try { return document.getElementById(id); } catch { return null; } }
-  function markValidity(el, ok) { if (!el) return; el.setAttribute("aria-invalid", ok ? "false" : "true"); }
-
-  // Generic value check for required controls
-  function hasValue(n) {
-    if (!n) return false;
-    if (n.tagName === "SELECT") return n.value !== "";
-    if (n.type === "checkbox" || n.type === "radio") return n.checked;
-    return String(n.value ?? "").trim() !== "";
-  }
-
-  // Mark invalid/valid for a batch
-  function markBatchValidity(nodes, isValidFn) {
-    let allOk = true;
-    for (const n of nodes) {
-      const ok = isValidFn(n);
-      n.setAttribute("aria-invalid", ok ? "false" : "true");
-      if (!ok) allOk = false;
-    }
-    return allOk;
-  }
-
-  // Enable/disable CTAs:
-  // - ACTIVE CTAs (Add Single / Add to Bulk) depend on full validity
-  // - DRAFT CTA depends only on the Title being non-empty
-  function setCtasEnabled(activeValid) {
-    // ACTIVE CTAs (Add Single / Add to Bulk) by id or visible text:
-    const activeIds = ["intake-submit", "intake-save", "intake-next", "intake-add-single", "intake-add-bulk", "btnAddSingle_bottom", "btnAddBulk_bottom"];
-    const actById   = activeIds.map((id) => document.getElementById(id)).filter(Boolean);
-    const actByText = Array.from(document.querySelectorAll("button, a[role='button']"))
-      .filter((b) => /add single item|add to bulk list/i.test((b.textContent || "").trim()));
-  
-    [...actById, ...actByText].forEach((btn) => {
-      const enable = !!activeValid;
-      btn.disabled = !enable;
-      btn.classList.toggle("opacity-60", !enable);
-      btn.classList.toggle("cursor-not-allowed", !enable);
-    });
-  
-    // DRAFT CTA:
-    // - Normally enables if Title or at least 1 photo
-    // - If __lockDraft is true, force-disable and annotate
-    const title = resolveControl(null, "Item Name / Description");
-    const hasTitle = !!title && String(title.value || "").trim() !== "";
-    const photoCount = (__photos?.length || 0) + (__pendingFiles?.length || 0);
-    const hasAnyPhoto = photoCount >= 1;
-    const draftBtn = document.getElementById("intake-draft");
-    if (draftBtn) {
-      const draftOk = !__lockDraft && (hasTitle || hasAnyPhoto);
-      draftBtn.disabled = !draftOk;
-      draftBtn.classList.toggle("opacity-60", !draftOk);
-      draftBtn.classList.toggle("cursor-not-allowed", !draftOk);
-      draftBtn.title = __lockDraft
-        ? "Draft save is disabled for Active listings."
-        : "";
-    }
-  }
-
-
-  // === [ADD] resolvers + explicit required-field lists (by ID or label) ===
-  function resolveControl(id, labelText) {
-    // Prefer ID, fall back to label text (using existing findControlByLabel)
-    return (id && document.getElementById(id)) || (labelText && findControlByLabel(labelText)) || null;
-  }
-  
-  // All Basic Item Details are always required.
-  // Use ID where we know it; otherwise rely on the visible label text from the HTML screen.
-  const BASIC_REQUIRED = [
-    { id: null, label: "Item Name / Description" },
-    { id: null, label: "Price (USD)" },
-    { id: null, label: "Qty" },
-    { id: null, label: "Cost of Goods (USD)" },
-    { id: "categorySelect", label: "Category" },
-    { id: "storeLocationSelect", label: "Store Location" },
-    { id: null, label: "Case#/Bin#/Shelf#" },
-    { id: "salesChannelSelect", label: "Sales Channel" },
-  ];
-  
-  // Marketplace details are required only when Sales Channel is Both / Marketplace Only.
-  const MARKETPLACE_REQUIRED = [
-    { id: "marketplaceCategorySelect", label: "Marketplace Category" },
-    { id: "conditionSelect",            label: "Condition" },
-    { id: "brandSelect",                label: "Brand" },
-    { id: "colorSelect",                label: "Primary Color" },
-    { id: null,                         label: "Long Description" },
-    // Shipping fields are required only when Sales Channel is Both/Marketplace
-    { id: "shippingBoxSelect",          label: "Shipping Box" },
-    { id: "shipWeightLb",               label: "Weight (lb)" },
-    { id: "shipWeightOz",               label: "Weight (oz)" },
-    { id: "shipLength",                 label: "Length" },
-    { id: "shipWidth",                  label: "Width" },
-    { id: "shipHeight",                 label: "Height" },
-  ];
-  
-  function getBasicRequiredControls() {
-    return BASIC_REQUIRED
-      .map(({ id, label }) => resolveControl(id, label))
-      .filter(Boolean)
-      .filter(n => !n.disabled && n.type !== "hidden");
-  }
-  
- function getMarketplaceRequiredControls() {
-    // Base marketplace + shipping fields (only when visible & enabled)
-    const base = MARKETPLACE_REQUIRED
-      .map(({ id, label }) => resolveControl(id, label))
-      .filter(Boolean)
-      .filter((n) => {
-        if (!n || n.disabled || n.type === "hidden") return false;
-        if (n.closest(".hidden")) return false;
-        if (n.offsetParent === null) return false;
-        return true;
-      });
-
-     // Determine if the eBay tile is actually selected right now.
-    // If not selected, we must NOT treat eBay fields as required.
-    const ebaySelected = (() => {
-      const rows = (__metaCache?.marketplaces || []);
-      const byId = new Map(rows.map(r => [Number(r.id), String(r.slug || "").toLowerCase()]));
-      for (const id of selectedMarketplaceIds) {
-        if (byId.get(Number(id)) === "ebay") return true;
-      }
-      return false;
-    })();
-
-    // eBay card fields (when the eBay card is rendered and the fields are visible)
-    const ebaySelectors = [
-      "#ebay_shippingPolicy",
-      "#ebay_paymentPolicy",
-      "#ebay_returnPolicy",
-      "#ebay_shipZip",
-      "#ebay_formatSelect",
-      "#ebay_bin",
-
-      // These are conditionally shown; include only if visible
-      "#ebay_duration",
-      "#ebay_start",
-      "#ebay_autoAccept",
-      "#ebay_minOffer",
-      "#ebay_promotePct"
-    ];
-
-    // Only treat eBay-specific fields as required when the eBay tile is actually selected.
-    const ebayNodes = !ebaySelected
-      ? []
-      : ebaySelectors
-          .map(sel => document.querySelector(sel))
-          .filter(Boolean)
-          .filter((n) => {
-            if (!n || n.disabled || n.type === "hidden") return false;
-            if (n.closest(".hidden")) return false;       // hidden by class (format/best-offer/promote toggles)
-            if (n.offsetParent === null) return false;    // not in layout flow
-            return true;
-          });
-
-    return [...base, ...ebayNodes];
-  }
-  // === [END ADD] ===
-  
-  function marketplaceActive() {
-    const sales = getEl("salesChannelSelect");
-    const v = (sales?.value || "").toLowerCase();
-    return v.includes("marketplace") || v.includes("both");
-  }
-
-  // === NEW: Marketplace tiles state + helpers ===
-  const MP_TILES_ID = "marketplaceTiles";
-  const MP_ERROR_ID = "marketplaceTilesError";
-  const MP_DEFAULTS_KEY = "rp:intake:lastCrosslist"; // prototype: local defaults
-  // Host for marketplace cards (placeholder UIs per selected marketplace)
-  const MP_CARDS_ID = "marketplaceCards";
-  
-  // Cache latest meta so we can re-render cards on tile toggles
-  let __metaCache = null;
-  /** currently selected marketplace IDs (from app.marketplaces_available.id) */
-  const selectedMarketplaceIds = new Set();
-
-  function readDefaults() {
-    try {
-      const raw = localStorage.getItem(MP_DEFAULTS_KEY);
-      if (!raw) return [];
-      const arr = JSON.parse(raw);
-      return Array.isArray(arr) ? arr.map(Number).filter(n => !Number.isNaN(n)) : [];
-    } catch { return []; }
-  }
-  function writeDefaults(ids) {
-    try { localStorage.setItem(MP_DEFAULTS_KEY, JSON.stringify(ids)); } catch {}
-  }
-
-  function renderMarketplaceTiles(meta) {
-    const host = document.getElementById(MP_TILES_ID);
-    if (!host) return;
-    host.innerHTML = "";
-
-    const rows = (meta?.marketplaces || []).filter(m => m.is_active !== false);
-
-    // Discover marketplace ids for helpful logging / future rules
-    let ebayMarketplaceId = null;
-    let vendooMarketplaceId = null;
-    try {
-      for (const m of rows) {
-        const slug = String(m.slug || "").toLowerCase();
-        if (slug === "ebay") ebayMarketplaceId = Number(m.id);
-        if (slug === "vendoo") vendooMarketplaceId = Number(m.id);
-      }
-      console.log("[intake] marketplaces:ids", {
-        ebayMarketplaceId,
-        vendooMarketplaceId,
-      });
-    } catch (e) {
-      console.warn("[intake] marketplaces:ids:discover_error", e);
-    }
-    
-    // PROTOTYPE RULE:
-    // If ZERO marketplaces are connected for this tenant, allow selecting ALL active marketplaces.
-    const anyConnected = rows.some(r => r.enabled_for_tenant && r.is_connected);
-    const enableForSelection = (m) => {
-      if (anyConnected) {
-        return !!(m.enabled_for_tenant && m.is_connected);
-      }
-      // Prototype fallback: let the user pick active marketplaces even without connections
-      return m.is_active !== false;
-    };
-    
-    for (const m of rows) {
-      const btn = document.createElement("button");
-      btn.type = "button";
-      btn.className = "btn btn-sm rounded-2xl";
-      btn.dataset.marketplaceId = String(m.id);
-      btn.title = m.marketplace_name || m.slug || "Marketplace";
-
-      const enabledSelectable = enableForSelection(m);
-
-      // Baseline styling
-      btn.className = "btn btn-sm rounded-2xl";
-
-      if (enabledSelectable) {
-        // Enabled tiles start as ghost (pale) until selected
-        btn.classList.add("btn-ghost");
-      } else {
-        // Disabled tiles are dimmed and non-interactive
-        btn.classList.add("btn-ghost", "opacity-50", "cursor-not-allowed");
-        btn.disabled = true;
-        btn.setAttribute("aria-disabled", "true");
-      }
-
-      // label
-      btn.textContent = m.marketplace_name || m.slug || `#${m.id}`;
-
-      // initial pressed state comes only from selectedMarketplaceIds
-      const isSelected = selectedMarketplaceIds.has(Number(m.id));
-      if (enabledSelectable && isSelected) {
-        btn.classList.remove("btn-ghost");
-        btn.classList.add("btn-primary");
-        btn.setAttribute("aria-pressed", "true");
-      } else {
-        btn.setAttribute("aria-pressed", "false");
-      }
-
-      // click toggles selection if selectable
-      if (enabledSelectable) {
-        btn.addEventListener("click", () => {
-          const id = Number(btn.dataset.marketplaceId);
-          const slug = String(m.slug || "").toLowerCase();
-          const isVendooTile = slug === "vendoo";
-
-          // Snapshot current selection so we can reason about Vendoo/eBay rules
-          const currentIds = new Set(Array.from(selectedMarketplaceIds));
-
-          if (isVendooTile) {
-            const alreadySelected = currentIds.has(id);
-
-            if (alreadySelected) {
-              // Deselect Vendoo → revert to "normal" mode (no special rules)
-              currentIds.delete(id);
-            } else {
-              // Select Vendoo → single-tenant mode:
-              //  - clear all other marketplace selections
-              //  - only Vendoo remains selected
-              currentIds.clear();
-              currentIds.add(id);
-            }
-          } else {
-            // Non-Vendoo tiles:
-            //  - if Vendoo is currently selected, clicking another tile will
-            //    drop Vendoo and behave like normal multi-select.
-            let vendooId = null;
-            for (const row of (__metaCache?.marketplaces || [])) {
-              const s = String(row.slug || "").toLowerCase();
-              if (s === "vendoo") {
-                vendooId = Number(row.id);
-                break;
-              }
-            }
-            if (vendooId != null && currentIds.has(vendooId)) {
-              currentIds.delete(vendooId);
-            }
-
-            const alreadySelected = currentIds.has(id);
-            if (alreadySelected) {
-              currentIds.delete(id);
-            } else {
-              currentIds.add(id);
-            }
-          }
-
-          // Write back to the shared selection set
-          selectedMarketplaceIds.clear();
-          for (const v of currentIds) {
-            selectedMarketplaceIds.add(v);
-          }
-
-          // Re-style all tiles by re-rendering from the updated selection
-          try {
-            renderMarketplaceTiles(__metaCache);
-          } catch (e) {
-            console.error("marketplaces:vendoo-tiles:rerender:error", e);
-          }
-
-          // Re-validate + update cards (delta mode retains card input values)
-          try { computeValidity(); } catch {}
-          try { renderMarketplaceCards(__metaCache, { mode: "delta" }); } catch {}
-        });
-      } else {
-        btn.addEventListener("click", () => {
-          alert("This marketplace isn’t connected for your tenant yet. Please ask your manager to connect it.");
-        });
-      }
-
-      host.appendChild(btn);
-    }
-  }
-
-  function showMarketplaceTilesError(show) {
-    const el = document.getElementById(MP_ERROR_ID);
-    if (!el) return;
-    el.classList.toggle("hidden", !show);
-  }
-
-  // Apply per-item marketplace selection (e.g., when loading an existing item).
-  // meta: inventory meta (usually __metaCache)
-  // marketplaceListing: res.marketplace_listing from GET /api/inventory/intake
-  function applyMarketplaceSelectionForItem(meta, marketplaceListing) { 
-    try {
-      console.group("[intake] marketplaces:applySelectionForItem");
-
-      console.log("[applySelection] meta.marketplaces raw:", meta?.marketplaces);
-      console.log("[applySelection] marketplaceListing raw:", marketplaceListing);
-      console.log("[applySelection] selectedMarketplaceIds (BEFORE clear):", Array.from(selectedMarketplaceIds));
-
-      const rows = (meta?.marketplaces || []);
-      const bySlug = new Map(
-        rows.map(r => [String(r.slug || "").toLowerCase(), r])
-      );
-
-      console.log("[applySelection] marketplaces rows.length:", rows.length);
-      console.log("[applySelection] bySlug keys:", Array.from(bySlug.keys()));
-
-      selectedMarketplaceIds.clear();
-      console.log("[applySelection] selectedMarketplaceIds after clear:", Array.from(selectedMarketplaceIds));
-
-      if (marketplaceListing) {
-        const ids = [];
-        console.log("[applySelection] marketplaceListing present, starting id collection");
-
-        // eBay row present -> include eBay marketplace id
-        if (marketplaceListing.ebay) {
-          const rawId =
-            marketplaceListing.ebay_marketplace_id ??
-            (bySlug.get("ebay") && bySlug.get("ebay").id);
-          console.log("[applySelection] eBay branch hit:", {
-            listingFlag: marketplaceListing.ebay,
-            rawId,
-            bySlugEbay: bySlug.get("ebay")
-          });
-          if (rawId != null) {
-            const id = Number(rawId);
-            console.log("[applySelection] eBay numeric id:", id, "isNaN?", Number.isNaN(id));
-            if (!Number.isNaN(id)) ids.push(id);
-          }
-        } else {
-          console.log("[applySelection] eBay branch skipped (no marketplaceListing.ebay)");
-        }
-
-        // Facebook row present -> include Facebook marketplace id
-        if (marketplaceListing.facebook) {
-          const rawId =
-            marketplaceListing.facebook_marketplace_id ??
-            (bySlug.get("facebook") && bySlug.get("facebook").id);
-          console.log("[applySelection] Facebook branch hit:", {
-            listingFlag: marketplaceListing.facebook,
-            rawId,
-            bySlugFacebook: bySlug.get("facebook")
-          });
-          if (rawId != null) {
-            const id = Number(rawId);
-            console.log("[applySelection] Facebook numeric id:", id, "isNaN?", Number.isNaN(id));
-            if (!Number.isNaN(id)) ids.push(id);
-          }
-        } else {
-          console.log("[applySelection] Facebook branch skipped (no marketplaceListing.facebook)");
-        }
-
-        // ⭐ Vendoo row present -> include Vendoo marketplace id
-        if (marketplaceListing.vendoo) {
-          const rawId =
-            marketplaceListing.vendoo_marketplace_id ??
-            (bySlug.get("vendoo") && bySlug.get("vendoo").id);
-          console.log("[applySelection] Vendoo branch hit:", {
-            listingFlag: marketplaceListing.vendoo,
-            rawId,
-            bySlugVendoo: bySlug.get("vendoo")
-          });
-          if (rawId != null) {
-            const id = Number(rawId);
-            console.log("[applySelection] Vendoo numeric id:", id, "isNaN?", Number.isNaN(id));
-            if (!Number.isNaN(id)) ids.push(id);
-          }
-        } else {
-          console.log("[applySelection] Vendoo branch skipped (no marketplaceListing.vendoo)");
-        }
-
-        console.log("[applySelection] collected ids before Set add:", ids);
-
-        for (const id of ids) {
-          selectedMarketplaceIds.add(id);
-        }
-
-        console.log("[applySelection] selectedMarketplaceIds after add:", Array.from(selectedMarketplaceIds));
-      } else {
-        console.log("[applySelection] marketplaceListing is falsy; no ids collected");
-      }
-
-      renderMarketplaceTiles(meta);
-      // When hydrating an existing item, do a full rebuild of cards
-      try { renderMarketplaceCards(meta, { mode: "full" }); } catch {}
-    } catch (e) {
-      console.error("marketplaces:applySelection:error", e);
-    }
-  }
-
-
-
-    // Render placeholder cards for each selected marketplace (UI-only; no API calls)
-  // opts.mode: "full" | "delta"
-  //  - "full"  → rebuild all cards (used on initial load / item load)
-  //  - "delta" → add/remove cards without touching existing ones (used on tile clicks)
-  function renderMarketplaceCards(meta, opts) {
-    const host = document.getElementById(MP_CARDS_ID);
-    if (!host) return;
-
-    const mode = (opts && opts.mode) || "full";
-
-    // Install delegated listeners once so any field edit re-checks validity
-    if (!host.dataset.validHook) {
-      const safeRecheck = () => { try { computeValidity(); } catch {} };
-      host.addEventListener("input", safeRecheck);
-      host.addEventListener("change", safeRecheck);
-      host.dataset.validHook = "1";
-    }
-
-     // Build a lookup of marketplaces by id (id, slug, marketplace_name, is_connected etc.)
-    const rows = (meta?.marketplaces || []).filter(m => m.is_active !== false);
-    const byId = new Map(rows.map(r => [Number(r.id), r]));
-    const desiredIds = Array.from(selectedMarketplaceIds).map(Number);
-
-    // Vendoo path: if Vendoo is selected, always render cards for ALL connected marketplaces.
-    // This lets the user see per-marketplace Vendoo status (eBay, Facebook, Depop, etc.)
-    try {
-      let vendooId = null;
-      const connectedIds = [];
-
-      for (const r of rows) {
-        const slug = String(r.slug || "").toLowerCase();
-        if (slug === "vendoo") vendooId = Number(r.id);
-        if (r.is_connected) connectedIds.push(Number(r.id));
-      }
-
-      const vendooSelected =
-        vendooId != null && desiredIds.includes(vendooId);
-
-      if (vendooSelected) {
-        for (const mid of connectedIds) {
-          if (!desiredIds.includes(mid)) {
-            desiredIds.push(mid);
-          }
-        }
-      }
-    } catch (e) {
-      console.error("marketplaces:vendoo-cards-sync:error", e);
-    }
-
-    // Capture existing per-card statuses (by marketplace id) before a full rebuild
-    const prevStatuses = new Map();
-    if (mode === "full") {
-      try {
-        for (const card of Array.from(host.querySelectorAll("[data-marketplace-id]"))) {
-          const mid = Number(card.dataset.marketplaceId);
-          const node = card.querySelector("[data-status-text]");
-          if (!Number.isNaN(mid) && node) {
-            prevStatuses.set(mid, node.innerHTML || node.textContent || "");
-          }
-        }
-      } catch {}
-    }
-
-    // Track which ids already have a card we can keep (delta mode)
-    const realized = new Set();
-    if (mode === "delta") {
-      const existing = Array.from(host.querySelectorAll("[data-marketplace-id]"));
-      for (const card of existing) {
-        const mid = Number(card.dataset.marketplaceId);
-        if (!desiredIds.includes(mid)) {
-          card.remove(); // tile was deselected → drop its card
-          continue;
-        }
-        realized.add(mid); // keep this card (and its current field values) as-is
-      }
-    } else {
-      // full reset: start from a clean container
-      host.innerHTML = "";
-    }
-
-    function createMarketplaceCard(m, prevStatusHtml) {
-      const slug = String(m.slug || "").toLowerCase();
-      const name = m.marketplace_name || m.slug || `#${m.id}`;
-      const connected = !!m.is_connected;
-
-      // Card wrapper
-      const card = document.createElement("div");
-      card.className = "card p-3";
-      card.dataset.marketplaceId = String(m.id);
-
-      // --- Header ---
-      const header = document.createElement("div");
-      header.className = "flex items-center justify-between mb-2";
-      header.innerHTML = `
-        <div class="flex items-center gap-2">
-          <span class="font-semibold">${name}</span>
-          <span class="text-xs px-2 py-1 rounded ${connected ? "bg-green-100 text-green-700" : "bg-gray-100 text-gray-600"}">
-            ${connected ? "Connected" : "Not connected"}
-          </span>
-        </div>
-        <div class="text-sm" data-card-status>
-          <strong>Status:</strong> <span class="mono" data-status-text>Not Listed</span>
-          <button type="button" class="btn btn-ghost btn-xs ml-2 hidden" data-delist>Delist</button>
-        </div>
-      `;
-      card.appendChild(header);
-
-      // Restore any previously displayed status for this marketplace card (on full rebuilds)
-      if (prevStatusHtml) {
-        try {
-          const node = header.querySelector("[data-status-text]");
-          if (node) node.innerHTML = prevStatusHtml;
-        } catch {}
-      }
-
-      // --- Body (placeholder fields) ---
-      const body = document.createElement("div");
-      body.className = "mt-2";
-
-      if (slug === "ebay") {
-        // eBay placeholder UI — all fields required unless hidden by rules
-        body.innerHTML = `
-          <div class="legacy-grid-2 gap-3">
-            <div class="field">
-              <label>Shipping Policy <span class="text-red-600" aria-hidden="true">*</span></label>
-              <select id="ebay_shippingPolicy" required enabled title="Data wiring in later phase">
-                <option value="">&lt;select&gt;</option>
-              </select>
-            </div>
-            <div class="field">
-              <label>Payment Policy <span class="text-red-600" aria-hidden="true">*</span></label>
-              <select id="ebay_paymentPolicy" required enabled title="Data wiring in later phase">
-                <option value="">&lt;select&gt;</option>
-              </select>
-            </div>
-            <div class="field">
-              <label>Return Policy <span class="text-red-600" aria-hidden="true">*</span></label>
-              <select id="ebay_returnPolicy" required enabled title="Data wiring in later phase">
-                <option value="">&lt;select&gt;</option>
-              </select>
-            </div>
-            <div class="field">
-              <label>Shipping Location (Zip) <span class="text-red-600" aria-hidden="true">*</span></label>
-              <input id="ebay_shipZip" type="text" inputmode="numeric" pattern="[0-9]{5}" placeholder="e.g. 80903" required />
-            </div>
-
-            <div class="field">
-              <label>Pricing Format <span class="text-red-600" aria-hidden="true">*</span></label>
-              <select id="ebay_formatSelect" required>
-                <option value="">&lt;select&gt;</option>
-                <option value="fixed">Fixed Price</option>
-                <option value="auction">Auction</option>
-              </select>
-            </div>
-
-            <!-- Auction-only -->
-            <div class="field ebay-auction-only hidden">
-              <label>Duration <span class="text-red-600" aria-hidden="true">*</span></label>
-              <select id="ebay_duration" required>
-                <option value="">&lt;select&gt;</option>
-                <option value="3">3 Days</option>
-                <option value="5">5 Days</option>
-                <option value="7">7 Days</option>
-                <option value="10">10 Days</option>
-              </select>
-            </div>
-
-            <div class="field">
-              <label>Buy It Now Price (USD) <span class="text-red-600" aria-hidden="true">*</span></label>
-              <input id="ebay_bin" type="number" step="0.01" min="0" placeholder="0.00" required />
-            </div>
-
-            <!-- Auction-only -->
-            <div class="field ebay-auction-only hidden">
-              <label>Starting Bid (USD) <span class="text-red-600" aria-hidden="true">*</span></label>
-              <input id="ebay_start" type="number" step="0.01" min="0" placeholder="0.00" required />
-            </div>
-            <div class="field ebay-auction-only hidden">
-              <label>Reserve Price (USD)</label>
-              <input id="ebay_reserve" type="number" step="0.01" min="0" placeholder="0.00" />
-            </div>
-
-            <!-- Fixed-only -->
-            <div class="field ebay-fixed-only">
-              <label class="switch" for="ebay_bestOffer">
-                <input id="ebay_bestOffer" type="checkbox" />
-                <span class="slider"></span>
-                <span class="switch-label">Allow Best Offer</span>
-              </label>
-            </div>
-            <div class="field wide ebay-fixed-only ebay-bestoffer-only hidden">
-              <div class="subgrid-2">
-                <div class="field">
-                  <label>Auto-accept (USD) <span class="text-red-600" aria-hidden="true">*</span></label>
-                  <input id="ebay_autoAccept" type="number" step="0.01" min="0" placeholder="0.00" required />
-                </div>
-                <div class="field">
-                  <label>Minimum offer (USD) <span class="text-red-600" aria-hidden="true">*</span></label>
-                  <input id="ebay_minOffer" type="number" step="0.01" min="0" placeholder="0.00" required />
-                </div>
-              </div>
-            </div>
-
-            <!-- Promote -->
-            <div class="field">
-              <label class="switch" for="ebay_promote">
-                <input id="ebay_promote" type="checkbox" />
-                <span class="slider"></span>
-                <span class="switch-label">Promote</span>
-              </label>
-            </div>
-            <div class="field wide ebay-promote-only hidden">
-              <label>Promotion Percent (%) <span class="text-red-600" aria-hidden="true">*</span></label>
-              <input id="ebay_promotePct" type="number" step="0.1" min="0" max="100" placeholder="0" required />
-            </div>
-          `;
-        card.appendChild(body);
-
-        // If tenant is connected to eBay, pull policies and populate the selects
-        (async () => {
-          try {
-            if (!connected) return; // leave disabled if not connected
-            const pol = await api("/api/marketplaces/ebay/policies", { method: "GET" });
-            if (!pol || pol.ok === false) return;
-
-            const shipSel = body.querySelector("#ebay_shippingPolicy");
-            const paySel  = body.querySelector("#ebay_paymentPolicy");
-            const retSel  = body.querySelector("#ebay_returnPolicy");
-
-            // Use existing helper; map { id, name }
-            fillSelect(shipSel, pol.shipping || [], { textKey: "name", valueKey: "id" });
-            fillSelect(paySel,  pol.payment  || [], { textKey: "name", valueKey: "id" });
-            fillSelect(retSel,  pol.returns  || [], { textKey: "name", valueKey: "id" });
-
-            // Enable once options are loaded
-            [shipSel, paySel, retSel].forEach(s => { if (s) { s.disabled = false; s.title = ""; } });
-
-            // Re-apply any saved policy ids AFTER options are present (fixes race on Load)
-            try {
-              const saved = (window && window.__ebaySavedPolicies) || null;
-              if (saved) {
-                if (shipSel) shipSel.value = saved.shipping_policy ?? "";
-                if (paySel)  paySel.value  = saved.payment_policy  ?? "";
-                if (retSel)  retSel.value  = saved.return_policy   ?? "";
-                // Nudge validity/UX
-                shipSel?.dispatchEvent(new Event("change"));
-                paySel?.dispatchEvent(new Event("change"));
-                retSel?.dispatchEvent(new Event("change"));
-                try { computeValidity(); } catch {}
-              }
-            } catch {}
-          } catch (e) {
-            console.warn("ebay policies load failed", e);
-          }
-        })();
-
-        // Wire local show/hide inside the eBay card (client-only)
-        const formatSel   = body.querySelector("#ebay_formatSelect");
-        const bestOffer   = body.querySelector("#ebay_bestOffer");
-        const promoteChk  = body.querySelector("#ebay_promote");
-
-        const fixedOnly     = () => body.querySelectorAll(".ebay-fixed-only");
-        const auctionOnly   = () => body.querySelectorAll(".ebay-auction-only");
-        const bestOfferOnly = () => body.querySelectorAll(".ebay-bestoffer-only");
-        const promoOnly     = () => body.querySelectorAll(".ebay-promote-only");
-
-        function applyEbayVisibility() {
-          const fmt = (formatSel?.value || "").toLowerCase(); // "" | "fixed" | "auction"
-          const isFixed   = fmt === "fixed";
-          const isAuction = fmt === "auction";
-          const hasBO     = !!bestOffer?.checked;
-          const promo     = !!promoteChk?.checked;
-
-          fixedOnly().forEach(n => n.classList.toggle("hidden", !isFixed));
-          auctionOnly().forEach(n => n.classList.toggle("hidden", !isAuction));
-          bestOfferOnly().forEach(n => n.classList.toggle("hidden", !(isFixed && hasBO)));
-          promoOnly().forEach(n => n.classList.toggle("hidden", !promo));
-
-          // When Best Offer is unchecked, clear and mark not required
-          const autoAcc = body.querySelector("#ebay_autoAccept");
-          const minOff  = body.querySelector("#ebay_minOffer");
-          if (autoAcc) autoAcc.required = isFixed && hasBO;
-          if (minOff)  minOff.required  = isFixed && hasBO;
-
-          // Re-evaluate button enablement whenever fields become shown/hidden or required flips
-          try { computeValidity(); } catch {}
-        }
-
-        // Any change that can flip visibility/required should re-run validity
-        formatSel?.addEventListener("change", applyEbayVisibility);
-        bestOffer?.addEventListener("change", applyEbayVisibility);
-        promoteChk?.addEventListener("change", applyEbayVisibility);
-
-        // First paint: align UI *and* button states to current values
-        applyEbayVisibility();
-        try { computeValidity(); } catch {}
-      } else {
-        // Generic placeholder card for other marketplaces (no filler lists yet)
-        body.innerHTML = `
-          <div class="muted text-sm">Marketplace-specific fields coming soon.</div>
-        `;
-        card.appendChild(body);
-      }
-
-      return card;
-    }
-
-    // For each selected marketplace, ensure a card exists
-    for (const id of desiredIds) {
-      if (realized.has(id)) continue; // delta mode: keep existing card and its values
-      const m = byId.get(Number(id));
-      if (!m) continue;
-      const card = createMarketplaceCard(m, prevStatuses.get(Number(id)));
-      host.appendChild(card);
-    }
-
-    // After rendering marketplace cards, sync the FB status once
-    try { refreshFacebookTile(); } catch {}
-
-    // If no marketplaces selected, nothing renders here by design.
-  }
-
-
-  // === END NEW ===
-
-  // ===== Marketplace Status UI helpers (Facebook) =====
-  function getFacebookStatusNodes() {
-    const card = Array.from(document.querySelectorAll('#marketplaceCards .card'))
-      .find(c => /facebook/i.test((c.querySelector('.font-semibold')?.textContent || '')));
-    if (!card) return { textEl: null, wrap: null };
-    const wrap = card.querySelector('[data-card-status]') || card;
-    const textEl = card.querySelector('[data-status-text]') || wrap.querySelector('.mono') || wrap;
-    return { textEl, wrap };
-  }
-
-  function setFacebookStatus(label, { link = null, tone = 'muted' } = {}) {
-    const { textEl, wrap } = getFacebookStatusNodes();
-    if (!textEl) return;
-    const classes = ['text-gray-600','text-blue-700','text-green-700','text-red-700'];
-    try { wrap.classList.remove(...classes); } catch {}
-    if (tone === 'info')  wrap.classList.add('text-blue-700');
-    if (tone === 'ok')    wrap.classList.add('text-green-700');
-    if (tone === 'error') wrap.classList.add('text-red-700');
-    if (link) {
-      textEl.innerHTML = '';
-      const a = document.createElement('a');
-      a.href = link; a.target = '_blank'; a.rel = 'noopener';
-      a.textContent = label;
-      textEl.appendChild(a);
-    } else {
-      textEl.textContent = label;
-    }
-  }
-
- async function refreshFacebookTile() {
+export const onRequestPost: PagesFunction = async ({ request, env }) => {
+  const t0 = Date.now();
   try {
-    if (!__currentItemId) return;
+    // AuthN
+    const cookieHeader = request.headers.get("cookie") || "";
+    const token = readCookie(cookieHeader, "__Host-rp_session");
+    if (!token) return json({ ok: false, error: "no_cookie" }, 401);
+    const payload = await verifyJwt(token, String(env.JWT_SECRET));
+    const actor_user_id = String((payload as any).sub || "");
+    if (!actor_user_id) return json({ ok: false, error: "bad_token" }, 401);
 
-    const snap = await api(
-      `/api/inventory/intake?item_id=${encodeURIComponent(__currentItemId)}`,
-      { method: "GET" }
-    );
+    // Tenant
+    const tenant_id = request.headers.get("x-tenant-id");
+    if (!tenant_id) return json({ ok: false, error: "missing_tenant" }, 400);
 
-    // Be tolerant to server response shapes:
-    // - marketplace_listing vs marketplace_listings
-    // - keyed by slug ("facebook") OR marketplace_id (2)
-    const mp = snap?.marketplace_listing || snap?.marketplace_listings || {};
-    const fbRow =
-      mp?.facebook ??
-      mp?.Facebook ??
-      mp?.["2"] ??
-      null;
+    const sql = neon(String(env.DATABASE_URL));
 
-    const rawStatus =
-      fbRow?.status ??
-      fbRow?.listing_status ??
-      fbRow?.state ??
-      "";
-
-    const st = String(rawStatus).trim().toLowerCase();
-
-    if (!st || st === "draft" || st === "not_listed") {
-      setFacebookStatus("Not Listed", { tone: "muted" });
-      return;
-    }
-
-    if (st === "publishing" || st === "pending_external" || st === "processing") {
-      setFacebookStatus("Publishing…", { tone: "info" });
-      return;
-    }
-
-    if (st === "live" || st === "listed") {
-      const url =
-        fbRow?.mp_item_url ??
-        fbRow?.remote_url ??
-        fbRow?.url ??
-        null;
-      setFacebookStatus("Listed", { tone: "ok", link: url || null });
-      return;
-    }
-
-    if (st === "error" || st === "create_failed" || st === "failed") {
-      const msg = (fbRow?.last_error ? String(fbRow.last_error).slice(0, 120) : "");
-      setFacebookStatus(msg ? `Error — ${msg}` : "Error", { tone: "error" });
-      return;
-    }
-
-    setFacebookStatus("Unknown", { tone: "muted" });
-  } catch (e) {
-    console.warn("[intake.js] refreshFacebookTile failed", e);
-  }
-}
-
-  
-  // ===== Marketplace Status UI helpers (eBay) =====
-  function getEbayStatusNodes() {
-    // Find the eBay card and its status span
-    const card = Array.from(document.querySelectorAll('#marketplaceCards .card'))
-      .find(c => /ebay/i.test((c.querySelector('.font-semibold')?.textContent || '')));
-    if (!card) return { textEl: null, wrap: null };
-  
-    const wrap = card.querySelector('[data-card-status]') || card;
-    const textEl = card.querySelector('[data-status-text]') || wrap.querySelector('.mono') || wrap;
-    return { textEl, wrap };
-  }
-  
-  function setEbayStatus(label, { link = null, tone = 'muted' } = {}) {
-    const { textEl, wrap } = getEbayStatusNodes();
-    if (!textEl) return;
-  
-    // Color cue via utility classes
-    const classes = ['text-gray-600','text-blue-700','text-green-700','text-red-700'];
-    wrap.classList.remove(...classes);  
-    if (tone === 'info')  wrap.classList.add('text-blue-700');
-    if (tone === 'ok')    wrap.classList.add('text-green-700');
-    if (tone === 'error') wrap.classList.add('text-red-700');
-  
-    // Set text/anchor
-    if (link) {
-      textEl.innerHTML = ''; // clear
-      const a = document.createElement('a');
-      a.href = link;
-      a.target = '_blank';
-      a.rel = 'noopener';
-      a.textContent = label;
-      textEl.appendChild(a);
-    } else {
-      textEl.textContent = label;
-    }
-  }
-
-    async function trackPublishJob(jobId, { maxMs = 90000, intervalMs = 1500 } = {}) {
-        const started = Date.now();
-      
-        async function pollOnce() {
-          try {
-            // Poll the existing POST endpoint. Your server returns { ok, status, remote? } when terminal.
-            const res = await fetch(`/api/marketplaces/publish/run?job_id=${encodeURIComponent(jobId)}`, {
-              method: "POST",
-              headers: { "content-type": "application/json" },
-              body: JSON.stringify({ poll: true })
-            });
-            const body = await res.json().catch(() => ({}));
-      
-            const status = String(body?.status || body?.state || "").toLowerCase();
-      
-            if (status === "succeeded") {
-              const remote = body.remote || {};
-              const url = remote.remoteUrl || remote.remoteURL || null;
-              setEbayStatus("Listed", { tone: "ok", link: url || null });
-              return true;
-            }
-      
-            if (status === "failed" || status === "dead" || body?.error) {
-              const msg = String(body?.error || "Failed").slice(0, 160);
-              setEbayStatus(`Error${msg ? ` — ${msg}` : ""}`, { tone: "error" });
-              return true;
-            }
-      
-            // Non-terminal shapes your server returns while work is ongoing
-            // Examples you've seen: { ok: true, taken: 0 }
-            
-            // --- Fallback guard ---
-            // If the job API hasn't reported "succeeded" yet, check the persisted listing row.
-            // We already hydrate the screen with GET /api/inventory/intake when loading drafts;
-            // use the same contract here so we don't spin forever if the job ended but the
-            // job endpoint didn't deliver a terminal payload to this browser.
-            try {
-              if (__currentItemId) {
-                const snap = await api(`/api/inventory/intake?item_id=${encodeURIComponent(__currentItemId)}`, { method: "GET" });
-                const live = String(snap?.marketplace_listing?.ebay?.status || "").toLowerCase() === "live";
-                if (live) {
-                  const url = snap?.marketplace_listing?.ebay?.mp_item_url || null;
-                  setEbayStatus("Listed", { tone: "ok", link: url || null });
-                  return true; // break the loop
-                }
-              }
-            } catch { /* ignore and keep polling until timeout */ }
-            
-            return false;
-          } catch {
-            // Network hiccup — keep polling until timeout
-            return false;
-          }
-        }
-      
-        let done = await pollOnce();
-          while (!done && (Date.now() - started) < maxMs) {
-            await new Promise(r => setTimeout(r, intervalMs));
-            done = await pollOnce();
-          }
-        
-          if (!done) setEbayStatus("Unknown", { tone: "muted" });
-        }
-  
-       
-        function computeValidity() {
-          // BASIC — always required (explicit control list)
-          const basicControls = getBasicRequiredControls();
-          const basicOk = markBatchValidity(basicControls, hasValue);
-      
-          // PHOTOS — must have at least one (persisted or pending)
-          const photoCount = (__photos?.length || 0) + (__pendingFiles?.length || 0);
-          const photosOk = photoCount >= 1;
-          // Light accessibility cue on the Photos card/header when missing
-          (function markPhotos(ok) {
-            const host = document.getElementById("photosCard")
-                     || document.getElementById("photosGrid")
-                     || document.getElementById("photosCount");
-            if (host) host.setAttribute("aria-invalid", ok ? "false" : "true");
-          })(photosOk);
-      
-          
-          // MARKETPLACE — required only when active
-          let marketOk = true;
-          if (marketplaceActive()) {
-            const marketControls = getMarketplaceRequiredControls();
-            marketOk = markBatchValidity(marketControls, hasValue);
-      
-            // Require ≥1 selected marketplace tile when marketplace flow is active
-            if (marketOk) {
-              const hasAny = selectedMarketplaceIds.size >= 1;
-              marketOk = marketOk && hasAny;
-              showMarketplaceTilesError(!hasAny);
-            } else {
-              showMarketplaceTilesError(false);
-            }
-          } else {
-            // clear invalid state for marketplace when not required
-            getMarketplaceRequiredControls().forEach(n => n.setAttribute("aria-invalid", "false"));
-            showMarketplaceTilesError(false);
-          }
-      
-          // ⬅️ photos are part of the gate
-          const allOk = basicOk && photosOk && marketOk;
-          setCtasEnabled(allOk);
-          document.dispatchEvent(new CustomEvent("intake:validity-changed", { detail: { valid: allOk } }));
-          return allOk;
-        }
-
-        // --- Copy for Xeasy: helpers & click handler (anchored insert) ---
-        function enableCopyXeasy(enabled = true) {
-          const btn = document.getElementById("copyXeasyBtn");
-          if (!btn) return;
-          btn.disabled = !enabled;
-          btn.classList.toggle("opacity-60", !enabled);
-          btn.classList.toggle("cursor-not-allowed", !enabled);
-          btn.title = enabled ? "Copy for Xeasy" : "Enabled in Phase 2";
-        }
-        
-        function buildXeasyText() {
-          // Title
-          const titleEl = document.getElementById("titleInput") || findControlByLabel("Item Name / Description");
-          const title = String(titleEl?.value || "").trim();
-        
-          // Price → format with a leading $; integers show as $10, non-integers as $10.50
-          const priceCtrl = document.getElementById("priceInput") || findControlByLabel("Price (USD)");
-          const rawPrice = String(priceCtrl?.value ?? "").trim();
-          let price = rawPrice;
-          if (price) {
-            const n = Number(String(price).replace(/[$,]/g, ""));
-            if (!Number.isNaN(n)) {
-              price = Number.isInteger(n) ? `$${n}` : `$${n.toFixed(2)}`;
-            } else if (!price.startsWith("$")) {
-              price = `$${price}`;
-            }
-          }
-        
-          // SKU priority: server snapshot → DOM echo ([data-sku-out]/#skuOut) → last-known
-          let sku = "";
-          try {
-            const snapSku = String(window?.__intakeSnap?.inventory?.sku ?? "").trim();
-            if (snapSku) sku = snapSku;
-          } catch {}
-        
-          if (!sku) {
-            try {
-              const el = document.querySelector("[data-sku-out]") || document.getElementById("skuOut");
-              if (el) {
-                // Prefer a data attribute if present, otherwise use text content
-                let t = "";
-                if (el.dataset && typeof el.dataset.sku === "string" && el.dataset.sku.trim() !== "") {
-                  t = el.dataset.sku;
-                } else {
-                  t = String(el.textContent || "");
-                }
-                t = t.trim();
-                // Strip leading "SKU" label if present, e.g. "SKU 12345" or "SKU: 12345"
-                t = t.replace(/^sku[:\s]*/i, "").trim();
-                sku = t;
-              }
-            } catch {}
-          }
-        
-          if (!sku) {
-            try { sku = String(window.__lastKnownSku || "").trim(); } catch {}
-          }
-        
-          // Store location & Case # (prefer the combined label "Case#/Bin#/Shelf#" if present)
-          const storeSel = document.getElementById("storeLocationSelect");
-          const storeLoc = String(storeSel?.value || "").trim();
-          const caseEl =
-            document.getElementById("caseShelfInput")
-            || findControlByLabel("Case#/Bin#/Shelf#")
-            || findControlByLabel("Case #");
-          const caseNo = String(caseEl?.value || "").trim();
-        
-          // Word-safe packing: first 14 chars (no mid-word) then next 23 chars (no mid-word)
-          const packWords = (s, limit) => {
-            const words = String(s || "").trim().split(/\s+/).filter(Boolean);
-            if (words.length === 0) return ["", ""];
-            let part = "";
-            let i = 0;
-            while (i < words.length) {
-              const next = part ? `${part} ${words[i]}` : words[i];
-              if (next.length <= limit) {
-                part = next;
-                i++;
-              } else {
-                break;
-              }
-            }
-            if (!part) { // if first word itself > limit, take it whole (no truncation)
-              part = words[0];
-              i = 1;
-            }
-            const rest = words.slice(i).join(" ");
-            return [part, rest];
-          };
-        
-          // Line 1: Price and SKU (this is where your SKU should appear)
-          const line1 = `${price} ${sku}`.trim();
-        
-          // Line 2/3: prepend RC, then title split across 14/23 without breaking words
-          const rc = `R${storeLoc}-C${caseNo}`.trim();
-          const [t1, tail] = packWords(title, 14);
-          const [t2] = packWords(tail, 23);
-        
-          const line2 = `${rc} ${t1}`.trim();
-          const line3 = String(t2 || "").trim();
-        
-          return [line1, line2, line3].filter(Boolean).join("\n");
-        }
-
-
-        
-        function wireCopyXeasy() {
-          const btn = document.getElementById("copyXeasyBtn");
-          if (!btn) return;
-          btn.addEventListener("click", async (e) => {
-            e.preventDefault();
-            try {
-              const text = buildXeasyText();
-              await navigator.clipboard.writeText(text);
-              if (typeof window.uiToast === "function") {
-                window.uiToast("Copied for Xeasy.");
-              } else {
-                alert("Copied for Xeasy.");
-              }
-            } catch (err) {
-              console.error("copy:xeasy:error", err);
-              alert("Failed to copy Xeasy text.");
-            }
-          });
-        }
-        // --- end Copy for Xeasy insert ---
-      
-        /* === Facebook handoff helpers (NEW) === */
-
-        // Build the payload the Tampermonkey script will send to Facebook.
-        window.rpBuildFacebookPayload = function rpBuildFacebookPayload() {
-
-          // 0) Resolve tenant (stashed during init) with robust fallbacks
-          const tenant_id = 
-            (typeof window.__tenantId === "string" && window.__tenantId) ||
-            (typeof window.ACTIVE_TENANT_ID === "string" && window.ACTIVE_TENANT_ID) ||
-            (document.querySelector('meta[name="x-tenant-id"]')?.getAttribute?.("content") || "") ||
-            (document.documentElement.getAttribute("data-tenant-id") || "") ||
-            (localStorage.getItem("rp:tenant_id") || "");
-          
-          // 1) title / price / qty
-          const titleEl = document.getElementById("titleInput") || findControlByLabel("Item Name / Description");
-          const priceEl = document.getElementById("priceInput") || findControlByLabel("Price (USD)");
-          const qtyEl   = document.getElementById("qtyInput")   || findControlByLabel("Qty");
-          
-          const title = String(titleEl?.value || "").trim();
-          const price = Number(priceEl?.value || 0) || 0;
-          const qty   = Math.max(0, parseInt(qtyEl?.value || "0", 10) || 0);
-
-          // 2) Prefer the server snapshot’s composed description (cached by __emitFacebookReadyIfSafe)
-          let composed = "";
-          try {
-            const snap = (window && window.__intakeSnap) || null;
-            const fromDb = String(snap?.item_listing_profile?.product_description || "");
-            if (fromDb) composed = fromDb;
-          } catch { /* fallback below */ }
-        
-          // 2b) Fallback: reconstruct locally to match server rules if needed
-          if (!composed) {
-            const BASE_SENTENCE =
-              "The photos are part of the description. Be sure to look them over for condition and details. This is sold as is, and it's ready for a new home.";
-          
-            const ensureBaseOnce = (t) => {
-              const v = String(t || "").trim();
-              if (!v) return BASE_SENTENCE;
-              return v.includes(BASE_SENTENCE) ? v : `${BASE_SENTENCE}${v ? "\n\n" + v : ""}`;
-            };
-          
-            const descEl = document.getElementById("longDescriptionTextarea") || findControlByLabel("Long Description");
-            const raw = String(descEl?.value || "").trim();
-            let body = ensureBaseOnce(raw);
-            if (title && !body.startsWith(title)) body = `${title}\n\n${body}`;
-          
-            // Footer from cached snapshot or visible fields
-            const snap = (window && window.__intakeSnap) || null;
-            const sku = String((snap?.inventory?.sku ?? window.__lastKnownSku ?? "") || "").trim();
-            const loc = String((snap?.inventory?.instore_loc ?? findControlByLabel("Store Location")?.value ?? "") || "").trim();
-            const cbs = String((snap?.inventory?.case_bin_shelf ?? findControlByLabel("Case#/Bin#/Shelf#")?.value ?? "") || "").trim();
-          
-            if (sku) {
-              const footerLine = `SKU: ${sku} • Location: ${loc || "—"} • Case/Bin/Shelf: ${cbs || "—"}`;
-              body = `${body}\n\n${footerLine}`;
-            }
-            composed = body;
-          }
-        
-          // 3) append store footer lines (Facebook-specific)
-          let description = composed;
-          const footer =
-            "Mad Rad Retro Toys\n" +
-            "5026 Kipling Street\n" +
-            "Wheat Ridge, CO 80033\n" +
-            "MON-SAT 10-5\n" +
-            "SUN 11-5\n" +
-            "303-960-2117";
-          description = description ? `${description}\n\n${footer}` : footer;
-
-           // 3b) Safety: remove any accidental duplicate consecutive lines
-          // (e.g., if the SKU footer was already present in the snapshot)
-          if (description) {
-            const lines = String(description).split(/\r?\n/);
-            const cleaned = [];
-            let last = "";
-            for (const line of lines) {
-              const trimmed = line.trim();
-              if (trimmed && trimmed === last) continue;
-              cleaned.push(line);
-              last = trimmed;
-            }
-            description = cleaned.join("\n");
-          }
-        
-          // 4) hard-coded for v1
-          const category  = "Action Figures";
-          const condition = "Used - Good";
-          const availability = qty > 1 ? "List as in Stock" : "List as Single Item";
-        
-          // 5) images from state (__photos), ordered: primary first, then sort_order
-          const ordered = (__photos || [])
-            .slice()
-            .sort((a, b) => {
-              const pa = a.is_primary ? -1 : 0;
-              const pb = b.is_primary ? -1 : 0;
-              if (pa !== pb) return pa - pb;
-              return (a.sort_order ?? 0) - (b.sort_order ?? 0);
-            })
-            .map(x => String(x.cdn_url || ""))
-            .filter(Boolean);
-        
-          // Resolve SKU from the server snapshot first; fall back to any visible UI echo.
-          const sku = (() => {
-            try {
-              const snap = (window && window.__intakeSnap) || null;
-              const v = snap?.inventory?.sku;
-              if (v) return String(v).trim();
-            } catch {}
-            const out = document.querySelector("[data-sku-out]")?.textContent;
-            if (out) return String(out).trim();
-            return String(window.__lastKnownSku || "").trim();
-          })();
-          
-          const payload = {
-            tenant_id, title, price, qty, availability, category, condition, description,
-            sku, // <-- added
-            images: ordered,
-            item_id: __currentItemId || null,
-            created_at: Date.now()
-          };
-        
-          // ✅ FULL payload log for debugging
-          try {
-            console.log("[intake.js] facebook payload", JSON.parse(JSON.stringify(payload)));
-          } catch {
-            console.log("[intake.js] facebook payload", payload);
-          }
-        
-          return payload;
-        }; // <-- end rpBuildFacebookPayload (removed the extra closing brace)
-
-        
-        // Only fire when: Active save, photos flushed, all publish jobs are settled,
-        // AND the Facebook tile is selected, AND the Facebook listing is not already live.
-        async function __emitFacebookReadyIfSafe({ saveStatus, jobIds }) {
-          console.groupCollapsed("[intake.js] facebook:gate");
-          console.log("preconditions", {
-            saveStatus,
-            pendingFiles: (__pendingFiles && __pendingFiles.length) || 0,
-            jobIdsCount: Array.isArray(jobIds) ? jobIds.length : 0
-          });
-        
-          if (String(saveStatus || "").toLowerCase() !== "active") {
-            console.log("skip: saveStatus is not 'active'");
-            console.groupEnd?.();
-            return;
-          }
-        
-          // photos flushed?
-          if (__pendingFiles && __pendingFiles.length > 0) {
-            console.log("skip: pending photos not flushed yet");
-            console.groupEnd?.();
-            return;
-          }
-        
-                  
-          // is Facebook selected?
-          const isFacebookSelected = (() => {
-            // use the cached meta to map selected ids → slug
-            const rows = (__metaCache?.marketplaces || []);
-            const byId = new Map(rows.map(r => [Number(r.id), String(r.slug || "").toLowerCase()]));
-            for (const id of selectedMarketplaceIds) {
-              if (byId.get(Number(id)) === "facebook") return true;
-            }
-            return false;
-          })();
-          if (!isFacebookSelected) {
-            console.log("skip: Facebook tile not selected");
-            console.groupEnd?.();
-            return;
-          }
-        
-          // not already live? (app.item_marketplace_listing.status === 'live')
-          if (__currentItemId) {
-            try {
-              const snap = await api(`/api/inventory/intake?item_id=${encodeURIComponent(__currentItemId)}`, { method: "GET" });
-              // cache the full snapshot so rpBuildFacebookPayload can read description synchronously
-              window.__intakeSnap = snap;
-              // keep a last-known SKU around for local fallback builders
-              try { window.__lastKnownSku = String(snap?.inventory?.sku || ""); } catch {}
-
-              // Normalize Facebook row from marketplace_listing or marketplace_listings
-              const listings = snap?.marketplace_listing || snap?.marketplace_listings || {};
-              let fbRow =
-                listings?.facebook ??
-                listings?.Facebook ??
-                listings?.["2"] ??
-                null;
-
-              // If listings is an array or generic object, try to find a row with slug 'facebook' or marketplace_id = 2
-              if (!fbRow) {
-                if (Array.isArray(listings)) {
-                  fbRow = listings.find(r =>
-                    String(r?.slug || "").toLowerCase() === "facebook" ||
-                    Number(r?.marketplace_id) === 2
-                  ) || null;
-                } else if (listings && typeof listings === "object") {
-                  for (const key of Object.keys(listings)) {
-                    const row = listings[key];
-                    if (!row || typeof row !== "object") continue;
-                    const slug = String(row.slug || "").toLowerCase();
-                    const mpId = Number(row.marketplace_id);
-                    if (slug === "facebook" || mpId === 2) {
-                      fbRow = row;
-                      break;
-                    }
-                  }
-                }
-              }
-
-              const statusRaw =
-                (fbRow && (fbRow.status ?? fbRow.listing_status ?? fbRow.state)) || "";
-              const st = String(statusRaw).trim().toLowerCase();
-              const alreadyListed = st === "live" || st === "listed";
-
-              console.log("existing fb status", {
-                statusRaw,
-                normalized: st,
-                alreadyListed,
-              });
-
-              if (alreadyListed) {
-                console.log("skip: already live/listed");
-                console.groupEnd?.();
-                return;
-              }
-
-            } catch (e) {
-              console.warn("fb status check failed", e);
-            }
-          }
-        
-          const payload = window.rpBuildFacebookPayload();
-            console.log("dispatch intake:facebook-ready", {
-              item_id: __currentItemId || null,
-              title: payload?.title,
-              images: (payload?.images || []).length
-            });
-            document.dispatchEvent(new CustomEvent("intake:facebook-ready", {
-              detail: { item_id: __currentItemId || null, payload }
-            }));
-            console.groupEnd?.();
-          }
-      
-          document.addEventListener("intake:facebook-ready", (ev) => {
-            const __t0 = performance.now();
-            const payload =
-              ev?.detail?.payload ||
-              (typeof window.rpBuildFacebookPayload === "function" ? window.rpBuildFacebookPayload() : null);
-            if (!payload) return;
-          
-              console.groupCollapsed("[intake.js] facebook:intake → begin");
-              setFacebookStatus("Publishing…", { tone: "info" });
-              console.log("[intake.js] payload echo", payload);
-
-              // Kick a short, one-time poll while the FB tab runs (max ~15s)
-              (function pollForFlipOnce() {
-                let ticks = 0;
-                const t = setInterval(async () => {
-                  try { await refreshFacebookTile(); } catch {}
-                  if (++ticks >= 15) clearInterval(t);
-                }, 1000);
-              })();
-            // 1) Same-origin handoff for Tampermonkey cache
-            try {
-              window.postMessage({ type: "RP_FACEBOOK_CREATE", payload }, location.origin);
-              console.log("[intake.js] postMessage → same-origin (RP_FACEBOOK_CREATE cached)");
-            } catch (e) {
-              console.warn("[intake.js] failed to send RP_FACEBOOK_CREATE", e);
-            }
-
-            // 2) Window handling — prefer the user-gesture stub, otherwise open now
-            let fbWin = window.__rpFbWin || null;
-            const FB_URL = "https://www.facebook.com/marketplace/create/item";
-            console.log("[intake.js] fbWin.stub", { hasStub: !!fbWin, closed: !!fbWin?.closed });
-  
-            if (!fbWin || fbWin.closed) {
-              // No stub available: try to open now (still may be blocked without a user gesture)
-              fbWin = window.open(FB_URL, "_blank", "popup=1");  // no 'noopener'
-              const opened = !!fbWin && !fbWin.closed;
-              console.log("[intake.js] open.fb →", { opened });
-            
-              if (!opened) {
-                console.warn("[intake.js] popup blocked — allow popups for resellpros.com to auto-open Facebook.");
-                if (typeof window.uiToast === "function") {
-                  window.uiToast("Popup blocked — please allow popups for resellpros.com, then click Save again to open Facebook.");
-                } else {
-                  // fall back to non-blocking console notice instead of alert
-                  console.log("Popup blocked — please allow popups for resellpros.com, then click Save again to open Facebook.");
-                }
-                console.groupEnd?.();
-                return;
-              }
-            } else {
-              // Reuse the stub we opened on the user click
-              console.log("reuse.stubWindow → navigate", FB_URL);
-              try { fbWin.location.href = FB_URL; } catch (e) { console.warn("nav to FB_URL failed", e); }
-            }
-  
-            // 3) (Optional secondary path) also try direct cross-origin postMessage to facebook.com
-            const post = () => {
-              try {
-                fbWin.postMessage({ source: "resellpro", type: "facebook:intake", payload }, "https://www.facebook.com");
-                console.log("[intake.js] postMessage → facebook.com (queued)");
-              } catch (e) {
-                console.warn("[intake.js] postMessage failed (retrying)", e);
-              }
-            };
-  
-            console.log("[intake.js] post.start");
-            post();
-            const t = setInterval(post, 1000);
-  
-            setTimeout(() => {
-              clearInterval(t);
-              const __t1 = performance.now();
-              console.log("[intake.js] facebook:intake → done", { ms: Math.round(__t1 - __t0) });
-              console.groupEnd?.();
-            }, 8000);
-        });
-
-
-
-
-        /** Refresh when the FB tab signals it’s done (dry-run or real) */
-        window.addEventListener("message", (ev) => {
-          try {
-            const okOrigin =
-              ev.origin === location.origin || ev.origin === "https://www.facebook.com";
-            if (!okOrigin) return;
-            if (ev.data && ev.data.type === "facebook:create:done") {
-              refreshFacebookTile();
-            }
-          } catch {}
-        });
-
-        /** Also refresh when user returns focus from the FB window */
-        window.addEventListener("focus", () => {
-          setTimeout(() => { try { refreshFacebookTile(); } catch {} }, 300);
-        });
-
-        // begin vendoo process
-        // ===== Vendoo: payload builder + emit helper (Tampermonkey bridge) =====
-        function rpBuildVendooPayload(detail) {
-          console.log("[vendoo] rpBuildVendooPayload: incoming detail", detail);
-        
-          if (!detail || typeof detail !== "object") {
-            console.warn("[vendoo] rpBuildVendooPayload: invalid detail");
-            return null;
-          }
-        
-          const {
-            saveStatus,
-            save_status,
-            intent,
-            marketplaces_selected,
-            item,
-            listing,
-            inventory_meta,
-            images,
-            ebay_payload_snapshot,
-            vendoo_mapping: vendoo_mapping_incoming,
-          } = detail;
-          
-          // MUST BE OUTSIDE the destructuring
-          const rawMap =
-            vendoo_mapping_incoming && typeof vendoo_mapping_incoming === "object"
-              ? vendoo_mapping_incoming
-              : {};
-          
-          const vendoo_mapping = {
-            vendoo_category_key: rawMap.category_key || null,
-            vendoo_category_vendoo: rawMap.category_vendoo || null,
-            vendoo_category_ebay: rawMap.category_ebay || null,
-            vendoo_category_facebook: rawMap.category_facebook || null,
-            vendoo_category_depop: rawMap.category_depop || null,
-          
-            vendoo_condition_main: rawMap.condition_main || null,
-            vendoo_condition_fb: rawMap.condition_fb || null,
-            vendoo_condition_depop: rawMap.condition_depop || null,
-          
-            vendoo_condition_ebay: rawMap.condition_ebay || null,
-            vendoo_condition_ebay_option: rawMap.condition_ebay_option || null,
-          };
-
-          const normalizedSaveStatus = String(saveStatus || save_status || "").toLowerCase();
-          console.log("[vendoo] rpBuildVendooPayload: normalizedSaveStatus", {
-            saveStatus,
-            save_status,
-            normalizedSaveStatus,
-          });
-
-          if (normalizedSaveStatus !== "active") {
-            console.log("[vendoo] rpBuildVendooPayload: skipping non-active save", {
-              saveStatus,
-              save_status,
-            });
-            return null;
-          }
-
-          console.log("[vendoo] rpBuildVendooPayload: normalized vendoo_mapping", {
-            vendoo_mapping_incoming,
-            vendoo_mapping,
-          });
-
-        
-          // Prefer intent.marketplaces from the server; fall back to marketplaces_selected.
-          const rawIntentMarketplaces = Array.isArray(intent?.marketplaces)
-            ? intent.marketplaces
-            : Array.isArray(marketplaces_selected)
-            ? marketplaces_selected
-            : [];
-        
-          console.log("[vendoo] rpBuildVendooPayload: raw intent sources", {
-            intentFromServer: intent?.marketplaces || null,
-            marketplaces_selected: marketplaces_selected || null,
-            rawIntentMarketplaces,
-            intentType: intent?.type || null,
-          });
-        
-          // Normalize to objects so fallback string arrays like ["vendoo"] still work.
-          const intentMarketplaces = (rawIntentMarketplaces || []).map((m) => {
-            if (typeof m === "string") {
-              const normalized = {
-                slug: m,
-                marketplace_id: null,
-                operation: "create",
-                selected: true,
-              };
-              console.log("[vendoo] rpBuildVendooPayload: normalized string marketplace to object", {
-                original: m,
-                normalized,
-              });
-              return normalized;
-            }
-        
-            const normalized = m || {};
-            console.log("[vendoo] rpBuildVendooPayload: normalized marketplace object", {
-              original: m,
-              normalized,
-            });
-            return normalized;
-          });
-        
-          console.log("[vendoo] rpBuildVendooPayload: normalized intentMarketplaces", {
-            intentMarketplaces,
-          });
-        
-          // Marketplace id 13 is Vendoo in our schema.
-          const vendooIntent =
-            intentMarketplaces.find((m) => {
-              const slug = String(m?.slug || "").toLowerCase();
-              const isVendoo =
-                slug === "vendoo" || String(m?.marketplace_id) === "13";
-              if (isVendoo) {
-                console.log("[vendoo] rpBuildVendooPayload: vendoo candidate matched", {
-                  candidate: m,
-                  slug,
-                });
-              } else {
-                console.log("[vendoo] rpBuildVendooPayload: marketplace candidate skipped", {
-                  candidate: m,
-                  slug,
-                });
-              }
-              return isVendoo;
-            }) || null;
-        
-          if (!vendooIntent) {
-            console.log("[vendoo] rpBuildVendooPayload: no vendoo marketplace intent found", {
-              intentMarketplaces,
-            });
-            return null;
-          }
-        
-          console.log("[vendoo] rpBuildVendooPayload: using vendooIntent", {
-            vendooIntent,
-          });
-        
-          const vendooOperation = String(vendooIntent.operation || "").toLowerCase() || "create";
-          if (vendooOperation !== "create") {
-            console.log("[vendoo] rpBuildVendooPayload: vendoo operation is not create; skip", {
-              vendooOperation,
-            });
-            return null;
-          }
-        
-          // ---------- NEW: normalize snapshot + inventory + images ----------
-          const snapshot =
-            ebay_payload_snapshot && typeof ebay_payload_snapshot === "object"
-              ? ebay_payload_snapshot
-              : null;
-        
-          const listingProfile =
-            snapshot && typeof snapshot.listing_profile === "object"
-              ? snapshot.listing_profile
-              : null;
-        
-          const marketplaceListing =
-            snapshot && typeof snapshot.marketplace_listing === "object"
-              ? snapshot.marketplace_listing
-              : null;
-        
-          const inventory =
-            inventory_meta && typeof inventory_meta === "object"
-              ? inventory_meta
-              : null;
-        
-          const normalizedImages = Array.isArray(images) ? images : [];
-        
-          // Flatten fields expected by Vendoo userscript (p.xxx).
-          const flattened = {
-            // Title + description
-            title:
-              (listingProfile && listingProfile.product_short_title) ||
-              (inventory && inventory.product_short_title) ||
-              null,
-            description:
-              (listingProfile && listingProfile.product_description) ||
-              null,
-        
-            // Brand
-            brand:
-              (listingProfile && listingProfile.brand_name) ||
-              (inventory && inventory.brand_name) ||
-              null,
-        
-            // Condition (favor Vendoo mapping if present)
-            condition:
-              (vendoo_mapping && vendoo_mapping.condition_main) ||
-              (listingProfile && listingProfile.item_condition) ||
-              null,
-        
-            // Primary color
-            primaryColor:
-              (listingProfile && listingProfile.primary_color) ||
-              null,
-        
-            // Category: prefer Vendoo mapping, then RP listing category, then inventory category_nm
-            category:
-              (vendoo_mapping && (vendoo_mapping.category_vendoo || vendoo_mapping.category_key)) ||
-              (listingProfile && listingProfile.listing_category) ||
-              (inventory && (inventory.category_nm || inventory.category_name)) ||
-              null,
-        
-            // SKU from inventory or item
-            sku:
-              (inventory && (inventory.sku || inventory.SKU)) ||
-              (item && (item.sku || item.SKU)) ||
-              null,
-        
-            // ZIP: marketplace listing shipping ZIP, fall back to inventory_meta if present
-            zip:
-              (marketplaceListing && marketplaceListing.shipping_zip) ||
-              (inventory && inventory.shipping_zip) ||
-              null,
-        
-            // Quantity from inventory
-            quantity:
-              (inventory && typeof inventory.quantity === "number" && inventory.quantity) ||
-              (inventory && typeof inventory.stock === "number" && inventory.stock) ||
-              (inventory &&
-                typeof inventory.qty !== "undefined" &&
-                !Number.isNaN(Number(inventory.qty)) &&
-                Number(inventory.qty)) ||
-              null,
-        
-            // Price from eBay marketplace listing snapshot, fall back to inventory price
-            price:
-              (marketplaceListing &&
-                typeof marketplaceListing.buy_it_now_price !== "undefined" &&
-                marketplaceListing.buy_it_now_price) ||
-              (inventory &&
-                typeof inventory.price !== "undefined" &&
-                inventory.price) ||
-              null,
-        
-            // Cost of goods from inventory
-            costOfGoods:
-              (inventory &&
-                typeof inventory.cost_of_goods !== "undefined" &&
-                inventory.cost_of_goods) ||
-              null,
-        
-            // Weight + dimensions from listing profile
-            weightLb:
-              (listingProfile &&
-                typeof listingProfile.weight_lb !== "undefined" &&
-                listingProfile.weight_lb) ||
-              null,
-            weightOz:
-              (listingProfile &&
-                typeof listingProfile.weight_oz !== "undefined" &&
-                listingProfile.weight_oz) ||
-              null,
-            length:
-              (listingProfile &&
-                typeof listingProfile.shipbx_length !== "undefined" &&
-                listingProfile.shipbx_length) ||
-              null,
-            width:
-              (listingProfile &&
-                typeof listingProfile.shipbx_width !== "undefined" &&
-                listingProfile.shipbx_width) ||
-              null,
-            height:
-              (listingProfile &&
-                typeof listingProfile.shipbx_height !== "undefined" &&
-                listingProfile.shipbx_height) ||
-              null,
-          };
-        
-          console.log("[vendoo] rpBuildVendooPayload: flattened fields for Vendoo script", flattened);
-        
-          // ---------- Build final payload ----------
-          const payload = {
-            __token: "MRAD_VENDOO_V1",       // ⭐ REQUIRED BY TAMPERMONKEY
-            source: "resell-pro",
-            mode: "single",
-            save_status: normalizedSaveStatus,
-        
-            // Core listing context (still passed through)
-            item: item || null,
-            listing: listing || null,
-            inventory_meta: inventory_meta || null,
-        
-            // Images (metadata only; Tampermonkey can use later)
-            images: normalizedImages,
-        
-            // Marketplace selections (server-normalized)
-            marketplaces_selected: intentMarketplaces,
-        
-            // eBay payload snapshot is the main bridge we’ll reuse for Vendoo mapping logic.
-            ebay_payload_snapshot: snapshot,
-        
-            // Normalized Vendoo mapping so Tampermonkey doesn't need to hit Neon.
-            vendoo_mapping,
-        
-            // Flattened top-level fields consumed by the Vendoo userscript.
-            // These match the "p.xxx" expectations in the Tampermonkey code.
-            ...flattened,
-          };
-        
-          console.log("[vendoo] rpBuildVendooPayload: built payload", payload);
-          return payload;
-        }
-
-      
-        async function __emitVendooReadyIfSafe(detail) {
-          try {
-            console.log("[vendoo] __emitVendooReadyIfSafe: entry", { detail });
-      
-            if (!detail || typeof detail !== "object") {
-              console.warn("[vendoo] __emitVendooReadyIfSafe: missing or invalid detail");
-              return;
-            }
-      
-           const { ok, status, marketplaces_selected } = detail || {};
-
-          
-          // If ok is undefined (because this isn't a raw API response),
-          // we allow the Vendoo flow to continue.
-          if (ok === false) {
-            console.log("[vendoo] __emitVendooReadyIfSafe: explicit failure; skip", {
-              ok,
-              status,
-            });
-            return;
-          }
-          
-          console.log("[vendoo] __emitVendooReadyIfSafe: OK-check passed", {
-            ok,
-            status,
-            hasMarketplacesSelected: !!marketplaces_selected,
-          });
-      
-            const payload = rpBuildVendooPayload(detail);
-            if (!payload) {
-              console.log("[vendoo] __emitVendooReadyIfSafe: rpBuildVendooPayload returned null; skip");
-              return;
-            }
-      
-            const evDetail = {
-              type: "mrad_vendoo_fill",
-              payload: {
-                ...payload,
-                vendoo_mapping: detail.vendoo_mapping || null,   // ⭐ FIX
-                __token: payload.__token || "MRAD_VENDOO_V1"
-              },
-              marketplaces_selected: marketplaces_selected || null,
-            };
-      
-            console.log("[vendoo] __emitVendooReadyIfSafe: dispatching CustomEvent", evDetail);
-            document.dispatchEvent(
-              new CustomEvent("intake:vendoo-ready", {
-                detail: evDetail,
-              })
-            );
-          } catch (err) {
-            console.warn("[vendoo] __emitVendooReadyIfSafe: error", err);
-          }
-        }
-      
-        // Vendoo: bridge to Tampermonkey (same pattern as Facebook).
-        document.addEventListener("intake:vendoo-ready", (ev) => {
-          try {
-            const detail = ev?.detail || {};
-            console.log("[vendoo] intake:vendoo-ready event", detail);
-            
-            // Derive payload from event detail
-            console.log("[vendoo] raw detail.payload", detail.payload);
-            const payload = detail.payload || {};
-            console.log("[vendoo] derived payload before token", payload);
-            
-            // Ensure token always present
-            if (!payload.__token) {
-              console.log("[vendoo] __token missing on payload, setting default token");
-              payload.__token = "MRAD_VENDOO_V1";
-            } else {
-              console.log("[vendoo] __token already present on payload", payload.__token);
-            }
-            
-            console.log("[vendoo] payload after token ensure", payload);
-        
-            // Tampermonkey listens for "mrad_vendoo_fill"
-            const message = {
-              type: "mrad_vendoo_fill",
-              payload: detail.payload || null,
-              marketplaces_selected: detail.marketplaces_selected || null,
-            };
-
-           // 1. Open Vendoo window (required so Tampermonkey loads)
-          let vendooWin = window.open("https://web.vendoo.co/app/item/new", "_blank");
-          
-          if (!vendooWin || vendooWin.closed) {
-            console.warn("[vendoo] popup blocked – allow popups for resellpros.com");
-          } else {
-            console.log("[vendoo] Vendoo window opened");
-          }
-          
-          // 2. Post message to Tampermonkey in THIS window
-          console.log("[vendoo] posting message to window for Tampermonkey", message);
-          window.postMessage(message, "*");
-          
-           // 3. ALSO send the payload into the Vendoo tab (Tampermonkey listens there too)
-            try {
-              vendooWin.postMessage(message, "*");
-              console.log("[vendoo] posted message to Vendoo window");
-            } catch (e) {
-              console.warn("[vendoo] failed to post to vendooWin", e);
-            }
-          } catch (err) {
-            console.warn("[vendoo] intake:vendoo-ready handler error", err);
-          }
-        });
-        //end vendoo process 
-
-
-  
-// --- Drafts refresh bus + helpers (anchored insert) ---
-let __draftsRefreshTimer = null;
-
-function isDraftsTabVisible() {
-  const tab = document.querySelector('[data-tab="drafts"], #tabDrafts, #draftsTab');
-  const host = tab || document.getElementById("recentDraftsTbody")?.closest("section,div,table");
-  if (!host) return true; // if we can't detect, allow refresh
-  const hiddenByAttr = host.getAttribute("hidden") != null;
-  const hiddenByClass = host.classList.contains("hidden");
-  return !(hiddenByAttr || hiddenByClass);
-}
-
-async function refreshDrafts({ force = false } = {}) {
-  console.groupCollapsed("[intake.debug] refreshDrafts()", { force, tabVisible: isDraftsTabVisible() });
-  try {
-    if (!force && !isDraftsTabVisible()) { console.log("skip: drafts tab hidden"); return; }
-    if (__draftsRefreshTimer) window.clearTimeout(__draftsRefreshTimer);
-    __draftsRefreshTimer = window.setTimeout(async () => {
-      const t0 = performance.now();
-      try {
-        const header = document.querySelector('#recentDraftsHeader, [data-recent-drafts-header]');
-        if (header) header.classList.add("loading");
-        const fn = (window && window.__loadDrafts) || (typeof loadDrafts === "function" ? loadDrafts : null);
-        console.log("call loadDrafts()", { hasWrapper: !!window.__loadDrafts, found: !!fn });
-        if (fn) { await fn(); }
-        console.log("loadDrafts() done", { elapsed_ms: Math.round(performance.now() - t0) });
-      } catch (e) {
-        console.error("refreshDrafts.error", e);
-      } finally {
-        const header = document.querySelector('#recentDraftsHeader, [data-recent-drafts-header]');
-        if (header) header.classList.remove("loading");
-        __draftsRefreshTimer = null;
-      }
-    }, 300);
-  } finally {
-    console.groupEnd?.();
-  }
-}
-
-// Central event to refresh Drafts after successful add/save/delete
-document.addEventListener("intake:item-changed", () => refreshDrafts({ force: true }));
-// --- end Drafts refresh bus ---
-
-// --- Inventory refresh bus + helpers (NEW) ---
-let __inventoryRefreshTimer = null;
-
-function isInventoryTabVisible() {
-  const pane = document.getElementById("paneInventory");
-  if (!pane) return true;
-  const hiddenByAttr = pane.getAttribute("hidden") != null;
-  const hiddenByClass = pane.classList.contains("hidden");
-  return !(hiddenByAttr || hiddenByClass);
-}
-
-async function refreshInventory({ force = false } = {}) {
-  console.groupCollapsed("[intake.debug] refreshInventory()", { force, tabVisible: isInventoryTabVisible() });
-  try {
-    if (!force && !isInventoryTabVisible()) { console.log("skip: inventory pane hidden"); return; }
-    if (__inventoryRefreshTimer) window.clearTimeout(__inventoryRefreshTimer);
-    __inventoryRefreshTimer = window.setTimeout(async () => {
-      const t0 = performance.now();
-      try {
-        const header = document.querySelector('#recentInventoryHeader, [data-recent-inventory-header]');
-        if (header) header.classList.add("loading");
-        const fn = (window && window.__loadInventory) || (typeof loadInventory === "function" ? loadInventory : null);
-        console.log("call loadInventory()", { hasWrapper: !!window.__loadInventory, found: !!fn });
-        if (fn) { await fn(); }
-        console.log("loadInventory() done", { elapsed_ms: Math.round(performance.now() - t0) });
-      } catch (e) {
-        console.error("refreshInventory.error", e);
-      } finally {
-        const header = document.querySelector('#recentInventoryHeader, [data-recent-inventory-header]');
-        if (header) header.classList.remove("loading");
-        __inventoryRefreshTimer = null;
-      }
-    }, 300);
-  } finally {
-    console.groupEnd?.();
-  }
-}
-
-// Refresh inventory after add/save/delete when the Inventory tab is open
-document.addEventListener("intake:item-changed", () => refreshInventory({ force: true }));
-// --- end Inventory refresh bus ---
-  
-  
-  
-  function wireValidation() {
-    // Always (re)validate when any required control changes/inputs
-    const controls = [
-      ...getBasicRequiredControls(),
-      ...getMarketplaceRequiredControls(),
-    ];
-  
-    const listen = (el) => {
-      if (!el) return;
-      const evt = (el.tagName === "SELECT") ? "change" : "input";
-      el.addEventListener(evt, computeValidity);
-    };
-  
-    controls.forEach(listen);
-  }
-  
-  // --- end validation helpers ---
-
-  try {
-    // …inside init() for the intake screen…
-    const meta = await loadMeta();
-    
-    // Derive tenant_id once from the meta response; fall back to DOM or localStorage.
-    // Store it in both our local stash and the global ACTIVE_TENANT_ID used by api().
-    (function () {
-      const fromMeta =
-        (meta && (meta.tenant_id || (meta.tenant && (meta.tenant.tenant_id || meta.tenant.id)))) || "";
-      const fromDom =
-        document.documentElement.getAttribute("data-tenant-id") ||
-        (function () {
-          const m = document.querySelector('meta[name="x-tenant-id"]');
-          return m ? m.getAttribute("content") : "";
-        })() ||
-        "";
-      const fromStore = localStorage.getItem("rp:tenant_id") || "";
-    
-      const resolved = String((fromMeta || fromDom || fromStore || "")).trim();
-    
-      // write once for the page lifetime
-      window.__tenantId = resolved;            // used by the multipart upload fetch
-      window.ACTIVE_TENANT_ID = resolved;      // used by the centralized api() helper
-    })();
-    
-    // (your existing code continues here…)
-
-    try {
-      __tenantId =
-        String(
-          (meta && (meta.tenant_id || meta?.tenant?.tenant_id || meta?.tenant?.id)) ||
-          document.documentElement.getAttribute("data-tenant-id") ||
-          localStorage.getItem("rp:tenant_id") ||
-          ""
-        );
-    } catch { __tenantId = ""; }
-
-    // Populate Category (+ show its code hint)
-    fillSelect($("categorySelect"), meta.categories, {
-      textKey: "category_name",
-      valueKey: "category_name",
-      extras: (row) => ({ code: row.category_code }),
-    });
-    wireCategoryCodeHint(meta);
-
-    // Marketplace lists
-    // Categories: already objects with keys
-    fillSelect($("marketplaceCategorySelect"), meta?.marketplace?.categories || [], {
-      textKey: "display_name",
-      valueKey: "category_key",
-      extras: (row) => ({ path: row.path || "" }),
-    });
-    wireMarketplaceCategoryPath();
-    
-    // Brands: accept array of strings OR array of objects
-    {
-      const raw = meta?.marketplace?.brands || [];
-      const asObjects = raw.map(r =>
-        (r && typeof r === "object")
-          ? r
-          : { brand_name: String(r ?? ""), brand_key: String(r ?? "") }
-      );
-      const haveKey = asObjects.length > 0 && !!asObjects[0]?.brand_key;
-      fillSelect($("brandSelect"), asObjects, {
-        textKey: "brand_name",
-        valueKey: haveKey ? "brand_key" : "brand_name",
-      });
-    }
-    
-    // Conditions: accept array of strings OR array of objects
-    {
-      const raw = meta?.marketplace?.conditions || [];
-      const asObjects = raw.map(r =>
-        (r && typeof r === "object")
-          ? r
-          : { condition_name: String(r ?? ""), condition_key: String(r ?? "") }
-      );
-      const haveKey = asObjects.length > 0 && !!asObjects[0]?.condition_key;
-      fillSelect($("conditionSelect"), asObjects, {
-        textKey: "condition_name",
-        valueKey: haveKey ? "condition_key" : "condition_name",
-      });
-    }
-    
-    // Colors: accept array of strings OR array of objects
-    {
-      const raw = meta?.marketplace?.colors || [];
-      const asObjects = raw.map(r =>
-        (r && typeof r === "object")
-          ? r
-          : { color_name: String(r ?? ""), color_key: String(r ?? "") }
-      );
-      const haveKey = asObjects.length > 0 && !!asObjects[0]?.color_key;
-      fillSelect($("colorSelect"), asObjects, {
-        textKey: "color_name",
-        valueKey: haveKey ? "color_key" : "color_name",
-      });
-    }
-
-    // Shipping
-    fillSelect($("shippingBoxSelect"), meta.shipping_boxes, {
-      textKey: "box_name",
-      valueKey: "box_key",
-    });
-    wireShippingBoxAutofill(meta);
-
-    //Render marketplace tiles (below Shipping)
-    __metaCache = meta;
-
-    // Seed selection from per-user defaults for brand NEW items.
-    // When loading an existing item, we override this with applyMarketplaceSelectionForItem().
-    try {
-      const defaults = readDefaults();
-      selectedMarketplaceIds.clear();
-      if (Array.isArray(defaults)) {
-        for (const raw of defaults) {
-          const id = Number(raw);
-          if (!Number.isNaN(id)) {
-            selectedMarketplaceIds.add(id);
-          }
-        }
-      }
-    } catch {}
-
-    renderMarketplaceTiles(meta);
-    // Render placeholder cards for any preselected tiles (from defaults)
-    try { renderMarketplaceCards(__metaCache); } catch {}
-      // Ensure the Facebook card reflects whatever Neon already knows on first paint
-      try { await refreshFacebookTile(); } catch {}
-      // === Hydrate per-user marketplace defaults (eBay) ===
-      async function hydrateUserDefaults() {
-        try {
-          const res = await api(`/api/inventory/user-defaults?marketplace=ebay`, { method: "GET" });
-          if (!res || res.ok === false || !res.defaults) return;
-          const d = res.defaults;
-    
-          // 1) Stash policy ids so the async policy loader can re-apply after options arrive.
-          //    If options are already present, we apply immediately as well.
-          try {
-            window.__ebaySavedPolicies = {
-              shipping_policy: d.shipping_policy ?? "",
-              payment_policy:  d.payment_policy  ?? "",
-              return_policy:   d.return_policy   ?? "",
-            };
-            const tryApply = (id, val) => {
-              const el = document.getElementById(id);
-              if (!el) return;
-              // only set if the option list is populated
-              if (el.options && el.options.length > 0 && val) el.value = String(val);
-            };
-            tryApply("ebay_shippingPolicy", d.shipping_policy);
-            tryApply("ebay_paymentPolicy",  d.payment_policy);
-            tryApply("ebay_returnPolicy",   d.return_policy);
-          } catch {}
-    
-          // 2) Non-policy fields can be set directly.
-          const zipEl = document.getElementById("ebay_shipZip");
-          if (zipEl && d.shipping_zip) zipEl.value = d.shipping_zip;
-    
-          const fmtEl = document.getElementById("ebay_formatSelect");
-          if (fmtEl && d.pricing_format) fmtEl.value = String(d.pricing_format);
-    
-          const bestEl = document.getElementById("ebay_bestOffer");
-          if (bestEl && typeof d.allow_best_offer === "boolean") bestEl.checked = d.allow_best_offer;
-    
-          const promEl = document.getElementById("ebay_promote");
-          if (promEl && typeof d.promote === "boolean") promEl.checked = d.promote;
-    
-          // 3) Re-apply visibility rules and any dependent logic
-          try {
-            document.getElementById("ebay_formatSelect")?.dispatchEvent(new Event("change"));
-            document.getElementById("ebay_bestOffer")?.dispatchEvent(new Event("change"));
-            document.getElementById("ebay_promote")?.dispatchEvent(new Event("change"));
-          } catch {}
-
-          // 4) Re-check validity now that pre-selected marketplace defaults are applied
-          try {
-            computeValidity();
-          } catch {}
-        } catch {}
-      }
-    
-    // Hydrate after cards exist
-    try { await hydrateUserDefaults(); } catch {}
-    // Store + channel
-    fillSelect($("storeLocationSelect"), meta.store_locations);
-    fillSelect($("salesChannelSelect"), meta.sales_channels);
-    
-    // Toggle marketplace card on load + when channel changes
-    setMarketplaceVisibility();
-    const salesSel = $("salesChannelSelect");
-    if (salesSel) salesSel.addEventListener("change", () => {
-      setMarketplaceVisibility();
-      computeValidity(); // re-check requireds when channel changes
+    // Resolve eBay marketplace id once per request
+    const ebayRow = await sql<{ id: number }[]>`SELECT id FROM app.marketplaces_available WHERE slug = 'ebay' LIMIT 1`;
+    const EBAY_MARKETPLACE_ID = ebayRow[0]?.id ?? null;
+    console.log("[intake] ctx", {
+      tenant_id,
+      actor_user_id,
+      EBAY_MARKETPLACE_ID,
+      request_ms: Date.now() - t0
     });
 
-    // [NEW] Default QTY to 1 if empty
-    {
-      const qty = resolveControl(null, "Qty");
-      if (qty && String(qty.value || "").trim() === "") {
-        qty.value = "1";
-      }
-    }
-
-    // Collect all controls inside a container (inputs, selects, textareas)
-    function controlsIn(el) {
-      if (!el) return [];
-      return Array.from(el.querySelectorAll("input, select, textarea"))
-        // exclude deliberately disabled controls
-        .filter(n => !n.disabled && n.type !== "hidden");
-    }
-    
-
-    // Apply placeholders if any list was empty
-    ensurePlaceholder($("categorySelect"));
-    ensurePlaceholder($("marketplaceCategorySelect"));
-    ensurePlaceholder($("brandSelect"));
-    ensurePlaceholder($("conditionSelect"));
-    ensurePlaceholder($("colorSelect"));
-    ensurePlaceholder($("shippingBoxSelect"));
-    ensurePlaceholder($("storeLocationSelect"));
-    ensurePlaceholder($("salesChannelSelect"));
-
-    // Pre-fill the Long Description field if empty
-    ensureDefaultLongDescription();
-
-    // If we arrived here from a Duplicate action, hydrate from the stashed seed
-      try {
-        hydrateFromDuplicateSeed();
-      } catch (e) {
-        console.error("[intake.js] hydrateFromDuplicateSeed failed", e);
-      }
-    
-    // Wire and run initial validation
-    wireValidation();
-    computeValidity();
-    
-    // Auto-load drafts into the Drafts tab on screen load (does not auto-switch the tab)
-    console.groupCollapsed("[intake.debug] init → loadDrafts (first paint)");
-    try {
-      const t0 = performance.now();
-      if (typeof loadDrafts === "function") {
-        const out = await loadDrafts();
-        console.log("loadDrafts() resolved", { type: typeof out });
-      } else {
-        console.log("loadDrafts() not found at init");
-      }
-      console.log("elapsed_ms", Math.round(performance.now() - t0));
-    } catch (e) {
-      console.error("loadDrafts.init.error", e);
-    } finally {
-      console.groupEnd?.();
-    }
-    
-    // True tab wiring (ARIA tabs + lazy-load for Inventory)
-    (function wireIntakeTabs() {
-      const tabBulk       = document.getElementById("tabBulk");
-      const tabDrafts     = document.getElementById("tabDrafts");
-      const tabInventory  = document.getElementById("tabInventory");
-      const paneBulk      = document.getElementById("paneBulk");
-      const paneDrafts    = document.getElementById("paneDrafts");
-      const paneInventory = document.getElementById("paneInventory");
-
-      const tabs  = [tabDrafts, tabInventory, tabBulk].filter(Boolean);
-      const panes = [paneDrafts, paneInventory, paneBulk].filter(Boolean);
-
-      function setSelected(tabEl, isSelected) {
-        if (!tabEl) return;
-        tabEl.setAttribute("aria-selected", String(isSelected));
-        tabEl.tabIndex = isSelected ? 0 : -1;
-
-        // Visual affordance: make the selected tab look active/primary
-        tabEl.classList.toggle("btn-primary", isSelected);
-        tabEl.classList.toggle("btn-ghost", !isSelected);
-      }
-
-      function showPane(paneEl) {
-        panes.forEach((p) => {
-          if (!p) return;
-          const active = p === paneEl;
-          // Native hide
-          p.hidden = !active;
-          // Utility class (kept for visual parity with existing CSS)
-          p.classList.toggle("hidden", !active);
-          // ARIA state for assistive tech
-          if (active) p.removeAttribute("aria-hidden");
-          else p.setAttribute("aria-hidden", "true");
-        });
-      }
-
-      function activate(tabEl, paneEl) {
-        tabs.forEach((t) => setSelected(t, t === tabEl));
-        showPane(paneEl);
-        if (tabEl) tabEl.focus();
-      }
-
-      // Click behavior
-      tabDrafts?.addEventListener("click", async (e) => {
-        e.preventDefault();
-        console.groupCollapsed("[intake.debug] CLICK → Drafts tab");
-        try {
-          activate(tabDrafts, paneDrafts);
-          const t0 = performance.now();
-          const fn = (typeof loadDrafts === "function") ? loadDrafts : null;
-          console.log("activate(drafts) + call loadDrafts()", { found: !!fn });
-          if (fn) { await fn(); }
-          console.log("loadDrafts() completed", { elapsed_ms: Math.round(performance.now() - t0) });
-        } catch (err) {
-          console.error("tabDrafts.click.error", err);
-        } finally {
-          console.groupEnd?.();
-        }
-      });
-      
-      tabInventory?.addEventListener("click", async (e) => {
-        e.preventDefault();
-        console.groupCollapsed("[intake.debug] CLICK → Inventory tab");
-        try {
-          activate(tabInventory, paneInventory);
-          const t0 = performance.now();
-          const fn = (typeof loadInventory === "function") ? loadInventory : null;
-          console.log("activate(inventory) + call loadInventory()", { found: !!fn });
-          if (fn) { await fn(); }
-          console.log("loadInventory() completed", { elapsed_ms: Math.round(performance.now() - t0) });
-        } catch (err) {
-          console.error("tabInventory.click.error", err);
-        } finally {
-          console.groupEnd?.();
-        }
-      });
-
-      // Bulk is disabled/placeholder for now
-      tabBulk?.addEventListener("click", () => {
-        activate(tabBulk, paneBulk);
-      });
-
-      // Keyboard behavior (Left/Right/Home/End) for accessibility
-      const KEY = { LEFT: 37, RIGHT: 39, HOME: 36, END: 35 };
-      document.getElementById("intakeTabBar")?.addEventListener("keydown", (e) => {
-        const current = document.activeElement;
-        if (!tabs.includes(current)) return;
-
-        let idx = tabs.indexOf(current);
-        if (e.keyCode === KEY.LEFT)  { idx = (idx - 1 + tabs.length) % tabs.length; }
-        if (e.keyCode === KEY.RIGHT) { idx = (idx + 1) % tabs.length; }
-        if (e.keyCode === KEY.HOME)  { idx = 0; }
-        if (e.keyCode === KEY.END)   { idx = tabs.length - 1; }
-
-        if (idx !== -1 && tabs[idx]) {
-          e.preventDefault();
-          tabs[idx].click();
-        }
-      });
-
-      // Default: Drafts selected, Inventory hidden
-      activate(tabDrafts, paneDrafts);
-    })();
-
-    // [intake.debug] Targeted fetch logger – instrumentation for edge cases
-    (function rpInstrumentFetchOnce() {
-      if (window.__rpFetchInstrumented) return;
-      window.__rpFetchInstrumented = true;
-
-      const origFetch = window.fetch;
-      if (!origFetch) return;
-
-      window.fetch = async (...args) => {
-        const [input, init] = args;
-        const url = (typeof input === "string") ? input : input?.url;
-        const started = performance.now();
-        try {
-          const res = await origFetch(...args);
-          const ms = Math.round(performance.now() - started);
-          if (url && String(url).includes("/api/inventory")) {
-            console.log("[intake.fetch]", { url, status: res.status, ms });
-          }
-          return res;
-        } catch (err) {
-          const ms = Math.round(performance.now() - started);
-          if (url && String(url).includes("/api/inventory")) {
-            console.error("[intake.fetch.error]", { url, ms, err });
-          }
-          throw err;
-        }
-      };
-    })();
-
-     // Inventory Image Viewer: click thumbnails in Active Inventory to open a lightbox
-    (function wireInventoryImageViewer() {
-      try {
-        const dialog   = document.getElementById("inventoryImageViewer");
-        const imgTarget = document.getElementById("inventoryImageViewerImg");
-        const tbody    = document.getElementById("recentInventoryTbody");
-
-        // If any of the pieces are missing, quietly no-op
-        if (!dialog || !imgTarget || !tbody) return;
-
-        const closeBtn = dialog.querySelector("button[type='submit']");
-
-        // Open on thumbnail click
-        tbody.addEventListener("click", (event) => {
-          const target = event.target;
-          if (!(target instanceof HTMLElement)) return;
-
-          // Find the nearest <img> inside the clicked cell
-          const img = target.closest("img");
-          if (!img) return;
-
-          const src =
-            img.getAttribute("data-full-src") ||
-            img.getAttribute("src");
-
-          if (!src) return;
-
-          event.preventDefault();
-
-          imgTarget.src = src;
-          imgTarget.alt = img.getAttribute("alt") || "Item image";
-
-          if (typeof dialog.showModal === "function") {
-            dialog.showModal();
-          } else if (typeof dialog.show === "function") {
-            dialog.show();
-          } else {
-            // Very old browsers: fall back to setting the open attribute
-            dialog.setAttribute("open", "true");
-          }
-        });
-
-        // Explicit Close button wiring (don’t rely solely on form method="dialog")
-        if (closeBtn) {
-          closeBtn.addEventListener("click", (ev) => {
-            ev.preventDefault();
-            try {
-              dialog.close();
-            } catch {
-              dialog.removeAttribute("open");
-            }
-          });
-        }
-
-        // Click on backdrop (outside card) closes the dialog
-        dialog.addEventListener("click", (ev) => {
-          if (ev.target === dialog) {
-            try {
-              dialog.close();
-            } catch {
-              dialog.removeAttribute("open");
-            }
-          }
-        });
-
-        // Escape key closes the dialog when open
-        document.addEventListener("keydown", (ev) => {
-          if (ev.key === "Escape" && dialog.open) {
-            try {
-              dialog.close();
-            } catch {
-              dialog.removeAttribute("open");
-            }
-          }
-        });
-      } catch (err) {
-        console.warn("[intake.js] wireInventoryImageViewer failed", err);
-      }
-    })();
-    
-    // --- [NEW] Submission wiring: both buttons call POST /api/inventory/intake
-
-    function valByIdOrLabel(id, label) {
-      const el = id ? document.getElementById(id) : null;
-      if (el) return el.value ?? "";
-      const byLbl = findControlByLabel(label || "");
-      return byLbl ? (byLbl.value ?? "") : "";
-    }
-
-    // NEW: Collect eBay-specific marketplace listing fields and coerce types.
-    // Maps directly to app.item_marketplace_listing columns.
-    function getEbayListingFields() {
-      const fmt = (document.getElementById("ebay_formatSelect")?.value || "").toLowerCase(); // "fixed" | "auction" | ""
-      const isFixed   = fmt === "fixed";
+    // Normalize/null-out eBay fields according to pricing_format & toggles
+    const normalizeEbay = (src: any) => {
+      if (!src || typeof src !== "object") return null;
+      const s: any = { ...src };
+      const fmt = String(s.pricing_format || "").toLowerCase();
+      const isFixed = fmt === "fixed";
       const isAuction = fmt === "auction";
-
-      // raw values
-      const shipping_policy = document.getElementById("ebay_shippingPolicy")?.value || "";
-      const payment_policy  = document.getElementById("ebay_paymentPolicy")?.value || "";
-      const return_policy   = document.getElementById("ebay_returnPolicy")?.value || "";
-      const shipping_zip    = document.getElementById("ebay_shipZip")?.value || "";
-      const pricing_format  = fmt || "";
-
-      // numbers (coerce only if non-empty)
-      const num = (id) => {
-        const v = document.getElementById(id)?.value ?? "";
-        return String(v).trim() === "" ? undefined : Number(v);
-      };
-
-      const buy_it_now_price   = num("ebay_bin");
-      const starting_bid       = num("ebay_start");
-      const reserve_price      = num("ebay_reserve");
-      const promote_percent    = num("ebay_promotePct");
-      const auto_accept_amount = num("ebay_autoAccept");
-      const minimum_offer_amount = num("ebay_minOffer");
-
+      // coerce numbers
+      const toNum = (v: any) => (v === "" || v == null ? null : Number(v));
+      s.buy_it_now_price     = toNum(s.buy_it_now_price);
+      s.starting_bid         = toNum(s.starting_bid);
+      s.reserve_price        = toNum(s.reserve_price);
+      s.promote_percent      = toNum(s.promote_percent);
+      s.auto_accept_amount   = toNum(s.auto_accept_amount);
+      s.minimum_offer_amount = toNum(s.minimum_offer_amount);
       // booleans
-      const allow_best_offer = !!document.getElementById("ebay_bestOffer")?.checked;
-      const promote          = !!document.getElementById("ebay_promote")?.checked;
+      s.promote = !!s.promote;
+      s.allow_best_offer = !!s.allow_best_offer;
+      // strings
+      s.shipping_policy = (s.shipping_policy ?? "").trim() || null;
+      s.payment_policy  = (s.payment_policy  ?? "").trim() || null;
+      s.return_policy   = (s.return_policy   ?? "").trim() || null;
+      s.shipping_zip    = (s.shipping_zip    ?? "").trim() || null;
+      s.pricing_format  = fmt || null;
+      s.duration        = (s.duration ?? "").trim() || null;
 
-      // “Duration” (present in UI); DB column may not exist yet — send anyway so backend can adopt later.
-      const duration = document.getElementById("ebay_duration")?.value || "";
-
-      // prune helper (drop empty strings/undefined/null)
-      const prune = (obj) => {
-        const out = {};
-        for (const [k, v] of Object.entries(obj || {})) {
-          if (v === null || v === undefined) continue;
-          if (typeof v === "string" && v.trim() === "") continue;
-          out[k] = v;
+      // visibility rules -> null
+      if (isFixed) {
+        s.starting_bid = null;
+        s.reserve_price = null;
+        s.duration = null;
+        if (!s.allow_best_offer) {
+          s.auto_accept_amount = null;
+          s.minimum_offer_amount = null;
         }
-        return out;
-      };
+      }
+      if (!s.promote) s.promote_percent = null;
 
-      // Respect Fixed vs Auction visibility rules
-      const base = {
-        shipping_policy,
-        payment_policy,
-        return_policy,
-        shipping_zip,
-        pricing_format,
-        buy_it_now_price,
-        allow_best_offer: isFixed ? allow_best_offer : undefined,
-        auto_accept_amount: isFixed && allow_best_offer ? auto_accept_amount : undefined,
-        minimum_offer_amount: isFixed && allow_best_offer ? minimum_offer_amount : undefined,
-        promote,
-        promote_percent: promote ? promote_percent : undefined,
-      };
+        return s;
+    };
 
-      const auctionExtras = isAuction ? {
-        duration,
-        starting_bid,
-        reserve_price,
-      } : {};
+     // ===== Long Description Composer (hard-coded v1) =====
+    const BASE_SENTENCE =
+      "The photos are part of the description. Be sure to look them over for condition and details. This is sold as is, and it's ready for a new home.";
 
-              return prune({ ...base, ...auctionExtras });
-        }
-    
-        function hydrateEbayFromSaved(ebay, ebayMarketplaceId) {
-          if (!ebay) return;
-        
-          // Stash saved policy ids globally so the policy-loader can re-apply AFTER options arrive
-          try {
-            window.__ebaySavedPolicies = {
-              shipping_policy: ebay.shipping_policy ?? "",
-              payment_policy:  ebay.payment_policy  ?? "",
-              return_policy:   ebay.return_policy   ?? ""
-            };
-          } catch {}
-        
-          // Reflect persisted listing status on the card
-          // app.item_marketplace_listing(status, mp_item_url) -> ebay.status, ebay.mp_item_url
-          // Map: live -> "Listed" (green, linkable); publishing -> "Publishing…"; error -> "Error"; else -> "Not Listed"
-          try {
-            const raw = String(ebay.status || "").toLowerCase();
-            const url = ebay.mp_item_url || null;
-            if (raw === "live") {
-              setEbayStatus("Listed", { tone: "ok", link: url || null });
-            } else if (raw === "publishing" || raw === "processing") {
-              setEbayStatus("Publishing…", { tone: "info" });
-            } else if (raw === "error" || raw === "failed" || raw === "dead") {
-              setEbayStatus("Error", { tone: "error" });
-            } else {
-              setEbayStatus("Not Listed", { tone: "muted" });
-            }
-          } catch {}
-        
-          // Now set values inside the eBay card
-          const setVal = (sel, v) => { if (sel) sel.value = v ?? ""; };
-          const setNum = (id, v) => {
-            const el = document.getElementById(id);
-            if (el) el.value = (v ?? "") === "" ? "" : String(v);
-          };
-          const setChk = (id, v) => {
-            const el = document.getElementById(id);
-            if (el) el.checked = !!v;
-          };
-    
-          // Policies: attempt immediate set (may be overridden by async loader; Patch 1 will re-apply)
-          setVal(document.getElementById("ebay_shippingPolicy"), ebay.shipping_policy);
-          setVal(document.getElementById("ebay_paymentPolicy"),  ebay.payment_policy);
-          setVal(document.getElementById("ebay_returnPolicy"),   ebay.return_policy);
+    // We no longer emit visible markers. Keep regex to strip old marker blocks during save.
+    const LEGACY_BLOCK_RE = /\n*\[⟦AUTO-FOOTER⟧][\s\S]*?\[⟦\/AUTO-FOOTER⟧]\s*$/m;
+    // Also strip any previous plain footer line at the end (SKU … • Location … • Case/Bin/Shelf …)
+    const PLAIN_FOOTER_RE = /\n*\s*SKU:\s*[^\n]*?•\s*Location:\s*[^\n]*?•\s*Case\/Bin\/Shelf:\s*[^\n]*\s*$/m;
 
-          setVal(document.getElementById("ebay_shipZip"),        ebay.shipping_zip);
-    
-          setVal(document.getElementById("ebay_formatSelect"),   ebay.pricing_format);
-          setVal(document.getElementById("ebay_duration"),       ebay.duration);
-    
-          setNum("ebay_bin",       ebay.buy_it_now_price);
-          setNum("ebay_start",     ebay.starting_bid);
-          setNum("ebay_reserve",   ebay.reserve_price);
-          setChk("ebay_bestOffer", ebay.allow_best_offer);
-    
-          setNum("ebay_autoAccept", ebay.auto_accept_amount);
-          setNum("ebay_minOffer",   ebay.minimum_offer_amount);
-    
-          setChk("ebay_promote",    ebay.promote);
-          setNum("ebay_promotePct", ebay.promote_percent);
-    
-          // Re-apply eBay visibility rules so hidden/required states match values
-          try {
-            const fmt = document.getElementById("ebay_formatSelect");
-            const bo  = document.getElementById("ebay_bestOffer");
-            const pr  = document.getElementById("ebay_promote");
-            fmt?.dispatchEvent(new Event("change"));
-            bo?.dispatchEvent(new Event("change"));
-            pr?.dispatchEvent(new Event("change"));
-          } catch {}
-    
-          // Also re-validate the whole form
-          try { computeValidity(); } catch {}
-        }
+    function ensureBaseOnce(text: string): string {
+      const t = String(text || "").trim();
+      if (!t) return BASE_SENTENCE;
+      if (t.includes(BASE_SENTENCE)) return t;
+      return `${BASE_SENTENCE}${t ? "\n\n" + t : ""}`;
+    }
 
-      // Compute per-marketplace intent from the current tile selection.
-    // This is where we encode the “deselect eBay → delete listing” rule.
-    function computeMarketplaceIntent(meta, selectedIds) {
-      const intent = {};
+    function stripAnyFooter(text: string): string {
+      let out = text.replace(LEGACY_BLOCK_RE, "");
+      out = out.replace(PLAIN_FOOTER_RE, "");
+      return out;
+    }
+
+    function upsertFooter(text: string, sku: string | null, instore_loc?: string | null, case_bin_shelf?: string | null): string {
+      // Always ensure base sentence first
+      let safe = ensureBaseOnce(text);
+
+      // Remove any prior footer (legacy block or existing plain line)
+      safe = stripAnyFooter(safe);
+
+      if (!sku) return safe; // Only append footer when a SKU exists
+
+      const footerLine =
+        `SKU: ${sku} • Location: ${instore_loc?.trim() || "—"} • Case/Bin/Shelf: ${case_bin_shelf?.trim() || "—"}`;
+
+      // Append a clean plain-text footer (no markers)
+      return `${safe}\n\n${footerLine}`;
+    }
+
+    
+    /**
+     * Compose final product_description.
+     * - Always inject BASE_SENTENCE once.
+     * - Prepend Item Name / Description (product_short_title) above the base sentence when present.
+     * - For drafts: no footer (no SKU yet).
+     * - For active: insert/replace a plain footer with current SKU/location/bin data.
+     */
+    function composeLongDescription(opts: {
+      existing: string | null | undefined,
+      status: "draft" | "active",
+      sku?: string | null,
+      instore_loc?: string | null,
+      case_bin_shelf?: string | null,
+      product_short_title?: string | null
+    }): string {
+      const {
+        existing,
+        status,
+        sku = null,
+        instore_loc = null,
+        case_bin_shelf = null,
+        product_short_title = null
+      } = opts || {};
+
+      // Ensure the base sentence, then prepend the title if not already at top
+      let body = ensureBaseOnce(existing || "");
+      const title = (product_short_title || "").trim();
+      if (title && !body.startsWith(title)) {
+        body = `${title}\n\n${body}`;
+      }
+
+      if (status === "draft") {
+        return body; // no footer for drafts
+      }
+
+      // Active: append fresh footer (upsertFooter will strip any existing footer)
+      return upsertFooter(body, sku, instore_loc, case_bin_shelf);
+    }
+
+
+        // Vendoo mapping helpers (category + condition)
+    // These are intentionally generic and just return raw rows so the caller can
+    // shape the payload as needed without over-coupling to schema details.
+    async function loadVendooCategoryMap(
+      sql: any,
+      tenantId: string | null | undefined,
+      listingCategory: string | null | undefined
+    ) {
+      if (!tenantId || !listingCategory) {
+        console.log("vendoo:category-map:skip", {
+          reason: "missing-tenant-or-category",
+          tenantId,
+          listingCategory,
+        });
+        return [];
+      }
+
+      console.log("vendoo:category-map:load:start", {
+        tenantId,
+        listingCategory,
+      });
+
       try {
-        const rows = (meta?.marketplaces || []);
-        for (const m of rows) {
-          const slug = String(m.slug || "").toLowerCase();
-          if (!slug) continue;
-          const id = Number(m.id);
-          const isSelected = selectedIds.has(id);
+        const rows = await sql`
+          select *
+          from app.marketplace_category_vendoo_map
+          where tenant_id = ${tenantId}
+            and category_key_uuid = ${listingCategory}
+        `;
 
-          
-          if (slug === "ebay") {
-            // Decision: deselecting the eBay tile == delete the eBay listing
-            intent[slug] = isSelected ? "upsert" : "delete";
-          } else if (slug === "facebook") {
-            // Decision: for Facebook we only have create logic right now.
-            // Deselecting should NOT delete in v1 → just ignore.
-            intent[slug] = isSelected ? "upsert" : "ignore";
-          } else if (slug === "vendoo") {
-            // Decision: for vendoo we only have create logic right now.
-            // Deselecting should NOT delete in v1 → just ignore.
-            intent[slug] = isSelected ? "upsert" : "ignore";  
-          } else {
-            // Future marketplaces: default to upsert when selected, ignore when not.
-            intent[slug] = isSelected ? "upsert" : "ignore";
-          }
-        }
-      } catch {
-        // fail open — server will fall back to old behavior if intent is missing
-      }
-      return intent;
-    }
-
-    function buildPayload(isDraft = false) {
-      // helper: drop empty strings/null/undefined
-      const prune = (obj) => {
-        const out = {};
-        for (const [k, v] of Object.entries(obj || {})) {
-          if (v === null || v === undefined) continue;
-          if (typeof v === "string" && v.trim() === "") continue;
-          out[k] = v;
-        }
-        return out;
-      };
-      
-      const title = valByIdOrLabel(null, "Item Name / Description");
-    
-      // Collect all possible fields (strings left as entered; numbers coerced when present)
-      const invAll = {
-        product_short_title: title,
-        price: (() => {
-          const v = valByIdOrLabel(null, "Price (USD)");
-          return v !== "" ? Number(v) : undefined;
-        })(),
-        qty: (() => {
-          const v = valByIdOrLabel(null, "Qty");
-          return v !== "" ? Number(v) : undefined;
-        })(),
-        cost_of_goods: (() => {
-          const v = valByIdOrLabel(null, "Cost of Goods (USD)");
-          return v !== "" ? Number(v) : undefined;
-        })(),
-        category_nm: valByIdOrLabel("categorySelect", "Category"),
-        instore_loc: valByIdOrLabel("storeLocationSelect", "Store Location"),
-        case_bin_shelf: valByIdOrLabel(null, "Case#/Bin#/Shelf#"),
-        instore_online: valByIdOrLabel("salesChannelSelect", "Sales Channel"),
-      };
-    
-      const listingAll = {
-        listing_category_key: valByIdOrLabel(
-          "marketplaceCategorySelect",
-          "Marketplace Category"
-        ),
-        condition_key: valByIdOrLabel("conditionSelect", "Condition"),
-        brand_key: valByIdOrLabel("brandSelect", "Brand"),
-        color_key: valByIdOrLabel("colorSelect", "Primary Color"),
-        product_description: valByIdOrLabel(null, "Long Description"),
-        shipping_box_key: valByIdOrLabel("shippingBoxSelect", "Shipping Box"),
-        weight_lb: (() => {
-          const v = valByIdOrLabel("shipWeightLb", "Weight (lb)");
-          return v !== "" ? Number(v) : undefined;
-        })(),
-        weight_oz: (() => {
-          const v = valByIdOrLabel("shipWeightOz", "Weight (oz)");
-          return v !== "" ? Number(v) : undefined;
-        })(),
-        shipbx_length: (() => {
-          const v = valByIdOrLabel("shipLength", "Length");
-          return v !== "" ? Number(v) : undefined;
-        })(),
-        shipbx_width: (() => {
-          const v = valByIdOrLabel("shipWidth", "Width");
-          return v !== "" ? Number(v) : undefined;
-        })(),
-        shipbx_height: (() => {
-          const v = valByIdOrLabel("shipHeight", "Height");
-          return v !== "" ? Number(v) : undefined;
-        })(),
-      };
-    
-      // eBay marketplace listing fields (maps to app.item_marketplace_listing)
-      const ebayListing = getEbayListingFields();
-    
-      // Helper: normalize marketplaces_selected → array of slugs ("ebay", "facebook", ...)
-      const gatherSelectedMarketplaces = () => {
-        const selectedSlugs = new Set();
-    
-        // 1) From the cached marketplace meta + selectedMarketplaceIds
-        try {
-          const rows = (__metaCache?.marketplaces || []);
-          const byId = new Map(
-            rows.map((r) => [
-              Number(r.id),
-              String(r.slug || "").toLowerCase(),
-            ])
-          );
-    
-          for (const id of selectedMarketplaceIds) {
-            const slug = byId.get(Number(id));
-            if (slug) selectedSlugs.add(slug);
-          }
-        } catch {
-          // no-op
-        }
-    
-        // 2) DOM fallback: tiles marked with data-mp-selected="true"
-        try {
-          const nodes = document.querySelectorAll(
-            '[data-mp-selected="true"]'
-          );
-          nodes.forEach((n) => {
-            const slug = String(n.dataset.mpSlug || "").toLowerCase();
-            if (slug) selectedSlugs.add(slug);
-          });
-        } catch {
-          // no-op
-        }
-    
-        return Array.from(selectedSlugs.values());
-      };
-    
-      const marketplaces_selected = gatherSelectedMarketplaces();
-
-      // Compute explicit marketplace intent snapshot using current tiles
-      const marketplaces_intent = computeMarketplaceIntent(__metaCache, selectedMarketplaceIds);
-
-      // Helper: attach marketplace_listing (ebay, facebook stub, etc.)
-      const attachMarketplaceListing = (payload) => {
-        const listingObj = {};
-    
-        // eBay-specific fields
-        if (ebayListing && Object.keys(ebayListing).length > 0) {
-          listingObj.ebay = ebayListing;
-        }
-    
-        // Facebook stub so the server can upsert / track the row
-        if (Array.isArray(marketplaces_selected) &&
-            marketplaces_selected.includes("facebook")) {
-          if (!listingObj.facebook) {
-            listingObj.facebook = {};
-          }
-        }
-    
-        if (Object.keys(listingObj).length > 0) {
-          payload.marketplace_listing = listingObj;
-        }
-      };
-
-      // Helper: build explicit intent object for the server
-      const buildIntent = () => {
-        const intent = {
-          source: "intake",
-          mode: isDraft ? "draft" : "active",
-          inventory: __currentItemId ? "update" : "create",
-          marketplaces: marketplaces_intent
-        };
-
-        console.log("[intake.js] buildIntent", {
-          mode: intent.mode,
-          inventoryOp: intent.inventory,
-          item_id: __currentItemId || null,
-          marketplaces_intent,
-          intent
+        console.log("vendoo:category-map:load:success", {
+          tenantId,
+          listingCategory,
+          rowCount: Array.isArray(rows) ? rows.length : null,
+          sampleRow: Array.isArray(rows) && rows.length > 0 ? rows[0] : null,
         });
 
-        return intent;
-      };
-    
-      // --------------------
-      // Draft items
-      // --------------------
-      if (isDraft) {
-        const inventory = prune(invAll);
-        const listing = prune(listingAll);
-        const payload = { status: "draft", inventory };
-    
-        if (Object.keys(listing).length > 0) {
-          payload.listing = listing;
-        }
-    
-        if (marketplaces_selected.length > 0) {
-          payload.marketplaces_selected = marketplaces_selected;
-        }
-    
-        attachMarketplaceListing(payload);
-
-        // NEW: attach explicit intent
-        payload.intent = buildIntent();
-    
-        // If this is a duplicated brand-new item, send source images for server-side copy
-        if (
-          !__currentItemId &&
-          __duplicateCarryPhotos &&
-          Array.isArray(__duplicateSourceImages) &&
-          __duplicateSourceImages.length > 0
-        ) {
-          payload.duplicate_images = __duplicateSourceImages.map(
-            (img, idx) => ({
-              r2_key: img.r2_key,
-              cdn_url: img.cdn_url,
-              bytes: img.bytes,
-              content_type: img.content_type,
-              width: img.width ?? null,
-              height: img.height ?? null,
-              sha256: img.sha256 ?? null,
-              sort_order:
-                typeof img.sort_order === "number"
-                  ? img.sort_order
-                  : idx,
-              is_primary: !!img.is_primary,
-            })
-          );
-        }
-    
-        return payload;
+        return rows;
+      } catch (err) {
+        console.error("vendoo:category-map:load:error", {
+          tenantId,
+          listingCategory,
+          error: String(err),
+        });
+        return [];
       }
-    
-      // --------------------
-      // Active / new items
-      // --------------------
-      const salesChannel = valByIdOrLabel(
-        "salesChannelSelect",
-        "Sales Channel"
-      );
-      const isStoreOnly = /store only/i.test(String(salesChannel || ""));
-      const inventory = prune(invAll);
-    
-      // Store-only: no marketplaces / listing needed
-      if (isStoreOnly) {
-        const payload = { inventory };
-
-        // NEW: still tell the server what we meant to do
-        payload.intent = buildIntent();
-    
-        if (
-          !__currentItemId &&
-          __duplicateCarryPhotos &&
-          Array.isArray(__duplicateSourceImages) &&
-          __duplicateSourceImages.length > 0
-        ) {
-          payload.duplicate_images = __duplicateSourceImages.map(
-            (img, idx) => ({
-              r2_key: img.r2_key,
-              cdn_url: img.cdn_url,
-              bytes: img.bytes,
-              content_type: img.content_type,
-              width: img.width ?? null,
-              height: img.height ?? null,
-              sha256: img.sha256 ?? null,
-              sort_order:
-                typeof img.sort_order === "number"
-                  ? img.sort_order
-                  : idx,
-              is_primary: !!img.is_primary,
-            })
-          );
-        }
-    
-        return payload;
-      }
-    
-      // Online / marketplace items
-      const listing = prune(listingAll);
-      const payload = { inventory, listing };
-    
-      if (marketplaces_selected.length > 0) {
-        payload.marketplaces_selected = marketplaces_selected;
-      }
-    
-      attachMarketplaceListing(payload);
-
-      // NEW: attach explicit intent
-      payload.intent = buildIntent();
-    
-      // If this is a duplicated brand-new item, send source images for server-side copy
-      if (
-        !__currentItemId &&
-        __duplicateCarryPhotos &&
-        Array.isArray(__duplicateSourceImages) &&
-        __duplicateSourceImages.length > 0
-      ) {
-        payload.duplicate_images = __duplicateSourceImages.map(
-          (img, idx) => ({
-            r2_key: img.r2_key,
-            cdn_url: img.cdn_url,
-            bytes: img.bytes,
-            content_type: img.content_type,
-            width: img.width ?? null,
-            height: img.height ?? null,
-            sha256: img.sha256 ?? null,
-            sort_order:
-              typeof img.sort_order === "number"
-                ? img.sort_order
-                : idx,
-            is_primary: !!img.is_primary,
-          })
-        );
-      }
-    
-      return payload;
     }
-
-
-
-
-
-    
-         
-
-
-     async function submitIntake(mode = "active") {
-      if (mode !== "draft" && !computeValidity()) return;
-    
-      const payload = buildPayload(mode === "draft");
-      console.log("[intake] duplicate_images count", Array.isArray(payload.duplicate_images) ? payload.duplicate_images.length : 0); 
-      // If we’re editing an existing item, send its id so the server updates it
-      if (__currentItemId) {
-        payload.item_id = __currentItemId;
+  
+    async function loadMarketplaceConditions(
+      sql: any,
+      tenantId: string | null | undefined,
+      conditionName: string | null | undefined
+    ) {
+      if (!tenantId || !conditionName) {
+        console.log("vendoo:conditions:skip", {
+          reason: "missing-tenant-or-condition",
+          tenantId,
+          conditionName,
+        });
+        return [];
       }
-      
-      // DEBUG (short): show marketplaces we’re asking for
-      console.log("[intake] marketplaces_selected", payload.marketplaces_selected, "has_fb=", payload?.marketplaces_selected?.includes?.("facebook"));
-      
-      const res = await api("/api/inventory/intake", {
-        method: "POST",
-        body: JSON.stringify(payload),
-        headers: { "content-type": "application/json" },
+
+      console.log("vendoo:conditions:load:start", {
+        tenantId,
+        conditionName,
       });
-      
-      // DEBUG (short): confirm server accepted and returned item_id/status
-      if (res?.ok) {
-        console.log("[intake] server.ok item_id=", res.item_id, "status=", res.status);
-         // NEW: remember the SKU from the server so Copy for Xeasy can use it
-        try {
-          if (res.sku) {
-            window.__lastKnownSku = String(res.sku).trim();
-          }
-        } catch {}
-      }
-      // Log non-OK responses with full context before throwing
-      if (!res || res.ok === false) {
-        try {
-          console.groupCollapsed("[intake.js] POST /api/inventory/intake failed");
-          console.log("payload.sent", payload);                               // what we sent
-          console.log("response.raw", res);                                   // what server returned
-          console.log("surface_error", res?.error || "intake_failed");
-          // If the server started returning more detail (e.g., constraint), show it
-          if (res?.message) console.log("message", res.message);
-          if (res?.constraint) console.log("constraint", res.constraint);
-          if (res?.code) console.log("pg.code", res.code);
-        } finally {
-          console.groupEnd?.();
-        }
-        throw new Error(res?.error || "intake_failed");
-      }
-        
-        // Save defaults (local) on success so user gets the same picks next time
-        try {
-          writeDefaults(Array.from(selectedMarketplaceIds.values()));
-        } catch {}
 
-         // NEW: also persist user defaults on the server for this marketplace
-        try {
-          // Only run if eBay controls exist on the page
-          const shipSel = document.getElementById("ebay_shippingPolicy");
-          const paySel  = document.getElementById("ebay_paymentPolicy");
-          const retSel  = document.getElementById("ebay_returnPolicy");
-          const zipEl   = document.getElementById("ebay_shipZip");
-          // Pricing format comes from the format select (fixed|auction)
-          const fmtSel  = document.getElementById("ebay_formatSelect");
-          const boChk   = document.getElementById("ebay_bestOffer");
-          const prChk   = document.getElementById("ebay_promote");
-        
-          if (shipSel || paySel || retSel || zipEl || fmtSel || boChk || prChk) {
-            const clean = (v) => (v === undefined || v === null
-              ? undefined
-              : (typeof v === "string" ? v.trim() : v));
-        
-            const defaults = {
-              shipping_policy: clean(shipSel?.value || ""),
-              payment_policy:  clean(paySel?.value  || ""),
-              return_policy:   clean(retSel?.value  || ""),
-              shipping_zip:    clean(zipEl?.value   || ""),
-              pricing_format:  clean((fmtSel?.value || "").toLowerCase()),
-              allow_best_offer: boChk ? Boolean(boChk.checked) : undefined,
-              promote:          prChk ? Boolean(prChk.checked) : undefined,
-            };
-        
-            await api("/api/inventory/user-defaults?marketplace=ebay", {
-              method: "PUT",
-              headers: {
-                "content-type": "application/json"
-              },
-              body: JSON.stringify({ defaults }),
-            });
-          }
-        } catch {}
-       
-        
-        // Post-save UX: confirm, disable fields, and swap CTAs
-        postSaveSuccess(res, mode);
-        // Notify Drafts to reload now that an item changed (added/promoted/saved)
-        document.dispatchEvent(new CustomEvent("intake:item-changed"));
       try {
-        const skuEl = document.querySelector("[data-sku-out]");
-        if (skuEl && res.sku) skuEl.textContent = res.sku;
-      } catch {}
-      // Success UX is up to you (toast, clear form, or route back to Inventory)
-    }
-    
-    function wireCtas() {
-      const activeIds = ["intake-submit", "intake-save", "intake-add-single", "intake-add-bulk"];
-      const draftIds  = ["intake-draft"];
+        const rows = await sql`
+          select *
+          from app.marketplace_conditions
+          where tenant_id = ${tenantId}
+            and condition_name = ${conditionName}
+        `;
 
-      // Buttons that create ACTIVE items
-      const actById = activeIds.map(id => document.getElementById(id)).filter(Boolean);
-      const actByText = Array.from(document.querySelectorAll("button, a[role='button']"))
-        .filter(b => /add single item|add to bulk list/i.test((b.textContent || "").trim()));
-      [...actById, ...actByText].forEach(btn => {
-        btn.addEventListener("click", async (e) => {
-          e.preventDefault();
-          try {
-            btn.disabled = true;
-      
-            // If Facebook tile is selected, open a stub window now (user gesture) to avoid popup blocking.
-            try {
-              const rows = (__metaCache?.marketplaces || []);
-              const byId = new Map(rows.map(r => [Number(r.id), String(r.slug || "").toLowerCase()]));
-              const wantsFacebook = Array.from(selectedMarketplaceIds).some(id => byId.get(Number(id)) === "facebook");
-              if (wantsFacebook) {
-                window.__rpFbWin = window.open("about:blank", "_blank", "popup=1");  // no 'noopener' so we keep a handle
-                try {
-                  const d = window.__rpFbWin && window.__rpFbWin.document;
-                  if (d) {
-                    d.title = "Preparing Facebook…";
-                    d.body.innerHTML = "<p style='font-family:sans-serif;padding:16px'>Preparing Facebook…</p>";
-                  }
-                } catch {}
-                console.log("[intake.js] opened stub FB window", !!window.__rpFbWin);
-              }
-            } catch {}
-      
-            await submitIntake("active");
-          } catch (err) {
-            console.error("intake:submit:error", err);
-            alert("Failed to save. Please check required fields and try again.");
-          } finally {
-            btn.disabled = false;
-          }
+        console.log("vendoo:conditions:load:success", {
+          tenantId,
+          conditionName,
+          rowCount: Array.isArray(rows) ? rows.length : null,
+          sampleRow: Array.isArray(rows) && rows.length > 0 ? rows[0] : null,
         });
+
+        return rows;
+      } catch (err) {
+        console.error("vendoo:conditions:load:error", {
+          tenantId,
+          conditionName,
+          error: String(err),
+        });
+        return [];
+      }
+    }
+  
+    async function loadVendooEbayConditionMap(
+      sql: any,
+      tenantId: string | null | undefined,
+      conditionName: string | null | undefined,
+      conditionOption: string | null | undefined
+    ) {
+      if (!tenantId || !conditionName || !conditionOption) {
+        console.log("vendoo:ebay-condition-map:skip", {
+          reason: "missing-tenant-or-condition-or-option",
+          tenantId,
+          conditionName,
+          conditionOption,
+        });
+        return [];
+      }
+
+      console.log("vendoo:ebay-condition-map:load:start", {
+        tenantId,
+        conditionName,
+        conditionOption,
       });
 
-      // Buttons that save DRAFTS
-      const draftButtons = draftIds.map(id => document.getElementById(id)).filter(Boolean);
-      draftButtons.forEach(btn => {
-        btn.addEventListener("click", async (e) => {
-          e.preventDefault();
-          try {
-            btn.disabled = true;
-            await submitIntake("draft");
-          } catch (err) {
-            console.error("intake:draft:error", err);
-            alert("Failed to save draft.");
-          } finally {
-            btn.disabled = false;
-          }
+      try {
+        const rows = await sql`
+          select *
+          from app.marketplace_condition_vendoo_ebay_map
+          where tenant_id = ${tenantId}
+            and condition_name = ${conditionName}
+            and condition_options = ${conditionOption}
+        `;
+
+        console.log("vendoo:ebay-condition-map:load:success", {
+          tenantId,
+          conditionName,
+          conditionOption,
+          rowCount: Array.isArray(rows) ? rows.length : null,
+          sampleRow: Array.isArray(rows) && rows.length > 0 ? rows[0] : null,
         });
-      });
+
+        return rows;
+      } catch (err) {
+        console.error("vendoo:ebay-condition-map:load:error", {
+          tenantId,
+          conditionName,
+          conditionOption,
+          error: String(err),
+        });
+        return [];
+      }
     }
 
-    // Remember original actions-row HTML so we can restore the 3 CTAs after editing
-    let __originalCtasHTML = null;
     
      
-
-    /** Format a timestamp into a short local string */
-    function fmtSaved(ts) {
+    // === Helper: enqueue marketplace publish jobs (create vs update + no-change short-circuit) ===
+    async function enqueuePublishJobs(
+      tenant_id: string,
+      item_id: string,
+      body: any,
+      status: "draft" | "active"
+    ): Promise<void> {
       try {
-        const d = new Date(ts);
-        return isNaN(d.getTime()) ? "—" : d.toLocaleString();
-      } catch { return "—"; }
-    }
-    
-    /** Render a single draft row */
-    function renderDraftRow(row) {
-      const tr = document.createElement("tr");
-      tr.className = "border-b";
-      tr.innerHTML = `
-        <td class="px-3 py-2 whitespace-nowrap">${fmtSaved(row.saved_at)}</td>
-        <td class="px-3 py-2">${row.product_short_title || "—"}</td>
-        <td class="px-3 py-2">${row.price != null ? `$${Number(row.price).toFixed(2)}` : "—"}</td>
-        <td class="px-3 py-2">${row.qty ?? "—"}</td>
-        <td class="px-3 py-2">${row.category_nm || "—"}</td>
-        <td class="px-3 py-2">
-          <div class="flex gap-2">
-            <button type="button" class="btn btn-primary btn-sm" data-action="load" data-item-id="${row.item_id}">Load</button>
-            <button type="button" class="btn btn-ghost btn-sm" data-action="duplicate" data-item-id="${row.item_id}">Duplicate</button>
-            <button type="button" class="btn btn-ghost btn-sm" data-action="delete" data-item-id="${row.item_id}">Delete</button>
-          </div>
-        </td>
-      `;
-      return tr;
-    }
-    
-        
-    /** Enter existing-view mode (disabled fields + Edit/Add New/Delete CTAs) */
-    function enterViewMode({ item_id, hasSku = false }) {
-      __currentItemId = item_id;
-    
-      // Disable all fields
-      try {
-        const form = document.getElementById("intakeForm");
-        if (form) {
-          const ctrls = Array.from(form.querySelectorAll("input, select, textarea"));
-          ctrls.forEach((el) => { el.disabled = true; el.readOnly = true; el.setAttribute("aria-disabled", "true"); });
-        }
-      } catch {}
-    
-      // Swap CTAs to Edit / Add New / Delete (mirror postSaveSuccess)
-      try {
-        const actionsRow = document.querySelector(".actions.flex.gap-2");
-        if (actionsRow) {
-          if (__originalCtasHTML == null) __originalCtasHTML = actionsRow.innerHTML;
-          actionsRow.innerHTML = `
-            <button id="btnEditItem" class="btn btn-primary btn-sm">Edit Item</button>
-            <button id="btnAddNew" class="btn btn-ghost btn-sm">Add New Item</button>
-            <button id="btnDeleteItem" class="btn btn-danger btn-sm">Delete</button>
-          `;
-          const btnEdit = document.getElementById("btnEditItem");
-          const btnNew  = document.getElementById("btnAddNew");
-          const btnDel  = document.getElementById("btnDeleteItem");
-    
-          if (btnEdit) btnEdit.addEventListener("click", (e) => {
-            e.preventDefault();
-            try {
-              const form = document.getElementById("intakeForm");
-              if (form) {
-                const ctrls = Array.from(form.querySelectorAll("input, select, textarea"));
-                ctrls.forEach((el) => { el.disabled = false; el.readOnly = false; el.removeAttribute("aria-disabled"); });
-                if (hasSku) {
-                  const cat = document.getElementById("categorySelect");
-                  if (cat) { cat.disabled = true; cat.setAttribute("aria-disabled", "true"); }
-                }
-              }
-            } catch {}
-            // Restore original CTAs and rewire
-            try {
-              if (__originalCtasHTML != null) {
-                actionsRow.innerHTML = __originalCtasHTML;
-                wireCtas();
-              }
-            } catch {}
-            computeValidity();
-          });
-    
-          if (btnNew) btnNew.addEventListener("click", (e) => {
-            e.preventDefault();
-            window.location.reload();
-          });
-    
-          if (btnDel) btnDel.addEventListener("click", async (e) => {
-            e.preventDefault();
-            try {
-              if (!__currentItemId) return alert("No item to delete.");
-              const sure = confirm("Delete this item? This cannot be undone.");
-              if (!sure) return;
-              btnDel.disabled = true;
-              const resDel = await api("/api/inventory/intake", {
-                method: "POST",
-                headers: { "content-type": "application/json" },
-                body: JSON.stringify({ action: "delete", item_id: __currentItemId }),
-              });
-              if (!resDel || resDel.ok === false) throw new Error(resDel?.error || "delete_failed");
-
-              // NEW: mirror the Active/Edit path — tell the runner to start with any job_ids
-              try {
-                const jobIds = Array.isArray(resDel?.job_ids) ? resDel.job_ids : [];
-                document.dispatchEvent(new CustomEvent("intake:item-saved", {
-                  detail: {
-                    action: "delete",
-                    save_status: "delete",
-                    item_id: __currentItemId,
-                    job_ids: jobIds,
-                  }
-                }));
-              } catch {}
-              
-              alert("Item deleted.");
-              // Also refresh Drafts immediately (useful when the page is not fully reloaded yet)
-              document.dispatchEvent(new CustomEvent("intake:item-changed"));
-              window.location.reload();
-            } catch (err) {
-              console.error("intake:delete:error", err);
-              alert("Failed to delete item.");
-            } finally {
-              btnDel.disabled = false;
-            }
-          });
-        }
-      } catch {}
-    }
-    
-    /** Click handler: Load a draft into the form and switch to edit path */
-    async function handleLoadDraft(item_id) {
-      try {
-        const res = await api(`/api/inventory/intake?item_id=${encodeURIComponent(item_id)}`, { method: "GET" });
-        if (!res || res.ok === false) throw new Error(res?.error || "fetch_failed");
-
-        // Basic + listing fields (now includes Long Description)
-        populateFromSaved(res.inventory || {}, res.listing || null);
-
-        // Apply per-item marketplace selection from Neon (eBay, Facebook, etc.)
-        try {
-          applyMarketplaceSelectionForItem(__metaCache, res.marketplace_listing || null);
-        } catch {}
-
-        // If the draft has an eBay listing row, hydrate the eBay card fields/status
-        try {
-          const ebaySaved = res?.marketplace_listing?.ebay || null;
-          const ebayId    = res?.marketplace_listing?.ebay_marketplace_id || null;
-          if (ebaySaved) {
-            hydrateEbayFromSaved(ebaySaved, ebayId);
-          }
-        } catch {}
-
-        // Photos: hydrate thumbnails from GET response
-        bootstrapPhotos(Array.isArray(res.images) ? res.images : [], item_id);
-        // Enter view mode (treat as previously-saved edit path). Drafts have no SKU.
-        enterViewMode({ item_id, hasSku: !!res?.inventory?.sku });
-
-        // NEW: remember the SKU for Copy-for-Xeasy
-        try {
-          if (res?.inventory?.sku) {
-            window.__lastKnownSku = String(res.inventory.sku).trim();
-          }
-        } catch {}
-        
-      // If this loaded item already has a SKU, enable "Copy for Xeasy" immediately
-      if (res?.inventory?.sku) {
-        try {
-          enableCopyXeasy(true);
-        } catch {}
-      }
-        
-      } catch (err) {
-        console.error("drafts:load:error", err);
-        alert("Failed to load draft.");
-      }
-    }
-
-    
-    /** Click handler: Delete a draft from the list */
-    async function handleDeleteDraft(item_id, rowEl) {
-      try {
-        const sure = confirm("Delete this draft? This cannot be undone.");
-        if (!sure) return;
-        const res = await api("/api/inventory/intake", {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({ action: "delete", item_id }),
+        console.log("[intake.enqueuePublishJobs] enter", {
+          tenant_id,
+          item_id,
+          status,
+          rawBodyMarketplacesSelected: body?.marketplaces_selected ?? null,
         });
-        if (!res || res.ok === false) throw new Error(res?.error || "delete_failed");
-        // Remove row
-        if (rowEl && rowEl.parentElement) rowEl.parentElement.removeChild(rowEl);
-      } catch (err) {
-        console.error("drafts:delete:error", err);
-        alert("Failed to delete draft.");
-      }
-    }
     
-    /** Load and render all pending drafts */
-    async function loadDrafts() {
-      try {
-        const tbody = document.getElementById("recentDraftsTbody");
-        if (!tbody) return;
-        // Fetch recent drafts
-        const res = await api("/api/inventory/drafts", { method: "GET" });
-        if (!res || res.ok === false) throw new Error(res?.error || "drafts_failed");
-        const rows = Array.isArray(res.rows) ? res.rows : [];
+        const rawSel = Array.isArray(body?.marketplaces_selected) ? body.marketplaces_selected : [];
+        console.log("[intake.enqueuePublishJobs] rawSel.normalized", {
+          type: Array.isArray(rawSel) ? "array" : typeof rawSel,
+          length: Array.isArray(rawSel) ? rawSel.length : null,
+          rawSel,
+        });
     
-        // Clear tbody
-        tbody.innerHTML = "";
-        if (rows.length === 0) {
-          const tr = document.createElement("tr");
-          tr.innerHTML = `<td class="px-3 py-2 text-gray-500" colspan="6">No drafts yet.</td>`;
-          tbody.appendChild(tr);
+        // Accept slugs (strings) and numeric ids (numbers OR numeric strings)
+        let slugs = rawSel
+          .filter((v: any) => typeof v === "string" && isNaN(Number(v)) && v.trim() !== "")
+          .map((s: string) => s.toLowerCase());
+        const ids = rawSel
+          .map((v: any) =>
+            typeof v === "number" && Number.isInteger(v)
+              ? v
+              : typeof v === "string" && /^\d+$/.test(v)
+              ? Number(v)
+              : null
+          )
+          .filter((n: number | null): n is number => n !== null);
+    
+        console.log("[intake.enqueuePublishJobs] selection.parsed", {
+          slugs,
+          ids,
+        });
+    
+        // Derive a canonical per-marketplace action map (slug -> upsert|delete|ignore)
+        const actionsBySlug: Record<string, MarketplaceAction> = {};
+        if (Array.isArray(intentMarketplaces) && intentMarketplaces.length > 0) {
+          console.log("[intake.enqueuePublishJobs] intentMarketplaces.raw", {
+            count: intentMarketplaces.length,
+            intentMarketplaces,
+          });
+          for (const m of intentMarketplaces as any[]) {
+            if (!m) continue;
+            const slug = String(m.slug || "").toLowerCase();
+            if (!slug) continue;
+            const opRaw = String(m.operation || "").toLowerCase();
+            let action: MarketplaceAction = "upsert";
+            if (opRaw === "delete") action = "delete";
+            else if (opRaw === "ignore") action = "ignore";
+            actionsBySlug[slug] = action;
+          }
+        } else {
+          console.log("[intake.enqueuePublishJobs] intentMarketplaces.empty_or_missing", {
+            intentMarketplacesType: Array.isArray(intentMarketplaces) ? "array" : typeof intentMarketplaces,
+          });
+        }
+    
+        console.log("[intake.enqueuePublishJobs] actionsBySlug.derived", {
+          actionsBySlug,
+        });
+    
+        // Merge in marketplaces from intent (any non-"ignore" actions)
+        const intentSlugs = Object.entries(actionsBySlug)
+          .filter(([, action]) => action && action !== "ignore")
+          .map(([slug]) => slug.toLowerCase());
+    
+        console.log("[intake.enqueuePublishJobs] intentSlugs.filtered", {
+          intentSlugs,
+        });
+    
+        if (intentSlugs.length > 0) {
+          const merged = new Set<string>([...slugs, ...intentSlugs]);
+          slugs = Array.from(merged);
+          console.log("[intake.enqueuePublishJobs] slugs.merged_with_intent", {
+            slugs,
+          });
+        }
+    
+        console.log("[intake] enqueue.start", {
+          item_id,
+          status,
+          rawSel,
+          slugs,
+          ids,
+          intentMarketplaces,
+          actionsBySlug,
+        });
+    
+        if (slugs.length === 0 && ids.length === 0) {
+          console.log("[intake] enqueue.skip_no_selection", {
+            reason: "no slugs and no ids after normalization",
+          });
           return;
         }
     
-        // Render rows
+        console.log("[intake.enqueuePublishJobs] querying_enabled_marketplaces", {
+          tenant_id,
+          slugs,
+          ids,
+        });
+    
+        // Resolve tenant-enabled marketplaces by either slug OR id
+        const rows = await sql/*sql*/`
+          SELECT ma.id, ma.slug
+          FROM app.marketplaces_available ma
+          JOIN app.tenant_marketplaces tm
+            ON tm.marketplace_id = ma.id
+           AND tm.tenant_id = ${tenant_id}
+           AND tm.enabled = true
+          WHERE (${slugs.length > 0} AND ma.slug = ANY(${slugs}))
+             OR (${ids.length > 0}   AND ma.id   = ANY(${ids}))
+        `;
+        console.log("[intake] enqueue.match_enabled", {
+          count: Array.isArray(rows) ? rows.length : null,
+          rows,
+        });
+    
+        console.log("[intake.enqueuePublishJobs] loading_canonical_fields", {
+          item_id,
+          tenant_id,
+        });
+    
+        // Load canonical fields we map to marketplaces (schema-backed)
+        const inv = await sql/*sql*/`
+          SELECT product_short_title
+          FROM app.inventory
+          WHERE item_id = ${item_id}
+          LIMIT 1
+        `;
+        const lst = await sql/*sql*/`
+          SELECT
+            listing_category_key, condition_key, brand_key, color_key, shipping_box_key,
+            listing_category, item_condition, brand_name, primary_color, shipping_box,
+            product_description, weight_lb, weight_oz, shipbx_length, shipbx_width, shipbx_height
+          FROM app.item_listing_profile
+          WHERE item_id = ${item_id} AND tenant_id = ${tenant_id}
+          LIMIT 1
+        `;
+        // For each marketplace, we may also include its listing row (eBay has the richest set today)
+        const imlRows = await sql/*sql*/`
+          SELECT marketplace_id, status, mp_offer_id,
+                 shipping_policy, payment_policy, return_policy, shipping_zip, pricing_format,
+                 buy_it_now_price, allow_best_offer, auto_accept_amount, minimum_offer_amount,
+                 promote, promote_percent, duration, starting_bid, reserve_price
+          FROM app.item_marketplace_listing
+          WHERE item_id = ${item_id} AND tenant_id = ${tenant_id}
+        `;
+    
+        console.log("[intake.enqueuePublishJobs] canonical_fields.loaded", {
+          hasInventory: Array.isArray(inv) && inv.length > 0,
+          hasListingProfile: Array.isArray(lst) && lst.length > 0,
+          marketplaceListingCount: Array.isArray(imlRows) ? imlRows.length : null,
+          invSample: Array.isArray(inv) && inv.length > 0 ? inv[0] : null,
+          lstSample: Array.isArray(lst) && lst.length > 0 ? lst[0] : null,
+        });
+    
+        // Stable JSON stringify (keys sorted) for hashing
+        const stableStringify = (obj: any) => {
+          const seen = new WeakSet();
+          const sorter = (v: any) => {
+            if (v && typeof v === "object" && !Array.isArray(v)) {
+              if (seen.has(v)) return v;
+              seen.add(v);
+              return Object.keys(v).sort().reduce((acc, k) => { acc[k] = sorter(v[k]); return acc; }, {} as any);
+            }
+            if (Array.isArray(v)) return v.map(sorter);
+            return v;
+          };
+          return JSON.stringify(sorter(obj));
+        };
+        const sha256Hex = async (s: string) => {
+          const data = new TextEncoder().encode(s);
+          const hash = await crypto.subtle.digest("SHA-256", data);
+          return Array.from(new Uint8Array(hash)).map(b => b.toString(16).padStart(2,"0")).join("");
+        };
+    
+        console.log("[intake.enqueuePublishJobs] prepared_hash_helpers", {
+          rowsCount: Array.isArray(rows) ? rows.length : null,
+        });
+    
         for (const r of rows) {
-          const tr = renderDraftRow(r);
-          tbody.appendChild(tr);
+          const slug = String(r.slug || "").toLowerCase();
+    
+          // Desired action from unified intent (default: "upsert")
+          const desiredAction: MarketplaceAction =
+            (actionsBySlug[slug] as MarketplaceAction) || "upsert";
+    
+          console.log("[intake.enqueuePublishJobs] loop.marketplace.start", {
+            item_id,
+            marketplace_id: r.id,
+            slug,
+            desiredAction,
+          });
+    
+          // If the client explicitly said "ignore", skip this marketplace entirely.
+          if (desiredAction === "ignore") {
+            console.log("[intake] enqueue.skip_intent_ignore", {
+              item_id,
+              marketplace_id: r.id,
+              slug,
+            });
+            continue;
+          }
+    
+          // If the client requested a delete, the delete path above handles it.
+          // Do NOT enqueue create/update jobs here.
+          if (desiredAction === "delete") {
+            console.log("[intake] enqueue.skip_intent_delete", {
+              item_id,
+              marketplace_id: r.id,
+              slug,
+            });
+            continue;
+          }
+    
+          // Pull the marketplace row (if present) to know current identifiers/status
+          const iml = Array.isArray(imlRows) ? imlRows.find((x: any) => x.marketplace_id === r.id) : null;
+          console.log("[intake.enqueuePublishJobs] loop.marketplace.iml", {
+            item_id,
+            marketplace_id: r.id,
+            slug,
+            hasIml: !!iml,
+            imlStatus: iml?.status ?? null,
+            imlMpOfferId: iml?.mp_offer_id ?? null,
+          });
+    
+          if (slug === "vendoo") {
+            console.log("[intake] vendoo.skip_enqueue_tampermonkey", {
+              item_id,
+              marketplace_id: r.id,
+              slug,
+              desiredAction,
+            });
+    
+            // Ensure stub exists so UI can reflect progress while Tampermonkey/Vendoo runs
+            await sql/*sql*/`
+              INSERT INTO app.item_marketplace_listing
+                (item_id, tenant_id, marketplace_id, status)
+              VALUES
+                (${item_id}, ${tenant_id}, ${r.id}, 'publishing')
+              ON CONFLICT (item_id, marketplace_id)
+              DO UPDATE SET
+                status = 'publishing',
+                updated_at = now()
+            `;
+    
+            await sql/*sql*/`
+              INSERT INTO app.item_marketplace_events
+                (item_id, tenant_id, marketplace_id, kind, payload)
+              VALUES
+                (${item_id}, ${tenant_id}, ${r.id}, 'publish_started', jsonb_build_object('source','vendoo_enqueue'))
+            `;
+    
+            console.log("[intake.enqueuePublishJobs] vendoo.stub_upserted_and_event_logged", {
+              item_id,
+              marketplace_id: r.id,
+              slug,
+            });
+    
+            // No server-runner job for Vendoo; browser/Tampermonkey flow will complete it.
+            continue;
+          }
+    
+          
+          if (slug === "facebook") {
+            const statusNorm = String(iml?.status || "").toLowerCase();
+            const isLiveLike = statusNorm === "active" || statusNorm === "live";
+    
+            console.log("[intake.enqueuePublishJobs] facebook.status_check", {
+              item_id,
+              marketplace_id: r.id,
+              current_status: statusNorm,
+              desiredAction,
+              isLiveLike,
+            });
+    
+            // If Facebook is already live/active and we're not explicitly deleting,
+            // don't keep flipping it back to "publishing" or emitting new publish_started events.
+            if (isLiveLike && desiredAction !== "delete") {
+              console.log("[intake] fb.skip_already_live", {
+                item_id,
+                marketplace_id: r.id,
+                current_status: statusNorm,
+                desiredAction,
+              });
+              continue;
+            }
+    
+            // Ensure stub exists so UI reflects progress for first-time or non-live publishes
+            await sql/*sql*/`
+              INSERT INTO app.item_marketplace_listing
+                (item_id, tenant_id, marketplace_id, status)
+              VALUES
+                (${item_id}, ${tenant_id}, ${r.id}, 'publishing')
+              ON CONFLICT (item_id, marketplace_id)
+              DO UPDATE SET
+                status = 'publishing',
+                updated_at = now()
+            `;
+    
+            // Emit a progress event (no server-runner for FB; browser/Tampermonkey will finish)
+            await sql/*sql*/`
+              INSERT INTO app.item_marketplace_events
+                (item_id, tenant_id, marketplace_id, kind, payload)
+              VALUES
+                (${item_id}, ${tenant_id}, ${r.id}, 'publish_started', jsonb_build_object('source','enqueue'))
+            `;
+    
+            console.log("[intake.enqueuePublishJobs] facebook.stub_upserted_and_event_logged", {
+              item_id,
+              marketplace_id: r.id,
+              slug,
+            });
+    
+            continue;
+          }
+    
+          console.log("[intake.enqueuePublishJobs] snapshot.building", {
+            item_id,
+            marketplace_id: r.id,
+            slug,
+          });
+    
+          // Build canonical snapshot for this marketplace
+          const snapshot = {
+            item_id,
+            tenant_id,
+            marketplace_id: r.id,
+            product_short_title: inv?.[0]?.product_short_title ?? null,
+            listing_profile: lst?.[0] ?? null,
+            marketplace_listing: iml ?? null
+          };
+          const snapshotStr = stableStringify(snapshot);
+          const hash = await sha256Hex(snapshotStr);
+          const payload_snapshot = { ...snapshot, _hash: hash };
+    
+          console.log("[intake.enqueuePublishJobs] snapshot.built", {
+            item_id,
+            marketplace_id: r.id,
+            slug: r.slug,
+            hash,
+            snapshotPreview: {
+              product_short_title: snapshot.product_short_title,
+              listing_profile: snapshot.listing_profile ? { listing_category: snapshot.listing_profile.listing_category } : null,
+            },
+          });
+    
+                     // Determine desired op 
+          // Option A: treat 'live' the same as 'active' so edits enqueue 'update' after first publish.
+          // IMPORTANT:
+          // - If the listing row exists but is NOT live/active (error, draft, ended, etc.),
+          //   always treat it as a fresh CREATE so we don't get stuck in a non-live state.
+          const statusNorm = String(iml?.status || "").toLowerCase();
+          const isLiveLike = statusNorm === "active" || statusNorm === "live";
+          const hasMpOffer = !!(iml?.mp_offer_id);
+    
+          console.log("[intake.enqueuePublishJobs] decide-op: pre", {
+            tenant_id,
+            item_id,
+            marketplace_id: r.id,
+            slug: r.slug,
+            iml_status: iml?.status ?? null,
+            statusNorm,
+            isLiveLike,
+            hasMpOffer,
+            mp_offer_id: iml?.mp_offer_id ?? null,
+            payload_marketplace_listing_status: (body as any)?.marketplace_listing?.status ?? null
+          });
+    
+          let op: "create" | "update";
+          if (isLiveLike && hasMpOffer) {
+            // Live/active offer on the marketplace → update the existing listing.
+            op = "update";
+          } else {
+            // No live offer (or no row / no offer id) → create a new listing.
+            // This covers the case where a row exists but status is NOT live.
+            op = "create";
+          }
+    
+          console.log("[intake.enqueuePublishJobs] decide-op: selected", {
+            tenant_id,
+            item_id,
+            marketplace_id: r.id,
+            slug: r.slug,
+            op
+          });
+    
+          console.log("[intake.enqueuePublishJobs] last-job.query", {
+            tenant_id,
+            item_id,
+            marketplace_id: r.id,
+            slug: r.slug,
+            op,
+          });
+    
+          // Compare vs most recent *succeeded* snapshot to short-circuit no-ops
+          const last = await sql/*sql*/`
+            SELECT status, payload_snapshot
+            FROM app.marketplace_publish_jobs
+            WHERE tenant_id = ${tenant_id}
+              AND item_id = ${item_id}
+              AND marketplace_id = ${r.id}
+            ORDER BY created_at DESC
+            LIMIT 1
+          `;
+    
+          const lastRow = Array.isArray(last) && last.length ? last[0] : null;
+          console.log("[intake.enqueuePublishJobs] last-job", {
+            tenant_id,
+            item_id,
+            marketplace_id: r.id,
+            slug: r.slug,
+            op,
+            last_status: lastRow ? lastRow.status : null,
+            has_last: !!lastRow
+          });
+    
+          const lastStatus = String(lastRow?.status || "");
+          const lastHash = String(lastRow?.payload_snapshot?._hash || "");
+          const isLastSucceeded = lastStatus === "succeeded";
+    
+          console.log("[intake.enqueuePublishJobs] no-change-check", {
+            item_id,
+            marketplace_id: r.id,
+            slug: r.slug,
+            isLiveLike,
+            hasMpOffer,
+            isLastSucceeded,
+            lastHash,
+            currentHash: hash,
+            willSkip:
+              isLiveLike && hasMpOffer && isLastSucceeded && lastHash && lastHash === hash,
+          });
+    
+          // Only skip when:
+          //  - this listing already has a live/active offer, AND
+          //  - the most recent job for this marketplace actually succeeded, AND
+          //  - the payload hash is unchanged.
+          if (isLiveLike && hasMpOffer && isLastSucceeded && lastHash && lastHash === hash) {
+            await sql/*sql*/`
+              INSERT INTO app.item_marketplace_events
+                (item_id, tenant_id, marketplace_id, kind)
+              VALUES (${item_id}, ${tenant_id}, ${r.id}, 'skipped_no_change')
+            `;
+            console.log("[intake] enqueue.skip_no_change", {
+              item_id,
+              marketplace_id: r.id,
+              lastStatus,
+            });
+            continue;
+          }
+    
+          console.log("[intake] enqueue.insert_job", {
+            marketplace_id: r.id,
+            slug: r.slug,
+            item_id,
+            op,
+          });
+    
+          await sql/*sql*/`
+            INSERT INTO app.marketplace_publish_jobs
+              (tenant_id, item_id, marketplace_id, op, status, payload_snapshot)
+            SELECT ${tenant_id}, ${item_id}, ${r.id}, ${op}, 'queued', ${payload_snapshot}
+            WHERE NOT EXISTS (
+              SELECT 1 FROM app.marketplace_publish_jobs j
+              WHERE j.tenant_id = ${tenant_id}
+                AND j.item_id = ${item_id}
+                AND j.marketplace_id = ${r.id}
+                AND j.op = ${op}
+                AND j.status IN ('queued','running')
+            )
+          `;
+    
+          console.log("[intake.enqueuePublishJobs] insert_job.completed", {
+            tenant_id,
+            item_id,
+            marketplace_id: r.id,
+            slug: r.slug,
+            op,
+          });
+    
+          // Touch listing row (useful for dashboards; do not flip status here)
+          // NOTE: status normalization happens in enqueue decision (active|live => update)
+          await sql/*sql*/`
+            UPDATE app.item_marketplace_listing
+               SET updated_at = now()
+             WHERE tenant_id = ${tenant_id}
+               AND item_id = ${item_id}
+               AND marketplace_id = ${r.id}
+          `;
+    
+          console.log("[intake.enqueuePublishJobs] listing_row.touched", {
+            tenant_id,
+            item_id,
+            marketplace_id: r.id,
+            slug: r.slug,
+          });
         }
     
-        // Wire row buttons
-        tbody.querySelectorAll("button[data-action]").forEach((btn) => {
-          const action = btn.getAttribute("data-action");
-          const id = btn.getAttribute("data-item-id");
-          if (action === "load") {
-            btn.addEventListener("click", () => handleLoadDraft(id));
-          
-          } else if (action === "duplicate") {
-            btn.addEventListener("click", () => handleDuplicateInventory(id));
-          
-          } else if (action === "delete") {
-            btn.addEventListener("click", () => handleDeleteInventory(id, btn.closest("tr")));
-          }
+        console.log("[intake] enqueue.done", { item_id });
+        console.log("[intake.enqueuePublishJobs] exit.success", {
+          item_id,
+          tenant_id,
+          status,
         });
-      } catch (err) {
-        console.error("drafts:load:error", err);
+      } catch (enqueueErr) {
+        const err: any = enqueueErr;
+        console.error("[intake] enqueue.error", {
+          item_id,
+          error: String(err),
+          stack: err?.stack || null,
+        });
+        // Best-effort event log
+        await sql/*sql*/`
+          INSERT INTO app.item_marketplace_events
+            (item_id, tenant_id, marketplace_id, kind, error_message)
+          VALUES (${item_id}, ${tenant_id}, ${EBAY_MARKETPLACE_ID}, 'enqueue_failed', ${String(enqueueErr).slice(0,500)})
+        `;
       }
     }
 
-     // Make loadDrafts available to the refresh bus declared earlier
-      try { window.__loadDrafts = loadDrafts; } catch {}
+    
+    // AuthZ (creation requires can_inventory_intake or elevated role)
+    const actor = await sql<{ role: Role; active: boolean; can_inventory_intake: boolean | null }[]>`
+      SELECT m.role, m.active, COALESCE(p.can_inventory_intake, false) AS can_inventory_intake
+      FROM app.memberships m
+      LEFT JOIN app.permissions p ON p.user_id = m.user_id
+      WHERE m.tenant_id = ${tenant_id} AND m.user_id = ${actor_user_id}
+      LIMIT 1
+    `;
 
-      function extractLiveMarketplaces(row) {
-        try {
-          // Backend: /api/inventory/recent should return `row.marketplaces`
-          // as an array of { slug, name, status, icon_url, remote_url? }.
-          const marketplaces = Array.isArray(row?.marketplaces) ? row.marketplaces : [];
-      
-          return marketplaces
-            .filter((mp) => {
-              const status = String(mp.status || "").toLowerCase();
-              return status === "live" && mp.icon_url;
-            })
-            .map((mp) => ({
-              slug: mp.slug || null,
-              name: mp.name || mp.slug || "",
-              icon_url: mp.icon_url,
-              href: mp.remote_url || mp.url || null,
-            }));
-        } catch {
-          return [];
-        }
-      }
-      
-      /**
-       * Render a secondary row that shows marketplace icons for an inventory item.
-       * Returns a <tr> element, or null if there are no live marketplaces.
-       */
-      function renderInventoryMarketplacesRow(row) {
-        const live = extractLiveMarketplaces(row);
-        if (!live.length) return null;
-      
-        const tr = document.createElement("tr");
-        tr.className = "inventory-marketplaces-row border-b";
-      
-        if (row && row.item_id != null) {
-          tr.dataset.itemId = row.item_id;
-          tr.dataset.rowKind = "marketplaces";
-        }
-      
-        const iconsHtml = live
-          .map(
-            (mp) => `
-              <div class="inventory-marketplace-icon" title="${mp.name || ""}">
-                <img src="${mp.icon_url}" alt="${mp.name || ""}" loading="lazy">
-              </div>
-            `
-          )
-          .join("");
-      
-        tr.innerHTML = `
-          <td class="px-3 pt-1 pb-3" colspan="8">
-            <div class="inventory-marketplaces-strip">
-              ${iconsHtml}
-            </div>
-          </td>
-        `;
-      
-        return tr;
-      }
-      
-      /** Render a single inventory row (Active items) */
-      function renderInventoryRow(row) {
-        const tr = document.createElement("tr");
-        tr.className = "border-b";
-        const price = (row.price != null) ? `$${Number(row.price).toFixed(2)}` : "—";
-        const qty = (row.qty ?? "—");
-        const cat = row.category_nm || "—";
-        const title = row.product_short_title || "—";
-        const saved = fmtSaved(row.saved_at);
-      
-        const imgUrl = row.image_url || "";
-        const imgCell = `
-          <div class="w-10 h-10 rounded-lg overflow-hidden border" style="width:40px;height:40px">
-            ${
-              imgUrl
-                ? `<button
-                     type="button"
-                     class="w-10 h-10 block inventory-thumb-btn"
-                     data-image-url="${imgUrl}"
-                     aria-label="View image"
-                   >
-                     <img
-                       src="${imgUrl}"
-                       alt=""
-                       style="width:40px;height:40px;object-fit:cover"
-                       loading="lazy"
-                     >
-                   </button>`
-                : `<div class="w-10 h-10 bg-gray-100"></div>`
-            }
-          </div>
-        `;
+    console.log("[intake] auth.actor", {
+      tenant_id,
+      actor_user_id,
+      rows: actor
+    });
+    
+    if (actor.length === 0 || actor[0].active === false) return json({ ok: false, error: "forbidden" }, 403);
+    const allow = ["owner", "admin", "manager"].includes(actor[0].role) || !!actor[0].can_inventory_intake;
+    if (!allow) return json({ ok: false, error: "forbidden" }, 403);
 
-      
-        tr.innerHTML = `
-          <td class="px-3 py-2 whitespace-nowrap">${saved}</td>
-          <td class="px-3 py-2">${imgCell}</td>
-          <td class="px-3 py-2 mono">${row.sku || "—"}</td>
-          <td class="px-3 py-2">${title}</td>
-          <td class="px-3 py-2">${price}</td>
-          <td class="px-3 py-2">${qty}</td>
-          <td class="px-3 py-2">${cat}</td>
-          <td class="px-3 py-2">
-            <div class="flex gap-2">
-              <button type="button" class="btn btn-primary btn-sm" data-action="load" data-item-id="${row.item_id}">Load</button>
-              <button type="button" class="btn btn-ghost btn-sm" data-action="duplicate" data-item-id="${row.item_id}">Duplicate</button>
-              <button type="button" class="btn btn-ghost btn-sm" data-action="delete" data-item-id="${row.item_id}">Delete</button>
-            </div>
-          </td>
-        `;
-        return tr;
-      }
-      
-     async function handleDeleteInventory(item_id, rowEl) {
-        try {
-          const sure = confirm("Delete this item? This cannot be undone.");
-          if (!sure) return;
-      
-          const res = await api("/api/inventory/intake", {
-            method: "POST",
-            headers: { "content-type": "application/json" },
-            body: JSON.stringify({ action: "delete", item_id }),
-          });
-      
-          if (!res || res.ok === false) throw new Error(res?.error || "delete_failed");
-      
-          // Remove the main inventory row and its optional marketplaces row.
-          if (rowEl && rowEl.parentElement) {
-            const tbody = rowEl.parentElement;
-            const itemId = (rowEl.dataset && rowEl.dataset.itemId) || item_id;
-      
-            tbody.removeChild(rowEl);
-      
-            if (itemId != null) {
-              const mpRow = tbody.querySelector(
-                `tr[data-row-kind="marketplaces"][data-item-id="${itemId}"]`
-              );
-              if (mpRow) {
-                tbody.removeChild(mpRow);
-              }
-            }
-          }
-      
-          // also nudge the drafts/inventory panes to stay current
-          document.dispatchEvent(new CustomEvent("intake:item-changed"));
-        } catch (err) {
-          console.error("inventory:delete:error", err);
-          alert("Failed to delete item.");
-        }
-      }
+    
+    
+    // Payload
+    const body = await request.json();
+    console.log("[intake] body.raw_keys", {
+      has_inventory: !!body?.inventory,
+      has_listing: !!body?.listing,
+      has_marketplace_listing: !!body?.marketplace_listing,
+      status: body?.status,
+      item_status: body?.inventory?.item_status,
+      intent: body?.intent
+    });
+    const inv = body?.inventory || {};
+    const lst = body?.listing || {};
+    const ebay = body?.marketplace_listing?.ebay || null;
+    
+    // Status: support Option A drafts; default to 'active' for existing flows
+    const rawStatus = (body?.status || inv?.item_status || "active");
+    const status = String(rawStatus).toLowerCase() === "draft" ? "draft" : "active";
+    const isDraft = status === "draft";
 
+    console.log("[intake] status.normalized", {
+      rawStatus,
+      status,
+      isDraft
+    });
+    
+    // Optional: if present, we update instead of insert
+    const item_id_in: string | null = body?.item_id ? String(body.item_id) : null;
 
-            async function handleDuplicateInventory(item_id) {
-        try {
-          // Reuse the same intake API as Load so we get inventory + listing + images
-          const res = await api(`/api/inventory/intake?item_id=${encodeURIComponent(item_id)}`, { method: "GET" });
-          if (!res || res.ok === false) throw new Error(res?.error || "load_failed");
-
-          const inv     = res.inventory || {};
-          const listing = res.listing   || null;
-          const images  = Array.isArray(res.images) ? res.images : [];
-
-          // Build a duplicate "seed" object that looks like a new draft
-          const invClone = { ...inv };
-          delete invClone.item_id;
-          delete invClone.sku;
-          invClone.item_status = "draft";
-
-          const seed = {
-            inventory: invClone,
-            listing,
-            images: images.map((img, idx) => ({
-              r2_key: img.r2_key,
-              cdn_url: img.cdn_url,
-              bytes: img.bytes,
-              content_type: img.content_type,
-              width: img.width_px ?? img.width ?? null,
-              height: img.height_px ?? img.height ?? null,
-              sha256: img.sha256_hex ?? img.sha256 ?? null,
-              sort_order: typeof img.sort_order === "number" ? img.sort_order : idx,
-              is_primary: !!img.is_primary,
-            })),
-          };
-
-          // Stash in sessionStorage so the next page load can hydrate from it
-          try {
-            sessionStorage.setItem("rp:intake:duplicateSeed", JSON.stringify(seed));
-            console.log("[intake.js] duplicateSeed stored", {
-              item_id,
-              imageCount: seed.images.length,
+    // Normalize intent.marketplaces (if provided by the client)
+    const rawIntent = body?.intent || null;
+    const intentMarketplaces: any[] = Array.isArray(rawIntent?.marketplaces)
+      ? rawIntent.marketplaces
+          .map((m: any) => {
+            if (!m) return null;
+            const slug = String(m.slug || "").toLowerCase() || null;
+            const idRaw = (m as any).marketplace_id;
+            const id =
+              idRaw == null
+                ? null
+                : typeof idRaw === "number"
+                ? idRaw
+                : /^\d+$/.test(String(idRaw))
+                ? Number(idRaw)
+                : null;
+            return {
+              marketplace_id: id,
+              slug,
+              selected: !!m.selected,
+              operation: m.operation || null,
+            };
+            console.log("[intake] intent.map_entry", {
+              raw: m,
+              mapped
             });
-          } catch (e) {
-            console.warn("[intake.js] unable to store duplicateSeed", e);
-          }
+          })
+          .filter((m: any) => m && (m.marketplace_id != null || m.slug))
+      : [];
 
-          // Navigate back into a pristine "new item" intake screen.
-          // We just reload the page; init() will detect the seed and hydrate.
-          window.location.reload();
-
-        } catch (err) {
-          console.error("duplicate:error", err);
-          alert("Unable to duplicate item.");
-        }
-      }
-
-
+    // Canonicalize marketplaces_selected from intent when present so all downstream
+    // logic (including enqueuePublishJobs) sees the same selection/ops.
+    if (intentMarketplaces.length > 0) {
+      const selectedForJobs: Array<number | string> = intentMarketplaces
+        .filter((m: any) => m.selected && m.operation !== "delete")
+        .map((m: any) => {
+          if (m.marketplace_id != null) return m.marketplace_id;
+          return m.slug;
+        })
+        .filter((v: any) => v !== null && v !== undefined);
+        console.log("[intake] marketplaces_selected.from_intent", {
+          before: body.marketplaces_selected,
+          selectedForJobs
+        });
+      body.marketplaces_selected = selectedForJobs;
+      console.log("[intake] intent.marketplaces.empty", {
+        marketplaces_selected: body.marketplaces_selected
+      });
+    }
     
-      async function loadInventory() {
-        try {
-          const tbody = document.getElementById("recentInventoryTbody");
-          if (!tbody) return;
-      
-          const res = await api("/api/inventory/recent?limit=50", { method: "GET" });
-          if (!res || res.ok === false) throw new Error(res?.error || "inventory_failed");
-          const rows = Array.isArray(res.rows) ? res.rows : [];
-      
-          tbody.innerHTML = "";
-          if (rows.length === 0) {
-            const tr = document.createElement("tr");
-            tr.innerHTML = `<td class="px-3 py-2 text-gray-500" colspan="8">No inventory found.</td>`;
-            tbody.appendChild(tr);
-            return;
-          }
-      
-          for (const r of rows) {
-            const mainRow = renderInventoryRow(r);
-            if (mainRow) {
-              tbody.appendChild(mainRow);
-            }
-      
-            const mpRow = renderInventoryMarketplacesRow(r);
-            if (mpRow) {
-              tbody.appendChild(mpRow);
-            }
-          }
-      
-          // Wire row buttons
-          tbody.querySelectorAll("button[data-action]").forEach((btn) => {
-            const action = btn.getAttribute("data-action");
-            const id = btn.getAttribute("data-item-id");
-
-            if (action === "load") {
-              // reuse the existing loader; it hydrates photos + fields
-              btn.addEventListener("click", () => handleLoadDraft(id));
-            } else if (action === "duplicate") {
-              btn.addEventListener("click", () => handleDuplicateInventory(id));
-            } else if (action === "delete") {
-              btn.addEventListener("click", () =>
-                handleDeleteInventory(id, btn.closest("tr"))
-              );
-            }
-          });
-
-          // Wire image thumbnail clicks → open shared Image Preview dialog
-            wireInventoryImageLightbox(tbody);
-          } catch (err) {
-          console.error("inventory:load:error", err);
-        }
-      }
+    // === DEBUG: show payload routing decisions ===
+    console.log("[intake] payload", {
+      status,
+      isDraft,
+      item_id_in,
+      marketplaces_selected: body?.marketplaces_selected ?? null,
+      has_ebay_block: !!ebay,
+      listing_keys_present: !!lst && Object.values(lst).some(v => v !== null && v !== undefined && String(v) !== ""),
+      intent_marketplaces: intentMarketplaces
+    });
 
 
-      
-      // Expose for refresh bus
-      try { window.__loadInventory = loadInventory; } catch {}
-      
-      wireCtas();
-      wireCopyXeasy();  // enable/wire the Xeasy copy button
-    // NEW: Photos bootstrap
-      wirePhotoPickers();
-      renderPhotosGrid();
-      // Hydrate Photos state from API results and refresh the grid
-      function bootstrapPhotos(images = [], itemId = null) {
-        __currentItemId = itemId || __currentItemId;
+    // If the client requested a delete, do it now (and exit)
+    if (body?.action === "delete") {
+      if (!item_id_in) return json({ ok: false, error: "missing_item_id" }, 400);
     
-        __photos = (images || [])
-          .map(r => ({
-            image_id: r.image_id,
-            cdn_url: r.cdn_url,
-            is_primary: !!r.is_primary,
-            sort_order: Number(r.sort_order) || 0,
-            r2_key: r.r2_key,
-            width: r.width_px,
-            height: r.height_px,
-            bytes: r.bytes,
-            content_type: r.content_type,
-          }))
-          .sort((a, b) => a.sort_order - b.sort_order);
-    
-        __pendingFiles = [];
-        renderPhotosGrid();
-    
-        // Re-evaluate gating to ensure "Save as Draft" may enable based on photos
-        try { computeValidity(); } catch {}
-      }
-
-      
-
-      // After successful save: confirm, disable form controls, and swap CTAs
-      function postSaveSuccess(res, mode) {
-        try {
-          // 1) Confirmation — show SKU when present, otherwise draft notice
-          const skuPart = res?.sku ? `SKU ${res.sku}` : `Draft saved`;
-          const msg = mode === "draft"
-            ? `Saved draft (#${res?.item_id || "?"}).`
-            : `Saved item ${skuPart} (#${res?.item_id || "?"}).`;
-          // Also enable the Xeasy copy button when this is an Active (non-draft) save
-          if (mode !== "draft") {
-            try { enableCopyXeasy(true); } catch {}
-          }
-          // Use a non-blocking toast/banner so the Facebook handoff isn't paused
-          if (typeof window.uiToast === "function") {
-            window.uiToast(msg);
-          } else {
-            const id = "intake-save-banner";
-            let b = document.getElementById(id);
-            if (!b) {
-              b = document.createElement("div");
-              b.id = id;
-              b.className = "alert alert-success mb-2";
-              document.body.appendChild(b);
-            }
-            b.textContent = msg;
-          }
-          // Remember the item id for subsequent edits/saves
-          __currentItemId = res?.item_id || __currentItemId;
-          // Also stash on the form for resilience (not strictly required)
-          try {
-            const form = document.getElementById("intakeForm");
-            if (form && __currentItemId) form.dataset.itemId = __currentItemId;
-          } catch (e) {}
-
-          // notify photos module to flush any pending uploads
-            
-          try {
-            const saveStatus = (mode === "draft" ? "draft" : "active");
-          
-            document.dispatchEvent(
-              new CustomEvent("intake:item-saved", {
-                detail: {
-                  // existing fields
-                  item_id: __currentItemId,
-                  action: "save",
-                  save_status: saveStatus,
-                  job_ids: Array.isArray(res?.job_ids) ? res.job_ids : [],
-          
-                  // NEW: required for Vendoo workflow
-                  ok: (typeof res?.ok === "boolean" ? res.ok : true),
-                  status: res?.status || saveStatus,
-                  intent: res?.intent || null,
-                  marketplaces_selected: res?.marketplaces_selected || null
-                }
-              })
-            );
-          } catch {}
-          
-        } catch {}
+        // A) Queue marketplace delete jobs FIRST (one per marketplace with a remote id)
+        const iml = await sql/*sql*/`
+          SELECT marketplace_id, mp_offer_id, mp_item_id
+            FROM app.item_marketplace_listing
+           WHERE item_id    = ${item_id_in}
+             AND tenant_id  = ${tenant_id}
+             AND (mp_offer_id IS NOT NULL OR mp_item_id IS NOT NULL)
+        `;
+        const job_ids: string[] = [];
+        for (const r of iml as any[]) {
+          // Try to insert a 'delete' job only if no in-flight job exists
+          const inserted = await sql/*sql*/`
+            WITH ins AS (
+              INSERT INTO app.marketplace_publish_jobs
+                (tenant_id, item_id, marketplace_id, op, status, payload_snapshot)
+              SELECT
+                ${tenant_id}, ${item_id_in}, ${r.marketplace_id}, 'delete', 'queued',
+                ${{
+                  item_id: item_id_in,
+                  tenant_id,
+                  marketplace_id: r.marketplace_id,
+                  marketplace_listing: { mp_offer_id: r.mp_offer_id, mp_item_id: r.mp_item_id }
+                }}
+              WHERE NOT EXISTS (
+                SELECT 1
+                  FROM app.marketplace_publish_jobs j
+                 WHERE j.tenant_id      = ${tenant_id}
+                   AND j.item_id        = ${item_id_in}
+                   AND j.marketplace_id = ${r.marketplace_id}
+                   AND j.op             = 'delete'
+                   AND j.status IN ('queued','running')
+              )
+              RETURNING job_id
+            )
+            SELECT job_id FROM ins
+            UNION ALL
+            -- If nothing inserted (duplicate in-flight), return the existing in-flight job_id
+            SELECT j.job_id
+              FROM app.marketplace_publish_jobs j
+             WHERE j.tenant_id      = ${tenant_id}
+               AND j.item_id        = ${item_id_in}
+               AND j.marketplace_id = ${r.marketplace_id}
+               AND j.op             = 'delete'
+               AND j.status IN ('queued','running')
+             LIMIT 1
+          `;
+          const got = Array.isArray(inserted) && inserted[0]?.job_id ? String(inserted[0].job_id) : null;
+          if (got) job_ids.push(got);
   
-        // 2) Disable all form fields (inputs/selects/textareas)
-        try {
-          const form = document.getElementById("intakeForm");
-          if (form) {
-            const ctrls = Array.from(form.querySelectorAll("input, select, textarea"));
-            ctrls.forEach(el => { el.disabled = true; el.readOnly = true; el.setAttribute("aria-disabled", "true"); });
+          // Reflect pending state on the listing row (status now exists in enum)
+          await sql/*sql*/`
+            UPDATE app.item_marketplace_listing
+               SET status='delete_pending', updated_at=now()
+             WHERE item_id=${item_id_in} AND tenant_id=${tenant_id} AND marketplace_id=${r.marketplace_id}
+          `;
+        }
+
+      
+        // B) R2 image deletion — TEMPORARILY DISABLED (safety hotfix)
+        //    We currently allow multiple items to share the same R2 object
+        //    (for example, items created via Duplicate that reuse the same r2_key).
+        //    Deleting the R2 object here can break other items that still reference
+        //    that key and leaves active listings with missing photos.
+        //    SHORT TERM: only delete DB rows; leave the R2 object in place.
+        //    LONG TERM OPTIONS:
+        //      1) Implement reference-counted deletes (only delete R2 when a key
+        //         is no longer referenced in app.item_images).
+        //      2) Change duplicate handling to clone images into new R2 keys per
+        //         item, so deletes are safe again.
+        const imgRows = await sql<{ image_id: string; r2_key: string | null }[]>`
+          SELECT image_id, r2_key
+            FROM app.item_images
+           WHERE item_id = ${item_id_in}
+        `;
+        // NOTE: Intentionally skipping env.R2_IMAGES.delete(r.r2_key) for now.
+        // for (const r of imgRows) {
+        //   if (!r?.r2_key) continue;
+        //   try { /* @ts-ignore */ await env.R2_IMAGES.delete(r.r2_key); } catch (e) {
+        //     console.warn("r2.delete failed", r.r2_key, e);
+        //   }
+        // }
+        await sql/*sql*/`DELETE FROM app.item_images WHERE item_id = ${item_id_in}`;
+    
+      // C) Explicitly remove the item's listing profile (don’t rely on cascade)
+      await sql/*sql*/`
+        DELETE FROM app.item_listing_profile
+         WHERE item_id = ${item_id_in} AND tenant_id = ${tenant_id}
+      `;
+    
+      // D) Remove inventory row last
+      await sql/*sql*/`
+        WITH s AS (SELECT set_config('app.actor_user_id', ${actor_user_id}, true))
+        DELETE FROM app.inventory
+         WHERE item_id = ${item_id_in}
+      `;
+    
+      // E) Return job_ids so the client can trigger/poll the runner
+      return json({ ok: true, deleted: true, item_id: item_id_in, job_ids }, 200);
+    }
+    
+       // If item_id was provided, UPDATE existing rows instead of INSERT
+        if (item_id_in) {
+          console.log("[intake] branch", { kind: isDraft ? "UPDATE_DRAFT" : "UPDATE_ACTIVE", item_id_in });
+        // Load existing inventory row
+        const existing = await sql<{ item_id: string; sku: string | null; item_status: string | null }[]>`
+          SELECT item_id, sku, item_status
+          FROM app.inventory
+          WHERE item_id = ${item_id_in}
+          LIMIT 1
+        `;
+        if (existing.length === 0) {
+          return json({ ok: false, error: "not_found" }, 404);
+        }
+
+        // Phase 0: disallow Active → Draft (server-side guard to match UI)
+        if (isDraft && String(existing[0].item_status || "").toLowerCase() === "active") {
+          return json({ ok: false, error: "cannot_downgrade_active_to_draft" }, 400);
+        }
+
+        // === DRAFT UPDATE: update any inventory fields; also upsert listing if sent ===
+        if (isDraft) {
+          const updInv = await sql<{ item_id: string; sku: string | null }[]>`
+            WITH s AS (
+              SELECT set_config('app.actor_user_id', ${actor_user_id}, true)
+            )
+            UPDATE app.inventory
+            SET
+              product_short_title = ${inv.product_short_title},
+              price = ${inv.price},
+              qty = ${inv.qty},
+              cost_of_goods = ${inv.cost_of_goods},
+              category_nm = ${inv.category_nm},
+              instore_loc = ${inv.instore_loc},
+              case_bin_shelf = ${inv.case_bin_shelf},
+              instore_online = ${inv.instore_online},
+              item_status = 'draft'
+            WHERE item_id = ${item_id_in}
+            RETURNING item_id, sku;
+          `;
+          const item_id = updInv[0].item_id;
+        
+          if (lst && Object.values(lst).some(v => v !== null && v !== undefined && String(v) !== "")) {
+            const descDraft = composeLongDescription({
+              existing: lst.product_description,
+              status: "draft",
+              product_short_title: inv?.product_short_title ?? null
+            });
+            await sql/*sql*/`
+            INSERT INTO app.item_listing_profile
+              ( item_id, tenant_id,
+                listing_category_key, condition_key, brand_key, color_key, shipping_box_key,
+                listing_category,       item_condition,  brand_name,  primary_color,  shipping_box,
+                product_description, weight_lb, weight_oz, shipbx_length, shipbx_width, shipbx_height )
+            VALUES
+              ( ${item_id}, ${tenant_id},
+                ${lst.listing_category_key}, ${lst.condition_key}, ${lst.brand_key}, ${lst.color_key}, ${lst.shipping_box_key},
+                (SELECT display_name    FROM app.marketplace_categories  WHERE category_key  = ${lst.listing_category_key}),
+                (SELECT condition_name  FROM app.marketplace_conditions  WHERE condition_key = ${lst.condition_key}),
+                (SELECT brand_name      FROM app.marketplace_brands      WHERE brand_key     = ${lst.brand_key}),
+                (SELECT color_name      FROM app.marketplace_colors      WHERE color_key     = ${lst.color_key}),
+                (SELECT box_name        FROM app.shipping_boxes          WHERE box_key       = ${lst.shipping_box_key}),
+                ${descDraft}, ${lst.weight_lb}, ${lst.weight_oz},
+                ${lst.shipbx_length}, ${lst.shipbx_width}, ${lst.shipbx_height}
+              )
+            ON CONFLICT (item_id) DO UPDATE SET
+              listing_category_key = EXCLUDED.listing_category_key,
+              condition_key        = EXCLUDED.condition_key,
+              brand_key            = EXCLUDED.brand_key,
+              color_key            = EXCLUDED.color_key,
+              shipping_box_key     = EXCLUDED.shipping_box_key,
+              listing_category     = EXCLUDED.listing_category,
+              item_condition       = EXCLUDED.item_condition,
+              brand_name           = EXCLUDED.brand_name,
+              primary_color        = EXCLUDED.primary_color,
+              shipping_box         = EXCLUDED.shipping_box,
+              product_description  = EXCLUDED.product_description,
+              weight_lb            = EXCLUDED.weight_lb,
+              weight_oz            = EXCLUDED.weight_oz,
+              shipbx_length        = EXCLUDED.shipbx_length,
+              shipbx_width         = EXCLUDED.shipbx_width,
+              shipbx_height        = EXCLUDED.shipbx_height
+          `;
           }
-        } catch {}
-  
-        // 3) Replace the three CTAs with: Edit Item + Add New Item
-        try {
-          // Find the first actions row that contains our intake buttons
-          const actionsRow = document.querySelector(".actions.flex.gap-2");
-          if (actionsRow) {
-            const itemId = res?.item_id || "";
-        
-            // Capture original CTAs the first time we swap them out
-            if (__originalCtasHTML == null) {
-              __originalCtasHTML = actionsRow.innerHTML;
+
+
+          // Upsert eBay marketplace listing when present (draft update)
+          if (EBAY_MARKETPLACE_ID && ebay) {
+            const e = normalizeEbay(ebay);
+            if (e) {
+              await sql/*sql*/`
+                INSERT INTO app.item_marketplace_listing
+                  (item_id, tenant_id, marketplace_id, status,
+                   shipping_policy, payment_policy, return_policy, shipping_zip, pricing_format,
+                   buy_it_now_price, allow_best_offer, auto_accept_amount, minimum_offer_amount,
+                   promote, promote_percent, duration, starting_bid, reserve_price)
+                VALUES
+                  (${item_id}, ${tenant_id}, ${EBAY_MARKETPLACE_ID}, 'draft',
+                   ${e.shipping_policy}, ${e.payment_policy}, ${e.return_policy}, ${e.shipping_zip}, ${e.pricing_format},
+                   ${e.buy_it_now_price}, ${e.allow_best_offer}, ${e.auto_accept_amount}, ${e.minimum_offer_amount},
+                   ${e.promote}, ${e.promote_percent}, ${e.duration}, ${e.starting_bid}, ${e.reserve_price})
+                ON CONFLICT (item_id, marketplace_id)
+                DO UPDATE SET
+                  status = 'draft',
+                  shipping_policy = EXCLUDED.shipping_policy,
+                  payment_policy  = EXCLUDED.payment_policy,
+                  return_policy   = EXCLUDED.return_policy,
+                  shipping_zip    = EXCLUDED.shipping_zip,
+                  pricing_format  = EXCLUDED.pricing_format,
+                  buy_it_now_price = EXCLUDED.buy_it_now_price,
+                  allow_best_offer = EXCLUDED.allow_best_offer,
+                  auto_accept_amount = EXCLUDED.auto_accept_amount,
+                  minimum_offer_amount = EXCLUDED.minimum_offer_amount,
+                  promote = EXCLUDED.promote,
+                  promote_percent = EXCLUDED.promote_percent,
+                  duration = EXCLUDED.duration,
+                  starting_bid = EXCLUDED.starting_bid,
+                  reserve_price = EXCLUDED.reserve_price,
+                  updated_at = now()
+              `;
+              await sql/*sql*/`
+                INSERT INTO app.user_marketplace_defaults
+                  (tenant_id, user_id, marketplace_id,
+                   shipping_policy, payment_policy, return_policy, shipping_zip, pricing_format,
+                   allow_best_offer, promote)
+                VALUES
+                  (${tenant_id}, ${actor_user_id}, ${EBAY_MARKETPLACE_ID},
+                   ${e.shipping_policy}, ${e.payment_policy}, ${e.return_policy}, ${e.shipping_zip}, ${e.pricing_format},
+                   ${e.allow_best_offer}, ${e.promote})
+                ON CONFLICT (tenant_id, user_id, marketplace_id)
+                DO UPDATE SET
+                  shipping_policy = EXCLUDED.shipping_policy,
+                  payment_policy  = EXCLUDED.payment_policy,
+                  return_policy   = EXCLUDED.return_policy,
+                  shipping_zip    = EXCLUDED.shipping_zip,
+                  pricing_format  = EXCLUDED.pricing_format,
+                  allow_best_offer = EXCLUDED.allow_best_offer,
+                  promote          = EXCLUDED.promote,
+                  updated_at       = now()
+              `;
             }
-        
-            // Swap to Edit / Add New
-            actionsRow.innerHTML = `
-              <button id="btnEditItem" class="btn btn-primary btn-sm">Edit Item</button>
-              <button id="btnAddNew" class="btn btn-ghost btn-sm">Add New Item</button>
-              <button id="btnDeleteItem" class="btn btn-danger btn-sm">Delete</button>
+          }
+          
+          return json({
+            ok: true,
+            item_id,
+            sku: updInv[0].sku,
+            status,
+            intent: { marketplaces: intentMarketplaces },
+            ms: Date.now() - t0
+          }, 200);
+        }
+
+
+          
+        // === ACTIVE UPDATE: if promoting to active and no SKU yet, allocate ===
+        console.log("[intake.ACTIVE] begin", {
+          tenant_id,
+          actor_user_id,
+          item_id_in,
+          inv_status: inv?.item_status ?? null,
+          instore_online: inv?.instore_online ?? null,
+          marketplaces_selected: body?.marketplaces_selected ?? null,
+          intentMarketplaces
+        });
+        // Look up category_code only when needed for SKU allocation
+        const catRows = await sql<{ category_code: string }[]>`
+          SELECT category_code FROM app.sku_categories WHERE category_name = ${inv.category_nm} LIMIT 1
+        `;
+        if (catRows.length === 0) return json({ ok: false, error: "bad_category" }, 400);
+        const category_code = catRows[0].category_code;
+
+        let sku: string | null = existing[0].sku;
+        if (!sku) {
+          const seqRows = await sql<{ last_number: number }[]>`
+            SELECT last_number FROM app.sku_sequence
+            WHERE tenant_id = ${tenant_id} AND category_code = ${category_code}
+            FOR UPDATE
+          `;
+          let next = 0;
+          if (seqRows.length === 0) {
+            await sql/*sql*/`
+              INSERT INTO app.sku_sequence (tenant_id, category_code, last_number)
+              VALUES (${tenant_id}, ${category_code}, 0)
+              ON CONFLICT (tenant_id, category_code) DO NOTHING
             `;
-        
-            const btnEdit = document.getElementById("btnEditItem");
-            const btnNew  = document.getElementById("btnAddNew");
-        
-            if (btnEdit) {
-              btnEdit.addEventListener("click", (e) => {
-                e.preventDefault();
-        
-               // (1) Re-enable form fields, and lock Category ONLY if a SKU already exists
-              try {
-                const form = document.getElementById("intakeForm");
-                if (form) {
-                  const ctrls = Array.from(form.querySelectorAll("input, select, textarea"));
-                  ctrls.forEach((el) => {
-                    el.disabled = false;
-                    el.readOnly = false;
-                    el.removeAttribute("aria-disabled");
-                  });
+            next = 1;
+            await sql/*sql*/`
+              UPDATE app.sku_sequence
+              SET last_number = ${next}
+              WHERE tenant_id = ${tenant_id} AND category_code = ${category_code}
+            `;
+          } else {
+            next = Number(seqRows[0].last_number || 0) + 1;
+            await sql/*sql*/`
+              UPDATE app.sku_sequence
+              SET last_number = ${next}
+              WHERE tenant_id = ${tenant_id} AND category_code = ${category_code}
+            `;
+          }
+          sku = `${category_code}${String(next).padStart(4, "0")}`;
+        }
+
+        // Full inventory update for ACTIVE
+        const updInv = await sql<{ item_id: string; sku: string | null }[]>`
+          WITH s AS (
+            SELECT set_config('app.actor_user_id', ${actor_user_id}, true)
+          )
+          UPDATE app.inventory
+          SET
+            sku = ${sku},
+            product_short_title = ${inv.product_short_title},
+            price = ${inv.price},
+            qty = ${inv.qty},
+            cost_of_goods = ${inv.cost_of_goods},
+            category_nm = ${inv.category_nm},
+            instore_loc = ${inv.instore_loc},
+            case_bin_shelf = ${inv.case_bin_shelf},
+            instore_online = ${inv.instore_online},
+            item_status = 'active'
+          WHERE item_id = ${item_id_in}
+          RETURNING item_id, sku;
+        `;
+
+          const item_id = updInv[0].item_id;
+          const retSku  = updInv[0].sku;
+
+          // Store Only: skip marketplace-related tables entirely
+          const isStoreOnly = String(inv?.instore_online || "").toLowerCase().includes("store only");
+
+          if (!isStoreOnly) {
+            const descActive = composeLongDescription({
+              existing: lst.product_description,
+              status: "active",
+              sku: retSku,
+              instore_loc: inv?.instore_loc ?? null,
+              case_bin_shelf: inv?.case_bin_shelf ?? null,
+              product_short_title: inv?.product_short_title ?? null
+            });
+            
+            // Upsert listing profile for this item_id
+            await sql/*sql*/`
+              INSERT INTO app.item_listing_profile
+                ( item_id, tenant_id,
+                  listing_category_key, condition_key, brand_key, color_key, shipping_box_key,
+                  listing_category,       item_condition,  brand_name,  primary_color,  shipping_box,
+                  product_description, weight_lb, weight_oz, shipbx_length, shipbx_width, shipbx_height )
+              VALUES
+                ( ${item_id}, ${tenant_id},
+                  ${lst.listing_category_key}, ${lst.condition_key}, ${lst.brand_key}, ${lst.color_key}, ${lst.shipping_box_key},
+                  (SELECT display_name    FROM app.marketplace_categories  WHERE category_key  = ${lst.listing_category_key}),
+                  (SELECT condition_name  FROM app.marketplace_conditions  WHERE condition_key = ${lst.condition_key}),
+                  (SELECT brand_name      FROM app.marketplace_brands      WHERE brand_key     = ${lst.brand_key}),
+                  (SELECT color_name      FROM app.marketplace_colors      WHERE color_key     = ${lst.color_key}),
+                  (SELECT box_name        FROM app.shipping_boxes          WHERE box_key       = ${lst.shipping_box_key}),
+                  ${descActive}, ${lst.weight_lb}, ${lst.weight_oz},
+                  ${lst.shipbx_length}, ${lst.shipbx_width}, ${lst.shipbx_height}
+                )
+            
+              ON CONFLICT (item_id) DO UPDATE SET
+                -- keys
+                listing_category_key = EXCLUDED.listing_category_key,
+                condition_key        = EXCLUDED.condition_key,
+                brand_key            = EXCLUDED.brand_key,
+                color_key            = EXCLUDED.color_key,
+                shipping_box_key     = EXCLUDED.shipping_box_key,
+                listing_category = EXCLUDED.listing_category,
+                item_condition   = EXCLUDED.item_condition,
+                brand_name       = EXCLUDED.brand_name,
+                primary_color    = EXCLUDED.primary_color,
+                product_description = EXCLUDED.product_description,
+                shipping_box     = EXCLUDED.shipping_box,
+                weight_lb        = EXCLUDED.weight_lb,
+                weight_oz        = EXCLUDED.weight_oz,
+                shipbx_length    = EXCLUDED.shipbx_length,
+                shipbx_width     = EXCLUDED.shipbx_width,
+                shipbx_height    = EXCLUDED.shipbx_height
+            `;
+
+              console.log("[intake.ACTIVE] listing_profile_upserted", {
+                tenant_id,
+                item_id,
+                listing_category_key: lst.listing_category_key,
+                condition_key: lst.condition_key
+              });
+
+              // ⭐ FIX: Hydrate listing profile BEFORE doing Vendoo mappings
+              const hydratedLstRows = await sql/*sql*/`
+                SELECT
+                  listing_category_key, condition_key, brand_key, color_key, shipping_box_key,
+                  listing_category, item_condition, brand_name, primary_color, shipping_box,
+                  weight_lb, weight_oz, shipbx_length, shipbx_width, shipbx_height
+                  
+                FROM app.item_listing_profile
+                WHERE item_id = ${item_id} AND tenant_id = ${tenant_id}
+                LIMIT 1
+              `;
               
-                  // If the last save returned a SKU, do not allow Category edits
-                  const hasSku = !!(res && res.sku);
-                  if (hasSku) {
-                    const cat = document.getElementById("categorySelect");
-                    if (cat) {
-                      cat.disabled = true;
-                      cat.setAttribute("aria-disabled", "true");
-                      const hint = document.getElementById("categoryCodeHint");
-                      if (hint) hint.textContent = "Category locked (SKU assigned)";
+              const hydrated = hydratedLstRows[0] || {};
+              console.log("[intake.CREATE_ACTIVE] hydrated listing for Vendoo mapping", hydrated);
+              
+              // ⭐ Use hydrated.item_condition and hydrated.listing_category_key
+              const vendooCategoryRows = await loadVendooCategoryMap(
+                sql,
+                tenant_id,
+                lst.listing_category_key
+              );
+              
+              const vendooConditionRows = await loadMarketplaceConditions(
+                sql,
+                tenant_id,
+                hydrated.item_condition || null
+              );
+              
+              const vendooEbayConditionRows = await loadVendooEbayConditionMap(
+                sql,
+                tenant_id,
+                hydrated.item_condition || null,
+                hydrated.condition_options || null
+              );
+
+              // Derive per-marketplace categories from rows
+              let vendoo_category_vendoo: string | null = null;
+              let vendoo_category_ebay: string | null = null;
+              let vendoo_category_facebook: string | null = null;
+              let vendoo_category_depop: string | null = null;
+              
+              // ⭐ NEW: Shape Vendoo mapping (Option A)
+              const vendoo_mapping = {
+              vendoo_category_key:
+                vendooCategoryRows?.[0]?.category_key_uuid || null,
+              vendoo_category_vendoo,
+              vendoo_category_ebay,
+              vendoo_category_facebook,
+              vendoo_category_depop,
+              
+                vendoo_condition_main:
+                  vendooConditionRows?.[0]?.vendoo_map || null,
+                vendoo_condition_fb:
+                  vendooConditionRows?.[0]?.fb_map || null,
+                vendoo_condition_depop:
+                  vendooConditionRows?.[0]?.depop_map || null,
+              
+                vendoo_condition_ebay:
+                  vendooEbayConditionRows?.[0]?.ebay_conditions || null,
+                vendoo_condition_ebay_option:
+                  vendooEbayConditionRows?.[0]?.condition_options || null
+              };
+              
+              console.log("[intake.ACTIVE] vendoo_mapping (POST)", vendoo_mapping);
+            
+              // Handle per-marketplace DELETE intent (e.g., deselecting the eBay tile on update)
+             if (EBAY_MARKETPLACE_ID && intentMarketplaces.length) {
+               const ebayIntent = intentMarketplaces.find((m: any) => {
+                 const slug = String(m.slug || "").toLowerCase();
+                 const id = m.marketplace_id != null ? Number(m.marketplace_id) : null;
+                 return slug === "ebay" || id === EBAY_MARKETPLACE_ID;
+               });
+               console.log("[intake.ACTIVE] ebay_intent_check", {
+                tenant_id,
+                item_id,
+                EBAY_MARKETPLACE_ID,
+                ebayIntent
+              });
+               if (ebayIntent?.operation === "delete") {
+                 console.log("[intake] intent.ebay_delete", { item_id, EBAY_MARKETPLACE_ID });
+                 const iml = await sql/*sql*/`
+                   SELECT marketplace_id, mp_offer_id, mp_item_id
+                   FROM app.item_marketplace_listing
+                   WHERE item_id = ${item_id}
+                     AND tenant_id = ${tenant_id}
+                     AND marketplace_id = ${EBAY_MARKETPLACE_ID}
+                     AND (mp_offer_id IS NOT NULL OR mp_item_id IS NOT NULL)
+                 `;
+                 console.log("[intake] intent.ebay_delete_iml", {
+                  tenant_id,
+                  item_id,
+                  rows: iml.length
+                });
+                 if (iml.length) {
+                   const r: any = iml[0];
+                   const inserted = await sql/*sql*/`
+                     WITH ins AS (
+                       INSERT INTO app.marketplace_publish_jobs
+                         (tenant_id, item_id, marketplace_id, op, status, payload_snapshot)
+                       SELECT
+                         ${tenant_id}, ${item_id}, ${EBAY_MARKETPLACE_ID}, 'delete', 'queued',
+                         ${{
+                           item_id,
+                           tenant_id,
+                           marketplace_id: EBAY_MARKETPLACE_ID,
+                           marketplace_listing: { mp_offer_id: r.mp_offer_id, mp_item_id: r.mp_item_id }
+                         }}
+                       WHERE NOT EXISTS (
+                         SELECT 1
+                           FROM app.marketplace_publish_jobs j
+                          WHERE j.tenant_id      = ${tenant_id}
+                            AND j.item_id        = ${item_id}
+                            AND j.marketplace_id = ${EBAY_MARKETPLACE_ID}
+                            AND j.op             = 'delete'
+                            AND j.status IN ('queued','running')
+                       )
+                       RETURNING job_id
+                     )
+                     SELECT job_id FROM ins
+                     UNION ALL
+                     SELECT j.job_id
+                       FROM app.marketplace_publish_jobs j
+                      WHERE j.tenant_id      = ${tenant_id}
+                        AND j.item_id        = ${item_id}
+                        AND j.marketplace_id = ${EBAY_MARKETPLACE_ID}
+                        AND j.op             = 'delete'
+                        AND j.status IN ('queued','running')
+                      LIMIT 1
+                   `;
+                   const jobId = Array.isArray(inserted) && inserted[0]?.job_id ? String(inserted[0].job_id) : null;
+                   console.log("[intake] intent.ebay_delete_job", { item_id, jobId });
+                   await sql/*sql*/`
+                     UPDATE app.item_marketplace_listing
+                        SET status='delete_pending', updated_at=now()
+                      WHERE item_id=${item_id} AND tenant_id=${tenant_id} AND marketplace_id=${EBAY_MARKETPLACE_ID}
+                   `;
+                 } else {
+                   // No remote id; safe to drop the row entirely
+                   await sql/*sql*/`
+                     DELETE FROM app.item_marketplace_listing
+                      WHERE item_id = ${item_id}
+                        AND tenant_id = ${tenant_id}
+                        AND marketplace_id = ${EBAY_MARKETPLACE_ID}
+                   `;
+                 }
+               }
+             }
+            // Upsert selected marketplaces (prototype).
+            // eBay gets the rich field set; all other selected marketplaces (e.g., Facebook) get a stub row.
+            {
+              const mpIds: number[] = [];
+              if (Array.isArray(body?.marketplaces_selected)) {
+                for (const v of body.marketplaces_selected as any[]) {
+                  if (typeof v === "number" && !Number.isNaN(v)) {
+                    mpIds.push(v);
+                  } else if (typeof v === "string") {
+                    // Numeric string → id
+                    if (/^\d+$/.test(v)) {
+                      const n = Number(v);
+                      if (!Number.isNaN(n)) mpIds.push(n);
+                    } else if (EBAY_MARKETPLACE_ID && v.toLowerCase() === "ebay") {
+                      // Allow the UI to send "ebay" as a slug and still hit the rich eBay upsert
+                      mpIds.push(EBAY_MARKETPLACE_ID);
                     }
                   }
                 }
-              } catch (err) { /* no-op */ }
-        
-                // (2) Restore the original 3 CTAs and re-wire their handlers
-                try {
-                  if (__originalCtasHTML != null) {
-                    actionsRow.innerHTML = __originalCtasHTML;
-                  }
-                  // Reattach events to the restored buttons
-                  wireCtas();
-                } catch (err) { /* no-op */ }
-        
-                // (3) Remove success banner (if present) and re-validate to toggle button disabled states
-                try {
-                  const banner = document.getElementById("intake-save-banner");
-                  if (banner) banner.remove();
-                } catch (err) { /* no-op */ }
-                computeValidity();
-        
-                // (4) Optional: focus the first field for convenience
-                try {
-                  const first = document.querySelector("#intakeForm input, #intakeForm select, #intakeForm textarea");
-                  if (first) first.focus();
-                } catch (err) { /* no-op */ }
+              }
+              console.log("[intake.ACTIVE] marketplaces_selected_normalized", {
+                tenant_id,
+                item_id,
+                raw: body?.marketplaces_selected ?? null,
+                mpIds
               });
-            }
-        
-            if (btnNew) {
-              btnNew.addEventListener("click", (e) => {
-                e.preventDefault();
-                // Reload the intake screen to start a fresh item
-                window.location.reload();
+              // Normalize the ebay payload once
+              const e = ebay ? normalizeEbay(ebay) : null;
+                console.log("[intake.ACTIVE] ebay_payload_normalized", {
+                hasEbay: !!ebay,
+                hasNormalized: !!e
               });
-            }
-
-            const btnDel = document.getElementById("btnDeleteItem");
-            if (btnDel) {
-              btnDel.addEventListener("click", async (e) => {
-                e.preventDefault();
-                try {
-                  if (!__currentItemId) return alert("No item to delete.");
-                  const sure = confirm("Delete this item? This cannot be undone.");
-                  if (!sure) return;
-                  btnDel.disabled = true;
-                  const resDel = await api("/api/inventory/intake", {
-                    method: "POST",
-                    headers: { "content-type": "application/json" },
-                    body: JSON.stringify({ action: "delete", item_id: __currentItemId }),
+              for (const mpId of mpIds) {
+                if (mpId === EBAY_MARKETPLACE_ID && e) {
+                  // eBay: full field upsert (existing behavior)
+                  await sql/*sql*/`
+                    INSERT INTO app.item_marketplace_listing
+                      (item_id, tenant_id, marketplace_id, status,
+                       shipping_policy, payment_policy, return_policy, shipping_zip, pricing_format,
+                       buy_it_now_price, allow_best_offer, auto_accept_amount, minimum_offer_amount,
+                       promote, promote_percent, duration, starting_bid, reserve_price)
+                    VALUES
+                      (${item_id}, ${tenant_id}, ${mpId}, 'draft',
+                       ${e.shipping_policy}, ${e.payment_policy}, ${e.return_policy}, ${e.shipping_zip}, ${e.pricing_format},
+                       ${e.buy_it_now_price}, ${e.allow_best_offer}, ${e.auto_accept_amount}, ${e.minimum_offer_amount},
+                       ${e.promote}, ${e.promote_percent}, ${e.duration}, ${e.starting_bid}, ${e.reserve_price})
+                    ON CONFLICT (item_id, marketplace_id)
+                    DO UPDATE SET
+                      status = 'draft',
+                      shipping_policy = EXCLUDED.shipping_policy,
+                      payment_policy  = EXCLUDED.payment_policy,
+                      return_policy   = EXCLUDED.return_policy,
+                      shipping_zip    = EXCLUDED.shipping_zip,
+                      pricing_format  = EXCLUDED.pricing_format,
+                      buy_it_now_price = EXCLUDED.buy_it_now_price,
+                      allow_best_offer = EXCLUDED.allow_best_offer,
+                      auto_accept_amount = EXCLUDED.auto_accept_amount,
+                      minimum_offer_amount = EXCLUDED.minimum_offer_amount,
+                      promote = EXCLUDED.promote,
+                      promote_percent = EXCLUDED.promote_percent,
+                      duration = EXCLUDED.duration,
+                      starting_bid = EXCLUDED.starting_bid,
+                      reserve_price = EXCLUDED.reserve_price,
+                      updated_at = now()
+                  `;
+                  console.log("[intake.ACTIVE] ebay_listing_upserted", {
+                    tenant_id,
+                    item_id,
+                    marketplace_id: mpId
                   });
-                  if (!resDel || resDel.ok === false) {
-                    throw new Error(resDel?.error || "delete_failed");
-                  }
-                  alert("Item deleted.");
-                  window.location.reload();
-                } catch (err) {
-                  console.error("intake:delete:error", err);
-                  alert("Failed to delete item.");
-                } finally {
-                  btnDel.disabled = false;
+                  await sql/*sql*/`
+                    INSERT INTO app.user_marketplace_defaults
+                      (tenant_id, user_id, marketplace_id,
+                       shipping_policy, payment_policy, return_policy, shipping_zip, pricing_format,
+                       allow_best_offer, promote)
+                    VALUES
+                      (${tenant_id}, ${actor_user_id}, ${EBAY_MARKETPLACE_ID},
+                       ${e.shipping_policy}, ${e.payment_policy}, ${e.return_policy}, ${e.shipping_zip}, ${e.pricing_format},
+                       ${e.allow_best_offer}, ${e.promote})
+                    ON CONFLICT (tenant_id, user_id, marketplace_id)
+                    DO UPDATE SET
+                      shipping_policy = EXCLUDED.shipping_policy,
+                      payment_policy  = EXCLUDED.payment_policy,
+                      return_policy   = EXCLUDED.return_policy,
+                      shipping_zip    = EXCLUDED.shipping_zip,
+                      pricing_format  = EXCLUDED.pricing_format,
+                      allow_best_offer = EXCLUDED.allow_best_offer,
+                      promote          = EXCLUDED.promote,
+                      updated_at       = now()
+                  `;
+                  console.log("[intake.ACTIVE] ebay_defaults_upserted", {
+                    tenant_id,
+                    user_id: actor_user_id,
+                    marketplace_id: EBAY_MARKETPLACE_ID
+                  });
+                } else {
+                  // Non-eBay (e.g., Facebook): ensure a stub listing row exists with 'publishing'
+                  await sql/*sql*/`
+                    INSERT INTO app.item_marketplace_listing
+                      (item_id, tenant_id, marketplace_id, status)
+                    VALUES
+                      (${item_id}, ${tenant_id}, ${mpId}, 'publishing')
+                    ON CONFLICT (item_id, marketplace_id)
+                    DO UPDATE SET
+                      status = 'publishing',
+                      updated_at = now()
+                  `;
+                  console.log("[intake.ACTIVE] non_ebay_listing_stub_upserted", {
+                    tenant_id,
+                    item_id,
+                    marketplace_id: mpId
+                  });
                 }
-              });
+              }
             }
-
-            
           }
-        } catch (err) { /* no-op */ }
-      }
-  
-    
-  
-  
-    
-  } catch (err) {
-    console.error("Meta load failed:", err);
-    const denied = document.getElementById("intake-access-denied");
-    if (denied) denied.classList.remove("hidden");
-  } finally {
-    try { document.body.classList.remove("loading"); } catch {}
-  }
-}
 
-// end intake js file. 
+          // If the intake intent explicitly requests eBay delete (tile deselected),
+          // enqueue a delete job and mark the listing as delete_pending.
+          if (intentMarketplaces?.ebay === "delete" && EBAY_MARKETPLACE_ID) {
+            const iml = await sql/*sql*/`
+              SELECT marketplace_id, mp_offer_id, mp_item_id
+                FROM app.item_marketplace_listing
+               WHERE item_id    = ${item_id}
+                 AND tenant_id  = ${tenant_id}
+                 AND marketplace_id = ${EBAY_MARKETPLACE_ID}
+                 AND (mp_offer_id IS NOT NULL OR mp_item_id IS NOT NULL)
+            `;
+            console.log("[intake.ACTIVE] explicit_ebay_delete_intent", {
+              tenant_id,
+              item_id,
+              rows: iml.length
+            });
+            for (const r of iml as any[]) {
+              const inserted = await sql/*sql*/`
+                WITH ins AS (
+                  INSERT INTO app.marketplace_publish_jobs
+                    (tenant_id, item_id, marketplace_id, op, status, payload_snapshot)
+                  SELECT
+                    ${tenant_id}, ${item_id}, ${r.marketplace_id}, 'delete', 'queued',
+                    ${{
+                      item_id,
+                      tenant_id,
+                      marketplace_id: r.marketplace_id,
+                      marketplace_listing: {
+                        mp_offer_id: r.mp_offer_id,
+                        mp_item_id: r.mp_item_id
+                      }
+                    }}
+                  WHERE NOT EXISTS (
+                    SELECT 1
+                      FROM app.marketplace_publish_jobs j
+                     WHERE j.tenant_id      = ${tenant_id}
+                       AND j.item_id        = ${item_id}
+                       AND j.marketplace_id = ${r.marketplace_id}
+                       AND j.op             = 'delete'
+                       AND j.status IN ('queued','running')
+                  )
+                  RETURNING job_id
+                )
+                SELECT job_id FROM ins
+                UNION ALL
+                SELECT j.job_id
+                  FROM app.marketplace_publish_jobs j
+                 WHERE j.tenant_id      = ${tenant_id}
+                   AND j.item_id        = ${item_id}
+                   AND j.marketplace_id = ${r.marketplace_id}
+                   AND j.op             = 'delete'
+                   AND j.status IN ('queued','running')
+                 LIMIT 1
+              `;
+
+              // Reflect pending delete on the listing row
+              await sql/*sql*/`
+                UPDATE app.item_marketplace_listing
+                   SET status='delete_pending', updated_at=now()
+                 WHERE item_id       = ${item_id}
+                   AND tenant_id     = ${tenant_id}
+                   AND marketplace_id = ${r.marketplace_id}
+              `;
+            }
+          }
+          
+          // Enqueue marketplace publish jobs (same behavior as Create Active)
+          console.log("[intake.ACTIVE] enqueuePublishJobs.start", {
+            tenant_id,
+            item_id,
+            status,
+            intentMarketplaces
+          });
+          await enqueuePublishJobs(tenant_id, item_id, body, status);
+          console.log("[intake.ACTIVE] enqueuePublishJobs.done", {
+            tenant_id,
+            item_id
+          });
+          // Return any queued jobs so the client can trigger them by job_id
+          const enqueuedUpd = await sql/*sql*/`
+            SELECT job_id
+            FROM app.marketplace_publish_jobs
+            WHERE tenant_id = ${tenant_id}
+              AND item_id   = ${item_id}
+              AND status    = 'queued'
+            ORDER BY created_at ASC
+          `;
+          
+          const job_ids_upd = Array.isArray(enqueuedUpd) ? enqueuedUpd.map((r: any) => String(r.job_id)) : [];
+          console.log("[intake.ACTIVE] queued_jobs", {
+            tenant_id,
+            item_id,
+            job_ids_upd
+          });
+          return json({
+            ok: true,
+            item_id,
+            sku: retSku,
+            status,
+            published: false,
+            job_ids: job_ids_upd,
+            intent: { marketplaces: intentMarketplaces },
+            vendoo_mapping,
+
+            ms: Date.now() - t0
+
+          }, 200);
+        }
+
+
+    
+        // Begin "transaction" (serverless best-effort: use explicit locks/constraints)
+        // Resolve category_code early for ACTIVE creates (needed for SKU allocation)
+        let category_code: string | null = null;
+        if (!isDraft) {
+          const catRows = await sql<{ category_code: string }[]>`
+            SELECT category_code
+            FROM app.sku_categories
+            WHERE category_name = ${inv.category_nm}
+            LIMIT 1
+          `;
+          if (catRows.length === 0) {
+            return json({ ok: false, error: "bad_category" }, 400);
+          }
+          category_code = catRows[0].category_code;
+        }
+        // 1) Allocate next SKU via sku_sequence (ACTIVE only). Drafts skip SKU.
+        let sku: string | null = null;
+        if (!isDraft) {
+          const seqRows = await sql<{ last_number: number }[]>`
+            SELECT last_number FROM app.sku_sequence
+            WHERE tenant_id = ${tenant_id} AND category_code = ${category_code}
+            FOR UPDATE
+          `;
+          let next = 0;
+          if (seqRows.length === 0) {
+            await sql/*sql*/`
+              INSERT INTO app.sku_sequence (tenant_id, category_code, last_number)
+              VALUES (${tenant_id}, ${category_code}, 0)
+              ON CONFLICT (tenant_id, category_code) DO NOTHING
+            `;
+            next = 1;
+            await sql/*sql*/`
+              UPDATE app.sku_sequence
+              SET last_number = ${next}
+              WHERE tenant_id = ${tenant_id} AND category_code = ${category_code}
+            `;
+          } else {
+            next = Number(seqRows[0].last_number || 0) + 1;
+            await sql/*sql*/`
+              UPDATE app.sku_sequence
+              SET last_number = ${next}
+              WHERE tenant_id = ${tenant_id} AND category_code = ${category_code}
+            `;
+          }
+          sku = `${category_code}${String(next).padStart(4, "0")}`;
+        }
+
+
+    // 2) Insert into inventory (drafts carry NULL sku; active allocates)
+    // === CREATE DRAFT: store any provided inventory fields; also upsert listing if sent ===
+    if (isDraft) {
+      console.log("[intake] branch", { kind: "CREATE_DRAFT" });
+      const invRows = await sql<{ item_id: string }[]>`
+        WITH s AS (
+          SELECT set_config('app.actor_user_id', ${actor_user_id}, true)
+        )
+        INSERT INTO app.inventory
+          (tenant_id, sku, product_short_title, price, qty, cost_of_goods, category_nm, instore_loc, case_bin_shelf, instore_online, item_status)
+        VALUES
+          (${tenant_id}, NULL, ${inv.product_short_title}, ${inv.price}, ${inv.qty}, ${inv.cost_of_goods},
+           ${inv.category_nm}, ${inv.instore_loc}, ${inv.case_bin_shelf}, ${inv.instore_online}, 'draft')
+        RETURNING item_id
+      `;
+      const item_id = invRows[0].item_id;
+
+      // === DUPLICATE IMAGES (if provided by client) ===
+      if (Array.isArray(body?.duplicate_images) && body.duplicate_images.length > 0) {
+        for (const img of body.duplicate_images) {
+          await sql/*sql*/`
+            INSERT INTO app.item_images
+              (tenant_id, item_id, r2_key, cdn_url, bytes, content_type, width_px, height_px, sha256_hex, is_primary, sort_order)
+            VALUES
+              (${tenant_id}, ${item_id}, ${img.r2_key}, ${img.cdn_url},
+               ${img.bytes}, ${img.content_type}, ${img.width}, ${img.height},
+               ${img.sha256}, ${img.is_primary}, ${img.sort_order})
+          `;
+        }
+      }
+    
+      // If the client provided any listing fields for the draft, persist them too
+      if (lst && Object.values(lst).some(v => v !== null && v !== undefined && String(v) !== "")) {
+        const descDraft = composeLongDescription({
+              existing: lst.product_description,
+              status: "draft",
+              product_short_title: inv?.product_short_title ?? null
+            });
+        
+        await sql/*sql*/`
+          INSERT INTO app.item_listing_profile
+            ( item_id, tenant_id,
+              listing_category_key, condition_key, brand_key, color_key, shipping_box_key,
+              listing_category,       item_condition,  brand_name,  primary_color,  shipping_box,
+              product_description, weight_lb, weight_oz, shipbx_length, shipbx_width, shipbx_height )
+          VALUES
+            ( ${item_id}, ${tenant_id},
+              ${lst.listing_category_key}, ${lst.condition_key}, ${lst.brand_key}, ${lst.color_key}, ${lst.shipping_box_key},
+              (SELECT display_name    FROM app.marketplace_categories  WHERE category_key  = ${lst.listing_category_key}),
+              (SELECT condition_name  FROM app.marketplace_conditions  WHERE condition_key = ${lst.condition_key}),
+              (SELECT brand_name      FROM app.marketplace_brands      WHERE brand_key     = ${lst.brand_key}),
+              (SELECT color_name      FROM app.marketplace_colors      WHERE color_key     = ${lst.color_key}),
+              (SELECT box_name        FROM app.shipping_boxes          WHERE box_key       = ${lst.shipping_box_key}),
+              ${descDraft}, ${lst.weight_lb}, ${lst.weight_oz},
+              ${lst.shipbx_length}, ${lst.shipbx_width}, ${lst.shipbx_height}
+            )
+        ON CONFLICT (item_id) DO UPDATE SET
+            -- keys
+            listing_category_key = EXCLUDED.listing_category_key,
+            condition_key        = EXCLUDED.condition_key,
+            brand_key            = EXCLUDED.brand_key,
+            color_key            = EXCLUDED.color_key,
+            shipping_box_key     = EXCLUDED.shipping_box_key,
+            listing_category = EXCLUDED.listing_category,
+            item_condition   = EXCLUDED.item_condition,
+            brand_name       = EXCLUDED.brand_name,
+            primary_color    = EXCLUDED.primary_color,
+            product_description = EXCLUDED.product_description,
+            shipping_box     = EXCLUDED.shipping_box,
+            weight_lb        = EXCLUDED.weight_lb,
+            weight_oz        = EXCLUDED.weight_oz,
+            shipbx_length    = EXCLUDED.shipbx_length,
+            shipbx_width     = EXCLUDED.shipbx_width,
+            shipbx_height    = EXCLUDED.shipbx_height
+        `;
+      }
+
+      // Upsert eBay marketplace listing when present (draft create)
+      if (EBAY_MARKETPLACE_ID && ebay) {
+        const e = normalizeEbay(ebay);
+        if (e) {
+          await sql/*sql*/`
+            INSERT INTO app.item_marketplace_listing
+              (item_id, tenant_id, marketplace_id, status,
+               shipping_policy, payment_policy, return_policy, shipping_zip, pricing_format,
+               buy_it_now_price, allow_best_offer, auto_accept_amount, minimum_offer_amount,
+               promote, promote_percent, duration, starting_bid, reserve_price)
+            VALUES
+              (${item_id}, ${tenant_id}, ${EBAY_MARKETPLACE_ID}, 'draft',
+               ${e.shipping_policy}, ${e.payment_policy}, ${e.return_policy}, ${e.shipping_zip}, ${e.pricing_format},
+               ${e.buy_it_now_price}, ${e.allow_best_offer}, ${e.auto_accept_amount}, ${e.minimum_offer_amount},
+               ${e.promote}, ${e.promote_percent}, ${e.duration}, ${e.starting_bid}, ${e.reserve_price})
+            ON CONFLICT (item_id, marketplace_id)
+            DO UPDATE SET
+              status = 'draft',
+              shipping_policy = EXCLUDED.shipping_policy,
+              payment_policy  = EXCLUDED.payment_policy,
+              return_policy   = EXCLUDED.return_policy,
+              shipping_zip    = EXCLUDED.shipping_zip,
+              pricing_format  = EXCLUDED.pricing_format,
+              buy_it_now_price = EXCLUDED.buy_it_now_price,
+              allow_best_offer = EXCLUDED.allow_best_offer,
+              auto_accept_amount = EXCLUDED.auto_accept_amount,
+              minimum_offer_amount = EXCLUDED.minimum_offer_amount,
+              promote = EXCLUDED.promote,
+              promote_percent = EXCLUDED.promote_percent,
+              duration = EXCLUDED.duration,
+              starting_bid = EXCLUDED.starting_bid,
+              reserve_price = EXCLUDED.reserve_price,
+              updated_at = now()
+          `;
+
+          await sql/*sql*/`
+              INSERT INTO app.user_marketplace_defaults
+                (tenant_id, user_id, marketplace_id,
+                 shipping_policy, payment_policy, return_policy, shipping_zip, pricing_format,
+                 allow_best_offer, promote)
+              VALUES
+                (${tenant_id}, ${actor_user_id}, ${EBAY_MARKETPLACE_ID},
+                 ${e.shipping_policy}, ${e.payment_policy}, ${e.return_policy}, ${e.shipping_zip}, ${e.pricing_format},
+                 ${e.allow_best_offer}, ${e.promote})
+              ON CONFLICT (tenant_id, user_id, marketplace_id)
+              DO UPDATE SET
+                shipping_policy = EXCLUDED.shipping_policy,
+                payment_policy  = EXCLUDED.payment_policy,
+                return_policy   = EXCLUDED.return_policy,
+                shipping_zip    = EXCLUDED.shipping_zip,
+                pricing_format  = EXCLUDED.pricing_format,
+                allow_best_offer = EXCLUDED.allow_best_offer,
+                promote          = EXCLUDED.promote,
+                updated_at       = now()
+            `;
+        }
+      }
+      
+      return json({
+        ok: true,
+        item_id,
+        sku: null,
+        status: "draft",
+        intent: { marketplaces: intentMarketplaces },
+        ms: Date.now() - t0
+      }, 200);
+    }
+
+
+    
+  //Save as Active Code
+   // 1) Allocate next SKU (already guarded earlier; keep as-is)
+    // 2) Insert full inventory
+    console.log("[intake] branch", { kind: "CREATE_ACTIVE" });
+    const invRows = await sql<{ item_id: string }[]>`
+      WITH s AS (
+        SELECT set_config('app.actor_user_id', ${actor_user_id}, true)
+      )
+      INSERT INTO app.inventory
+        (tenant_id, sku, product_short_title, price, qty, cost_of_goods, category_nm, instore_loc, case_bin_shelf, instore_online, item_status)
+      VALUES
+        (${tenant_id}, ${sku}, ${inv.product_short_title}, ${inv.price}, ${inv.qty}, ${inv.cost_of_goods},
+         ${inv.category_nm}, ${inv.instore_loc}, ${inv.case_bin_shelf}, ${inv.instore_online}, 'active')
+      RETURNING item_id
+    `;
+    const item_id = invRows[0].item_id;
+
+    // === DUPLICATE IMAGES (if provided by client) ===
+    if (Array.isArray(body?.duplicate_images) && body.duplicate_images.length > 0) {
+      for (const img of body.duplicate_images) {
+        await sql/*sql*/`
+          INSERT INTO app.item_images
+            (tenant_id, item_id, r2_key, cdn_url, bytes, content_type, width_px, height_px, sha256_hex, is_primary, sort_order)
+          VALUES
+            (${tenant_id}, ${item_id}, ${img.r2_key}, ${img.cdn_url},
+             ${img.bytes}, ${img.content_type}, ${img.width}, ${img.height},
+             ${img.sha256}, ${img.is_primary}, ${img.sort_order})
+        `;
+      }
+    }
+    // Store Only: skip marketplace-related tables
+    const isStoreOnly = String(inv?.instore_online || "").toLowerCase().includes("store only");
+
+    if (!isStoreOnly) {
+      // 3) Insert listing profile (ACTIVE — ALWAYS)
+      const descActive = composeLongDescription({
+        existing: lst.product_description,
+        status: "active",
+        sku: sku, // fix: use the allocated sku variable (lowercase)
+        instore_loc: inv?.instore_loc ?? null,
+        case_bin_shelf: inv?.case_bin_shelf ?? null,
+        product_short_title: inv?.product_short_title ?? null
+      });
+      
+      await sql/*sql*/`
+      INSERT INTO app.item_listing_profile
+        ( item_id, tenant_id,
+          listing_category_key, condition_key, brand_key, color_key, shipping_box_key,
+          listing_category,       item_condition,  brand_name,  primary_color,  shipping_box,
+          product_description, weight_lb, weight_oz, shipbx_length, shipbx_width, shipbx_height )
+      VALUES
+        ( ${item_id}, ${tenant_id},
+          ${lst.listing_category_key}, ${lst.condition_key}, ${lst.brand_key}, ${lst.color_key}, ${lst.shipping_box_key},
+          (SELECT display_name    FROM app.marketplace_categories  WHERE category_key  = ${lst.listing_category_key}),
+          (SELECT condition_name  FROM app.marketplace_conditions  WHERE condition_key = ${lst.condition_key}),
+          (SELECT brand_name      FROM app.marketplace_brands      WHERE brand_key     = ${lst.brand_key}),
+          (SELECT color_name      FROM app.marketplace_colors      WHERE color_key     = ${lst.color_key}),
+          (SELECT box_name        FROM app.shipping_boxes          WHERE box_key       = ${lst.shipping_box_key}),
+          ${descActive}, ${lst.weight_lb}, ${lst.weight_oz},
+          ${lst.shipbx_length}, ${lst.shipbx_width}, ${lst.shipbx_height}
+        )
+        ON CONFLICT (item_id) DO UPDATE SET
+          -- keys
+          listing_category_key = EXCLUDED.listing_category_key,
+          condition_key        = EXCLUDED.condition_key,
+          brand_key            = EXCLUDED.brand_key,
+          color_key            = EXCLUDED.color_key,
+          shipping_box_key     = EXCLUDED.shipping_box_key,
+          -- labels / other
+          listing_category     = EXCLUDED.listing_category,
+          item_condition       = EXCLUDED.item_condition,
+          brand_name           = EXCLUDED.brand_name,
+          primary_color        = EXCLUDED.primary_color,
+          product_description  = EXCLUDED.product_description,
+          shipping_box         = EXCLUDED.shipping_box,
+          weight_lb            = EXCLUDED.weight_lb,
+          weight_oz            = EXCLUDED.weight_oz,
+          shipbx_length        = EXCLUDED.shipbx_length,
+          shipbx_width         = EXCLUDED.shipbx_width,
+          shipbx_height        = EXCLUDED.shipbx_height
+      `;
+    }
+    
+    // Upsert eBay marketplace listing when present (active create)
+    if (EBAY_MARKETPLACE_ID && ebay) {
+      const e = normalizeEbay(ebay);
+      if (e) {
+        await sql/*sql*/`
+          INSERT INTO app.item_marketplace_listing
+            (item_id, tenant_id, marketplace_id, status,
+             shipping_policy, payment_policy, return_policy, shipping_zip, pricing_format,
+             buy_it_now_price, allow_best_offer, auto_accept_amount, minimum_offer_amount,
+             promote, promote_percent, duration, starting_bid, reserve_price)
+          VALUES
+            (${item_id}, ${tenant_id}, ${EBAY_MARKETPLACE_ID}, 'draft',
+             ${e.shipping_policy}, ${e.payment_policy}, ${e.return_policy}, ${e.shipping_zip}, ${e.pricing_format},
+             ${e.buy_it_now_price}, ${e.allow_best_offer}, ${e.auto_accept_amount}, ${e.minimum_offer_amount},
+             ${e.promote}, ${e.promote_percent}, ${e.duration}, ${e.starting_bid}, ${e.reserve_price})
+          ON CONFLICT (item_id, marketplace_id)
+          DO UPDATE SET
+            status = 'draft',
+            shipping_policy = EXCLUDED.shipping_policy,
+            payment_policy  = EXCLUDED.payment_policy,
+            return_policy   = EXCLUDED.return_policy,
+            shipping_zip    = EXCLUDED.shipping_zip,
+            pricing_format  = EXCLUDED.pricing_format,
+            buy_it_now_price = EXCLUDED.buy_it_now_price,
+            allow_best_offer = EXCLUDED.allow_best_offer,
+            auto_accept_amount = EXCLUDED.auto_accept_amount,
+            minimum_offer_amount = EXCLUDED.minimum_offer_amount,
+            promote = EXCLUDED.promote,
+            promote_percent = EXCLUDED.promote_percent,
+            duration = EXCLUDED.duration,
+            starting_bid = EXCLUDED.starting_bid,
+            reserve_price = EXCLUDED.reserve_price,
+            updated_at = now()
+        `;
+        await sql/*sql*/`
+        INSERT INTO app.user_marketplace_defaults
+          (tenant_id, user_id, marketplace_id,
+           shipping_policy, payment_policy, return_policy, shipping_zip, pricing_format,
+           allow_best_offer, promote)
+        VALUES
+          (${tenant_id}, ${actor_user_id}, ${EBAY_MARKETPLACE_ID},
+           ${e.shipping_policy}, ${e.payment_policy}, ${e.return_policy}, ${e.shipping_zip}, ${e.pricing_format},
+           ${e.allow_best_offer}, ${e.promote})
+        ON CONFLICT (tenant_id, user_id, marketplace_id)
+        DO UPDATE SET
+          shipping_policy = EXCLUDED.shipping_policy,
+          payment_policy  = EXCLUDED.payment_policy,
+          return_policy   = EXCLUDED.return_policy,
+          shipping_zip    = EXCLUDED.shipping_zip,
+          pricing_format  = EXCLUDED.pricing_format,
+          allow_best_offer = EXCLUDED.allow_best_offer,
+          promote          = EXCLUDED.promote,
+          updated_at       = now()
+      `;
+      }
+    }
+
+    // NEW: For any other selected marketplaces (e.g., Facebook), create a stub row now
+    {
+      const selIds: number[] = Array.isArray(body?.marketplaces_selected)
+        ? body.marketplaces_selected.map((n: any) => Number(n)).filter((n) => !Number.isNaN(n))
+        : [];
+      const otherIds = selIds.filter((id) => id !== EBAY_MARKETPLACE_ID);
+      for (const mpId of otherIds) {
+        await sql/*sql*/`
+          INSERT INTO app.item_marketplace_listing
+            (item_id, tenant_id, marketplace_id, status)
+          VALUES
+            (${item_id}, ${tenant_id}, ${mpId}, 'publishing')
+          ON CONFLICT (item_id, marketplace_id)
+          DO UPDATE SET
+            status = 'publishing',
+            updated_at = now()
+        `;
+      }
+    }
+    
+   //calling the enqueue process to prepare for the marketplace publish 
+   await enqueuePublishJobs(tenant_id, item_id, body, status);
+    
+    // Do NOT run publish inline.
+    // Look up any jobs we just queued for this item so the client can trigger them by job_id.
+    const enqueued = await sql/*sql*/`
+      SELECT job_id
+      FROM app.marketplace_publish_jobs
+      WHERE tenant_id = ${tenant_id}
+        AND item_id   = ${item_id}
+        AND status    = 'queued'
+      ORDER BY created_at ASC
+    `;
+
+    // ⭐ FIX: hydrate listing profile before computing Vendoo mappings (CREATE_ACTIVE)
+    const hydratedLstRows = await sql/*sql*/`
+      SELECT
+        listing_category_key, condition_key, brand_key, color_key, shipping_box_key,
+        listing_category, item_condition, brand_name, primary_color, shipping_box,
+        weight_lb, weight_oz, shipbx_length, shipbx_width, shipbx_height
+        
+      FROM app.item_listing_profile
+      WHERE item_id = ${item_id} AND tenant_id = ${tenant_id}
+      LIMIT 1
+    `;
+    const hydrated = hydratedLstRows[0] || {};
+    console.log("[intake.CREATE_ACTIVE] hydrated listing for Vendoo mapping", hydrated);
+    
+    // ⭐ NEW — build Vendoo mapping for POST responses
+
+    // Prefer the UUID key; we key mappings by this
+    const listingCategoryKey =
+      lst.listing_category_key || null;
+    
+    // Load category mapping (expects category_key_uuid)
+    const vendooCatRows = await loadVendooCategoryMap(
+      sql,
+      tenant_id,
+      listingCategoryKey
+    );
+    
+    // Derive per-marketplace categories from rows
+    let category_vendoo: string | null = null;
+    let category_ebay: string | null = null;
+    let category_facebook: string | null = null;
+    let category_depop: string | null = null;
+    let conditionOptions: string | null = null; // for eBay condition mapping
+
+    if (Array.isArray(vendooCatRows)) {
+      for (const r of vendooCatRows) {
+        const mp = Number(r.marketplace_id);
+        if (mp === 13) {
+          category_vendoo = r.vendoo_category_path || null;
+        }
+        if (mp === 1) {
+          category_ebay = r.vendoo_category_path || null;
+          // eBay row also carries condition_options we use below
+          conditionOptions = conditionOptions || r.condition_options || null;
+        }
+        if (mp === 2) {
+          category_facebook = r.vendoo_category_path || null;
+        }
+        if (mp === 4) {
+          category_depop = r.vendoo_category_path || null;
+        }
+      }
+    }
+    
+    
+    // Load base condition mapping
+    const vendooCondRows = await loadMarketplaceConditions(
+      sql,
+      tenant_id,
+      hydrated.item_condition || null
+    );
+
+    // Load Vendoo–eBay condition mapping, using condition_options from the category row
+    let vendooEbayRows: any[] = [];
+    //let conditionOptions: string | null = null;
+
+    if (Array.isArray(vendooCatRows) && vendooCatRows.length > 0) {
+      const ebayRow = vendooCatRows.find(
+        (r: any) => Number(r.marketplace_id) === 1
+      );
+      conditionOptions = ebayRow?.condition_options || null;
+    }
+
+    if (hydrated.item_condition && conditionOptions) {
+      vendooEbayRows = await loadVendooEbayConditionMap(
+        sql,
+        tenant_id,
+        hydrated.item_condition,
+        conditionOptions
+      );
+    }
+
+   // Shape mapping in the SAME format as GET /api/inventory/intake
+    const vendoo_mapping = {
+      // Category mapping
+      category_key: listingCategoryKey || null,
+      category_vendoo,
+      category_ebay,
+      category_facebook,
+      category_depop,
+      // Base condition mapping
+      condition_main: vendooCondRows?.[0]?.vendoo_map || null,
+      condition_fb: vendooCondRows?.[0]?.fb_map || null,
+      condition_depop: vendooCondRows?.[0]?.depop_map || null,
+
+      // Vendoo–eBay condition mapping
+      condition_ebay: vendooEbayRows?.[0]?.ebay_conditions || null,
+      condition_ebay_option: vendooEbayRows?.[0]?.condition_options || null,
+    };
+
+    console.log("[intake.ACTIVE] vendoo_mapping (POST)", {
+      tenant_id,
+      item_id,
+      listingCategoryKey,
+      item_condition: hydrated.item_condition,
+      vendoo_mapping,
+    });
+    const job_ids = Array.isArray(enqueued) ? enqueued.map((r: any) => String(r.job_id)) : [];
+
+    return json({
+      ok: true,
+      item_id,
+      sku,
+      status,
+      published: false,
+      job_ids,
+      intent: { marketplaces: intentMarketplaces },
+      vendoo_mapping,
+      ms: Date.now() - t0
+    }, 200);
+
+  } catch (err: any) {
+    // —— High-signal server-side logging to surface the true root cause ——
+    // Neon/Postgres errors often include:
+    //   code, detail, hint, schema, table, column, constraint, routine, severity, position
+    try {
+      console.error("[intake] fatal", {
+        took_ms: Date.now() - t0,
+        message: String(err?.message || err),
+        name: err?.name || null,
+        code: err?.code || null,
+        detail: err?.detail || null,
+        hint: err?.hint || null,
+        schema: err?.schema || null,
+        table: err?.table || null,
+        column: err?.column || null,
+        constraint: err?.constraint || null,
+        severity: err?.severity || null,
+        routine: err?.routine || null,
+      });
+    } catch {}
+
+    // Preserve current API contract
+    const msg = String(err?.message || err);
+    if (/unique|duplicate/i.test(msg)) return json({ ok: false, error: "duplicate_sku" }, 409);
+    return json({ ok: false, error: "server_error", message: msg }, 500);
+  }
+};
+
+// Read a single item (inventory + optional listing profile) by item_id
+export const onRequestGet: PagesFunction = async ({ request, env }) => {
+  try {
+    // AuthN
+    const cookieHeader = request.headers.get("cookie") || "";
+    const token = (function readCookie(header: string, name: string): string | null {
+      if (!header) return null;
+      for (const part of header.split(/; */)) {
+        const [k, ...rest] = part.split("=");
+        if (k === name) return decodeURIComponent(rest.join("="));
+      }
+      return null;
+    })(cookieHeader, "__Host-rp_session");
+    if (!token) return new Response(JSON.stringify({ ok: false, error: "no_cookie" }), { status: 401, headers: { "content-type": "application/json" } });
+
+    // Verify JWT (reuse the inline HS256 verifier pattern)
+    async function verifyJwt(token: string, secret: string): Promise<any> {
+      const enc = new TextEncoder();
+      const [h, p, s] = token.split(".");
+      if (!h || !p || !s) throw new Error("bad_token");
+      const base64urlToBytes = (str: string) => {
+        const pad = "=".repeat((4 - (str.length % 4)) % 4);
+        const b64 = (str + pad).replace(/-/g, "+").replace(/_/g, "/");
+        const bin = atob(b64);
+        return Uint8Array.from(bin, (c) => c.charCodeAt(0));
+      };
+      const data = `${h}.${p}`;
+      const key = await crypto.subtle.importKey("raw", enc.encode(String(env.JWT_SECRET)), { name: "HMAC", hash: "SHA-256" }, false, ["verify"]);
+      const ok = await crypto.subtle.verify("HMAC", key, base64urlToBytes(s), enc.encode(data));
+      if (!ok) throw new Error("bad_sig");
+      const payload = JSON.parse(new TextDecoder().decode(base64urlToBytes(p)));
+      if ((payload as any)?.exp && Date.now() / 1000 > (payload as any).exp) throw new Error("expired");
+      return payload;
+    }
+    await verifyJwt(token, String(env.JWT_SECRET));
+
+    // Tenant (required for listing profile lookups)
+    const tenant_id = request.headers.get("x-tenant-id");
+    if (!tenant_id) {
+      return new Response(JSON.stringify({ ok: false, error: "missing_tenant" }), { status: 400, headers: { "content-type": "application/json" } });
+    }
+
+    const url = new URL(request.url);
+    const item_id = url.searchParams.get("item_id");
+    if (!item_id) {
+      return new Response(JSON.stringify({ ok: false, error: "missing_item_id" }), { status: 400, headers: { "content-type": "application/json" } });
+    }
+
+    const sql = neon(String(env.DATABASE_URL));
+
+    // Load inventory row
+    const invRows = await sql<any[]>`
+      SELECT *
+      FROM app.inventory
+      WHERE item_id = ${item_id}
+      LIMIT 1
+    `;
+    if (invRows.length === 0) {
+      return new Response(JSON.stringify({ ok: false, error: "not_found" }), { status: 404, headers: { "content-type": "application/json" } });
+    }
+
+    // Load listing profile (only for this tenant, if present)
+    const lstRows = await sql<any[]>`
+      SELECT *
+      FROM app.item_listing_profile
+      WHERE item_id = ${item_id} AND tenant_id = ${tenant_id}
+      LIMIT 1
+    `;
+
+    // Load images for this item (scoped by tenant)
+    const imgRows = await sql<any[]>`
+      SELECT image_id, r2_key, cdn_url, is_primary, sort_order,
+             content_type, bytes, width_px, height_px
+      FROM app.item_images
+      WHERE item_id = ${item_id} AND tenant_id = ${tenant_id}
+      ORDER BY sort_order ASC, created_at ASC
+    `;
+
+    // Load the eBay marketplace listing row (if any) to hydrate edit UI
+    const ebayIdRows = await sql<{ id: number }[]>`
+      SELECT id FROM app.marketplaces_available WHERE slug = 'ebay' LIMIT 1
+    `;
+    const EBAY_ID = ebayIdRows[0]?.id ?? null;
+
+    let ebayListing: any = null;
+    if (EBAY_ID != null) {
+      const rows = await sql<any[]>`
+        SELECT
+          status,
+          shipping_policy, payment_policy, return_policy, shipping_zip, pricing_format,
+          buy_it_now_price, allow_best_offer, auto_accept_amount, minimum_offer_amount,
+          promote, promote_percent, duration, starting_bid, reserve_price
+        FROM app.item_marketplace_listing
+        WHERE item_id = ${item_id} AND tenant_id = ${tenant_id} AND marketplace_id = ${EBAY_ID}
+        LIMIT 1
+      `;
+      if (rows.length) ebayListing = rows[0];
+    }
+
+    // Load the Facebook marketplace listing row (if any) to hydrate the UI
+    // Neon uses marketplace_id = 2 for Facebook; also try slug for portability.
+    const facebookIdRows = await sql<{ id: number }[]>`
+      SELECT id FROM app.marketplaces_available WHERE slug = 'facebook' LIMIT 1
+    `;
+    const FACEBOOK_ID = facebookIdRows[0]?.id ?? 2;
+
+    let facebookListing: any = null;
+    if (FACEBOOK_ID != null) {
+      const rows = await sql<any[]>`
+        SELECT
+          status,
+          mp_item_url
+        FROM app.item_marketplace_listing
+        WHERE item_id = ${item_id} AND tenant_id = ${tenant_id} AND marketplace_id = ${FACEBOOK_ID}
+        LIMIT 1
+      `;
+      if (rows.length) facebookListing = rows[0];
+    }
+
+    // ---- Long Description default (GET fallback so UI shows something helpful) ----
+    const BASE_SENTENCE_GET =
+      "The photos are part of the description. Be sure to look them over for condition and details. This is sold as is, and it's ready for a new home.";
+    let listingOut: any = lstRows[0] || null;
+    if (!listingOut || !String(listingOut.product_description || "").trim()) {
+      listingOut = { ...(listingOut || {}), product_description: BASE_SENTENCE_GET };
+    }
+
+       // ---------------------------------------------------------------------
+    // VENDOO CATEGORY + CONDITION MAPPING
+    // ---------------------------------------------------------------------
+
+    let vendoo_mapping: any = {};
+    try {
+      // IMPORTANT INPUTS FOR MAPPING
+      const listingCategoryKey = listingOut?.listing_category_key || null; 
+      const conditionName =
+        listingOut?.item_condition || null;
+
+      console.log("GET /api/inventory/intake: vendoo mapping inputs", {
+        tenant_id,
+        item_id,
+        listingCategoryKey,
+        conditionName,
+        listingOut_raw: listingOut,
+      });
+
+      // 1) CATEGORY MAPPING (vendoo, ebay, facebook, depop)
+      console.log("GET /api/inventory/intake: loading category map", {
+        tenant_id: tenant_id,
+        listingCategoryKey,
+      });
+
+      const catRows = await loadVendooCategoryMap(
+        sql,
+        tenant_id,
+        listingCategoryKey
+      );
+
+      console.log("GET /api/inventory/intake: category map rows", {
+        count: Array.isArray(catRows) ? catRows.length : null,
+        rows: catRows,
+      });
+
+      let category_vendoo: string | null = null;
+      let category_ebay: string | null = null;
+      let category_facebook: string | null = null;
+      let category_depop: string | null = null;
+      let condition_options: string | null = null; // used later for the vendoo–ebay condition mapping
+
+      if (Array.isArray(catRows)) {
+        for (const r of catRows) {
+          const mp = Number(r.marketplace_id);
+          console.log("GET /api/inventory/intake: category map row", {
+            marketplace_id: mp,
+            row: r,
+          });
+
+          if (mp === 13) category_vendoo = r.vendoo_category_path || null;
+          if (mp === 1) {
+            category_ebay = r.vendoo_category_path || null;
+            condition_options = r.condition_options || null;
+          }
+          if (mp === 2) category_facebook = r.vendoo_category_path || null;
+          if (mp === 4) category_depop = r.vendoo_category_path || null;
+        }
+      }
+
+      console.log("GET /api/inventory/intake: category mapping result", {
+        listingCategoryKey,
+        category_vendoo,
+        category_ebay,
+        category_facebook,
+        category_depop,
+        condition_options_from_category: condition_options,
+      });
+
+      // 2) BASE CONDITION MAPPING (vendoo, facebook, depop)
+      let condition_main: string | null = null;
+      let condition_fb: string | null = null;
+      let condition_depop: string | null = null;
+
+      console.log("GET /api/inventory/intake: loading base condition map", {
+        tenant_id: tenant_id,
+        conditionName,
+      });
+
+      const condRows = await loadMarketplaceConditions(
+        sql,
+        tenant_id,
+        conditionName
+      );
+
+      console.log("GET /api/inventory/intake: base condition rows", {
+        count: Array.isArray(condRows) ? condRows.length : null,
+        rows: condRows,
+      });
+
+      if (Array.isArray(condRows) && condRows.length > 0) {
+        const r = condRows[0];
+        condition_main = r.vendoo_map || null;
+        condition_fb = r.fb_map || null;
+        condition_depop = r.depop_map || null;
+
+        console.log("GET /api/inventory/intake: base condition mapping result", {
+          conditionName,
+          condition_main,
+          condition_fb,
+          condition_depop,
+        });
+      } else {
+        console.log("GET /api/inventory/intake: no base condition mapping found", {
+          conditionName,
+        });
+      }
+
+      // 3) SPECIAL VENDOO–EBAY CONDITION MAPPING
+      let condition_ebay: string | null = null;
+      let condition_ebay_option: string | null = null;
+
+      if (conditionName && condition_options) {
+        console.log("GET /api/inventory/intake: loading vendoo-ebay condition map", {
+          tenant_id: tenant_id,
+          conditionName,
+          condition_options,
+        });
+
+        const ebayCondRows = await loadVendooEbayConditionMap(
+          sql,
+          tenant_id,
+          conditionName,
+          condition_options
+        );
+
+        console.log("GET /api/inventory/intake: vendoo-ebay condition rows", {
+          count: Array.isArray(ebayCondRows) ? ebayCondRows.length : null,
+          rows: ebayCondRows,
+        });
+
+        if (Array.isArray(ebayCondRows) && ebayCondRows.length > 0) {
+          const r = ebayCondRows[0];
+          condition_ebay = r.ebay_conditions || null;
+          condition_ebay_option = r.condition_options || null;
+
+          console.log("GET /api/inventory/intake: vendoo-ebay condition mapping result", {
+            conditionName,
+            condition_options,
+            condition_ebay,
+            condition_ebay_option,
+          });
+        } else {
+          console.log("GET /api/inventory/intake: no vendoo-ebay condition mapping found", {
+            conditionName,
+            condition_options,
+          });
+        }
+      } else {
+        console.log("GET /api/inventory/intake: skipping vendoo-ebay condition map", {
+          conditionName,
+          condition_options,
+        });
+      }
+
+      vendoo_mapping = {
+        category_key: listingCategoryKey || null,
+        category_vendoo,
+        category_ebay,
+        category_facebook,
+        category_depop,
+
+        condition_main,
+        condition_fb,
+        condition_depop,
+        condition_ebay,
+        condition_ebay_option,
+      };
+
+      console.log("GET /api/inventory/intake: FINAL vendoo_mapping", {
+        tenant_id,
+        item_id,
+        vendoo_mapping,
+      });
+    } catch (err) {
+      console.error("vendoo_mapping_build_error", {
+        tenant_id,
+        item_id,
+        error: String(err),
+        stack: (err as any)?.stack || null,
+      });
+      vendoo_mapping = {};
+    }
+
+    // ---------------------------------------------------------------------
+    // FINAL RESPONSE (unchanged except vendoo_mapping injected)
+    // ---------------------------------------------------------------------
+    console.log("GET /api/inventory/intake: response summary with vendoo_mapping", {
+      tenant_id,
+      item_id,
+      inventory_present: !!invRows[0],
+      listing_present: !!listingOut,
+      images_count: imgRows?.length ?? 0,
+      ebayListing_present: !!ebayListing,
+      facebookListing_present: !!facebookListing,
+      vendoo_mapping,
+    });
+
+    return new Response(JSON.stringify({
+      ok: true,
+
+      // inventory info
+      inventory: invRows[0],
+      inventory_meta: invRows[0],
+
+      // listing profile (marketplace listing details)
+      listing: listingOut,
+      listing_profile: listingOut,
+
+      // images
+      images: imgRows,
+
+      // structured marketplace listings
+      marketplace_listing: {
+        ebay: ebayListing,
+        ebay_marketplace_id: EBAY_ID,
+        facebook: facebookListing,
+        facebook_marketplace_id: FACEBOOK_ID
+      },
+
+      // flat ebay listing for convenience
+      marketplace_listing_flat: ebayListing,
+
+      // snapshot for eBay-style payload
+      ebay_payload_snapshot: {
+        listing_profile: listingOut,
+        marketplace_listing: ebayListing
+      },
+
+      // NEW: Fully-hydrated Vendoo mapping block
+      vendoo_mapping
+    }), {
+      status: 200,
+      headers: {
+        "content-type": "application/json",
+        "cache-control": "no-store"
+      }
+    });
+
+
+    
+  } catch (e: any) {
+    return new Response(JSON.stringify({ ok: false, error: "server_error", message: String(e?.message || e) }), { status: 500, headers: { "content-type": "application/json" } });
+  }
+};
+
+// end intake.ts file
