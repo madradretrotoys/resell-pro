@@ -2964,27 +2964,29 @@ function setMarketplaceVisibility() {
             inventory_meta,
             images,
             ebay_payload_snapshot,
-            // Vendoo mapping arrives from server as: { category_key, category_vendoo, ... }
-            // We must remap those 1:1 to the Vendoo userscript schema.
-            const rawMap =
-              vendoo_mapping_incoming && typeof vendoo_mapping_incoming === "object"
-                ? vendoo_mapping_incoming
-                : {};
-            
-            const vendoo_mapping = {
-              vendoo_category_key: rawMap.category_key || null,
-              vendoo_category_vendoo: rawMap.category_vendoo || null,
-              vendoo_category_ebay: rawMap.category_ebay || null,
-              vendoo_category_facebook: rawMap.category_facebook || null,
-              vendoo_category_depop: rawMap.category_depop || null,
-            
-              vendoo_condition_main: rawMap.condition_main || null,
-              vendoo_condition_fb: rawMap.condition_fb || null,
-              vendoo_condition_depop: rawMap.condition_depop || null,
-            
-              vendoo_condition_ebay: rawMap.condition_ebay || null,
-              vendoo_condition_ebay_option: rawMap.condition_ebay_option || null,
-            };
+            vendoo_mapping: vendoo_mapping_incoming,
+          } = detail;
+          
+          // MUST BE OUTSIDE the destructuring
+          const rawMap =
+            vendoo_mapping_incoming && typeof vendoo_mapping_incoming === "object"
+              ? vendoo_mapping_incoming
+              : {};
+          
+          const vendoo_mapping = {
+            vendoo_category_key: rawMap.category_key || null,
+            vendoo_category_vendoo: rawMap.category_vendoo || null,
+            vendoo_category_ebay: rawMap.category_ebay || null,
+            vendoo_category_facebook: rawMap.category_facebook || null,
+            vendoo_category_depop: rawMap.category_depop || null,
+          
+            vendoo_condition_main: rawMap.condition_main || null,
+            vendoo_condition_fb: rawMap.condition_fb || null,
+            vendoo_condition_depop: rawMap.condition_depop || null,
+          
+            vendoo_condition_ebay: rawMap.condition_ebay || null,
+            vendoo_condition_ebay_option: rawMap.condition_ebay_option || null,
+          };
 
           const normalizedSaveStatus = String(saveStatus || save_status || "").toLowerCase();
           console.log("[vendoo] rpBuildVendooPayload: normalizedSaveStatus", {
