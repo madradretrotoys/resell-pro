@@ -939,14 +939,16 @@ export async function init() {
               // Preserve any existing vendoo_mapping on detail, but
               // also thread through mapping derived server-side if present.
               const beforeVendooMapping =
-                vendooDetail.vendoo_mapping ||
-                null;
-
-              const fromSnapVendooMapping =
-                (snap && typeof snap === "object" && snap.vendoo_mapping)
-                  ? snap.vendoo_mapping
-                  : null;
-
+              vendooDetail.vendoo_mapping ||
+              null;
+            
+            // ⭐ Ensure the field ALWAYS exists so it survives the emit
+            vendooDetail.vendoo_mapping = beforeVendooMapping;
+            
+            const fromSnapVendooMapping =
+              (snap && typeof snap === "object" && snap.vendoo_mapping)
+                ? snap.vendoo_mapping
+                : null;
               // Correct behavior: if snap provides a valid vendoo_mapping,
               // it should always override the placeholder/null values.
               if (fromSnapVendooMapping && typeof fromSnapVendooMapping === "object") {
@@ -968,8 +970,12 @@ export async function init() {
               });
             }
         
-            console.log("[intake.js] vendoo emit detail (pre-emit)", vendooDetail);
-            await __emitVendooReadyIfSafe(vendooDetail);
+           console.log("[intake.js] vendoo emit detail (pre-emit)", vendooDetail);
+
+          // ⭐ Ensure vendoo_mapping is attached
+          vendooDetail.vendoo_mapping = vendooDetail.vendoo_mapping || null;
+          
+          await __emitVendooReadyIfSafe(vendooDetail);
           } catch (err) {
             console.warn("[intake.js] __emitVendooReadyIfSafe failed", err);
           }
@@ -3289,7 +3295,8 @@ function setMarketplaceVisibility() {
               type: "mrad_vendoo_fill",
               payload: {
                 ...payload,
-                __token: payload.__token || "MRAD_VENDOO_V1"   // ⭐ ENSURE TOKEN ALWAYS PRESENT
+                vendoo_mapping: detail.vendoo_mapping || null,   // ⭐ FIX
+                __token: payload.__token || "MRAD_VENDOO_V1"
               },
               marketplaces_selected: marketplaces_selected || null,
             };
