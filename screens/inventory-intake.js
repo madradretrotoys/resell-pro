@@ -938,22 +938,24 @@ export async function init() {
         
               // Preserve any existing vendoo_mapping on detail, but
               // also thread through mapping derived server-side if present.
-              const beforeVendooMapping =
-              vendooDetail.vendoo_mapping ||
-              null;
-            
-            // ⭐ Ensure the field ALWAYS exists so it survives the emit
-            vendooDetail.vendoo_mapping = beforeVendooMapping;
-            
-            const fromSnapVendooMapping =
-              (snap && typeof snap === "object" && snap.vendoo_mapping)
-                ? snap.vendoo_mapping
+              // Keep POST return vendoo_mapping if present — do NOT let snapshot overwrite it
+              const postVendooMap = vendooDetail.vendoo_mapping && Object.keys(vendooDetail.vendoo_mapping).length
+                ? vendooDetail.vendoo_mapping
                 : null;
-              // Correct behavior: if snap provides a valid vendoo_mapping,
-              // it should always override the placeholder/null values.
-              if (fromSnapVendooMapping && typeof fromSnapVendooMapping === "object") {
-                vendooDetail.vendoo_mapping = fromSnapVendooMapping;
-              }
+              
+              // Snapshot mapping only used if POST mapping missing or null
+              const snapVendooMap =
+                snap && snap.vendoo_mapping && Object.keys(snap.vendoo_mapping).length
+                  ? snap.vendoo_mapping
+                  : null;
+              
+              // FINAL: prefer POST mapping
+              vendooDetail.vendoo_mapping = postVendooMap || snapVendooMap || {};
+              console.log("[vendoo] FIXED merge mapping", {
+                postVendooMap,
+                snapVendooMap,
+                final: vendooDetail.vendoo_mapping
+              });
 
               console.log("[intake.js] vendoo: enrich from snap (FIXED)", {
                 beforeVendooMapping,
