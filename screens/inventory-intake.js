@@ -938,24 +938,22 @@ export async function init() {
         
               // Preserve any existing vendoo_mapping on detail, but
               // also thread through mapping derived server-side if present.
-              // Keep POST return vendoo_mapping if present — do NOT let snapshot overwrite it
-              const postVendooMap = vendooDetail.vendoo_mapping && Object.keys(vendooDetail.vendoo_mapping).length
-                ? vendooDetail.vendoo_mapping
+              const beforeVendooMapping =
+              vendooDetail.vendoo_mapping ||
+              null;
+            
+            // ⭐ Ensure the field ALWAYS exists so it survives the emit
+            vendooDetail.vendoo_mapping = beforeVendooMapping;
+            
+            const fromSnapVendooMapping =
+              (snap && typeof snap === "object" && snap.vendoo_mapping)
+                ? snap.vendoo_mapping
                 : null;
-              
-              // Snapshot mapping only used if POST mapping missing or null
-              const snapVendooMap =
-                snap && snap.vendoo_mapping && Object.keys(snap.vendoo_mapping).length
-                  ? snap.vendoo_mapping
-                  : null;
-              
-              // FINAL: prefer POST mapping
-              vendooDetail.vendoo_mapping = postVendooMap || snapVendooMap || {};
-              console.log("[vendoo] FIXED merge mapping", {
-                postVendooMap,
-                snapVendooMap,
-                final: vendooDetail.vendoo_mapping
-              });
+              // Correct behavior: if snap provides a valid vendoo_mapping,
+              // it should always override the placeholder/null values.
+              if (fromSnapVendooMapping && typeof fromSnapVendooMapping === "object") {
+                vendooDetail.vendoo_mapping = fromSnapVendooMapping;
+              }
 
               console.log("[intake.js] vendoo: enrich from snap (FIXED)", {
                 beforeVendooMapping,
@@ -2974,23 +2972,12 @@ function setMarketplaceVisibility() {
             ebay_payload_snapshot,
             vendoo_mapping: vendoo_mapping_incoming,
           } = detail;
-          // 🟦 LOG: Incoming mapping from server (direct POST response)
-          console.log("[vendoo] incoming vendoo_mapping_incoming (from detail)", vendoo_mapping_incoming);
-
+          
           // MUST BE OUTSIDE the destructuring
           const rawMap =
             vendoo_mapping_incoming && typeof vendoo_mapping_incoming === "object"
               ? vendoo_mapping_incoming
               : {};
-
-          // 🟪 LOG: Normalized rawMap
-          console.log("[vendoo] normalized rawMap (safe mapping)", rawMap);  
-          
-          // ⭐ NEW: Ensure detail.vendoo_mapping contains the raw server mapping
-          detail.vendoo_mapping = rawMap;
-
-          // 🟩 LOG: After assignment
-          console.log("[vendoo] detail.vendoo_mapping (after assignment)", detail.vendoo_mapping);
           
           const vendoo_mapping = {
             vendoo_category_key: rawMap.category_key || null,
@@ -3007,9 +2994,6 @@ function setMarketplaceVisibility() {
             vendoo_condition_ebay_option: rawMap.condition_ebay_option || null,
           };
 
-          // 🟧 LOG: Final transformed mapping used by rpBuildVendooPayload
-          console.log("[vendoo] final vendoo_mapping (transformed for payload)", vendoo_mapping);
-          
           const normalizedSaveStatus = String(saveStatus || save_status || "").toLowerCase();
           console.log("[vendoo] rpBuildVendooPayload: normalizedSaveStatus", {
             saveStatus,
