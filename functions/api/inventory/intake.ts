@@ -1729,6 +1729,13 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
             item_id,
             job_ids_upd
           });
+
+          // 🟦 Log exactly what we're about to return for vendoo_mapping
+          console.log("[intake.ACTIVE] vendoo_mapping (RETURN)", {
+            tenant_id,
+            item_id,
+            vendoo_mapping
+          });
           return json({
             ok: true,
             item_id,
