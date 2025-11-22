@@ -2964,20 +2964,26 @@ function setMarketplaceVisibility() {
             inventory_meta,
             images,
             ebay_payload_snapshot,
-            // Optional server-side Vendoo mapping fields (Phase 2)
-            vendoo_category_key,
-            vendoo_category_vendoo,
-            vendoo_category_ebay,
-            vendoo_category_facebook,
-            vendoo_category_depop,
-            vendoo_condition_main,
-            vendoo_condition_fb,
-            vendoo_condition_depop,
-            vendoo_condition_ebay,
-            vendoo_condition_ebay_option,
+           // Vendoo mapping arrives as a single object: detail.vendoo_mapping
             vendoo_mapping: vendoo_mapping_incoming,
           } = detail;
-        
+          
+          // Normalize Vendoo mapping coming back from the server
+          const vendoo_mapping =
+            vendoo_mapping_incoming && typeof vendoo_mapping_incoming === "object"
+              ? vendoo_mapping_incoming
+              : {
+                  category_key: null,
+                  category_vendoo: null,
+                  category_ebay: null,
+                  category_facebook: null,
+                  category_depop: null,
+                  condition_main: null,
+                  condition_fb: null,
+                  condition_depop: null,
+                  condition_ebay: null,
+                  condition_ebay_option: null,
+                };
           const normalizedSaveStatus = String(saveStatus || save_status || "").toLowerCase();
           console.log("[vendoo] rpBuildVendooPayload: normalizedSaveStatus", {
             saveStatus,
