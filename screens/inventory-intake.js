@@ -3296,7 +3296,7 @@ function setMarketplaceVisibility() {
               type: "mrad_vendoo_fill",
               payload: {
                 ...payload,
-                vendoo_mapping: detail.vendoo_mapping || null,   // ⭐ FIX
+                vendoo_mapping: payload.vendoo_mapping,  // ← THIS is the fix
                 __token: payload.__token || "MRAD_VENDOO_V1"
               },
               marketplaces_selected: marketplaces_selected || null,
