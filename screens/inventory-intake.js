@@ -118,43 +118,60 @@ export async function init() {
     updatePhotosUIBasic();
     // Nudge gating when photo count changes (add/replace/delete/reorder)
     try { computeValidity(); } catch {}
+    // NEW: wire the shared inventory image lightbox for photo thumbnails
+    try {
+      // Limit binding to this grid so we don’t touch other screens unnecessarily
+      wireInventoryImageLightbox(host);
+    } catch (err) {
+      console.warn("[photos] wireInventoryImageLightbox failed for photosGrid", err);
+    }
   }
   
-  // Thumb element
+    // Thumb element
   function renderThumb(model, flags) {
-  const { persisted = false, pending = false } = flags || {};
-  const wrap = document.createElement("div");
-  // fixed 140x140 thumb box (pure CSS styles; no Tailwind utilities)
-  wrap.className = "relative group border rounded-xl overflow-hidden";
-  wrap.style.width = "140px";
-  wrap.style.height = "140px";
-  wrap.style.display = "inline-block"; // ensure the grid cell stays compact
-  wrap.tabIndex = 0;
+    const { persisted = false, pending = false } = flags || {};
+    const wrap = document.createElement("div");
+    // fixed 140x140 thumb box (pure CSS styles; no Tailwind utilities)
+    wrap.className = "relative group border rounded-xl overflow-hidden";
+    wrap.style.width = "140px";
+    wrap.style.height = "140px";
+    wrap.style.display = "inline-block"; // ensure the grid cell stays compact
+    wrap.tabIndex = 0;
 
-  const img = new Image();
-  img.src = model.cdn_url || "";
-  img.alt = "Item photo";
-  img.loading = "lazy";
-  img.className = "block";
-  img.style.width = "140px";
-  img.style.height = "140px";
-  img.style.objectFit = "cover";
-  img.style.display = "block";
-  wrap.appendChild(img);
+    // NEW: clickable button wrapper that the shared lightbox helper can bind to.
+    // This keeps the Crop/Replace/Primary/Delete bar separate so it doesn’t trigger the viewer.
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "inventory-thumb-btn block w-full h-full";
+    btn.title = "Click to view larger";
+    btn.dataset.imageUrl = model.cdn_url || "";
 
-  const bar = document.createElement("div");
-  bar.className = "absolute inset-x-0 bottom-0 p-1 bg-black/50 opacity-0 group-hover:opacity-100 transition";
-  bar.innerHTML = `
-    <div class="flex gap-1 justify-center">
-      <button class="btn btn-ghost btn-sm" data-act="crop" title="Crop">Crop</button>
-      <label class="btn btn-ghost btn-sm cursor-pointer" title="Replace">
-        Replace
-        <input type="file" accept="image/*" class="hidden" data-act="replace">
-      </label>
-      <button class="btn btn-ghost btn-sm" data-act="primary" ${pending ? "disabled" : ""} title="Set Primary">Primary</button>
-      <button class="btn btn-ghost btn-sm" data-act="delete" title="Delete">Delete</button>
-    </div>
-  `;
+    const img = new Image();
+    img.src = model.cdn_url || "";
+    img.alt = "Item photo";
+    img.loading = "lazy";
+    img.className = "block";
+    img.style.width = "140px";
+    img.style.height = "140px";
+    img.style.objectFit = "cover";
+    img.style.display = "block";
+
+    btn.appendChild(img);
+    wrap.appendChild(btn);
+
+    const bar = document.createElement("div");
+    bar.className = "absolute inset-x-0 bottom-0 p-1 bg-black/50 opacity-0 group-hover:opacity-100 transition";
+    bar.innerHTML = `
+      <div class="flex gap-1 justify-center">
+        <button class="btn btn-ghost btn-sm" data-act="crop" title="Crop">Crop</button>
+        <label class="btn btn-ghost btn-sm cursor-pointer" title="Replace">
+          Replace
+          <input type="file" accept="image/*" class="hidden" data-act="replace">
+        </label>
+        <button class="btn btn-ghost btn-sm" data-act="primary" ${pending ? "disabled" : ""} title="Set Primary">Primary</button>
+        <button class="btn btn-ghost btn-sm" data-act="delete" title="Delete">Delete</button>
+      </div>
+    `;
     wrap.appendChild(bar);
   
     // Drag handle in reorder mode
@@ -202,6 +219,7 @@ export async function init() {
   
     return wrap;
   }
+
   
   // Enable drop targets to reorder cards
   function hostDragEnable() {
@@ -370,10 +388,26 @@ export async function init() {
   
   // Replace
   async function replaceImage(oldModel, newFile) {
-    const ds = await downscaleToBlob(f);
-    if (!ds._rpId) ds._rpId = (crypto?.randomUUID ? crypto.randomUUID() : String(Date.now() + Math.random()));
-    if (!ds._previewUrl) ds._previewUrl = URL.createObjectURL(ds);
-    await uploadAndAttach(ds);
+    if (!newFile) return;
+
+    // Downscale the newly selected file
+    const ds = await downscaleToBlob(newFile);
+
+    // Ensure this file has a stable id + preview URL (for consistency with pending uploads)
+    if (!ds._rpId) {
+      ds._rpId = (crypto?.randomUUID ? crypto.randomUUID() : String(Date.now() + Math.random()));
+    }
+    if (!ds._previewUrl) {
+      ds._previewUrl = URL.createObjectURL(ds);
+    }
+
+    // If we're replacing an existing persisted image, tell uploadAndAttach which image to retire.
+    const cropOfImageId = oldModel && oldModel.image_id ? oldModel.image_id : null;
+
+    await uploadAndAttach(
+      ds,
+      cropOfImageId ? { cropOfImageId } : {}
+    );
   }
   
   // Minimal cropper: square crop with zoom+drag
@@ -542,15 +576,40 @@ export async function init() {
           item_id: ev?.detail?.item_id,
           action: ev?.detail?.action,
           save_status: ev?.detail?.save_status,
-          job_ids: ev?.detail?.job_ids
+          job_ids: ev?.detail?.job_ids,
+          vendoo_mapping: ev?.detail?.vendoo_mapping ?? null
         });
         
         const id         = ev?.detail?.item_id;
         const saveStatus = String(ev?.detail?.save_status || "").toLowerCase(); // "active" | "draft" | "delete"
         const action     = String(ev?.detail?.action || (saveStatus === "delete" ? "delete" : "save")).toLowerCase();
         const jobIds     = Array.isArray(ev?.detail?.job_ids) ? ev.detail.job_ids : [];
+        const intent     = ev?.detail?.intent || null;
+        const intentMarketplaces = Array.isArray(intent?.marketplaces) ? intent.marketplaces : null;
+
         if (!id) { console.warn("[intake.js] intake:item-saved missing item_id"); console.groupEnd?.(); return; }
         __currentItemId = id;
+
+        // Debug: confirm that UI → API → response intent is flowing, especially for eBay deletes
+        if (intentMarketplaces) {
+          const ebayIntent = intentMarketplaces.find((m) => {
+            const slug = String(m?.slug || "").toLowerCase();
+            return slug === "ebay";
+          }) || null;
+
+          console.log("[intake.js] marketplace intent (response)", {
+            saveStatus,
+            action,
+            marketplaces: intentMarketplaces,
+            ebayIntent,
+          });
+        } else {
+          console.log("[intake.js] marketplace intent (response) missing or empty", {
+            saveStatus,
+            action,
+            rawIntent: intent,
+          });
+        }
         
         
         // Phase 0: once Active, permanently lock Draft action for this listing (UI)
@@ -608,12 +667,340 @@ export async function init() {
            }
         }
 
-        // When the save is Active, photos are flushed, and eBay jobs are quiet,
-        // this will emit `intake:facebook-ready` ONLY if Facebook is selected
-        // and not already live for this item.
-        await __emitFacebookReadyIfSafe({ saveStatus, jobIds });
+        //---------------------------------------------
+        // Inject Vendoo intent when selected in UI
+        //---------------------------------------------
+        (function injectVendooIntent() {
+          console.groupCollapsed("%c[intake.js] injectVendooIntent START", "color:#0af; font-weight:bold;");
+          try {
+            console.log("[injectVendooIntent] incoming state", {
+              saveStatus,
+              selectedMarketplaceIds: Array.from(selectedMarketplaceIds),
+              intentBefore: intent,
+              intentMarketplacesBefore: intent?.marketplaces || null
+            });
+        
+            // Vendoo marketplace_id is 13 in your schema
+            const vendooId = 13;
+            console.log("[injectVendooIntent] vendooId", vendooId);
+        
+            // Determine if the Vendoo tile is selected in the UI
+            const vendooSelected =
+              Array.from(selectedMarketplaceIds).some((id) => Number(id) === vendooId);
+        
+            console.log("[injectVendooIntent] vendooSelected?", vendooSelected);
+        
+            // Only inject intent for ACTIVE saves and when Vendoo tile is selected
+            if (!vendooSelected) {
+              console.warn("[injectVendooIntent] EXIT — Vendoo tile not selected.");
+              console.groupEnd();
+              return;
+            }
+        
+            if (saveStatus !== "active") {
+              console.warn("[injectVendooIntent] EXIT — saveStatus is NOT active:", saveStatus);
+              console.groupEnd();
+              return;
+            }
+        
+            // Ensure intent + marketplaces array exists
+            if (!intent) {
+              console.log("[injectVendooIntent] intent missing → creating ev.detail.intent");
+              ev.detail.intent = intent = {};
+            }
+        
+            if (!intent.marketplaces) {
+              console.log("[injectVendooIntent] intent.marketplaces missing → creating []");
+              intent.marketplaces = [];
+            }
+        
+            // When Vendoo intent is missing, add a fresh create-op
+            const already = intent.marketplaces.find(
+              (m) => String(m.slug || "").toLowerCase() === "vendoo"
+            );
+        
+            console.log("[injectVendooIntent] vendoo intent already present?", already);
+        
+            if (!already) {
+              const payload = {
+                slug: "vendoo",
+                marketplace_id: vendooId,
+                selected: true,
+                operation: "create"
+              };
+        
+              intent.marketplaces.push(payload);
+        
+              console.log("%c[injectVendooIntent] Vendoo intent ADDED", "color:#0f0; font-weight:bold;", {
+                addedPayload: payload,
+                saveStatus,
+                marketplace_id: vendooId,
+                operation: "create"
+              });
+            } else {
+              console.log("%c[injectVendooIntent] Vendoo intent ALREADY EXISTS — no action taken", "color:#ff0;");
+            }
+        
+            console.log("[injectVendooIntent] final intent state:", {
+              intent,
+              intentMarketplaces: intent.marketplaces
+            });
+        
+          } catch (e) {
+            console.error("%c[injectVendooIntent ERROR]", "color:#f00; font-weight:bold;", e);
+          }
+          console.groupEnd();
+        })();
+        
+        //---------------------------------------------
+        // Derive Facebook intent from the server’s normalized intent.marketplaces
+        //---------------------------------------------
+        let facebookOp = null;
+        console.groupCollapsed("%c[intake.js] Derive Facebook Intent", "color:#0af; font-weight:bold;");
+        try {
+          if (intentMarketplaces) {
+            console.log("[facebookIntent] examining intent.marketplaces:", intentMarketplaces);
+        
+            const facebookIntent = intentMarketplaces.find((m) => {
+              const slug = String(m?.slug || "").toLowerCase();
+              return slug === "facebook" || String(m?.marketplace_id) === "2";
+            }) || null;
+        
+            facebookOp = facebookIntent?.operation || null;
+        
+            console.log("[facebookIntent] derived facebookOp:", facebookOp, {
+              facebookIntent
+            });
+          } else {
+            console.warn("[facebookIntent] intentMarketplaces is NULL — skipping Facebook op derivation");
+          }
+        } catch (e) {
+          console.error("[facebookIntent ERROR]", e);
+        }
+        console.groupEnd();
+        const shouldEmitFacebook =
+          saveStatus === "active" && (
+            // If we don’t have intent yet, preserve legacy behavior.
+            !facebookOp ||
+            // When the server explicitly says "create", we allow the ready event.
+            String(facebookOp).toLowerCase() === "create"
+          );
+
+        console.log("[intake.js] facebook intent gate", {
+          saveStatus,
+          facebookOp,
+          shouldEmitFacebook,
+        });
+
+        // When the save is Active, photos are flushed, and the server indicates that
+        // Facebook should be created, this will emit `intake:facebook-ready`.
+        if (shouldEmitFacebook) {
+          await __emitFacebookReadyIfSafe({ saveStatus, jobIds, intentMarketplaces });
+        } else {
+          console.log("[intake.js] skip facebook-ready emit", {
+            reason: saveStatus !== "active"
+              ? "non-active-save"
+              : "facebook-op-not-create (likely already live / skip)",
+          });
+        }
+
+       // —— Vendoo intent gate (mirrors Facebook pattern) —— 
+        let vendooOp = null;
+        let vendooIntentDebug = null;
+        
+        if (intentMarketplaces) {
+          console.log("[intake.js] vendoo intent: raw intentMarketplaces", {
+            intentMarketplaces,
+          });
+        
+          const vendooIntent = intentMarketplaces.find((m) => {
+            const slug = String(m?.slug || "").toLowerCase();
+            const isVendoo = slug === "vendoo" || String(m?.marketplace_id) === "13";
+            console.log("[intake.js] vendoo intent: candidate", {
+              candidate: m,
+              slug,
+              isVendoo,
+            });
+            return isVendoo;
+          }) || null;
+        
+          vendooIntentDebug = vendooIntent;
+          vendooOp = vendooIntent?.operation || null;
+        }
+        
+        const shouldEmitVendoo =
+          saveStatus === "active" && (
+            // If we don’t have intent yet, preserve legacy behavior.
+            !vendooOp ||
+            // When the server explicitly says "create", we allow the Vendoo-ready event.
+            String(vendooOp).toLowerCase() === "create"
+          );
+        
+        console.log("[intake.js] vendoo intent gate", {
+          saveStatus,
+          vendooOp,
+          shouldEmitVendoo,
+          vendooIntent: vendooIntentDebug,
+          intentMarketplaces,
+        });
+        
+        // When the save is Active, photos are flushed, and the server indicates that
+        // Vendoo should be created, this will feed the Tampermonkey bridge.
+        if (shouldEmitVendoo) {
+          try {
+            // Prefer an existing snapshot (Facebook gate may have already loaded it)
+            let snap = null;
+            try {
+              snap = window.__intakeSnap || null;
+            } catch (e) {
+              console.warn("[intake.js] vendoo: error reading window.__intakeSnap", e);
+              snap = null;
+            }
+        
+            console.log("[intake.js] vendoo: initial snap from window.__intakeSnap", {
+              hasSnap: !!snap,
+              snapKeys: snap ? Object.keys(snap) : null,
+              snapPreview: snap ? {
+                inventory_meta: snap.inventory_meta,
+                listing: snap.listing || snap.listing_profile,
+                vendoo_mapping: snap.vendoo_mapping || null,
+              } : null,
+            });
+        
+            // If we don't have a snapshot yet, load a fresh one for this item.
+            if (!snap && __currentItemId) {
+              console.log("[intake.js] vendoo: loading snapshot for payload enrich", {
+                item_id: __currentItemId,
+              });
+              snap = await api(
+                `/api/inventory/intake?item_id=${encodeURIComponent(__currentItemId)}`,
+                { method: "GET" }
+              );
+              console.log("[intake.js] vendoo: snapshot loaded from /api/inventory/intake", {
+                snapRaw: snap,
+                snapKeys: snap ? Object.keys(snap) : null,
+                inventory_meta: snap?.inventory_meta || snap?.inventory || null,
+                listing_profile: snap?.listing_profile || snap?.listing || null,
+                vendoo_mapping: snap?.vendoo_mapping || null,
+                ebay_payload_snapshot: snap?.ebay_payload_snapshot || null,
+              });
+              try {
+                window.__intakeSnap = snap;
+              } catch (e) {
+                console.warn("[intake.js] vendoo: failed to write window.__intakeSnap", e);
+              }
+            }
+        
+            const vendooDetail = {
+              ...ev.detail,
+              // 🔑 Make sure rpBuildVendooPayload sees an ACTIVE status
+              saveStatus,              // camelCase for rpBuildVendooPayload
+              save_status: saveStatus, // keep the original too
+              intent,
+              intentMarketplaces,
+            };
+        
+            console.log("[intake.js] vendoo: base vendooDetail before enrich", {
+              evDetail: ev.detail,
+              saveStatus,
+              intent,
+              intentMarketplaces,
+              existing_vendoo_mapping: ev?.detail?.vendoo_mapping ?? null,
+            });
+        
+            // Enrich detail with images + inventory_meta + ebay_payload_snapshot + vendoo_mapping
+            if (snap && typeof snap === "object") {
+              vendooDetail.inventory_meta =
+                snap.inventory_meta ||
+                snap.inventory ||
+                snap.item ||
+                null;
+        
+              vendooDetail.images =
+                snap.images ||
+                snap.item_images ||
+                snap.photos ||
+                null;
+        
+              vendooDetail.ebay_payload_snapshot =
+                snap.ebay_payload_snapshot ||
+                snap.ebay_payload ||
+                (snap.marketplace_payloads &&
+                  (snap.marketplace_payloads.ebay ||
+                   snap.marketplace_payloads["ebay"])) ||
+                {
+                  // fallback pseudo-snapshot using listing + ebay marketplace listing if present
+                  listing_profile: snap.listing_profile || snap.listing || null,
+                  marketplace_listing:
+                    (snap.marketplace_listing && snap.marketplace_listing.ebay) ||
+                    snap.marketplace_listing ||
+                    null,
+                };
+        
+              // Preserve any existing vendoo_mapping on detail, but
+              // also thread through mapping derived server-side if present.
+              const beforeVendooMapping =
+              vendooDetail.vendoo_mapping ||
+              null;
+            
+            // ⭐ Ensure the field ALWAYS exists so it survives the emit
+            vendooDetail.vendoo_mapping = beforeVendooMapping;
+            
+            const fromSnapVendooMapping =
+              (snap && typeof snap === "object" && snap.vendoo_mapping)
+                ? snap.vendoo_mapping
+                : null;
+            
+            // ⭐ FIX: Only override if snap mapping HAS REAL FIELDS
+            if (
+              fromSnapVendooMapping &&
+              typeof fromSnapVendooMapping === "object" &&
+              Object.keys(fromSnapVendooMapping).length > 0
+            ) {
+              vendooDetail.vendoo_mapping = fromSnapVendooMapping;
+            }
+
+
+              console.log("[intake.js] vendoo: enrich from snap (FIXED)", {
+                beforeVendooMapping,
+                fromSnapVendooMapping,
+                finalVendooMapping: vendooDetail.vendoo_mapping,
+                inventory_meta: vendooDetail.inventory_meta,
+                images: vendooDetail.images,
+                ebay_payload_snapshot: vendooDetail.ebay_payload_snapshot,
+              });
+            } else {
+              console.log("[intake.js] vendoo: no usable snap object; skipping enrich", {
+                snapType: typeof snap,
+                snap,
+              });
+            }
+        
+           console.log("[intake.js] vendoo emit detail (pre-emit)", vendooDetail);
+
+          // ⭐ Ensure vendoo_mapping is attached
+          vendooDetail.vendoo_mapping = vendooDetail.vendoo_mapping || null;
+          
+          await __emitVendooReadyIfSafe(vendooDetail);
+          } catch (err) {
+            console.warn("[intake.js] __emitVendooReadyIfSafe failed", err);
+          }
+        } else {
+          console.log("[intake.js] skip vendoo-ready emit", {
+            reason: saveStatus !== "active"
+              ? "non-active-save"
+              : "vendoo-op-not-create (likely already live / skip)",
+          });
+        }
+
+
+    
         // Immediately reconcile the Facebook card with the DB snapshot
         try { await refreshFacebookTile(); } catch {}
+
+        // Immediately reconcile the vendoo card with the DB snapshot
+        try { await refreshVendooTile(); } catch {}
+      
       } catch (e) {
         console.error("photos:flush:error", e);
       } finally {
@@ -1293,6 +1680,23 @@ function setMarketplaceVisibility() {
 
     const rows = (meta?.marketplaces || []).filter(m => m.is_active !== false);
 
+    // Discover marketplace ids for helpful logging / future rules
+    let ebayMarketplaceId = null;
+    let vendooMarketplaceId = null;
+    try {
+      for (const m of rows) {
+        const slug = String(m.slug || "").toLowerCase();
+        if (slug === "ebay") ebayMarketplaceId = Number(m.id);
+        if (slug === "vendoo") vendooMarketplaceId = Number(m.id);
+      }
+      console.log("[intake] marketplaces:ids", {
+        ebayMarketplaceId,
+        vendooMarketplaceId,
+      });
+    } catch (e) {
+      console.warn("[intake] marketplaces:ids:discover_error", e);
+    }
+    
     // PROTOTYPE RULE:
     // If ZERO marketplaces are connected for this tenant, allow selecting ALL active marketplaces.
     const anyConnected = rows.some(r => r.enabled_for_tenant && r.is_connected);
@@ -1339,25 +1743,68 @@ function setMarketplaceVisibility() {
         btn.setAttribute("aria-pressed", "false");
       }
 
-       // click toggles selection if selectable
+      // click toggles selection if selectable
       if (enabledSelectable) {
         btn.addEventListener("click", () => {
           const id = Number(btn.dataset.marketplaceId);
-          const isSel = selectedMarketplaceIds.has(id);
-          if (isSel) {
-            selectedMarketplaceIds.delete(id);
-            btn.classList.remove("btn-primary");
-            btn.classList.add("btn-ghost");
-            btn.setAttribute("aria-pressed", "false");
+          const slug = String(m.slug || "").toLowerCase();
+          const isVendooTile = slug === "vendoo";
+
+          // Snapshot current selection so we can reason about Vendoo/eBay rules
+          const currentIds = new Set(Array.from(selectedMarketplaceIds));
+
+          if (isVendooTile) {
+            const alreadySelected = currentIds.has(id);
+
+            if (alreadySelected) {
+              // Deselect Vendoo → revert to "normal" mode (no special rules)
+              currentIds.delete(id);
+            } else {
+              // Select Vendoo → single-tenant mode:
+              //  - clear all other marketplace selections
+              //  - only Vendoo remains selected
+              currentIds.clear();
+              currentIds.add(id);
+            }
           } else {
-            selectedMarketplaceIds.add(id);
-            btn.classList.remove("btn-ghost");
-            btn.classList.add("btn-primary");
-            btn.setAttribute("aria-pressed", "true");
+            // Non-Vendoo tiles:
+            //  - if Vendoo is currently selected, clicking another tile will
+            //    drop Vendoo and behave like normal multi-select.
+            let vendooId = null;
+            for (const row of (__metaCache?.marketplaces || [])) {
+              const s = String(row.slug || "").toLowerCase();
+              if (s === "vendoo") {
+                vendooId = Number(row.id);
+                break;
+              }
+            }
+            if (vendooId != null && currentIds.has(vendooId)) {
+              currentIds.delete(vendooId);
+            }
+
+            const alreadySelected = currentIds.has(id);
+            if (alreadySelected) {
+              currentIds.delete(id);
+            } else {
+              currentIds.add(id);
+            }
           }
-          // live-validate after any toggle
-          computeValidity();
-          // Delta-mode: add/remove cards without resetting existing card inputs
+
+          // Write back to the shared selection set
+          selectedMarketplaceIds.clear();
+          for (const v of currentIds) {
+            selectedMarketplaceIds.add(v);
+          }
+
+          // Re-style all tiles by re-rendering from the updated selection
+          try {
+            renderMarketplaceTiles(__metaCache);
+          } catch (e) {
+            console.error("marketplaces:vendoo-tiles:rerender:error", e);
+          }
+
+          // Re-validate + update cards (delta mode retains card input values)
+          try { computeValidity(); } catch {}
           try { renderMarketplaceCards(__metaCache, { mode: "delta" }); } catch {}
         });
       } else {
@@ -1379,27 +1826,46 @@ function setMarketplaceVisibility() {
   // Apply per-item marketplace selection (e.g., when loading an existing item).
   // meta: inventory meta (usually __metaCache)
   // marketplaceListing: res.marketplace_listing from GET /api/inventory/intake
-    function applyMarketplaceSelectionForItem(meta, marketplaceListing) {
+  function applyMarketplaceSelectionForItem(meta, marketplaceListing) { 
     try {
+      console.group("[intake] marketplaces:applySelectionForItem");
+
+      console.log("[applySelection] meta.marketplaces raw:", meta?.marketplaces);
+      console.log("[applySelection] marketplaceListing raw:", marketplaceListing);
+      console.log("[applySelection] selectedMarketplaceIds (BEFORE clear):", Array.from(selectedMarketplaceIds));
+
       const rows = (meta?.marketplaces || []);
       const bySlug = new Map(
         rows.map(r => [String(r.slug || "").toLowerCase(), r])
       );
 
+      console.log("[applySelection] marketplaces rows.length:", rows.length);
+      console.log("[applySelection] bySlug keys:", Array.from(bySlug.keys()));
+
       selectedMarketplaceIds.clear();
+      console.log("[applySelection] selectedMarketplaceIds after clear:", Array.from(selectedMarketplaceIds));
 
       if (marketplaceListing) {
         const ids = [];
+        console.log("[applySelection] marketplaceListing present, starting id collection");
 
         // eBay row present -> include eBay marketplace id
         if (marketplaceListing.ebay) {
           const rawId =
             marketplaceListing.ebay_marketplace_id ??
             (bySlug.get("ebay") && bySlug.get("ebay").id);
+          console.log("[applySelection] eBay branch hit:", {
+            listingFlag: marketplaceListing.ebay,
+            rawId,
+            bySlugEbay: bySlug.get("ebay")
+          });
           if (rawId != null) {
             const id = Number(rawId);
+            console.log("[applySelection] eBay numeric id:", id, "isNaN?", Number.isNaN(id));
             if (!Number.isNaN(id)) ids.push(id);
           }
+        } else {
+          console.log("[applySelection] eBay branch skipped (no marketplaceListing.ebay)");
         }
 
         // Facebook row present -> include Facebook marketplace id
@@ -1407,15 +1873,48 @@ function setMarketplaceVisibility() {
           const rawId =
             marketplaceListing.facebook_marketplace_id ??
             (bySlug.get("facebook") && bySlug.get("facebook").id);
+          console.log("[applySelection] Facebook branch hit:", {
+            listingFlag: marketplaceListing.facebook,
+            rawId,
+            bySlugFacebook: bySlug.get("facebook")
+          });
           if (rawId != null) {
             const id = Number(rawId);
+            console.log("[applySelection] Facebook numeric id:", id, "isNaN?", Number.isNaN(id));
             if (!Number.isNaN(id)) ids.push(id);
           }
+        } else {
+          console.log("[applySelection] Facebook branch skipped (no marketplaceListing.facebook)");
         }
+
+        // ⭐ Vendoo row present -> include Vendoo marketplace id
+        if (marketplaceListing.vendoo) {
+          const rawId =
+            marketplaceListing.vendoo_marketplace_id ??
+            (bySlug.get("vendoo") && bySlug.get("vendoo").id);
+          console.log("[applySelection] Vendoo branch hit:", {
+            listingFlag: marketplaceListing.vendoo,
+            rawId,
+            bySlugVendoo: bySlug.get("vendoo")
+          });
+          if (rawId != null) {
+            const id = Number(rawId);
+            console.log("[applySelection] Vendoo numeric id:", id, "isNaN?", Number.isNaN(id));
+            if (!Number.isNaN(id)) ids.push(id);
+          }
+        } else {
+          console.log("[applySelection] Vendoo branch skipped (no marketplaceListing.vendoo)");
+        }
+
+        console.log("[applySelection] collected ids before Set add:", ids);
 
         for (const id of ids) {
           selectedMarketplaceIds.add(id);
         }
+
+        console.log("[applySelection] selectedMarketplaceIds after add:", Array.from(selectedMarketplaceIds));
+      } else {
+        console.log("[applySelection] marketplaceListing is falsy; no ids collected");
       }
 
       renderMarketplaceTiles(meta);
@@ -1446,10 +1945,36 @@ function setMarketplaceVisibility() {
       host.dataset.validHook = "1";
     }
 
-    // Build a lookup of marketplaces by id (id, slug, marketplace_name, is_connected etc.)
+     // Build a lookup of marketplaces by id (id, slug, marketplace_name, is_connected etc.)
     const rows = (meta?.marketplaces || []).filter(m => m.is_active !== false);
     const byId = new Map(rows.map(r => [Number(r.id), r]));
     const desiredIds = Array.from(selectedMarketplaceIds).map(Number);
+
+    // Vendoo path: if Vendoo is selected, always render cards for ALL connected marketplaces.
+    // This lets the user see per-marketplace Vendoo status (eBay, Facebook, Depop, etc.)
+    try {
+      let vendooId = null;
+      const connectedIds = [];
+
+      for (const r of rows) {
+        const slug = String(r.slug || "").toLowerCase();
+        if (slug === "vendoo") vendooId = Number(r.id);
+        if (r.is_connected) connectedIds.push(Number(r.id));
+      }
+
+      const vendooSelected =
+        vendooId != null && desiredIds.includes(vendooId);
+
+      if (vendooSelected) {
+        for (const mid of connectedIds) {
+          if (!desiredIds.includes(mid)) {
+            desiredIds.push(mid);
+          }
+        }
+      }
+    } catch (e) {
+      console.error("marketplaces:vendoo-cards-sync:error", e);
+    }
 
     // Capture existing per-card statuses (by marketplace id) before a full rebuild
     const prevStatuses = new Map();
@@ -2414,22 +2939,439 @@ function setMarketplaceVisibility() {
 
 
 
-/** Refresh when the FB tab signals it’s done (dry-run or real) */
-window.addEventListener("message", (ev) => {
-  try {
-    const okOrigin =
-      ev.origin === location.origin || ev.origin === "https://www.facebook.com";
-    if (!okOrigin) return;
-    if (ev.data && ev.data.type === "facebook:create:done") {
-      refreshFacebookTile();
-    }
-  } catch {}
-});
+        /** Refresh when the FB tab signals it’s done (dry-run or real) */
+        window.addEventListener("message", (ev) => {
+          try {
+            const okOrigin =
+              ev.origin === location.origin || ev.origin === "https://www.facebook.com";
+            if (!okOrigin) return;
+            if (ev.data && ev.data.type === "facebook:create:done") {
+              refreshFacebookTile();
+            }
+          } catch {}
+        });
 
-/** Also refresh when user returns focus from the FB window */
-window.addEventListener("focus", () => {
-  setTimeout(() => { try { refreshFacebookTile(); } catch {} }, 300);
-});
+        /** Also refresh when user returns focus from the FB window */
+        window.addEventListener("focus", () => {
+          setTimeout(() => { try { refreshFacebookTile(); } catch {} }, 300);
+        });
+
+        // begin vendoo process
+        // ===== Vendoo: payload builder + emit helper (Tampermonkey bridge) =====
+        function rpBuildVendooPayload(detail) {
+          console.log("[vendoo] rpBuildVendooPayload: incoming detail", detail);
+        
+          if (!detail || typeof detail !== "object") {
+            console.warn("[vendoo] rpBuildVendooPayload: invalid detail");
+            return null;
+          }
+        
+          const {
+            saveStatus,
+            save_status,
+            intent,
+            marketplaces_selected,
+            item,
+            listing,
+            inventory_meta,
+            images,
+            ebay_payload_snapshot,
+            vendoo_mapping: vendoo_mapping_incoming,
+          } = detail;
+          
+          // MUST BE OUTSIDE the destructuring
+          const rawMap =
+            vendoo_mapping_incoming && typeof vendoo_mapping_incoming === "object"
+              ? vendoo_mapping_incoming
+              : {};
+          
+          const vendoo_mapping = {
+            vendoo_category_key: rawMap.category_key || null,
+            vendoo_category_vendoo: rawMap.category_vendoo || null,
+            vendoo_category_ebay: rawMap.category_ebay || null,
+            vendoo_category_facebook: rawMap.category_facebook || null,
+            vendoo_category_depop: rawMap.category_depop || null,
+          
+            vendoo_condition_main: rawMap.condition_main || null,
+            vendoo_condition_fb: rawMap.condition_fb || null,
+            vendoo_condition_depop: rawMap.condition_depop || null,
+          
+            vendoo_condition_ebay: rawMap.condition_ebay || null,
+            vendoo_condition_ebay_option: rawMap.condition_ebay_option || null,
+          };
+
+          const normalizedSaveStatus = String(saveStatus || save_status || "").toLowerCase();
+          console.log("[vendoo] rpBuildVendooPayload: normalizedSaveStatus", {
+            saveStatus,
+            save_status,
+            normalizedSaveStatus,
+          });
+
+          if (normalizedSaveStatus !== "active") {
+            console.log("[vendoo] rpBuildVendooPayload: skipping non-active save", {
+              saveStatus,
+              save_status,
+            });
+            return null;
+          }
+
+          console.log("[vendoo] rpBuildVendooPayload: normalized vendoo_mapping", {
+            vendoo_mapping_incoming,
+            vendoo_mapping,
+          });
+
+        
+          // Prefer intent.marketplaces from the server; fall back to marketplaces_selected.
+          const rawIntentMarketplaces = Array.isArray(intent?.marketplaces)
+            ? intent.marketplaces
+            : Array.isArray(marketplaces_selected)
+            ? marketplaces_selected
+            : [];
+        
+          console.log("[vendoo] rpBuildVendooPayload: raw intent sources", {
+            intentFromServer: intent?.marketplaces || null,
+            marketplaces_selected: marketplaces_selected || null,
+            rawIntentMarketplaces,
+            intentType: intent?.type || null,
+          });
+        
+          // Normalize to objects so fallback string arrays like ["vendoo"] still work.
+          const intentMarketplaces = (rawIntentMarketplaces || []).map((m) => {
+            if (typeof m === "string") {
+              const normalized = {
+                slug: m,
+                marketplace_id: null,
+                operation: "create",
+                selected: true,
+              };
+              console.log("[vendoo] rpBuildVendooPayload: normalized string marketplace to object", {
+                original: m,
+                normalized,
+              });
+              return normalized;
+            }
+        
+            const normalized = m || {};
+            console.log("[vendoo] rpBuildVendooPayload: normalized marketplace object", {
+              original: m,
+              normalized,
+            });
+            return normalized;
+          });
+        
+          console.log("[vendoo] rpBuildVendooPayload: normalized intentMarketplaces", {
+            intentMarketplaces,
+          });
+        
+          // Marketplace id 13 is Vendoo in our schema.
+          const vendooIntent =
+            intentMarketplaces.find((m) => {
+              const slug = String(m?.slug || "").toLowerCase();
+              const isVendoo =
+                slug === "vendoo" || String(m?.marketplace_id) === "13";
+              if (isVendoo) {
+                console.log("[vendoo] rpBuildVendooPayload: vendoo candidate matched", {
+                  candidate: m,
+                  slug,
+                });
+              } else {
+                console.log("[vendoo] rpBuildVendooPayload: marketplace candidate skipped", {
+                  candidate: m,
+                  slug,
+                });
+              }
+              return isVendoo;
+            }) || null;
+        
+          if (!vendooIntent) {
+            console.log("[vendoo] rpBuildVendooPayload: no vendoo marketplace intent found", {
+              intentMarketplaces,
+            });
+            return null;
+          }
+        
+          console.log("[vendoo] rpBuildVendooPayload: using vendooIntent", {
+            vendooIntent,
+          });
+        
+          const vendooOperation = String(vendooIntent.operation || "").toLowerCase() || "create";
+          if (vendooOperation !== "create") {
+            console.log("[vendoo] rpBuildVendooPayload: vendoo operation is not create; skip", {
+              vendooOperation,
+            });
+            return null;
+          }
+        
+          // ---------- NEW: normalize snapshot + inventory + images ----------
+          const snapshot =
+            ebay_payload_snapshot && typeof ebay_payload_snapshot === "object"
+              ? ebay_payload_snapshot
+              : null;
+        
+          const listingProfile =
+            snapshot && typeof snapshot.listing_profile === "object"
+              ? snapshot.listing_profile
+              : null;
+        
+          const marketplaceListing =
+            snapshot && typeof snapshot.marketplace_listing === "object"
+              ? snapshot.marketplace_listing
+              : null;
+        
+          const inventory =
+            inventory_meta && typeof inventory_meta === "object"
+              ? inventory_meta
+              : null;
+        
+          const normalizedImages = Array.isArray(images) ? images : [];
+        
+          // Flatten fields expected by Vendoo userscript (p.xxx).
+          const flattened = {
+            // Title + description
+            title:
+              (listingProfile && listingProfile.product_short_title) ||
+              (inventory && inventory.product_short_title) ||
+              null,
+            description:
+              (listingProfile && listingProfile.product_description) ||
+              null,
+        
+            // Brand
+            brand:
+              (listingProfile && listingProfile.brand_name) ||
+              (inventory && inventory.brand_name) ||
+              null,
+        
+            // Condition (favor Vendoo mapping if present)
+            condition:
+              (vendoo_mapping && vendoo_mapping.vendoo_condition_main) ||
+              (listingProfile && listingProfile.item_condition) ||
+              null,
+        
+            // Primary color
+            primaryColor:
+              (listingProfile && listingProfile.primary_color) ||
+              null,
+        
+            // Category: prefer Vendoo mapping, then RP listing category, then inventory category_nm
+            category:
+              (vendoo_mapping && (vendoo_mapping.vendoo_category_vendoo || vendoo_mapping.vendoo_category_key)) ||
+              (listingProfile && listingProfile.listing_category) ||
+              (inventory && (inventory.category_nm || inventory.category_name)) ||
+              null,
+        
+            // SKU from inventory or item
+            sku:
+              (inventory && (inventory.sku || inventory.SKU)) ||
+              (item && (item.sku || item.SKU)) ||
+              null,
+        
+            // ZIP: marketplace listing shipping ZIP, fall back to inventory_meta if present
+            zip:
+              (marketplaceListing && marketplaceListing.shipping_zip) ||
+              (inventory && inventory.shipping_zip) ||
+              null,
+        
+            // Quantity from inventory
+            quantity:
+              (inventory && typeof inventory.quantity === "number" && inventory.quantity) ||
+              (inventory && typeof inventory.stock === "number" && inventory.stock) ||
+              (inventory &&
+                typeof inventory.qty !== "undefined" &&
+                !Number.isNaN(Number(inventory.qty)) &&
+                Number(inventory.qty)) ||
+              null,
+        
+            // Price from eBay marketplace listing snapshot, fall back to inventory price
+            price:
+              (marketplaceListing &&
+                typeof marketplaceListing.buy_it_now_price !== "undefined" &&
+                marketplaceListing.buy_it_now_price) ||
+              (inventory &&
+                typeof inventory.price !== "undefined" &&
+                inventory.price) ||
+              null,
+        
+            // Cost of goods from inventory
+            costOfGoods:
+              (inventory &&
+                typeof inventory.cost_of_goods !== "undefined" &&
+                inventory.cost_of_goods) ||
+              null,
+        
+            // Weight + dimensions from listing profile
+            weightLb:
+              (listingProfile &&
+                typeof listingProfile.weight_lb !== "undefined" &&
+                listingProfile.weight_lb) ||
+              null,
+            weightOz:
+              (listingProfile &&
+                typeof listingProfile.weight_oz !== "undefined" &&
+                listingProfile.weight_oz) ||
+              null,
+            length:
+              (listingProfile &&
+                typeof listingProfile.shipbx_length !== "undefined" &&
+                listingProfile.shipbx_length) ||
+              null,
+            width:
+              (listingProfile &&
+                typeof listingProfile.shipbx_width !== "undefined" &&
+                listingProfile.shipbx_width) ||
+              null,
+            height:
+              (listingProfile &&
+                typeof listingProfile.shipbx_height !== "undefined" &&
+                listingProfile.shipbx_height) ||
+              null,
+          };
+        
+          console.log("[vendoo] rpBuildVendooPayload: flattened fields for Vendoo script", flattened);
+        
+          // ---------- Build final payload ----------
+          const payload = {
+            __token: "MRAD_VENDOO_V1",       // ⭐ REQUIRED BY TAMPERMONKEY
+            source: "resell-pro",
+            mode: "single",
+            save_status: normalizedSaveStatus,
+        
+            // Core listing context (still passed through)
+            item: item || null,
+            listing: listing || null,
+            inventory_meta: inventory_meta || null,
+        
+            // Images (metadata only; Tampermonkey can use later)
+            images: normalizedImages,
+        
+            // Marketplace selections (server-normalized)
+            marketplaces_selected: intentMarketplaces,
+        
+            // eBay payload snapshot is the main bridge we’ll reuse for Vendoo mapping logic.
+            ebay_payload_snapshot: snapshot,
+        
+            // Normalized Vendoo mapping so Tampermonkey doesn't need to hit Neon.
+            vendoo_mapping,
+        
+            // Flattened top-level fields consumed by the Vendoo userscript.
+            // These match the "p.xxx" expectations in the Tampermonkey code.
+            ...flattened,
+          };
+        
+          console.log("[vendoo] rpBuildVendooPayload: built payload", payload);
+          return payload;
+        }
+
+      
+        async function __emitVendooReadyIfSafe(detail) {
+          try {
+            console.log("[vendoo] __emitVendooReadyIfSafe: entry", { detail });
+      
+            if (!detail || typeof detail !== "object") {
+              console.warn("[vendoo] __emitVendooReadyIfSafe: missing or invalid detail");
+              return;
+            }
+      
+           const { ok, status, marketplaces_selected } = detail || {};
+
+          
+          // If ok is undefined (because this isn't a raw API response),
+          // we allow the Vendoo flow to continue.
+          if (ok === false) {
+            console.log("[vendoo] __emitVendooReadyIfSafe: explicit failure; skip", {
+              ok,
+              status,
+            });
+            return;
+          }
+          
+          console.log("[vendoo] __emitVendooReadyIfSafe: OK-check passed", {
+            ok,
+            status,
+            hasMarketplacesSelected: !!marketplaces_selected,
+          });
+      
+            const payload = rpBuildVendooPayload(detail);
+            if (!payload) {
+              console.log("[vendoo] __emitVendooReadyIfSafe: rpBuildVendooPayload returned null; skip");
+              return;
+            }
+      
+            const evDetail = {
+              type: "mrad_vendoo_fill",
+              payload: {
+                ...payload,
+                vendoo_mapping: payload.vendoo_mapping,  // ← THIS is the fix
+                __token: payload.__token || "MRAD_VENDOO_V1"
+              },
+              marketplaces_selected: marketplaces_selected || null,
+            };
+      
+            console.log("[vendoo] __emitVendooReadyIfSafe: dispatching CustomEvent", evDetail);
+            document.dispatchEvent(
+              new CustomEvent("intake:vendoo-ready", {
+                detail: evDetail,
+              })
+            );
+          } catch (err) {
+            console.warn("[vendoo] __emitVendooReadyIfSafe: error", err);
+          }
+        }
+      
+        // Vendoo: bridge to Tampermonkey (same pattern as Facebook).
+        document.addEventListener("intake:vendoo-ready", (ev) => {
+          try {
+            const detail = ev?.detail || {};
+            console.log("[vendoo] intake:vendoo-ready event", detail);
+            
+            // Derive payload from event detail
+            console.log("[vendoo] raw detail.payload", detail.payload);
+            const payload = detail.payload || {};
+            console.log("[vendoo] derived payload before token", payload);
+            
+            // Ensure token always present
+            if (!payload.__token) {
+              console.log("[vendoo] __token missing on payload, setting default token");
+              payload.__token = "MRAD_VENDOO_V1";
+            } else {
+              console.log("[vendoo] __token already present on payload", payload.__token);
+            }
+            
+            console.log("[vendoo] payload after token ensure", payload);
+        
+            // Tampermonkey listens for "mrad_vendoo_fill"
+            const message = {
+              type: "mrad_vendoo_fill",
+              payload: detail.payload || null,
+              marketplaces_selected: detail.marketplaces_selected || null,
+            };
+
+           // 1. Open Vendoo window (required so Tampermonkey loads)
+          let vendooWin = window.open("https://web.vendoo.co/app/item/new", "_blank");
+          
+          if (!vendooWin || vendooWin.closed) {
+            console.warn("[vendoo] popup blocked – allow popups for resellpros.com");
+          } else {
+            console.log("[vendoo] Vendoo window opened");
+          }
+          
+          // 2. Post message to Tampermonkey in THIS window
+          console.log("[vendoo] posting message to window for Tampermonkey", message);
+          window.postMessage(message, "*");
+          
+           // 3. ALSO send the payload into the Vendoo tab (Tampermonkey listens there too)
+            try {
+              vendooWin.postMessage(message, "*");
+              console.log("[vendoo] posted message to Vendoo window");
+            } catch (e) {
+              console.warn("[vendoo] failed to post to vendooWin", e);
+            }
+          } catch (err) {
+            console.warn("[vendoo] intake:vendoo-ready handler error", err);
+          }
+        });
+        //end vendoo process 
+
 
   
 // --- Drafts refresh bus + helpers (anchored insert) ---
@@ -3157,11 +4099,42 @@ document.addEventListener("intake:item-changed", () => refreshInventory({ force:
           try { computeValidity(); } catch {}
         }
 
+      // Compute per-marketplace intent from the current tile selection.
+    // This is where we encode the “deselect eBay → delete listing” rule.
+    function computeMarketplaceIntent(meta, selectedIds) {
+      const intent = {};
+      try {
+        const rows = (meta?.marketplaces || []);
+        for (const m of rows) {
+          const slug = String(m.slug || "").toLowerCase();
+          if (!slug) continue;
+          const id = Number(m.id);
+          const isSelected = selectedIds.has(id);
 
+          
+          if (slug === "ebay") {
+            // Decision: deselecting the eBay tile == delete the eBay listing
+            intent[slug] = isSelected ? "upsert" : "delete";
+          } else if (slug === "facebook") {
+            // Decision: for Facebook we only have create logic right now.
+            // Deselecting should NOT delete in v1 → just ignore.
+            intent[slug] = isSelected ? "upsert" : "ignore";
+          } else if (slug === "vendoo") {
+            // Decision: for vendoo we only have create logic right now.
+            // Deselecting should NOT delete in v1 → just ignore.
+            intent[slug] = isSelected ? "upsert" : "ignore";  
+          } else {
+            // Future marketplaces: default to upsert when selected, ignore when not.
+            intent[slug] = isSelected ? "upsert" : "ignore";
+          }
+        }
+      } catch {
+        // fail open — server will fall back to old behavior if intent is missing
+      }
+      return intent;
+    }
 
-
-    
-       function buildPayload(isDraft = false) {
+    function buildPayload(isDraft = false) {
       // helper: drop empty strings/null/undefined
       const prune = (obj) => {
         const out = {};
@@ -3172,15 +4145,24 @@ document.addEventListener("intake:item-changed", () => refreshInventory({ force:
         }
         return out;
       };
-    
+      
       const title = valByIdOrLabel(null, "Item Name / Description");
     
       // Collect all possible fields (strings left as entered; numbers coerced when present)
       const invAll = {
         product_short_title: title,
-        price: (() => { const v = valByIdOrLabel(null, "Price (USD)"); return v !== "" ? Number(v) : undefined; })(),
-        qty: (() => { const v = valByIdOrLabel(null, "Qty"); return v !== "" ? Number(v) : undefined; })(),
-        cost_of_goods: (() => { const v = valByIdOrLabel(null, "Cost of Goods (USD)"); return v !== "" ? Number(v) : undefined; })(),
+        price: (() => {
+          const v = valByIdOrLabel(null, "Price (USD)");
+          return v !== "" ? Number(v) : undefined;
+        })(),
+        qty: (() => {
+          const v = valByIdOrLabel(null, "Qty");
+          return v !== "" ? Number(v) : undefined;
+        })(),
+        cost_of_goods: (() => {
+          const v = valByIdOrLabel(null, "Cost of Goods (USD)");
+          return v !== "" ? Number(v) : undefined;
+        })(),
         category_nm: valByIdOrLabel("categorySelect", "Category"),
         instore_loc: valByIdOrLabel("storeLocationSelect", "Store Location"),
         case_bin_shelf: valByIdOrLabel(null, "Case#/Bin#/Shelf#"),
@@ -3188,59 +4170,155 @@ document.addEventListener("intake:item-changed", () => refreshInventory({ force:
       };
     
       const listingAll = {
-        listing_category_key: valByIdOrLabel("marketplaceCategorySelect", "Marketplace Category"),
-        condition_key:        valByIdOrLabel("conditionSelect", "Condition"),
-        brand_key:            valByIdOrLabel("brandSelect", "Brand"),
-        color_key:            valByIdOrLabel("colorSelect", "Primary Color"),
-        product_description:  valByIdOrLabel(null, "Long Description"),
-        shipping_box_key:     valByIdOrLabel("shippingBoxSelect", "Shipping Box"),
-        weight_lb:  (() => { const v = valByIdOrLabel("shipWeightLb", "Weight (lb)"); return v !== "" ? Number(v) : undefined; })(),
-        weight_oz:  (() => { const v = valByIdOrLabel("shipWeightOz", "Weight (oz)"); return v !== "" ? Number(v) : undefined; })(),
-        shipbx_length: (() => { const v = valByIdOrLabel("shipLength", "Length"); return v !== "" ? Number(v) : undefined; })(),
-        shipbx_width:  (() => { const v = valByIdOrLabel("shipWidth", "Width"); return v !== "" ? Number(v) : undefined; })(),
-        shipbx_height: (() => { const v = valByIdOrLabel("shipHeight", "Height"); return v !== "" ? Number(v) : undefined; })(),
+        listing_category_key: valByIdOrLabel(
+          "marketplaceCategorySelect",
+          "Marketplace Category"
+        ),
+        condition_key: valByIdOrLabel("conditionSelect", "Condition"),
+        brand_key: valByIdOrLabel("brandSelect", "Brand"),
+        color_key: valByIdOrLabel("colorSelect", "Primary Color"),
+        product_description: valByIdOrLabel(null, "Long Description"),
+        shipping_box_key: valByIdOrLabel("shippingBoxSelect", "Shipping Box"),
+        weight_lb: (() => {
+          const v = valByIdOrLabel("shipWeightLb", "Weight (lb)");
+          return v !== "" ? Number(v) : undefined;
+        })(),
+        weight_oz: (() => {
+          const v = valByIdOrLabel("shipWeightOz", "Weight (oz)");
+          return v !== "" ? Number(v) : undefined;
+        })(),
+        shipbx_length: (() => {
+          const v = valByIdOrLabel("shipLength", "Length");
+          return v !== "" ? Number(v) : undefined;
+        })(),
+        shipbx_width: (() => {
+          const v = valByIdOrLabel("shipWidth", "Width");
+          return v !== "" ? Number(v) : undefined;
+        })(),
+        shipbx_height: (() => {
+          const v = valByIdOrLabel("shipHeight", "Height");
+          return v !== "" ? Number(v) : undefined;
+        })(),
+      };
+    
+      // eBay marketplace listing fields (maps to app.item_marketplace_listing)
+      const ebayListing = getEbayListingFields();
+    
+      // Helper: normalize marketplaces_selected → array of slugs ("ebay", "facebook", ...)
+      const gatherSelectedMarketplaces = () => {
+        const selectedSlugs = new Set();
+    
+        // 1) From the cached marketplace meta + selectedMarketplaceIds
+        try {
+          const rows = (__metaCache?.marketplaces || []);
+          const byId = new Map(
+            rows.map((r) => [
+              Number(r.id),
+              String(r.slug || "").toLowerCase(),
+            ])
+          );
+    
+          for (const id of selectedMarketplaceIds) {
+            const slug = byId.get(Number(id));
+            if (slug) selectedSlugs.add(slug);
+          }
+        } catch {
+          // no-op
+        }
+    
+        // 2) DOM fallback: tiles marked with data-mp-selected="true"
+        try {
+          const nodes = document.querySelectorAll(
+            '[data-mp-selected="true"]'
+          );
+          nodes.forEach((n) => {
+            const slug = String(n.dataset.mpSlug || "").toLowerCase();
+            if (slug) selectedSlugs.add(slug);
+          });
+        } catch {
+          // no-op
+        }
+    
+        return Array.from(selectedSlugs.values());
+      };
+    
+      const marketplaces_selected = gatherSelectedMarketplaces();
+
+      // Compute explicit marketplace intent snapshot using current tiles
+      const marketplaces_intent = computeMarketplaceIntent(__metaCache, selectedMarketplaceIds);
+
+      // Helper: attach marketplace_listing (ebay, facebook stub, etc.)
+      const attachMarketplaceListing = (payload) => {
+        const listingObj = {};
+    
+        // eBay-specific fields
+        if (ebayListing && Object.keys(ebayListing).length > 0) {
+          listingObj.ebay = ebayListing;
+        }
+    
+        // Facebook stub so the server can upsert / track the row
+        if (Array.isArray(marketplaces_selected) &&
+            marketplaces_selected.includes("facebook")) {
+          if (!listingObj.facebook) {
+            listingObj.facebook = {};
+          }
+        }
+    
+        if (Object.keys(listingObj).length > 0) {
+          payload.marketplace_listing = listingObj;
+        }
       };
 
-      // NEW: eBay marketplace listing fields (maps to app.item_marketplace_listing)
-      const ebayListing = getEbayListingFields();
+      // Helper: build explicit intent object for the server
+      const buildIntent = () => {
+        const intent = {
+          source: "intake",
+          mode: isDraft ? "draft" : "active",
+          inventory: __currentItemId ? "update" : "create",
+          marketplaces: marketplaces_intent
+        };
 
+        console.log("[intake.js] buildIntent", {
+          mode: intent.mode,
+          inventoryOp: intent.inventory,
+          item_id: __currentItemId || null,
+          marketplaces_intent,
+          intent
+        });
+
+        return intent;
+      };
+    
+      // --------------------
+      // Draft items
+      // --------------------
       if (isDraft) {
-        // Send any non-empty fields for drafts (Basic + Marketplace + eBay listing fields)
         const inventory = prune(invAll);
-        const listing   = prune(listingAll);
+        const listing = prune(listingAll);
         const payload = { status: "draft", inventory };
-      
-        if (Object.keys(listing).length > 0) payload.listing = listing;
-
-        // Ensure marketplaces_selected includes the UI selections (including Facebook)
-        try {
-          // Reuse whatever mechanism you already have for tile selection; fallback to data-attributes
-          const selected = new Set(Array.from(document.querySelectorAll('[data-mp-selected="true"]')).map(n => (n.dataset.mpSlug || "").toLowerCase()));
-          // If you store selected IDs elsewhere, merge them here
-          if (!Array.isArray(payload.marketplaces_selected)) payload.marketplaces_selected = [];
-          for (const s of selected) {
-            if (s && !payload.marketplaces_selected.includes(s)) payload.marketplaces_selected.push(s);
-          }
-        } catch { /* no-op */ }
-        
-        // eBay-specific fields (existing)
-        if (Object.keys(ebayListing).length > 0) {
-          payload.marketplace_listing = { ...(payload.marketplace_listing || {}), ebay: ebayListing };
+    
+        if (Object.keys(listing).length > 0) {
+          payload.listing = listing;
         }
-
-        // NEW: Facebook flag so the server upserts the stub row
-        if (payload.marketplaces_selected.includes("facebook")) {
-          payload.marketplace_listing = { ...(payload.marketplace_listing || {}), facebook: {} };
+    
+        if (marketplaces_selected.length > 0) {
+          payload.marketplaces_selected = marketplaces_selected;
         }
+    
+        attachMarketplaceListing(payload);
 
-          // If this is a duplicated brand-new item, send source images for server-side copy
-          if (
-             !__currentItemId &&
-            __duplicateCarryPhotos &&
-            Array.isArray(__duplicateSourceImages) &&
-            __duplicateSourceImages.length > 0
-          ) {
-            payload.duplicate_images = __duplicateSourceImages.map((img, idx) => ({
+        // NEW: attach explicit intent
+        payload.intent = buildIntent();
+    
+        // If this is a duplicated brand-new item, send source images for server-side copy
+        if (
+          !__currentItemId &&
+          __duplicateCarryPhotos &&
+          Array.isArray(__duplicateSourceImages) &&
+          __duplicateSourceImages.length > 0
+        ) {
+          payload.duplicate_images = __duplicateSourceImages.map(
+            (img, idx) => ({
               r2_key: img.r2_key,
               cdn_url: img.cdn_url,
               bytes: img.bytes,
@@ -3248,30 +4326,84 @@ document.addEventListener("intake:item-changed", () => refreshInventory({ force:
               width: img.width ?? null,
               height: img.height ?? null,
               sha256: img.sha256 ?? null,
-              sort_order: typeof img.sort_order === "number" ? img.sort_order : idx,
+              sort_order:
+                typeof img.sort_order === "number"
+                  ? img.sort_order
+                  : idx,
               is_primary: !!img.is_primary,
-            }));
-          }
-
-          return payload;
-       }
-
+            })
+          );
+        }
     
-      // Active/new items
-      const salesChannel = valByIdOrLabel("salesChannelSelect", "Sales Channel");
+        return payload;
+      }
+    
+      // --------------------
+      // Active / new items
+      // --------------------
+      const salesChannel = valByIdOrLabel(
+        "salesChannelSelect",
+        "Sales Channel"
+      );
       const isStoreOnly = /store only/i.test(String(salesChannel || ""));
       const inventory = prune(invAll);
     
+      // Store-only: no marketplaces / listing needed
       if (isStoreOnly) {
         const payload = { inventory };
 
+        // NEW: still tell the server what we meant to do
+        payload.intent = buildIntent();
+    
         if (
-         !__currentItemId &&
-           __duplicateCarryPhotos &&
-           Array.isArray(__duplicateSourceImages) &&
-           __duplicateSourceImages.length > 0
+          !__currentItemId &&
+          __duplicateCarryPhotos &&
+          Array.isArray(__duplicateSourceImages) &&
+          __duplicateSourceImages.length > 0
         ) {
-          payload.duplicate_images = __duplicateSourceImages.map((img, idx) => ({
+          payload.duplicate_images = __duplicateSourceImages.map(
+            (img, idx) => ({
+              r2_key: img.r2_key,
+              cdn_url: img.cdn_url,
+              bytes: img.bytes,
+              content_type: img.content_type,
+              width: img.width ?? null,
+              height: img.height ?? null,
+              sha256: img.sha256 ?? null,
+              sort_order:
+                typeof img.sort_order === "number"
+                  ? img.sort_order
+                  : idx,
+              is_primary: !!img.is_primary,
+            })
+          );
+        }
+    
+        return payload;
+      }
+    
+      // Online / marketplace items
+      const listing = prune(listingAll);
+      const payload = { inventory, listing };
+    
+      if (marketplaces_selected.length > 0) {
+        payload.marketplaces_selected = marketplaces_selected;
+      }
+    
+      attachMarketplaceListing(payload);
+
+      // NEW: attach explicit intent
+      payload.intent = buildIntent();
+    
+      // If this is a duplicated brand-new item, send source images for server-side copy
+      if (
+        !__currentItemId &&
+        __duplicateCarryPhotos &&
+        Array.isArray(__duplicateSourceImages) &&
+        __duplicateSourceImages.length > 0
+      ) {
+        payload.duplicate_images = __duplicateSourceImages.map(
+          (img, idx) => ({
             r2_key: img.r2_key,
             cdn_url: img.cdn_url,
             bytes: img.bytes,
@@ -3279,45 +4411,24 @@ document.addEventListener("intake:item-changed", () => refreshInventory({ force:
             width: img.width ?? null,
             height: img.height ?? null,
             sha256: img.sha256 ?? null,
-            sort_order: typeof img.sort_order === "number" ? img.sort_order : idx,
+            sort_order:
+              typeof img.sort_order === "number"
+                ? img.sort_order
+                : idx,
             is_primary: !!img.is_primary,
-          }));
-        }
-        return payload ;
+          })
+        );
       }
     
-      const listing = prune(listingAll);
-      const marketplaces_selected = Array.from(selectedMarketplaceIds.values());
-
-      const payload = { inventory, listing, marketplaces_selected };
-
-      if (Object.keys(ebayListing).length > 0) {
-        // Backend: upsert into app.item_marketplace_listing when present
-        payload.marketplace_listing = { ebay: ebayListing };
-      }
-
-      // If this is a duplicated brand-new item, send source images for server-side copy
-      if (
-        !__currentItemId &&
-         __duplicateCarryPhotos &&
-         Array.isArray(__duplicateSourceImages) &&
-         __duplicateSourceImages.length > 0
-      ) {
-        payload.duplicate_images = __duplicateSourceImages.map((img, idx) => ({
-          r2_key: img.r2_key,
-          cdn_url: img.cdn_url,
-          bytes: img.bytes,
-          content_type: img.content_type,
-          width: img.width ?? null,
-          height: img.height ?? null,
-          sha256: img.sha256 ?? null,
-          sort_order: typeof img.sort_order === "number" ? img.sort_order : idx,
-          is_primary: !!img.is_primary,
-        }));
-      }
-         
       return payload;
     }
+
+
+
+
+
+    
+         
 
 
      async function submitIntake(mode = "active") {
@@ -4060,13 +5171,23 @@ document.addEventListener("intake:item-changed", () => refreshInventory({ force:
           // notify photos module to flush any pending uploads
             
           try {
+            const saveStatus = (mode === "draft" ? "draft" : "active");
+          
             document.dispatchEvent(
               new CustomEvent("intake:item-saved", {
                 detail: {
+                  // existing fields
                   item_id: __currentItemId,
                   action: "save",
-                  save_status: (mode === "draft" ? "draft" : "active"),
-                  job_ids: Array.isArray(res?.job_ids) ? res.job_ids : []
+                  save_status: saveStatus,
+                  job_ids: Array.isArray(res?.job_ids) ? res.job_ids : [],
+          
+                  // NEW: required for Vendoo workflow
+                  ok: (typeof res?.ok === "boolean" ? res.ok : true),
+                  status: res?.status || saveStatus,
+                  intent: res?.intent || null,
+                  marketplaces_selected: res?.marketplaces_selected || null,
+                  vendoo_mapping: res?.vendoo_mapping || null
                 }
               })
             );

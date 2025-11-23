@@ -3,7 +3,18 @@ import { neon } from "@neondatabase/serverless";
 
 
 type Role = "owner" | "admin" | "manager" | "clerk";
+
+type MarketplaceAction = "upsert" | "delete" | "ignore";
+type IntakeIntent = {
+  source?: string; // e.g., "intake"
+  mode?: "draft" | "active";
+  inventory?: "create" | "update";
+  marketplaces?: Record<string, MarketplaceAction>;
+};
+
 const json = (data: any, status = 200) =>
+
+  
   new Response(JSON.stringify(data), {
     status,
     headers: { "content-type": "application/json", "cache-control": "no-store" },
@@ -184,7 +195,154 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
       return upsertFooter(body, sku, instore_loc, case_bin_shelf);
     }
 
-        // === Helper: enqueue marketplace publish jobs (create vs update + no-change short-circuit) ===
+
+        // Vendoo mapping helpers (category + condition)
+    // These are intentionally generic and just return raw rows so the caller can
+    // shape the payload as needed without over-coupling to schema details.
+    async function loadVendooCategoryMap(
+      sql: any,
+      tenantId: string | null | undefined,
+      listingCategory: string | null | undefined
+    ) {
+      if (!tenantId || !listingCategory) {
+        console.log("vendoo:category-map:skip", {
+          reason: "missing-tenant-or-category",
+          tenantId,
+          listingCategory,
+        });
+        return [];
+      }
+
+      console.log("vendoo:category-map:load:start", {
+        tenantId,
+        listingCategory,
+      });
+
+      try {
+        const rows = await sql`
+          select *
+          from app.marketplace_category_vendoo_map
+          where tenant_id = ${tenantId}
+            and category_key_uuid = ${listingCategory}
+        `;
+
+        console.log("vendoo:category-map:load:success", {
+          tenantId,
+          listingCategory,
+          rowCount: Array.isArray(rows) ? rows.length : null,
+          sampleRow: Array.isArray(rows) && rows.length > 0 ? rows[0] : null,
+        });
+
+        return rows;
+      } catch (err) {
+        console.error("vendoo:category-map:load:error", {
+          tenantId,
+          listingCategory,
+          error: String(err),
+        });
+        return [];
+      }
+    }
+  
+    async function loadMarketplaceConditions(
+      sql: any,
+      tenantId: string | null | undefined,
+      conditionName: string | null | undefined
+    ) {
+      if (!tenantId || !conditionName) {
+        console.log("vendoo:conditions:skip", {
+          reason: "missing-tenant-or-condition",
+          tenantId,
+          conditionName,
+        });
+        return [];
+      }
+
+      console.log("vendoo:conditions:load:start", {
+        tenantId,
+        conditionName,
+      });
+
+      try {
+        const rows = await sql`
+          select *
+          from app.marketplace_conditions
+          where tenant_id = ${tenantId}
+            and condition_name = ${conditionName}
+        `;
+
+        console.log("vendoo:conditions:load:success", {
+          tenantId,
+          conditionName,
+          rowCount: Array.isArray(rows) ? rows.length : null,
+          sampleRow: Array.isArray(rows) && rows.length > 0 ? rows[0] : null,
+        });
+
+        return rows;
+      } catch (err) {
+        console.error("vendoo:conditions:load:error", {
+          tenantId,
+          conditionName,
+          error: String(err),
+        });
+        return [];
+      }
+    }
+  
+    async function loadVendooEbayConditionMap(
+      sql: any,
+      tenantId: string | null | undefined,
+      conditionName: string | null | undefined,
+      conditionOption: string | null | undefined
+    ) {
+      if (!tenantId || !conditionName || !conditionOption) {
+        console.log("vendoo:ebay-condition-map:skip", {
+          reason: "missing-tenant-or-condition-or-option",
+          tenantId,
+          conditionName,
+          conditionOption,
+        });
+        return [];
+      }
+
+      console.log("vendoo:ebay-condition-map:load:start", {
+        tenantId,
+        conditionName,
+        conditionOption,
+      });
+
+      try {
+        const rows = await sql`
+          select *
+          from app.marketplace_condition_vendoo_ebay_map
+          where tenant_id = ${tenantId}
+            and condition_name = ${conditionName}
+            and condition_options = ${conditionOption}
+        `;
+
+        console.log("vendoo:ebay-condition-map:load:success", {
+          tenantId,
+          conditionName,
+          conditionOption,
+          rowCount: Array.isArray(rows) ? rows.length : null,
+          sampleRow: Array.isArray(rows) && rows.length > 0 ? rows[0] : null,
+        });
+
+        return rows;
+      } catch (err) {
+        console.error("vendoo:ebay-condition-map:load:error", {
+          tenantId,
+          conditionName,
+          conditionOption,
+          error: String(err),
+        });
+        return [];
+      }
+    }
+
+    
+     
+    // === Helper: enqueue marketplace publish jobs (create vs update + no-change short-circuit) ===
     async function enqueuePublishJobs(
       tenant_id: string,
       item_id: string,
@@ -192,23 +350,106 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
       status: "draft" | "active"
     ): Promise<void> {
       try {
+        console.log("[intake.enqueuePublishJobs] enter", {
+          tenant_id,
+          item_id,
+          status,
+          rawBodyMarketplacesSelected: body?.marketplaces_selected ?? null,
+        });
+    
         const rawSel = Array.isArray(body?.marketplaces_selected) ? body.marketplaces_selected : [];
-        console.log("[intake] enqueue.start", { item_id, status, rawSel });
-
+        console.log("[intake.enqueuePublishJobs] rawSel.normalized", {
+          type: Array.isArray(rawSel) ? "array" : typeof rawSel,
+          length: Array.isArray(rawSel) ? rawSel.length : null,
+          rawSel,
+        });
+    
         // Accept slugs (strings) and numeric ids (numbers OR numeric strings)
-        const slugs = rawSel
+        let slugs = rawSel
           .filter((v: any) => typeof v === "string" && isNaN(Number(v)) && v.trim() !== "")
           .map((s: string) => s.toLowerCase());
         const ids = rawSel
-          .map((v: any) => (typeof v === "number" && Number.isInteger(v)) ? v
-            : (typeof v === "string" && /^\d+$/.test(v) ? Number(v) : null))
+          .map((v: any) =>
+            typeof v === "number" && Number.isInteger(v)
+              ? v
+              : typeof v === "string" && /^\d+$/.test(v)
+              ? Number(v)
+              : null
+          )
           .filter((n: number | null): n is number => n !== null);
-
+    
+        console.log("[intake.enqueuePublishJobs] selection.parsed", {
+          slugs,
+          ids,
+        });
+    
+        // Derive a canonical per-marketplace action map (slug -> upsert|delete|ignore)
+        const actionsBySlug: Record<string, MarketplaceAction> = {};
+        if (Array.isArray(intentMarketplaces) && intentMarketplaces.length > 0) {
+          console.log("[intake.enqueuePublishJobs] intentMarketplaces.raw", {
+            count: intentMarketplaces.length,
+            intentMarketplaces,
+          });
+          for (const m of intentMarketplaces as any[]) {
+            if (!m) continue;
+            const slug = String(m.slug || "").toLowerCase();
+            if (!slug) continue;
+            const opRaw = String(m.operation || "").toLowerCase();
+            let action: MarketplaceAction = "upsert";
+            if (opRaw === "delete") action = "delete";
+            else if (opRaw === "ignore") action = "ignore";
+            actionsBySlug[slug] = action;
+          }
+        } else {
+          console.log("[intake.enqueuePublishJobs] intentMarketplaces.empty_or_missing", {
+            intentMarketplacesType: Array.isArray(intentMarketplaces) ? "array" : typeof intentMarketplaces,
+          });
+        }
+    
+        console.log("[intake.enqueuePublishJobs] actionsBySlug.derived", {
+          actionsBySlug,
+        });
+    
+        // Merge in marketplaces from intent (any non-"ignore" actions)
+        const intentSlugs = Object.entries(actionsBySlug)
+          .filter(([, action]) => action && action !== "ignore")
+          .map(([slug]) => slug.toLowerCase());
+    
+        console.log("[intake.enqueuePublishJobs] intentSlugs.filtered", {
+          intentSlugs,
+        });
+    
+        if (intentSlugs.length > 0) {
+          const merged = new Set<string>([...slugs, ...intentSlugs]);
+          slugs = Array.from(merged);
+          console.log("[intake.enqueuePublishJobs] slugs.merged_with_intent", {
+            slugs,
+          });
+        }
+    
+        console.log("[intake] enqueue.start", {
+          item_id,
+          status,
+          rawSel,
+          slugs,
+          ids,
+          intentMarketplaces,
+          actionsBySlug,
+        });
+    
         if (slugs.length === 0 && ids.length === 0) {
-          console.log("[intake] enqueue.skip_no_selection");
+          console.log("[intake] enqueue.skip_no_selection", {
+            reason: "no slugs and no ids after normalization",
+          });
           return;
         }
-
+    
+        console.log("[intake.enqueuePublishJobs] querying_enabled_marketplaces", {
+          tenant_id,
+          slugs,
+          ids,
+        });
+    
         // Resolve tenant-enabled marketplaces by either slug OR id
         const rows = await sql/*sql*/`
           SELECT ma.id, ma.slug
@@ -220,8 +461,16 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
           WHERE (${slugs.length > 0} AND ma.slug = ANY(${slugs}))
              OR (${ids.length > 0}   AND ma.id   = ANY(${ids}))
         `;
-        console.log("[intake] enqueue.match_enabled", { count: rows.length, rows });
-
+        console.log("[intake] enqueue.match_enabled", {
+          count: Array.isArray(rows) ? rows.length : null,
+          rows,
+        });
+    
+        console.log("[intake.enqueuePublishJobs] loading_canonical_fields", {
+          item_id,
+          tenant_id,
+        });
+    
         // Load canonical fields we map to marketplaces (schema-backed)
         const inv = await sql/*sql*/`
           SELECT product_short_title
@@ -247,7 +496,15 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
           FROM app.item_marketplace_listing
           WHERE item_id = ${item_id} AND tenant_id = ${tenant_id}
         `;
-
+    
+        console.log("[intake.enqueuePublishJobs] canonical_fields.loaded", {
+          hasInventory: Array.isArray(inv) && inv.length > 0,
+          hasListingProfile: Array.isArray(lst) && lst.length > 0,
+          marketplaceListingCount: Array.isArray(imlRows) ? imlRows.length : null,
+          invSample: Array.isArray(inv) && inv.length > 0 ? inv[0] : null,
+          lstSample: Array.isArray(lst) && lst.length > 0 ? lst[0] : null,
+        });
+    
         // Stable JSON stringify (keys sorted) for hashing
         const stableStringify = (obj: any) => {
           const seen = new WeakSet();
@@ -267,11 +524,66 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
           const hash = await crypto.subtle.digest("SHA-256", data);
           return Array.from(new Uint8Array(hash)).map(b => b.toString(16).padStart(2,"0")).join("");
         };
-
+    
+        console.log("[intake.enqueuePublishJobs] prepared_hash_helpers", {
+          rowsCount: Array.isArray(rows) ? rows.length : null,
+        });
+    
         for (const r of rows) {
           const slug = String(r.slug || "").toLowerCase();
-          if (slug === "facebook") {
-            // Ensure stub exists so UI reflects progress
+    
+          // Desired action from unified intent (default: "upsert")
+          const desiredAction: MarketplaceAction =
+            (actionsBySlug[slug] as MarketplaceAction) || "upsert";
+    
+          console.log("[intake.enqueuePublishJobs] loop.marketplace.start", {
+            item_id,
+            marketplace_id: r.id,
+            slug,
+            desiredAction,
+          });
+    
+          // If the client explicitly said "ignore", skip this marketplace entirely.
+          if (desiredAction === "ignore") {
+            console.log("[intake] enqueue.skip_intent_ignore", {
+              item_id,
+              marketplace_id: r.id,
+              slug,
+            });
+            continue;
+          }
+    
+          // If the client requested a delete, the delete path above handles it.
+          // Do NOT enqueue create/update jobs here.
+          if (desiredAction === "delete") {
+            console.log("[intake] enqueue.skip_intent_delete", {
+              item_id,
+              marketplace_id: r.id,
+              slug,
+            });
+            continue;
+          }
+    
+          // Pull the marketplace row (if present) to know current identifiers/status
+          const iml = Array.isArray(imlRows) ? imlRows.find((x: any) => x.marketplace_id === r.id) : null;
+          console.log("[intake.enqueuePublishJobs] loop.marketplace.iml", {
+            item_id,
+            marketplace_id: r.id,
+            slug,
+            hasIml: !!iml,
+            imlStatus: iml?.status ?? null,
+            imlMpOfferId: iml?.mp_offer_id ?? null,
+          });
+    
+          if (slug === "vendoo") {
+            console.log("[intake] vendoo.skip_enqueue_tampermonkey", {
+              item_id,
+              marketplace_id: r.id,
+              slug,
+              desiredAction,
+            });
+    
+            // Ensure stub exists so UI can reflect progress while Tampermonkey/Vendoo runs
             await sql/*sql*/`
               INSERT INTO app.item_marketplace_listing
                 (item_id, tenant_id, marketplace_id, status)
@@ -282,7 +594,61 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
                 status = 'publishing',
                 updated_at = now()
             `;
-
+    
+            await sql/*sql*/`
+              INSERT INTO app.item_marketplace_events
+                (item_id, tenant_id, marketplace_id, kind, payload)
+              VALUES
+                (${item_id}, ${tenant_id}, ${r.id}, 'publish_started', jsonb_build_object('source','vendoo_enqueue'))
+            `;
+    
+            console.log("[intake.enqueuePublishJobs] vendoo.stub_upserted_and_event_logged", {
+              item_id,
+              marketplace_id: r.id,
+              slug,
+            });
+    
+            // No server-runner job for Vendoo; browser/Tampermonkey flow will complete it.
+            continue;
+          }
+    
+          
+          if (slug === "facebook") {
+            const statusNorm = String(iml?.status || "").toLowerCase();
+            const isLiveLike = statusNorm === "active" || statusNorm === "live";
+    
+            console.log("[intake.enqueuePublishJobs] facebook.status_check", {
+              item_id,
+              marketplace_id: r.id,
+              current_status: statusNorm,
+              desiredAction,
+              isLiveLike,
+            });
+    
+            // If Facebook is already live/active and we're not explicitly deleting,
+            // don't keep flipping it back to "publishing" or emitting new publish_started events.
+            if (isLiveLike && desiredAction !== "delete") {
+              console.log("[intake] fb.skip_already_live", {
+                item_id,
+                marketplace_id: r.id,
+                current_status: statusNorm,
+                desiredAction,
+              });
+              continue;
+            }
+    
+            // Ensure stub exists so UI reflects progress for first-time or non-live publishes
+            await sql/*sql*/`
+              INSERT INTO app.item_marketplace_listing
+                (item_id, tenant_id, marketplace_id, status)
+              VALUES
+                (${item_id}, ${tenant_id}, ${r.id}, 'publishing')
+              ON CONFLICT (item_id, marketplace_id)
+              DO UPDATE SET
+                status = 'publishing',
+                updated_at = now()
+            `;
+    
             // Emit a progress event (no server-runner for FB; browser/Tampermonkey will finish)
             await sql/*sql*/`
               INSERT INTO app.item_marketplace_events
@@ -290,15 +656,22 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
               VALUES
                 (${item_id}, ${tenant_id}, ${r.id}, 'publish_started', jsonb_build_object('source','enqueue'))
             `;
-
+    
+            console.log("[intake.enqueuePublishJobs] facebook.stub_upserted_and_event_logged", {
+              item_id,
+              marketplace_id: r.id,
+              slug,
+            });
+    
             continue;
           }
-          
-          // Pull the marketplace row (if present) to know current identifiers/status
-          const iml = Array.isArray(imlRows) ? imlRows.find((x:any) => x.marketplace_id === r.id) : null;
-
-
-
+    
+          console.log("[intake.enqueuePublishJobs] snapshot.building", {
+            item_id,
+            marketplace_id: r.id,
+            slug,
+          });
+    
           // Build canonical snapshot for this marketplace
           const snapshot = {
             item_id,
@@ -311,38 +684,130 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
           const snapshotStr = stableStringify(snapshot);
           const hash = await sha256Hex(snapshotStr);
           const payload_snapshot = { ...snapshot, _hash: hash };
-
-          // Determine desired op
-          // Option A: treat 'live' the same as 'active' so edits enqueue 'update' after first publish
+    
+          console.log("[intake.enqueuePublishJobs] snapshot.built", {
+            item_id,
+            marketplace_id: r.id,
+            slug: r.slug,
+            hash,
+            snapshotPreview: {
+              product_short_title: snapshot.product_short_title,
+              listing_profile: snapshot.listing_profile ? { listing_category: snapshot.listing_profile.listing_category } : null,
+            },
+          });
+    
+                     // Determine desired op 
+          // Option A: treat 'live' the same as 'active' so edits enqueue 'update' after first publish.
+          // IMPORTANT:
+          // - If the listing row exists but is NOT live/active (error, draft, ended, etc.),
+          //   always treat it as a fresh CREATE so we don't get stuck in a non-live state.
           const statusNorm = String(iml?.status || "").toLowerCase();
           const isLiveLike = statusNorm === "active" || statusNorm === "live";
-          const hasActiveOffer = !!(iml?.mp_offer_id) && isLiveLike;
-          const op = hasActiveOffer ? "update" : "create";
-
-          // Compare vs most recent snapshot (any op) to short-circuit no-ops
+          const hasMpOffer = !!(iml?.mp_offer_id);
+    
+          console.log("[intake.enqueuePublishJobs] decide-op: pre", {
+            tenant_id,
+            item_id,
+            marketplace_id: r.id,
+            slug: r.slug,
+            iml_status: iml?.status ?? null,
+            statusNorm,
+            isLiveLike,
+            hasMpOffer,
+            mp_offer_id: iml?.mp_offer_id ?? null,
+            payload_marketplace_listing_status: (body as any)?.marketplace_listing?.status ?? null
+          });
+    
+          let op: "create" | "update";
+          if (isLiveLike && hasMpOffer) {
+            // Live/active offer on the marketplace → update the existing listing.
+            op = "update";
+          } else {
+            // No live offer (or no row / no offer id) → create a new listing.
+            // This covers the case where a row exists but status is NOT live.
+            op = "create";
+          }
+    
+          console.log("[intake.enqueuePublishJobs] decide-op: selected", {
+            tenant_id,
+            item_id,
+            marketplace_id: r.id,
+            slug: r.slug,
+            op
+          });
+    
+          console.log("[intake.enqueuePublishJobs] last-job.query", {
+            tenant_id,
+            item_id,
+            marketplace_id: r.id,
+            slug: r.slug,
+            op,
+          });
+    
+          // Compare vs most recent *succeeded* snapshot to short-circuit no-ops
           const last = await sql/*sql*/`
-            SELECT payload_snapshot
+            SELECT status, payload_snapshot
             FROM app.marketplace_publish_jobs
             WHERE tenant_id = ${tenant_id}
               AND item_id = ${item_id}
               AND marketplace_id = ${r.id}
-              AND status IN ('queued','running','done')
             ORDER BY created_at DESC
             LIMIT 1
           `;
-          const lastHash = String(last?.[0]?.payload_snapshot?._hash || "");
-          if (lastHash && lastHash === hash) {
-            // Log an event and skip
+    
+          const lastRow = Array.isArray(last) && last.length ? last[0] : null;
+          console.log("[intake.enqueuePublishJobs] last-job", {
+            tenant_id,
+            item_id,
+            marketplace_id: r.id,
+            slug: r.slug,
+            op,
+            last_status: lastRow ? lastRow.status : null,
+            has_last: !!lastRow
+          });
+    
+          const lastStatus = String(lastRow?.status || "");
+          const lastHash = String(lastRow?.payload_snapshot?._hash || "");
+          const isLastSucceeded = lastStatus === "succeeded";
+    
+          console.log("[intake.enqueuePublishJobs] no-change-check", {
+            item_id,
+            marketplace_id: r.id,
+            slug: r.slug,
+            isLiveLike,
+            hasMpOffer,
+            isLastSucceeded,
+            lastHash,
+            currentHash: hash,
+            willSkip:
+              isLiveLike && hasMpOffer && isLastSucceeded && lastHash && lastHash === hash,
+          });
+    
+          // Only skip when:
+          //  - this listing already has a live/active offer, AND
+          //  - the most recent job for this marketplace actually succeeded, AND
+          //  - the payload hash is unchanged.
+          if (isLiveLike && hasMpOffer && isLastSucceeded && lastHash && lastHash === hash) {
             await sql/*sql*/`
               INSERT INTO app.item_marketplace_events
                 (item_id, tenant_id, marketplace_id, kind)
               VALUES (${item_id}, ${tenant_id}, ${r.id}, 'skipped_no_change')
             `;
-            console.log("[intake] enqueue.skip_no_change", { item_id, marketplace_id: r.id });
+            console.log("[intake] enqueue.skip_no_change", {
+              item_id,
+              marketplace_id: r.id,
+              lastStatus,
+            });
             continue;
           }
-
-          console.log("[intake] enqueue.insert_job", { marketplace_id: r.id, slug: r.slug, item_id, op });
+    
+          console.log("[intake] enqueue.insert_job", {
+            marketplace_id: r.id,
+            slug: r.slug,
+            item_id,
+            op,
+          });
+    
           await sql/*sql*/`
             INSERT INTO app.marketplace_publish_jobs
               (tenant_id, item_id, marketplace_id, op, status, payload_snapshot)
@@ -356,7 +821,15 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
                 AND j.status IN ('queued','running')
             )
           `;
-
+    
+          console.log("[intake.enqueuePublishJobs] insert_job.completed", {
+            tenant_id,
+            item_id,
+            marketplace_id: r.id,
+            slug: r.slug,
+            op,
+          });
+    
           // Touch listing row (useful for dashboards; do not flip status here)
           // NOTE: status normalization happens in enqueue decision (active|live => update)
           await sql/*sql*/`
@@ -366,11 +839,28 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
                AND item_id = ${item_id}
                AND marketplace_id = ${r.id}
           `;
+    
+          console.log("[intake.enqueuePublishJobs] listing_row.touched", {
+            tenant_id,
+            item_id,
+            marketplace_id: r.id,
+            slug: r.slug,
+          });
         }
-
+    
         console.log("[intake] enqueue.done", { item_id });
+        console.log("[intake.enqueuePublishJobs] exit.success", {
+          item_id,
+          tenant_id,
+          status,
+        });
       } catch (enqueueErr) {
-        console.error("[intake] enqueue.error", { item_id, error: String(enqueueErr) });
+        const err: any = enqueueErr;
+        console.error("[intake] enqueue.error", {
+          item_id,
+          error: String(err),
+          stack: err?.stack || null,
+        });
         // Best-effort event log
         await sql/*sql*/`
           INSERT INTO app.item_marketplace_events
@@ -379,6 +869,7 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
         `;
       }
     }
+
     
     // AuthZ (creation requires can_inventory_intake or elevated role)
     const actor = await sql<{ role: Role; active: boolean; can_inventory_intake: boolean | null }[]>`
@@ -388,6 +879,13 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
       WHERE m.tenant_id = ${tenant_id} AND m.user_id = ${actor_user_id}
       LIMIT 1
     `;
+
+    console.log("[intake] auth.actor", {
+      tenant_id,
+      actor_user_id,
+      rows: actor
+    });
+    
     if (actor.length === 0 || actor[0].active === false) return json({ ok: false, error: "forbidden" }, 403);
     const allow = ["owner", "admin", "manager"].includes(actor[0].role) || !!actor[0].can_inventory_intake;
     if (!allow) return json({ ok: false, error: "forbidden" }, 403);
@@ -396,6 +894,14 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
     
     // Payload
     const body = await request.json();
+    console.log("[intake] body.raw_keys", {
+      has_inventory: !!body?.inventory,
+      has_listing: !!body?.listing,
+      has_marketplace_listing: !!body?.marketplace_listing,
+      status: body?.status,
+      item_status: body?.inventory?.item_status,
+      intent: body?.intent
+    });
     const inv = body?.inventory || {};
     const lst = body?.listing || {};
     const ebay = body?.marketplace_listing?.ebay || null;
@@ -404,9 +910,65 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
     const rawStatus = (body?.status || inv?.item_status || "active");
     const status = String(rawStatus).toLowerCase() === "draft" ? "draft" : "active";
     const isDraft = status === "draft";
+
+    console.log("[intake] status.normalized", {
+      rawStatus,
+      status,
+      isDraft
+    });
     
     // Optional: if present, we update instead of insert
     const item_id_in: string | null = body?.item_id ? String(body.item_id) : null;
+
+    // Normalize intent.marketplaces (if provided by the client)
+    const rawIntent = body?.intent || null;
+    const intentMarketplaces: any[] = Array.isArray(rawIntent?.marketplaces)
+      ? rawIntent.marketplaces
+          .map((m: any) => {
+            if (!m) return null;
+            const slug = String(m.slug || "").toLowerCase() || null;
+            const idRaw = (m as any).marketplace_id;
+            const id =
+              idRaw == null
+                ? null
+                : typeof idRaw === "number"
+                ? idRaw
+                : /^\d+$/.test(String(idRaw))
+                ? Number(idRaw)
+                : null;
+            return {
+              marketplace_id: id,
+              slug,
+              selected: !!m.selected,
+              operation: m.operation || null,
+            };
+            console.log("[intake] intent.map_entry", {
+              raw: m,
+              mapped
+            });
+          })
+          .filter((m: any) => m && (m.marketplace_id != null || m.slug))
+      : [];
+
+    // Canonicalize marketplaces_selected from intent when present so all downstream
+    // logic (including enqueuePublishJobs) sees the same selection/ops.
+    if (intentMarketplaces.length > 0) {
+      const selectedForJobs: Array<number | string> = intentMarketplaces
+        .filter((m: any) => m.selected && m.operation !== "delete")
+        .map((m: any) => {
+          if (m.marketplace_id != null) return m.marketplace_id;
+          return m.slug;
+        })
+        .filter((v: any) => v !== null && v !== undefined);
+        console.log("[intake] marketplaces_selected.from_intent", {
+          before: body.marketplaces_selected,
+          selectedForJobs
+        });
+      body.marketplaces_selected = selectedForJobs;
+      console.log("[intake] intent.marketplaces.empty", {
+        marketplaces_selected: body.marketplaces_selected
+      });
+    }
     
     // === DEBUG: show payload routing decisions ===
     console.log("[intake] payload", {
@@ -415,7 +977,8 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
       item_id_in,
       marketplaces_selected: body?.marketplaces_selected ?? null,
       has_ebay_block: !!ebay,
-      listing_keys_present: !!lst && Object.values(lst).some(v => v !== null && v !== undefined && String(v) !== "")
+      listing_keys_present: !!lst && Object.values(lst).some(v => v !== null && v !== undefined && String(v) !== ""),
+      intent_marketplaces: intentMarketplaces
     });
 
 
@@ -665,12 +1228,29 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
             }
           }
           
-          return json({ ok: true, item_id, sku: updInv[0].sku, status, ms: Date.now() - t0 }, 200);
+          return json({
+            ok: true,
+            item_id,
+            sku: updInv[0].sku,
+            status,
+            intent: { marketplaces: intentMarketplaces },
+            vendoo_mapping,
+            ms: Date.now() - t0
+          }, 200);
         }
 
 
           
         // === ACTIVE UPDATE: if promoting to active and no SKU yet, allocate ===
+        console.log("[intake.ACTIVE] begin", {
+          tenant_id,
+          actor_user_id,
+          item_id_in,
+          inv_status: inv?.item_status ?? null,
+          instore_online: inv?.instore_online ?? null,
+          marketplaces_selected: body?.marketplaces_selected ?? null,
+          intentMarketplaces
+        });
         // Look up category_code only when needed for SKU allocation
         const catRows = await sql<{ category_code: string }[]>`
           SELECT category_code FROM app.sku_categories WHERE category_name = ${inv.category_nm} LIMIT 1
@@ -784,17 +1364,193 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
                 shipbx_width     = EXCLUDED.shipbx_width,
                 shipbx_height    = EXCLUDED.shipbx_height
             `;
-  
+
+              console.log("[intake.ACTIVE] listing_profile_upserted", {
+                tenant_id,
+                item_id,
+                listing_category_key: lst.listing_category_key,
+                condition_key: lst.condition_key
+              });
+
+              // ⭐ FIX: Hydrate listing profile BEFORE doing Vendoo mappings
+              const hydratedLstRows = await sql/*sql*/`
+                SELECT
+                  listing_category_key, condition_key, brand_key, color_key, shipping_box_key,
+                  listing_category, item_condition, brand_name, primary_color, shipping_box,
+                  weight_lb, weight_oz, shipbx_length, shipbx_width, shipbx_height
+                  
+                FROM app.item_listing_profile
+                WHERE item_id = ${item_id} AND tenant_id = ${tenant_id}
+                LIMIT 1
+              `;
+              
+              const hydrated = hydratedLstRows[0] || {};
+              console.log("[intake.CREATE_ACTIVE] hydrated listing for Vendoo mapping", hydrated);
+              
+              // ⭐ Use hydrated.item_condition and hydrated.listing_category_key
+              const vendooCategoryRows = await loadVendooCategoryMap(
+                sql,
+                tenant_id,
+                lst.listing_category_key
+              );
+              
+              const vendooConditionRows = await loadMarketplaceConditions(
+                sql,
+                tenant_id,
+                hydrated.item_condition || null
+              );
+              
+              const vendooEbayConditionRows = await loadVendooEbayConditionMap(
+                sql,
+                tenant_id,
+                hydrated.item_condition || null,
+                hydrated.condition_options || null
+              );
+
+              // Derive per-marketplace categories from rows
+              let vendoo_category_vendoo: string | null = null;
+              let vendoo_category_ebay: string | null = null;
+              let vendoo_category_facebook: string | null = null;
+              let vendoo_category_depop: string | null = null;
+              
+              // ⭐ NEW: Shape Vendoo mapping (Option A)
+              const vendoo_mapping = {
+              vendoo_category_key:
+                vendooCategoryRows?.[0]?.category_key_uuid || null,
+              vendoo_category_vendoo,
+              vendoo_category_ebay,
+              vendoo_category_facebook,
+              vendoo_category_depop,
+              
+                vendoo_condition_main:
+                  vendooConditionRows?.[0]?.vendoo_map || null,
+                vendoo_condition_fb:
+                  vendooConditionRows?.[0]?.fb_map || null,
+                vendoo_condition_depop:
+                  vendooConditionRows?.[0]?.depop_map || null,
+              
+                vendoo_condition_ebay:
+                  vendooEbayConditionRows?.[0]?.ebay_conditions || null,
+                vendoo_condition_ebay_option:
+                  vendooEbayConditionRows?.[0]?.condition_options || null
+              };
+              
+              console.log("[intake.ACTIVE] vendoo_mapping (POST)", vendoo_mapping);
+            
+              // Handle per-marketplace DELETE intent (e.g., deselecting the eBay tile on update)
+             if (EBAY_MARKETPLACE_ID && intentMarketplaces.length) {
+               const ebayIntent = intentMarketplaces.find((m: any) => {
+                 const slug = String(m.slug || "").toLowerCase();
+                 const id = m.marketplace_id != null ? Number(m.marketplace_id) : null;
+                 return slug === "ebay" || id === EBAY_MARKETPLACE_ID;
+               });
+               console.log("[intake.ACTIVE] ebay_intent_check", {
+                tenant_id,
+                item_id,
+                EBAY_MARKETPLACE_ID,
+                ebayIntent
+              });
+               if (ebayIntent?.operation === "delete") {
+                 console.log("[intake] intent.ebay_delete", { item_id, EBAY_MARKETPLACE_ID });
+                 const iml = await sql/*sql*/`
+                   SELECT marketplace_id, mp_offer_id, mp_item_id
+                   FROM app.item_marketplace_listing
+                   WHERE item_id = ${item_id}
+                     AND tenant_id = ${tenant_id}
+                     AND marketplace_id = ${EBAY_MARKETPLACE_ID}
+                     AND (mp_offer_id IS NOT NULL OR mp_item_id IS NOT NULL)
+                 `;
+                 console.log("[intake] intent.ebay_delete_iml", {
+                  tenant_id,
+                  item_id,
+                  rows: iml.length
+                });
+                 if (iml.length) {
+                   const r: any = iml[0];
+                   const inserted = await sql/*sql*/`
+                     WITH ins AS (
+                       INSERT INTO app.marketplace_publish_jobs
+                         (tenant_id, item_id, marketplace_id, op, status, payload_snapshot)
+                       SELECT
+                         ${tenant_id}, ${item_id}, ${EBAY_MARKETPLACE_ID}, 'delete', 'queued',
+                         ${{
+                           item_id,
+                           tenant_id,
+                           marketplace_id: EBAY_MARKETPLACE_ID,
+                           marketplace_listing: { mp_offer_id: r.mp_offer_id, mp_item_id: r.mp_item_id }
+                         }}
+                       WHERE NOT EXISTS (
+                         SELECT 1
+                           FROM app.marketplace_publish_jobs j
+                          WHERE j.tenant_id      = ${tenant_id}
+                            AND j.item_id        = ${item_id}
+                            AND j.marketplace_id = ${EBAY_MARKETPLACE_ID}
+                            AND j.op             = 'delete'
+                            AND j.status IN ('queued','running')
+                       )
+                       RETURNING job_id
+                     )
+                     SELECT job_id FROM ins
+                     UNION ALL
+                     SELECT j.job_id
+                       FROM app.marketplace_publish_jobs j
+                      WHERE j.tenant_id      = ${tenant_id}
+                        AND j.item_id        = ${item_id}
+                        AND j.marketplace_id = ${EBAY_MARKETPLACE_ID}
+                        AND j.op             = 'delete'
+                        AND j.status IN ('queued','running')
+                      LIMIT 1
+                   `;
+                   const jobId = Array.isArray(inserted) && inserted[0]?.job_id ? String(inserted[0].job_id) : null;
+                   console.log("[intake] intent.ebay_delete_job", { item_id, jobId });
+                   await sql/*sql*/`
+                     UPDATE app.item_marketplace_listing
+                        SET status='delete_pending', updated_at=now()
+                      WHERE item_id=${item_id} AND tenant_id=${tenant_id} AND marketplace_id=${EBAY_MARKETPLACE_ID}
+                   `;
+                 } else {
+                   // No remote id; safe to drop the row entirely
+                   await sql/*sql*/`
+                     DELETE FROM app.item_marketplace_listing
+                      WHERE item_id = ${item_id}
+                        AND tenant_id = ${tenant_id}
+                        AND marketplace_id = ${EBAY_MARKETPLACE_ID}
+                   `;
+                 }
+               }
+             }
             // Upsert selected marketplaces (prototype).
             // eBay gets the rich field set; all other selected marketplaces (e.g., Facebook) get a stub row.
             {
-              const mpIds: number[] = Array.isArray(body?.marketplaces_selected)
-                ? body.marketplaces_selected.map((n: any) => Number(n)).filter((n) => !Number.isNaN(n))
-                : [];
-
+              const mpIds: number[] = [];
+              if (Array.isArray(body?.marketplaces_selected)) {
+                for (const v of body.marketplaces_selected as any[]) {
+                  if (typeof v === "number" && !Number.isNaN(v)) {
+                    mpIds.push(v);
+                  } else if (typeof v === "string") {
+                    // Numeric string → id
+                    if (/^\d+$/.test(v)) {
+                      const n = Number(v);
+                      if (!Number.isNaN(n)) mpIds.push(n);
+                    } else if (EBAY_MARKETPLACE_ID && v.toLowerCase() === "ebay") {
+                      // Allow the UI to send "ebay" as a slug and still hit the rich eBay upsert
+                      mpIds.push(EBAY_MARKETPLACE_ID);
+                    }
+                  }
+                }
+              }
+              console.log("[intake.ACTIVE] marketplaces_selected_normalized", {
+                tenant_id,
+                item_id,
+                raw: body?.marketplaces_selected ?? null,
+                mpIds
+              });
               // Normalize the ebay payload once
               const e = ebay ? normalizeEbay(ebay) : null;
-
+                console.log("[intake.ACTIVE] ebay_payload_normalized", {
+                hasEbay: !!ebay,
+                hasNormalized: !!e
+              });
               for (const mpId of mpIds) {
                 if (mpId === EBAY_MARKETPLACE_ID && e) {
                   // eBay: full field upsert (existing behavior)
@@ -811,7 +1567,7 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
                        ${e.promote}, ${e.promote_percent}, ${e.duration}, ${e.starting_bid}, ${e.reserve_price})
                     ON CONFLICT (item_id, marketplace_id)
                     DO UPDATE SET
-                      status = 'live',
+                      status = 'draft',
                       shipping_policy = EXCLUDED.shipping_policy,
                       payment_policy  = EXCLUDED.payment_policy,
                       return_policy   = EXCLUDED.return_policy,
@@ -828,6 +1584,11 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
                       reserve_price = EXCLUDED.reserve_price,
                       updated_at = now()
                   `;
+                  console.log("[intake.ACTIVE] ebay_listing_upserted", {
+                    tenant_id,
+                    item_id,
+                    marketplace_id: mpId
+                  });
                   await sql/*sql*/`
                     INSERT INTO app.user_marketplace_defaults
                       (tenant_id, user_id, marketplace_id,
@@ -848,6 +1609,11 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
                       promote          = EXCLUDED.promote,
                       updated_at       = now()
                   `;
+                  console.log("[intake.ACTIVE] ebay_defaults_upserted", {
+                    tenant_id,
+                    user_id: actor_user_id,
+                    marketplace_id: EBAY_MARKETPLACE_ID
+                  });
                 } else {
                   // Non-eBay (e.g., Facebook): ensure a stub listing row exists with 'publishing'
                   await sql/*sql*/`
@@ -860,13 +1626,94 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
                       status = 'publishing',
                       updated_at = now()
                   `;
+                  console.log("[intake.ACTIVE] non_ebay_listing_stub_upserted", {
+                    tenant_id,
+                    item_id,
+                    marketplace_id: mpId
+                  });
                 }
               }
             }
           }
-          // Enqueue marketplace publish jobs (same behavior as Create Active)
-          await enqueuePublishJobs(tenant_id, item_id, body, status);
 
+          // If the intake intent explicitly requests eBay delete (tile deselected),
+          // enqueue a delete job and mark the listing as delete_pending.
+          if (intentMarketplaces?.ebay === "delete" && EBAY_MARKETPLACE_ID) {
+            const iml = await sql/*sql*/`
+              SELECT marketplace_id, mp_offer_id, mp_item_id
+                FROM app.item_marketplace_listing
+               WHERE item_id    = ${item_id}
+                 AND tenant_id  = ${tenant_id}
+                 AND marketplace_id = ${EBAY_MARKETPLACE_ID}
+                 AND (mp_offer_id IS NOT NULL OR mp_item_id IS NOT NULL)
+            `;
+            console.log("[intake.ACTIVE] explicit_ebay_delete_intent", {
+              tenant_id,
+              item_id,
+              rows: iml.length
+            });
+            for (const r of iml as any[]) {
+              const inserted = await sql/*sql*/`
+                WITH ins AS (
+                  INSERT INTO app.marketplace_publish_jobs
+                    (tenant_id, item_id, marketplace_id, op, status, payload_snapshot)
+                  SELECT
+                    ${tenant_id}, ${item_id}, ${r.marketplace_id}, 'delete', 'queued',
+                    ${{
+                      item_id,
+                      tenant_id,
+                      marketplace_id: r.marketplace_id,
+                      marketplace_listing: {
+                        mp_offer_id: r.mp_offer_id,
+                        mp_item_id: r.mp_item_id
+                      }
+                    }}
+                  WHERE NOT EXISTS (
+                    SELECT 1
+                      FROM app.marketplace_publish_jobs j
+                     WHERE j.tenant_id      = ${tenant_id}
+                       AND j.item_id        = ${item_id}
+                       AND j.marketplace_id = ${r.marketplace_id}
+                       AND j.op             = 'delete'
+                       AND j.status IN ('queued','running')
+                  )
+                  RETURNING job_id
+                )
+                SELECT job_id FROM ins
+                UNION ALL
+                SELECT j.job_id
+                  FROM app.marketplace_publish_jobs j
+                 WHERE j.tenant_id      = ${tenant_id}
+                   AND j.item_id        = ${item_id}
+                   AND j.marketplace_id = ${r.marketplace_id}
+                   AND j.op             = 'delete'
+                   AND j.status IN ('queued','running')
+                 LIMIT 1
+              `;
+
+              // Reflect pending delete on the listing row
+              await sql/*sql*/`
+                UPDATE app.item_marketplace_listing
+                   SET status='delete_pending', updated_at=now()
+                 WHERE item_id       = ${item_id}
+                   AND tenant_id     = ${tenant_id}
+                   AND marketplace_id = ${r.marketplace_id}
+              `;
+            }
+          }
+          
+          // Enqueue marketplace publish jobs (same behavior as Create Active)
+          console.log("[intake.ACTIVE] enqueuePublishJobs.start", {
+            tenant_id,
+            item_id,
+            status,
+            intentMarketplaces
+          });
+          await enqueuePublishJobs(tenant_id, item_id, body, status);
+          console.log("[intake.ACTIVE] enqueuePublishJobs.done", {
+            tenant_id,
+            item_id
+          });
           // Return any queued jobs so the client can trigger them by job_id
           const enqueuedUpd = await sql/*sql*/`
             SELECT job_id
@@ -876,8 +1723,21 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
               AND status    = 'queued'
             ORDER BY created_at ASC
           `;
+          
           const job_ids_upd = Array.isArray(enqueuedUpd) ? enqueuedUpd.map((r: any) => String(r.job_id)) : [];
+          console.log("[intake.ACTIVE] queued_jobs", {
+            tenant_id,
+            item_id,
+            job_ids_upd
+          });
 
+          // 🟦 Log exactly what we're about to return for vendoo_mapping
+          console.log("[intake.ACTIVE] vendoo_mapping (RETURN)", {
+            tenant_id,
+            item_id,
+            vendoo_mapping
+          });
+          
           return json({
             ok: true,
             item_id,
@@ -885,7 +1745,11 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
             status,
             published: false,
             job_ids: job_ids_upd,
+            intent: { marketplaces: intentMarketplaces },
+            vendoo_mapping,
+
             ms: Date.now() - t0
+
           }, 200);
         }
 
@@ -1073,8 +1937,23 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
             `;
         }
       }
+
+      // 🟦 Log exactly what we're about to return for vendoo_mapping
+      console.log("[intake.ACTIVE] vendoo_mapping (RETURN)", {
+        tenant_id,
+        item_id,
+        vendoo_mapping
+      });
       
-      return json({ ok: true, item_id, sku: null, status: 'draft', ms: Date.now() - t0 }, 200);
+      return json({
+        ok: true,
+        item_id,
+        sku: null,
+        status: "draft",
+        intent: { marketplaces: intentMarketplaces },
+        vendoo_mapping,
+        ms: Date.now() - t0
+      }, 200);
     }
 
 
@@ -1161,7 +2040,7 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
           shipbx_height        = EXCLUDED.shipbx_height
       `;
     }
-
+    
     // Upsert eBay marketplace listing when present (active create)
     if (EBAY_MARKETPLACE_ID && ebay) {
       const e = normalizeEbay(ebay);
@@ -1253,6 +2132,113 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
       ORDER BY created_at ASC
     `;
 
+    // ⭐ FIX: hydrate listing profile before computing Vendoo mappings (CREATE_ACTIVE)
+    const hydratedLstRows = await sql/*sql*/`
+      SELECT
+        listing_category_key, condition_key, brand_key, color_key, shipping_box_key,
+        listing_category, item_condition, brand_name, primary_color, shipping_box,
+        weight_lb, weight_oz, shipbx_length, shipbx_width, shipbx_height
+        
+      FROM app.item_listing_profile
+      WHERE item_id = ${item_id} AND tenant_id = ${tenant_id}
+      LIMIT 1
+    `;
+    const hydrated = hydratedLstRows[0] || {};
+    console.log("[intake.CREATE_ACTIVE] hydrated listing for Vendoo mapping", hydrated);
+    
+    // ⭐ NEW — build Vendoo mapping for POST responses
+
+    // Prefer the UUID key; we key mappings by this
+    const listingCategoryKey =
+      lst.listing_category_key || null;
+    
+    // Load category mapping (expects category_key_uuid)
+    const vendooCatRows = await loadVendooCategoryMap(
+      sql,
+      tenant_id,
+      listingCategoryKey
+    );
+    
+    // Derive per-marketplace categories from rows
+    let category_vendoo: string | null = null;
+    let category_ebay: string | null = null;
+    let category_facebook: string | null = null;
+    let category_depop: string | null = null;
+    let conditionOptions: string | null = null; // for eBay condition mapping
+
+    if (Array.isArray(vendooCatRows)) {
+      for (const r of vendooCatRows) {
+        const mp = Number(r.marketplace_id);
+        if (mp === 13) {
+          category_vendoo = r.vendoo_category_path || null;
+        }
+        if (mp === 1) {
+          category_ebay = r.vendoo_category_path || null;
+          // eBay row also carries condition_options we use below
+          conditionOptions = conditionOptions || r.condition_options || null;
+        }
+        if (mp === 2) {
+          category_facebook = r.vendoo_category_path || null;
+        }
+        if (mp === 4) {
+          category_depop = r.vendoo_category_path || null;
+        }
+      }
+    }
+    
+    
+    // Load base condition mapping
+    const vendooCondRows = await loadMarketplaceConditions(
+      sql,
+      tenant_id,
+      hydrated.item_condition || null
+    );
+
+    // Load Vendoo–eBay condition mapping, using condition_options from the category row
+    let vendooEbayRows: any[] = [];
+    //let conditionOptions: string | null = null;
+
+    if (Array.isArray(vendooCatRows) && vendooCatRows.length > 0) {
+      const ebayRow = vendooCatRows.find(
+        (r: any) => Number(r.marketplace_id) === 1
+      );
+      conditionOptions = ebayRow?.condition_options || null;
+    }
+
+    if (hydrated.item_condition && conditionOptions) {
+      vendooEbayRows = await loadVendooEbayConditionMap(
+        sql,
+        tenant_id,
+        hydrated.item_condition,
+        conditionOptions
+      );
+    }
+
+   // Shape mapping in the SAME format as GET /api/inventory/intake
+    const vendoo_mapping = {
+      // Category mapping
+      category_key: listingCategoryKey || null,
+      category_vendoo,
+      category_ebay,
+      category_facebook,
+      category_depop,
+      // Base condition mapping
+      condition_main: vendooCondRows?.[0]?.vendoo_map || null,
+      condition_fb: vendooCondRows?.[0]?.fb_map || null,
+      condition_depop: vendooCondRows?.[0]?.depop_map || null,
+
+      // Vendoo–eBay condition mapping
+      condition_ebay: vendooEbayRows?.[0]?.ebay_conditions || null,
+      condition_ebay_option: vendooEbayRows?.[0]?.condition_options || null,
+    };
+
+    console.log("[intake.ACTIVE] vendoo_mapping (POST)", {
+      tenant_id,
+      item_id,
+      listingCategoryKey,
+      item_condition: hydrated.item_condition,
+      vendoo_mapping,
+    });
     const job_ids = Array.isArray(enqueued) ? enqueued.map((r: any) => String(r.job_id)) : [];
 
     return json({
@@ -1262,6 +2248,8 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
       status,
       published: false,
       job_ids,
+      intent: { marketplaces: intentMarketplaces },
+      vendoo_mapping,
       ms: Date.now() - t0
     }, 200);
 
@@ -1420,18 +2408,244 @@ export const onRequestGet: PagesFunction = async ({ request, env }) => {
       listingOut = { ...(listingOut || {}), product_description: BASE_SENTENCE_GET };
     }
 
+       // ---------------------------------------------------------------------
+    // VENDOO CATEGORY + CONDITION MAPPING
+    // ---------------------------------------------------------------------
+
+    let vendoo_mapping: any = {};
+    try {
+      // IMPORTANT INPUTS FOR MAPPING
+      const listingCategoryKey = listingOut?.listing_category_key || null; 
+      const conditionName =
+        listingOut?.item_condition || null;
+
+      console.log("GET /api/inventory/intake: vendoo mapping inputs", {
+        tenant_id,
+        item_id,
+        listingCategoryKey,
+        conditionName,
+        listingOut_raw: listingOut,
+      });
+
+      // 1) CATEGORY MAPPING (vendoo, ebay, facebook, depop)
+      console.log("GET /api/inventory/intake: loading category map", {
+        tenant_id: tenant_id,
+        listingCategoryKey,
+      });
+
+      const catRows = await loadVendooCategoryMap(
+        sql,
+        tenant_id,
+        listingCategoryKey
+      );
+
+      console.log("GET /api/inventory/intake: category map rows", {
+        count: Array.isArray(catRows) ? catRows.length : null,
+        rows: catRows,
+      });
+
+      let category_vendoo: string | null = null;
+      let category_ebay: string | null = null;
+      let category_facebook: string | null = null;
+      let category_depop: string | null = null;
+      let condition_options: string | null = null; // used later for the vendoo–ebay condition mapping
+
+      if (Array.isArray(catRows)) {
+        for (const r of catRows) {
+          const mp = Number(r.marketplace_id);
+          console.log("GET /api/inventory/intake: category map row", {
+            marketplace_id: mp,
+            row: r,
+          });
+
+          if (mp === 13) category_vendoo = r.vendoo_category_path || null;
+          if (mp === 1) {
+            category_ebay = r.vendoo_category_path || null;
+            condition_options = r.condition_options || null;
+          }
+          if (mp === 2) category_facebook = r.vendoo_category_path || null;
+          if (mp === 4) category_depop = r.vendoo_category_path || null;
+        }
+      }
+
+      console.log("GET /api/inventory/intake: category mapping result", {
+        listingCategoryKey,
+        category_vendoo,
+        category_ebay,
+        category_facebook,
+        category_depop,
+        condition_options_from_category: condition_options,
+      });
+
+      // 2) BASE CONDITION MAPPING (vendoo, facebook, depop)
+      let condition_main: string | null = null;
+      let condition_fb: string | null = null;
+      let condition_depop: string | null = null;
+
+      console.log("GET /api/inventory/intake: loading base condition map", {
+        tenant_id: tenant_id,
+        conditionName,
+      });
+
+      const condRows = await loadMarketplaceConditions(
+        sql,
+        tenant_id,
+        conditionName
+      );
+
+      console.log("GET /api/inventory/intake: base condition rows", {
+        count: Array.isArray(condRows) ? condRows.length : null,
+        rows: condRows,
+      });
+
+      if (Array.isArray(condRows) && condRows.length > 0) {
+        const r = condRows[0];
+        condition_main = r.vendoo_map || null;
+        condition_fb = r.fb_map || null;
+        condition_depop = r.depop_map || null;
+
+        console.log("GET /api/inventory/intake: base condition mapping result", {
+          conditionName,
+          condition_main,
+          condition_fb,
+          condition_depop,
+        });
+      } else {
+        console.log("GET /api/inventory/intake: no base condition mapping found", {
+          conditionName,
+        });
+      }
+
+      // 3) SPECIAL VENDOO–EBAY CONDITION MAPPING
+      let condition_ebay: string | null = null;
+      let condition_ebay_option: string | null = null;
+
+      if (conditionName && condition_options) {
+        console.log("GET /api/inventory/intake: loading vendoo-ebay condition map", {
+          tenant_id: tenant_id,
+          conditionName,
+          condition_options,
+        });
+
+        const ebayCondRows = await loadVendooEbayConditionMap(
+          sql,
+          tenant_id,
+          conditionName,
+          condition_options
+        );
+
+        console.log("GET /api/inventory/intake: vendoo-ebay condition rows", {
+          count: Array.isArray(ebayCondRows) ? ebayCondRows.length : null,
+          rows: ebayCondRows,
+        });
+
+        if (Array.isArray(ebayCondRows) && ebayCondRows.length > 0) {
+          const r = ebayCondRows[0];
+          condition_ebay = r.ebay_conditions || null;
+          condition_ebay_option = r.condition_options || null;
+
+          console.log("GET /api/inventory/intake: vendoo-ebay condition mapping result", {
+            conditionName,
+            condition_options,
+            condition_ebay,
+            condition_ebay_option,
+          });
+        } else {
+          console.log("GET /api/inventory/intake: no vendoo-ebay condition mapping found", {
+            conditionName,
+            condition_options,
+          });
+        }
+      } else {
+        console.log("GET /api/inventory/intake: skipping vendoo-ebay condition map", {
+          conditionName,
+          condition_options,
+        });
+      }
+
+      vendoo_mapping = {
+        category_key: listingCategoryKey || null,
+        category_vendoo,
+        category_ebay,
+        category_facebook,
+        category_depop,
+
+        condition_main,
+        condition_fb,
+        condition_depop,
+        condition_ebay,
+        condition_ebay_option,
+      };
+
+      console.log("GET /api/inventory/intake: FINAL vendoo_mapping", {
+        tenant_id,
+        item_id,
+        vendoo_mapping,
+      });
+    } catch (err) {
+      console.error("vendoo_mapping_build_error", {
+        tenant_id,
+        item_id,
+        error: String(err),
+        stack: (err as any)?.stack || null,
+      });
+      vendoo_mapping = {};
+    }
+
+    // ---------------------------------------------------------------------
+    // FINAL RESPONSE (unchanged except vendoo_mapping injected)
+    // ---------------------------------------------------------------------
+    console.log("GET /api/inventory/intake: response summary with vendoo_mapping", {
+      tenant_id,
+      item_id,
+      inventory_present: !!invRows[0],
+      listing_present: !!listingOut,
+      images_count: imgRows?.length ?? 0,
+      ebayListing_present: !!ebayListing,
+      facebookListing_present: !!facebookListing,
+      vendoo_mapping,
+    });
+
     return new Response(JSON.stringify({
       ok: true,
+
+      // inventory info
       inventory: invRows[0],
+      inventory_meta: invRows[0],
+
+      // listing profile (marketplace listing details)
       listing: listingOut,
+      listing_profile: listingOut,
+
+      // images
       images: imgRows,
+
+      // structured marketplace listings
       marketplace_listing: {
         ebay: ebayListing,
         ebay_marketplace_id: EBAY_ID,
         facebook: facebookListing,
         facebook_marketplace_id: FACEBOOK_ID
+      },
+
+      // flat ebay listing for convenience
+      marketplace_listing_flat: ebayListing,
+
+      // snapshot for eBay-style payload
+      ebay_payload_snapshot: {
+        listing_profile: listingOut,
+        marketplace_listing: ebayListing
+      },
+
+      // NEW: Fully-hydrated Vendoo mapping block
+      vendoo_mapping
+    }), {
+      status: 200,
+      headers: {
+        "content-type": "application/json",
+        "cache-control": "no-store"
       }
-    }), { status: 200, headers: { "content-type": "application/json", "cache-control": "no-store" } });
+    });
 
 
     
