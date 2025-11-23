@@ -950,16 +950,11 @@ export async function init() {
               (snap && typeof snap === "object" && snap.vendoo_mapping)
                 ? snap.vendoo_mapping
                 : null;
-            
-            // ⭐ FIX: Only override if snap mapping HAS REAL FIELDS
-            if (
-              fromSnapVendooMapping &&
-              typeof fromSnapVendooMapping === "object" &&
-              Object.keys(fromSnapVendooMapping).length > 0
-            ) {
-              vendooDetail.vendoo_mapping = fromSnapVendooMapping;
-            }
-
+              // Correct behavior: if snap provides a valid vendoo_mapping,
+              // it should always override the placeholder/null values.
+              if (fromSnapVendooMapping && typeof fromSnapVendooMapping === "object") {
+                vendooDetail.vendoo_mapping = fromSnapVendooMapping;
+              }
 
               console.log("[intake.js] vendoo: enrich from snap (FIXED)", {
                 beforeVendooMapping,
@@ -3346,49 +3341,29 @@ function setMarketplaceVisibility() {
               marketplaces_selected: detail.marketplaces_selected || null,
             };
 
-           // OPEN VENDOO WINDOW
-            let vendooWin = window.open("https://web.vendoo.co/app/item/new", "_blank");
-            if (!vendooWin || vendooWin.closed) {
-              console.warn("[vendoo] popup blocked – allow popups for resellpros.com");
-              return;
-            }
+           // 1. Open Vendoo window (required so Tampermonkey loads)
+          let vendooWin = window.open("https://web.vendoo.co/app/item/new", "_blank");
+          
+          if (!vendooWin || vendooWin.closed) {
+            console.warn("[vendoo] popup blocked – allow popups for resellpros.com");
+          } else {
             console.log("[vendoo] Vendoo window opened");
-            
-            // POST ONLY AFTER VENDOO WINDOW IS READY
-            async function sendToVendooWhenReady(msg) {
-              console.log("[vendoo] waiting for Vendoo tab to become ready...");
-            
-              // Wait up to 20 seconds
-              const maxWait = 20000;
-              const interval = 250;
-              const start = Date.now();
-            
-              while (Date.now() - start < maxWait) {
-                try {
-                  if (vendooWin.document && vendooWin.document.readyState === "complete") {
-                    console.log("[vendoo] Vendoo tab is loaded. Sending payload...", msg);
-                    vendooWin.postMessage(msg, "*");
-                    return;
-                  }
-                } catch (e) {
-                  // cross-origin while loading
-                }
-            
-                await new Promise(r => setTimeout(r, interval));
-              }
-            
-              console.warn("[vendoo] Vendoo tab never reported ready; sending fallback");
-              try { vendooWin.postMessage(msg, "*"); } catch (e) {
-                console.error("[vendoo] fallback send failed:", e);
-              }
+          }
+          
+          // 2. Post message to Tampermonkey in THIS window
+          console.log("[vendoo] posting message to window for Tampermonkey", message);
+          window.postMessage(message, "*");
+          
+           // 3. ALSO send the payload into the Vendoo tab (Tampermonkey listens there too)
+            try {
+              vendooWin.postMessage(message, "*");
+              console.log("[vendoo] posted message to Vendoo window");
+            } catch (e) {
+              console.warn("[vendoo] failed to post to vendooWin", e);
             }
-            
-            // Fire async wait+send
-            sendToVendooWhenReady(message);
-            
-            // ALSO send to this window (Tampermonkey may run here too)
-            console.log("[vendoo] Posting message to current window", message);
-            window.postMessage(message, "*");
+          } catch (err) {
+            console.warn("[vendoo] intake:vendoo-ready handler error", err);
+          }
         });
         //end vendoo process 
 
