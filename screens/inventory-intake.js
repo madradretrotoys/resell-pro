@@ -3341,51 +3341,40 @@ function setMarketplaceVisibility() {
               marketplaces_selected: detail.marketplaces_selected || null,
             };
 
-            // 1. Open Vendoo window
-            let vendooWin = window.open("https://web.vendoo.co/app/item/new", "_blank");
-            if (!vendooWin || vendooWin.closed) {
-              console.warn("[vendoo] popup blocked – allow popups for resellpros.com");
-              return;
-            }
-            console.log("[vendoo] Vendoo window opened");
-            
-            // 2. Wait until Vendoo is actually loaded before sending payload
-            async function sendToVendooWhenReady(msg) {
-              console.log("[vendoo] Waiting for Vendoo tab to be ready...");
-            
-              const maxWait = 20000;
-              const interval = 250;
-              const start = Date.now();
-            
-              while (Date.now() - start < maxWait) {
+            // 1. Open Vendoo window (required so Tampermonkey loads)
+              const vendooWin = window.open("https://web.vendoo.co/app/item/new", "_blank");
+          
+              if (!vendooWin || vendooWin.closed) {
+                console.warn("[vendoo] popup blocked – allow popups for resellpros.com");
+              } else {
+                console.log("[vendoo] Vendoo window opened");
+              }
+          
+              // 2. Post message to this window (in case TM is listening here too)
+              console.log("[vendoo] Posting message to current window", message);
+              window.postMessage(message, "*");
+          
+              // 3. After a short delay, send the payload into the Vendoo tab
+              //    This gives Vendoo + Tampermonkey time to load.
+              setTimeout(() => {
                 try {
-                  if (vendooWin.document && vendooWin.document.readyState === "complete") {
-                    console.log("[vendoo] Vendoo tab loaded — sending payload", msg);
-                    vendooWin.postMessage(msg, "*");
+                  if (!vendooWin || vendooWin.closed) {
+                    console.warn("[vendoo] Vendoo window is not available for postMessage");
                     return;
                   }
-                } catch (err) {
-                  // Expected while Vendoo is still loading cross-domain
+                  vendooWin.postMessage(message, "*");
+                  console.log("[vendoo] posted message to Vendoo window (delayed send)");
+                } catch (e) {
+                  console.warn("[vendoo] failed to post to Vendoo window", e);
                 }
-                await new Promise(r => setTimeout(r, interval));
-              }
-            
-              console.warn("[vendoo] Vendoo never reported ready — sending fallback");
-              try {
-                vendooWin.postMessage(msg, "*");
-              } catch (err) {
-                console.error("[vendoo] Fallback send failed:", err);
-              }
+              }, 1500);
+          
+            } catch (err) {
+              console.warn("[vendoo] intake:vendoo-ready handler error", err);
             }
-            
-            // 3. Start async wait+send
-            sendToVendooWhenReady(message);
-            
-            // 4. ALSO send to same-window TM listeners (does not interfere)
-            console.log("[vendoo] Posting message to current window", message);
-            window.postMessage(message, "*");
-        });
-        //end vendoo process 
+          });
+          //end vendoo process
+ 
 
 
   
