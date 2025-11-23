@@ -950,11 +950,16 @@ export async function init() {
               (snap && typeof snap === "object" && snap.vendoo_mapping)
                 ? snap.vendoo_mapping
                 : null;
-              // Correct behavior: if snap provides a valid vendoo_mapping,
-              // it should always override the placeholder/null values.
-              if (fromSnapVendooMapping && typeof fromSnapVendooMapping === "object") {
-                vendooDetail.vendoo_mapping = fromSnapVendooMapping;
-              }
+            
+            // ⭐ FIX: Only override if snap mapping HAS REAL FIELDS
+            if (
+              fromSnapVendooMapping &&
+              typeof fromSnapVendooMapping === "object" &&
+              Object.keys(fromSnapVendooMapping).length > 0
+            ) {
+              vendooDetail.vendoo_mapping = fromSnapVendooMapping;
+            }
+
 
               console.log("[intake.js] vendoo: enrich from snap (FIXED)", {
                 beforeVendooMapping,
