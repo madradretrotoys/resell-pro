@@ -952,7 +952,12 @@ export async function init() {
                 : null;
               // Correct behavior: if snap provides a valid vendoo_mapping,
               // it should always override the placeholder/null values.
-              if (fromSnapVendooMapping && typeof fromSnapVendooMapping === "object") {
+              // ⭐ FIX: Only override if snap mapping HAS REAL FIELDS
+              if (
+                fromSnapVendooMapping &&
+                typeof fromSnapVendooMapping === "object" &&
+                Object.keys(fromSnapVendooMapping).length > 0
+              ) {
                 vendooDetail.vendoo_mapping = fromSnapVendooMapping;
               }
 
