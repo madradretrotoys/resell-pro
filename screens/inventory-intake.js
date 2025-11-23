@@ -3365,31 +3365,28 @@ function setMarketplaceVisibility() {
             
               while (Date.now() - start < maxWait) {
                 try {
-                  // Check if the window has navigated and loaded
                   if (vendooWin.document && vendooWin.document.readyState === "complete") {
                     console.log("[vendoo] Vendoo tab is loaded. Sending payload...", msg);
                     vendooWin.postMessage(msg, "*");
                     return;
                   }
                 } catch (e) {
-                  // Expected while cross-origin loads
+                  // cross-origin while loading
                 }
             
                 await new Promise(r => setTimeout(r, interval));
               }
             
-              console.warn("[vendoo] Vendoo tab never reported ready; sending anyway as fallback.");
-              try {
-                vendooWin.postMessage(msg, "*");
-              } catch (e) {
-                console.error("[vendoo] Fallback send failed:", e);
+              console.warn("[vendoo] Vendoo tab never reported ready; sending fallback");
+              try { vendooWin.postMessage(msg, "*"); } catch (e) {
+                console.error("[vendoo] fallback send failed:", e);
               }
             }
             
             // Fire async wait+send
             sendToVendooWhenReady(message);
             
-            // ALSO send to this window (for same-window Tampermonkey)
+            // ALSO send to this window (Tampermonkey may run here too)
             console.log("[vendoo] Posting message to current window", message);
             window.postMessage(message, "*");
         });
