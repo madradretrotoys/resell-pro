@@ -230,6 +230,25 @@
 
     </div> <!-- 👈 CLOSE the outer two-column wrapper -->
 
+    <!-- Shared Inventory Image Viewer (used by POS + Intake thumbnail helper) -->
+    <dialog id="inventoryImageViewer" class="rounded-2xl p-0">
+      <form method="dialog" class="p-3 w-[90vw] max-w-xl">
+        <h3 class="section-title mb-2">Image Preview</h3>
+
+        <img
+          id="inventoryImageViewerImg"
+          src=""
+          alt="Item Image"
+          class="max-h-[70vh] w-full h-auto object-contain bg-base-200 rounded-lg"
+          style="display:block;max-width:100%;height:auto;max-height:70vh;margin:0 auto;"
+        />
+
+        <div class="flex justify-end mt-3">
+          <button class="btn btn-ghost btn-sm" type="submit">Close</button>
+        </div>
+      </form>
+    </dialog>
+
     <!-- BELOW: Sales list (today/custom) -->
     <div id="pos-sales" class="card p-3 mt-3">
       <div class="flex items-center justify-between mb-2">

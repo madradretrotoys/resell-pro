@@ -480,18 +480,31 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
           `;
         }
 
-    
-      // B) Best-effort delete R2 images and rows (existing logic)
-      const imgRows = await sql<{ image_id: string; r2_key: string | null }[]>`
-        SELECT image_id, r2_key
-          FROM app.item_images
-         WHERE item_id = ${item_id_in}
-      `;
-      for (const r of imgRows) {
-        if (!r?.r2_key) continue;
-        try { /* @ts-ignore */ await env.R2_IMAGES.delete(r.r2_key); } catch (e) { console.warn("r2.delete failed", r.r2_key, e); }
-      }
-      await sql/*sql*/`DELETE FROM app.item_images WHERE item_id = ${item_id_in}`;
+      
+        // B) R2 image deletion — TEMPORARILY DISABLED (safety hotfix)
+        //    We currently allow multiple items to share the same R2 object
+        //    (for example, items created via Duplicate that reuse the same r2_key).
+        //    Deleting the R2 object here can break other items that still reference
+        //    that key and leaves active listings with missing photos.
+        //    SHORT TERM: only delete DB rows; leave the R2 object in place.
+        //    LONG TERM OPTIONS:
+        //      1) Implement reference-counted deletes (only delete R2 when a key
+        //         is no longer referenced in app.item_images).
+        //      2) Change duplicate handling to clone images into new R2 keys per
+        //         item, so deletes are safe again.
+        const imgRows = await sql<{ image_id: string; r2_key: string | null }[]>`
+          SELECT image_id, r2_key
+            FROM app.item_images
+           WHERE item_id = ${item_id_in}
+        `;
+        // NOTE: Intentionally skipping env.R2_IMAGES.delete(r.r2_key) for now.
+        // for (const r of imgRows) {
+        //   if (!r?.r2_key) continue;
+        //   try { /* @ts-ignore */ await env.R2_IMAGES.delete(r.r2_key); } catch (e) {
+        //     console.warn("r2.delete failed", r.r2_key, e);
+        //   }
+        // }
+        await sql/*sql*/`DELETE FROM app.item_images WHERE item_id = ${item_id_in}`;
     
       // C) Explicitly remove the item's listing profile (don’t rely on cascade)
       await sql/*sql*/`

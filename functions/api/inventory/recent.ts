@@ -71,8 +71,8 @@ export const onRequestGet: PagesFunction = async ({ request, env }) => {
     const limitRaw = Number(url.searchParams.get("limit") || 50);
     const limit = Number.isFinite(limitRaw) ? Math.max(1, Math.min(100, limitRaw)) : 50;
 
-    // Query: latest Active items for this tenant + primary image (if any)
-    const rows = await sql<{
+   // Query: latest Active items for this tenant + primary image (if any)
+        const rows = await sql<{
       item_id: string;
       saved_at: string;
       sku: string | null;
@@ -81,27 +81,63 @@ export const onRequestGet: PagesFunction = async ({ request, env }) => {
       qty: number | null;
       category_nm: string | null;
       image_url: string | null;
+      marketplaces: {
+        marketplace_id: number;
+        slug: string | null;
+        name: string | null;
+        status: string | null;
+        icon_url: string | null;
+        remote_url: string | null;
+      }[] | null;
     }[]>`
       WITH imgs AS (
         SELECT item_id, cdn_url AS image_url
         FROM app.item_images
         WHERE tenant_id = ${tenant_id} AND is_primary = TRUE
+      ),
+      mp AS (
+        SELECT
+          l.item_id,
+          COALESCE(
+            json_agg(
+              json_build_object(
+                'marketplace_id', l.marketplace_id,
+                'slug', m.slug,
+                'name', m.marketplace_name,
+                'status', l.status,
+                'icon_url', m.icon_url,
+                'remote_url', l.mp_item_url
+              )
+              ORDER BY m.marketplace_name
+            ) FILTER (WHERE l.marketplace_id IS NOT NULL),
+            '[]'::json
+          ) AS marketplaces
+        FROM app.item_marketplace_listing l
+        JOIN app.marketplaces_available m
+          ON m.id = l.marketplace_id
+        WHERE l.tenant_id = ${tenant_id}
+          AND l.status = 'live'
+        GROUP BY l.item_id
       )
       SELECT
         i.item_id,
         i.updated_at AS saved_at,
+        i.sku,
         i.product_short_title,
         i.price,
         i.qty,
         i.category_nm,
-        imgs.image_url
+        imgs.image_url,
+        COALESCE(mp.marketplaces, '[]'::json) AS marketplaces
       FROM app.inventory i
       LEFT JOIN imgs ON imgs.item_id = i.item_id
+      LEFT JOIN mp ON mp.item_id = i.item_id
       WHERE i.tenant_id = ${tenant_id}
         AND i.item_status = 'active'
       ORDER BY i.updated_at DESC
       LIMIT ${limit}
     `;
+
      
     return json({ ok: true, rows }, 200);
   } catch (err: any) {
