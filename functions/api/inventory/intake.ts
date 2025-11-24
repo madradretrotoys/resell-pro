@@ -576,68 +576,15 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
           });
     
           if (slug === "vendoo") {
-            console.log("[intake] vendoo.skip_enqueue_tampermonkey", {
+            console.log("[intake] vendoo.master_expand", {
+              tenant_id,
               item_id,
-              marketplace_id: r.id,
-              slug,
-              desiredAction,
+              vendoo_marketplace_id: r.id,
+              slugs_selected: slugs,
+              rows_enabled: rows,
             });
-    
-            // Ensure stub exists so UI can reflect progress while Tampermonkey/Vendoo runs
-            await sql/*sql*/`
-              INSERT INTO app.item_marketplace_listing
-                (item_id, tenant_id, marketplace_id, status)
-              VALUES
-                (${item_id}, ${tenant_id}, ${r.id}, 'publishing')
-              ON CONFLICT (item_id, marketplace_id)
-              DO UPDATE SET
-                status = 'publishing',
-                updated_at = now()
-            `;
-    
-            await sql/*sql*/`
-              INSERT INTO app.item_marketplace_events
-                (item_id, tenant_id, marketplace_id, kind, payload)
-              VALUES
-                (${item_id}, ${tenant_id}, ${r.id}, 'publish_started', jsonb_build_object('source','vendoo_enqueue'))
-            `;
-    
-            console.log("[intake.enqueuePublishJobs] vendoo.stub_upserted_and_event_logged", {
-              item_id,
-              marketplace_id: r.id,
-              slug,
-            });
-    
-            // No server-runner job for Vendoo; browser/Tampermonkey flow will complete it.
-            continue;
-          }
-    
           
-          if (slug === "facebook") {
-            const statusNorm = String(iml?.status || "").toLowerCase();
-            const isLiveLike = statusNorm === "active" || statusNorm === "live";
-    
-            console.log("[intake.enqueuePublishJobs] facebook.status_check", {
-              item_id,
-              marketplace_id: r.id,
-              current_status: statusNorm,
-              desiredAction,
-              isLiveLike,
-            });
-    
-            // If Facebook is already live/active and we're not explicitly deleting,
-            // don't keep flipping it back to "publishing" or emitting new publish_started events.
-            if (isLiveLike && desiredAction !== "delete") {
-              console.log("[intake] fb.skip_already_live", {
-                item_id,
-                marketplace_id: r.id,
-                current_status: statusNorm,
-                desiredAction,
-              });
-              continue;
-            }
-    
-            // Ensure stub exists so UI reflects progress for first-time or non-live publishes
+            // Always stub Vendoo itself
             await sql/*sql*/`
               INSERT INTO app.item_marketplace_listing
                 (item_id, tenant_id, marketplace_id, status)
@@ -645,24 +592,58 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
                 (${item_id}, ${tenant_id}, ${r.id}, 'publishing')
               ON CONFLICT (item_id, marketplace_id)
               DO UPDATE SET
-                status = 'publishing',
-                updated_at = now()
+                status='publishing',
+                updated_at=now()
             `;
-    
-            // Emit a progress event (no server-runner for FB; browser/Tampermonkey will finish)
             await sql/*sql*/`
               INSERT INTO app.item_marketplace_events
                 (item_id, tenant_id, marketplace_id, kind, payload)
               VALUES
-                (${item_id}, ${tenant_id}, ${r.id}, 'publish_started', jsonb_build_object('source','enqueue'))
+                (${item_id}, ${tenant_id}, ${r.id}, 'publish_started',
+                 jsonb_build_object('source','vendoo_master'))
             `;
-    
-            console.log("[intake.enqueuePublishJobs] facebook.stub_upserted_and_event_logged", {
-              item_id,
-              marketplace_id: r.id,
-              slug,
-            });
-    
+          
+            // ⭐ NEW — Expand Vendoo to create stub rows for all tenant-enabled marketplaces
+            for (const m of rows) {
+              const mSlug = String(m.slug || "").toLowerCase();
+          
+              // Skip Vendoo itself (already handled)
+              if (mSlug === "vendoo") continue;
+          
+              // eBay: Only stub if user also selected eBay tile
+              if (mSlug === "ebay" && !slugs.includes("ebay")) {
+                console.log("[intake] vendoo.skip_ebay_not_selected", { m });
+                continue;
+              }
+          
+              // Facebook, Depop, Grailed, Poshmark, etc — stub always when Vendoo selected
+              console.log("[intake] vendoo.expand_stub", {
+                item_id,
+                marketplace_id: m.id,
+                slug: mSlug,
+              });
+          
+              await sql/*sql*/`
+                INSERT INTO app.item_marketplace_listing
+                  (item_id, tenant_id, marketplace_id, status)
+                VALUES
+                  (${item_id}, ${tenant_id}, ${m.id}, 'publishing')
+                ON CONFLICT (item_id, marketplace_id)
+                DO UPDATE SET
+                  status='publishing',
+                  updated_at=now()
+              `;
+          
+              await sql/*sql*/`
+                INSERT INTO app.item_marketplace_events
+                  (item_id, tenant_id, marketplace_id, kind, payload)
+                VALUES
+                  (${item_id}, ${tenant_id}, ${m.id}, 'publish_started',
+                   jsonb_build_object('source','vendoo_expand'))
+              `;
+            }
+          
+            // ⭐ Same behavior — Vendoo itself never gets a server-runner job
             continue;
           }
     
