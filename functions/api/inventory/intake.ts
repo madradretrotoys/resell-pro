@@ -344,51 +344,112 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
     // Shared Vendoo Mapping Builder (used by ACTIVE CREATE + ACTIVE UPDATE)
     // ---------------------------------------------------------------------
     async function buildVendooMapping(sql: any, tenant_id: string, item_id: string) {
-      const hydratedRows = await sql/*sql*/`
+      const hydratedLstRows = await sql/*sql*/`
         SELECT
           listing_category_key, condition_key, brand_key, color_key, shipping_box_key,
           listing_category, item_condition, brand_name, primary_color, shipping_box,
-          weight_lb, weight_oz, shipbx_length, shipbx_width, shipbx_height,
-          condition_options
+          weight_lb, weight_oz, shipbx_length, shipbx_width, shipbx_height
+          
         FROM app.item_listing_profile
         WHERE item_id = ${item_id} AND tenant_id = ${tenant_id}
         LIMIT 1
       `;
-      const h = hydratedRows[0] || {};
-    
-      const vendooCategoryRows = await loadVendooCategoryMap(
+      const hydrated = hydratedLstRows[0] || {};
+      console.log("[intake.CREATE_ACTIVE] hydrated listing for Vendoo mapping", hydrated);
+      
+      // ⭐ NEW — build Vendoo mapping for POST responses
+  
+      // Prefer the UUID key; we key mappings by this
+      const listingCategoryKey =
+        lst.listing_category_key || null;
+      
+      // Load category mapping (expects category_key_uuid)
+      const vendooCatRows = await loadVendooCategoryMap(
         sql,
         tenant_id,
-        h.listing_category_key
+        listingCategoryKey
       );
-    
-      const vendooConditionRows = await loadMarketplaceConditions(
+      
+      // Derive per-marketplace categories from rows
+      let category_vendoo: string | null = null;
+      let category_ebay: string | null = null;
+      let category_facebook: string | null = null;
+      let category_depop: string | null = null;
+      let conditionOptions: string | null = null; // for eBay condition mapping
+  
+      if (Array.isArray(vendooCatRows)) {
+        for (const r of vendooCatRows) {
+          const mp = Number(r.marketplace_id);
+          if (mp === 13) {
+            category_vendoo = r.vendoo_category_path || null;
+          }
+          if (mp === 1) {
+            category_ebay = r.vendoo_category_path || null;
+            // eBay row also carries condition_options we use below
+            conditionOptions = conditionOptions || r.condition_options || null;
+          }
+          if (mp === 2) {
+            category_facebook = r.vendoo_category_path || null;
+          }
+          if (mp === 4) {
+            category_depop = r.vendoo_category_path || null;
+          }
+        }
+      }
+      
+      
+      // Load base condition mapping
+      const vendooCondRows = await loadMarketplaceConditions(
         sql,
         tenant_id,
-        h.item_condition || null
+        hydrated.item_condition || null
       );
-    
-      const vendooEbayConditionRows = await loadVendooEbayConditionMap(
-        sql,
-        tenant_id,
-        h.item_condition || null,
-        h.condition_options || null
-      );
-    
-      return {
-        vendoo_category_key: vendooCategoryRows?.[0]?.category_key_uuid || null,
-        vendoo_category_vendoo: null,
-        vendoo_category_ebay: null,
-        vendoo_category_facebook: null,
-        vendoo_category_depop: null,
-    
-        vendoo_condition_main: vendooConditionRows?.[0]?.vendoo_map || null,
-        vendoo_condition_fb: vendooConditionRows?.[0]?.fb_map || null,
-        vendoo_condition_depop: vendooConditionRows?.[0]?.depop_map || null,
-    
-        vendoo_condition_ebay: vendooEbayConditionRows?.[0]?.ebay_conditions || null,
-        vendoo_condition_ebay_option: vendooEbayConditionRows?.[0]?.condition_options || null
+  
+      // Load Vendoo–eBay condition mapping, using condition_options from the category row
+      let vendooEbayRows: any[] = [];
+      //let conditionOptions: string | null = null;
+  
+      if (Array.isArray(vendooCatRows) && vendooCatRows.length > 0) {
+        const ebayRow = vendooCatRows.find(
+          (r: any) => Number(r.marketplace_id) === 1
+        );
+        conditionOptions = ebayRow?.condition_options || null;
+      }
+  
+      if (hydrated.item_condition && conditionOptions) {
+        vendooEbayRows = await loadVendooEbayConditionMap(
+          sql,
+          tenant_id,
+          hydrated.item_condition,
+          conditionOptions
+        );
+      }
+  
+     // Shape mapping in the SAME format as GET /api/inventory/intake
+      const vendoo_mapping = {
+        // Category mapping
+        category_key: listingCategoryKey || null,
+        category_vendoo,
+        category_ebay,
+        category_facebook,
+        category_depop,
+        // Base condition mapping
+        condition_main: vendooCondRows?.[0]?.vendoo_map || null,
+        condition_fb: vendooCondRows?.[0]?.fb_map || null,
+        condition_depop: vendooCondRows?.[0]?.depop_map || null,
+  
+        // Vendoo–eBay condition mapping
+        condition_ebay: vendooEbayRows?.[0]?.ebay_conditions || null,
+        condition_ebay_option: vendooEbayRows?.[0]?.condition_options || null,
       };
+  
+      console.log("[intake.ACTIVE] vendoo_mapping (POST)", {
+        tenant_id,
+        item_id,
+        listingCategoryKey,
+        item_condition: hydrated.item_condition,
+        vendoo_mapping,
+      });
     }
     
      
