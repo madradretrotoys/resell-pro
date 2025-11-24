@@ -461,6 +461,22 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
           WHERE (${slugs.length > 0} AND ma.slug = ANY(${slugs}))
              OR (${ids.length > 0}   AND ma.id   = ANY(${ids}))
         `;
+
+         // NEW: load ALL tenant-enabled marketplaces for Vendoo expansion
+        const allTenantEnabled = await sql/*sql*/`
+          SELECT ma.id, ma.slug
+          FROM app.marketplaces_available ma
+          JOIN app.tenant_marketplaces tm
+            ON tm.marketplace_id = ma.id
+           AND tm.tenant_id = ${tenant_id}
+           AND tm.enabled = true
+        `;
+        console.log("[intake] allTenantEnabled", {
+          count: Array.isArray(allTenantEnabled) ? allTenantEnabled.length : null,
+          allTenantEnabled,
+        }); 
+
+        
         console.log("[intake] enqueue.match_enabled", {
           count: Array.isArray(rows) ? rows.length : null,
           rows,
@@ -603,26 +619,25 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
                  jsonb_build_object('source','vendoo_master'))
             `;
           
-            // ⭐ NEW — Expand Vendoo to create stub rows for all tenant-enabled marketplaces
-            for (const m of rows) {
+            // ⭐ FIXED — Expand Vendoo to all tenant-enabled marketplaces
+            for (const m of allTenantEnabled) {
               const mSlug = String(m.slug || "").toLowerCase();
-          
+            
               // Skip Vendoo itself (already handled)
               if (mSlug === "vendoo") continue;
-          
-              // eBay: Only stub if user also selected eBay tile
+            
+              // eBay: only stub if user selected eBay tile
               if (mSlug === "ebay" && !slugs.includes("ebay")) {
                 console.log("[intake] vendoo.skip_ebay_not_selected", { m });
                 continue;
               }
-          
-              // Facebook, Depop, Grailed, Poshmark, etc — stub always when Vendoo selected
-              console.log("[intake] vendoo.expand_stub", {
+            
+              console.log("[intake] vendoo.expand_stub_fixed", {
                 item_id,
                 marketplace_id: m.id,
                 slug: mSlug,
               });
-          
+            
               await sql/*sql*/`
                 INSERT INTO app.item_marketplace_listing
                   (item_id, tenant_id, marketplace_id, status)
@@ -633,13 +648,13 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
                   status='publishing',
                   updated_at=now()
               `;
-          
+            
               await sql/*sql*/`
                 INSERT INTO app.item_marketplace_events
                   (item_id, tenant_id, marketplace_id, kind, payload)
                 VALUES
                   (${item_id}, ${tenant_id}, ${m.id}, 'publish_started',
-                   jsonb_build_object('source','vendoo_expand'))
+                    jsonb_build_object('source','vendoo_expand'))
               `;
             }
           
