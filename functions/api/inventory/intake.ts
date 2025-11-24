@@ -1780,7 +1780,7 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
           });
 
           // 🟦 Log exactly what we're about to return for vendoo_mapping
-          console.log("[intake.ACTIVE] vendoo_mapping (RETURN)", {
+          console.log("[intake.ACTIVE_retrun] vendoo_mapping (RETURN)", {
             tenant_id,
             item_id,
             vendoo_mapping
