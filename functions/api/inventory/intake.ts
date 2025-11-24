@@ -355,7 +355,7 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
         LIMIT 1
       `;
       const hydrated = hydratedLstRows[0] || {};
-      console.log("[intake.CREATE_ACTIVE] hydrated listing for Vendoo mapping", hydrated);
+      console.log("[intake.Shared2] hydrated listing for Vendoo mapping", hydrated);
       
       // ⭐ NEW — build Vendoo mapping for POST responses
   
@@ -443,7 +443,7 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
         condition_ebay_option: vendooEbayRows?.[0]?.condition_options || null,
       };
   
-      console.log("[intake.ACTIVE] vendoo_mapping (POST)", {
+      console.log("[intake.Shared3] vendoo_mapping (POST)", {
         tenant_id,
         item_id,
         listingCategoryKey,
@@ -2182,7 +2182,7 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
 
     // ⭐ Unified shared Vendoo mapping call (CREATE ACTIVE)
     const vendoo_mapping = await buildVendooMapping(sql, tenant_id, item_id);
-    console.log("[intake.CREATE_ACTIVE] vendoo_mapping (POST)", vendoo_mapping);
+    console.log("[intake.Shared1] vendoo_mapping (POST)", vendoo_mapping);
 
     const job_ids = Array.isArray(enqueued) ? enqueued.map((r: any) => String(r.job_id)) : [];
 
