@@ -1987,7 +1987,7 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
       }
 
       // 🟦 Log exactly what we're about to return for vendoo_mapping
-      console.log("[intake.ACTIVE] vendoo_mapping (RETURN)", {
+      console.log("[intake.ACTIVE_return] vendoo_mapping (RETURN)", {
         tenant_id,
         item_id,
         vendoo_mapping
@@ -2186,6 +2186,13 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
 
     const job_ids = Array.isArray(enqueued) ? enqueued.map((r: any) => String(r.job_id)) : [];
 
+   // 🟦 Log exactly what we're about to return for vendoo_mapping
+    console.log("[intake.ACTIVE_Create_return] vendoo_mapping (RETURN)", {
+      tenant_id,
+      item_id,
+      vendoo_mapping
+    });  
+    
     return json({
       ok: true,
       item_id,
