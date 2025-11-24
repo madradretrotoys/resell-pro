@@ -450,6 +450,9 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
         item_condition: hydrated.item_condition,
         vendoo_mapping,
       });
+
+      // ⭐ FIXED — RETURN IT
+      return vendoo_mapping;
     }
     
      
