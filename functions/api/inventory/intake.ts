@@ -1361,6 +1361,10 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
           marketplaces_selected: body?.marketplaces_selected ?? null,
           intentMarketplaces
         });
+          
+        // ⭐ FIX: ensure vendoo_mapping exists in this entire scope
+        let vendoo_mapping: any = null;
+          
         // Look up category_code only when needed for SKU allocation
         const catRows = await sql<{ category_code: string }[]>`
           SELECT category_code FROM app.sku_categories WHERE category_name = ${inv.category_nm} LIMIT 1
@@ -1484,9 +1488,9 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
                 condition_key: lst.condition_key
               });
 
-              // ⭐ Unified shared Vendoo mapping call (CREATE ACTIVE)
-              const vendoo_mapping = await buildVendooMapping(sql, tenant_id, item_id);
-              console.log("[intake.CREATE_ACTIVE] vendoo_mapping (POST)", vendoo_mapping);
+              // ⭐ Unified shared Vendoo mapping call (UPDATE ACTIVE)
+              vendoo_mapping = await buildVendooMapping(sql, tenant_id, item_id);
+              console.log("[intake.ACTIVE_UPDATE] vendoo_mapping (POST)", vendoo_mapping);
             
               // Handle per-marketplace DELETE intent (e.g., deselecting the eBay tile on update)
              if (EBAY_MARKETPLACE_ID && intentMarketplaces.length) {
