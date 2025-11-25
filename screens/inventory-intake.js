@@ -1941,6 +1941,8 @@ function setMarketplaceVisibility() {
     const host = document.getElementById(MP_CARDS_ID);
     if (!host) return;
 
+    
+    
     const mode = (opts && opts.mode) || "full";
 
     // Install delegated listeners once so any field edit re-checks validity
@@ -2248,6 +2250,8 @@ function setMarketplaceVisibility() {
 
     // After rendering marketplace cards, sync the FB status once
     try { refreshFacebookTile(); } catch {}
+    try { wireValidation(); } catch {}
+    try { computeValidity(); } catch {}
 
     // If no marketplaces selected, nothing renders here by design.
   }
@@ -4765,6 +4769,8 @@ document.addEventListener("intake:item-changed", () => refreshInventory({ force:
 
         // Basic + listing fields (now includes Long Description)
         populateFromSaved(res.inventory || {}, res.listing || null);
+        try { wireValidation(); } catch {}
+        try { computeValidity(); } catch {}
 
         // Apply per-item marketplace selection from Neon (eBay, Facebook, etc.)
         try {
@@ -5354,7 +5360,9 @@ document.addEventListener("intake:item-changed", () => refreshInventory({ force:
         } catch (err) { /* no-op */ }
       }
   
-    
+      // Final validation/wiring after all async UI initialization
+      try { wireValidation(); } catch {}
+      try { computeValidity(); } catch {}
   
   
     
