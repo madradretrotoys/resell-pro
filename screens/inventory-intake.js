@@ -2225,10 +2225,7 @@ function setMarketplaceVisibility() {
         try { computeValidity(); } catch {}
       } else {
         // Generic placeholder card for other marketplaces (no filler lists yet)
-        body.innerHTML = `
-          //<div class="muted text-sm">Marketplace-specific fields coming soon.</div>
-        `;
-        card.appendChild(body);
+        
       }
 
       return card;
