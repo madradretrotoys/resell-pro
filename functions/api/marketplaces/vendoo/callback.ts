@@ -44,8 +44,10 @@ export const onRequestPost = async ({ request, env }) => {
   // -------------------------
   const MP_IDS = {
     ebay: 1,
-    shopify: 4,
-    whatnot: 6,
+    facebook: 2,
+    whatnot: 3,
+    depop: 4,
+    shopify: 5,
     vendoo: 13
   };
 
