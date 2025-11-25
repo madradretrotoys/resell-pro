@@ -2962,7 +2962,15 @@ function setMarketplaceVisibility() {
         window.addEventListener("message", async (ev) => {
           try {
             // Only trust messages from our own origin
-            if (ev.origin !== location.origin) return;
+            const allowed = [
+              "https://resellpros.com",
+              "https://web.vendoo.co"       // Vendoo
+            ];
+            
+            if (!allowed.includes(ev.origin)) {
+              console.warn("[vendoo] blocked message from origin:", ev.origin);
+              return;
+            }
 
             const data = ev.data || {};
             if (data.type !== "mrad_vendoo_result") return;
