@@ -1499,16 +1499,10 @@ function setMarketplaceVisibility() {
   // Mark invalid/valid for a batch
   function markBatchValidity(nodes, isValidFn) {
     let allOk = true;
-  
-    for (const el of nodes) {
-      const ok = isValidFn(el);
-  
-      if (!ok) {
-        showFieldError(el, "This field is required");
-        allOk = false;
-      } else {
-        clearFieldError(el);
-      }
+    for (const n of nodes) {
+      const ok = isValidFn(n);
+      n.setAttribute("aria-invalid", ok ? "false" : "true");
+      if (!ok) allOk = false;
     }
     return allOk;
   }
@@ -1941,8 +1935,6 @@ function setMarketplaceVisibility() {
     const host = document.getElementById(MP_CARDS_ID);
     if (!host) return;
 
-    
-    
     const mode = (opts && opts.mode) || "full";
 
     // Install delegated listeners once so any field edit re-checks validity
@@ -2233,7 +2225,10 @@ function setMarketplaceVisibility() {
         try { computeValidity(); } catch {}
       } else {
         // Generic placeholder card for other marketplaces (no filler lists yet)
-        
+        body.innerHTML = `
+          <div class="muted text-sm">Marketplace-specific fields coming soon.</div>
+        `;
+        card.appendChild(body);
       }
 
       return card;
@@ -2250,8 +2245,6 @@ function setMarketplaceVisibility() {
 
     // After rendering marketplace cards, sync the FB status once
     try { refreshFacebookTile(); } catch {}
-    try { wireValidation(); } catch {}
-    try { computeValidity(); } catch {}
 
     // If no marketplaces selected, nothing renders here by design.
   }
@@ -2448,29 +2441,7 @@ function setMarketplaceVisibility() {
         
           if (!done) setEbayStatus("Unknown", { tone: "muted" });
         }
-
-        function showFieldError(el, message) {
-          if (!el) return;
-        
-          // 1) red border
-          el.classList.add("border-red-500");
-        
-          // 2) error label below field (auto-created once)
-          let err = el.parentElement.querySelector(".rp-error");
-          if (!err) {
-            err = document.createElement("div");
-            err.className = "rp-error text-xs text-red-600 mt-1";
-            el.parentElement.appendChild(err);
-          }
-          err.textContent = message;
-        }
-        
-        function clearFieldError(el) {
-          if (!el) return;
-          el.classList.remove("border-red-500");
-          const err = el.parentElement.querySelector(".rp-error");
-          if (err) err.remove();
-        }
+  
        
         function computeValidity() {
           // BASIC — always required (explicit control list)
@@ -4769,8 +4740,6 @@ document.addEventListener("intake:item-changed", () => refreshInventory({ force:
 
         // Basic + listing fields (now includes Long Description)
         populateFromSaved(res.inventory || {}, res.listing || null);
-        try { wireValidation(); } catch {}
-        try { computeValidity(); } catch {}
 
         // Apply per-item marketplace selection from Neon (eBay, Facebook, etc.)
         try {
@@ -5360,9 +5329,7 @@ document.addEventListener("intake:item-changed", () => refreshInventory({ force:
         } catch (err) { /* no-op */ }
       }
   
-      // Final validation/wiring after all async UI initialization
-      try { wireValidation(); } catch {}
-      try { computeValidity(); } catch {}
+    
   
   
     
