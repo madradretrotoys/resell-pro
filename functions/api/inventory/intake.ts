@@ -464,6 +464,15 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
       status: "draft" | "active"
     ): Promise<void> {
       try {
+        // 🚫 Skip ALL marketplace logic for drafts & store-only
+        const isStoreOnly = String(body?.inventory?.instore_online || "")
+            .toLowerCase()
+            .includes("store only");
+
+        if (status === "draft" || isStoreOnly) {
+          console.log("[enqueuePublishJobs] Skipped: draft or store-only");
+          return;
+        }
         console.log("[intake.enqueuePublishJobs] enter", {
           tenant_id,
           item_id,
