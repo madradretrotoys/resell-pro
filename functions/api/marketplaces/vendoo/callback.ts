@@ -7,12 +7,23 @@ export const onRequestPost = async ({ request, env }) => {
   console.log("[vendoo.callback] raw body →", body);
 
   const item_id = String(body?.item_id || "").trim();
+  const tenant_id = String(body?.tenant_id || "").trim();
+  
   if (!item_id) {
     return new Response(JSON.stringify({ ok: false, error: "missing_item_id" }), {
       status: 400,
       headers: { "content-type": "application/json" }
     });
   }
+  
+  if (!tenant_id) {
+    return new Response(JSON.stringify({ ok: false, error: "missing_tenant_id" }), {
+      status: 400,
+      headers: { "content-type": "application/json" }
+    });
+  }
+  
+  console.log("[vendoo.callback] using item_id + tenant_id →", { item_id, tenant_id });
 
   const vendooRoot = body?.vendoo || {};
   const marketplaces = body?.marketplaces || {};
