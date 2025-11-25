@@ -29,14 +29,124 @@ async function decryptJson(base64Key: string, blob: string): Promise<any> {
   return JSON.parse(new TextDecoder().decode(pt));
 }
 
-function msUntil(iso: string | null | undefined) {
+ function msUntil(iso: string | null | undefined) {
   if (!iso) return -1;
   const t = Date.parse(iso);
   if (!Number.isFinite(t)) return -1;
   return t - Date.now();
 }
 
+// Normalize our internal UI condition labels to a valid eBay Inventory API ConditionEnum,
+// taking into account the category's allowed condition IDs from getItemConditionPolicies.
+// This keeps us from hitting 2004/25021 condition errors.
+function normalizeConditionForCategory(opts: { rawCond: string; ebayCategoryId: string | null }): { conditionEnum: string } {
+  const { rawCond, ebayCategoryId } = opts;
+  const raw = (rawCond || "").trim().toLowerCase();
+  const cat = String(ebayCategoryId || "").trim();
+
+  // "New" handling is consistent across your current categories
+  const isNew =
+    raw.startsWith("new") ||
+    raw === "";
+
+  if (isNew) {
+    return { conditionEnum: "NEW" };
+  }
+
+  // Category groups based on your getItemConditionPolicies snapshot.
+  // Group A: categories that only support New/Used (1000/3000).
+  const CATS_NEW_USED_ONLY = [
+    "19027",
+    "151093",
+    "261069",
+    "262346",
+    "261068",
+    "1340",
+    "262348",
+    "230",
+    "2535",
+    "234",
+    "30",
+    "261070"
+  ];
+
+  // Group B: categories with granular used states but no "parts" (259104/259105).
+  const CATS_MULTI_USED = [
+    "259104",
+    "259105"
+  ];
+
+  // Group C/D: categories that explicitly support "For parts or not working" (7000).
+  const CATS_WITH_PARTS = [
+    "139971",
+    "88433"
+  ];
+
+  // Group E: trading card categories (graded/ungraded).
+  // For these categories, eBay’s card-specific model expects:
+  // - Graded      → LIKE_NEW (2750)
+  // - Ungraded    → USED_VERY_GOOD (4000)
+  //
+  // For now we treat all *non-new* cards as Ungraded, so we always send USED_VERY_GOOD.
+  const CATS_CARDS = [
+    "261328", // Sports Trading Card Singles
+    "183050", // Non-Sport Trading Card Singles
+    "183454"  // CCG Individual Cards (future-proofing)
+  ];
+
+  // Special-case: broken/parts-only where category supports 7000.
+  if (raw === "pre-owned - broken for parts only" && CATS_WITH_PARTS.includes(cat)) {
+    return { conditionEnum: "FOR_PARTS_OR_NOT_WORKING" };
+  }
+
+  // Trading cards: always treat pre-owned as Ungraded (conditionId 4000) by using USED_VERY_GOOD.
+  if (CATS_CARDS.includes(cat)) {
+    return { conditionEnum: "USED_VERY_GOOD" };
+  }
+
+  // Categories that only support New/Used (1000/3000).
+  if (CATS_NEW_USED_ONLY.includes(cat)) {
+    return { conditionEnum: "USED_EXCELLENT" };
+  }
+
+  // Categories with granular used states but no "parts".
+  if (CATS_MULTI_USED.includes(cat)) {
+    if (raw === "pre-owned - good") {
+      return { conditionEnum: "USED_GOOD" };
+    }
+    if (
+      raw === "pre-owned - fair" ||
+      raw === "pre-owned poor (major flaws)" ||
+      raw === "pre-owned - broken for parts only"
+    ) {
+      // No 7000 in these categories; fall back to Acceptable for lower tiers and parts.
+      return { conditionEnum: "USED_ACCEPTABLE" };
+    }
+    // Default used tier if we don't recognize the pre-owned label.
+    return { conditionEnum: "USED_VERY_GOOD" };
+  }
+
+  // Categories that support the full range including parts (e.g. 88433, 139971).
+  if (CATS_WITH_PARTS.includes(cat)) {
+    if (raw === "pre-owned - good") {
+      return { conditionEnum: "USED_GOOD" };
+    }
+    if (raw === "pre-owned - fair" || raw === "pre-owned poor (major flaws)") {
+      return { conditionEnum: "USED_ACCEPTABLE" };
+    }
+    if (raw === "pre-owned - broken for parts only") {
+      return { conditionEnum: "FOR_PARTS_OR_NOT_WORKING" };
+    }
+    // Default used tier.
+    return { conditionEnum: "USED_VERY_GOOD" };
+  }
+
+  // Fallback for any future categories: treat pre-owned as generic Used.
+  return { conditionEnum: "USED_EXCELLENT" };
+}
+
 async function create(params: CreateParams): Promise<CreateResult> {
+
   const { env, tenant_id, item, profile, mpListing, images } = params;
   const sql = getSql(env);
 
@@ -566,27 +676,71 @@ async function create(params: CreateParams): Promise<CreateResult> {
   if (primary) imageUrls.push(primary);
   if (Array.isArray(gallery) && gallery.length) imageUrls.push(...gallery);
 
-  // Map our richer UI labels to eBay's 2-value enum: NEW or USED
-  const rawCond = String(profile?.item_condition || '').trim().toLowerCase();
-  
-  // helpers
-  const isNew =
-    rawCond.startsWith('new') ||               // "New With Imperfections", "New Without Tags/Box", etc.
-    rawCond === '' ;                           // default to NEW if empty
-  
-  const conditionEnum = isNew ? 'NEW' : 'USED';
-  
-  // include a short note only for USED items
+   // Map our richer UI labels to eBay's ConditionEnum values,
+  // normalized per category so we avoid 2004/25021 condition errors.
+  const rawCond = String(profile?.item_condition || "").trim().toLowerCase();
+
+  const { conditionEnum } = normalizeConditionForCategory({
+    rawCond,
+    ebayCategoryId
+  });
+
+  // Helpful debug so we can see exactly what was chosen at runtime
+  console.log("[ebay:condition.map]", {
+    uiCondition: profile?.item_condition || null,
+    rawCond,
+    ebayCategoryId,
+    conditionEnum
+  });
+
+  const isNew = conditionEnum === "NEW";
+
+  // include a short note only for non-NEW items
   const conditionDescription =
     !isNew && profile?.product_description
       ? String(profile.product_description).slice(0, 1000)
       : undefined;
 
+  // Card categories where eBay’s vertical requires Card Condition (40001)
+  const isCardCategoryForConditionDescriptor =
+    ebayCategoryId === "183050" || ebayCategoryId === "261328";
+
+  // For trading card categories, we treat non-NEW as Ungraded (conditionId 4000 via USED_VERY_GOOD)
+  // and send the required Card Condition descriptor:
+  // - name: "40001"   (Card Condition)
+  // - values: ["400011"] (Excellent)
+  //
+  // This matches the getItemConditionPolicies metadata for 183050/261328.
+  const cardConditionDescriptor = isCardCategoryForConditionDescriptor
+    ? { name: "40001", values: ["400011"], label: "Excellent" }
+    : null;
+
+  if (cardConditionDescriptor) {
+    console.log("[ebay:cards.conditionDescriptor]", {
+      ebayCategoryId,
+      conditionEnum,
+      descriptorName: cardConditionDescriptor.name,
+      descriptorValues: cardConditionDescriptor.values,
+      label: cardConditionDescriptor.label
+    });
+  }
   // map our fields into eBay inventory item structure
   const computedQty = Math.max(1, Number((item && item.qty) != null ? item.qty : 1));
   const inventoryItemBody: any = {
-    condition: conditionEnum,  
+    condition: conditionEnum,
     ...(conditionDescription ? { conditionDescription } : {}),
+    ...(cardConditionDescriptor
+      ? {
+          // For trading card verticals, emit Card Condition as a conditionDescriptor
+          // using the numeric IDs required by the Inventory API.
+          conditionDescriptors: [
+            {
+              name: cardConditionDescriptor.name,
+              values: cardConditionDescriptor.values
+            }
+          ]
+        }
+      : {}), 
     product: {
       title: item?.product_short_title || '',
       description: profile?.product_description || '',
@@ -671,16 +825,30 @@ async function create(params: CreateParams): Promise<CreateResult> {
   // Ensure the eBay Inventory Location exists (create if needed & verify)
   await ensureLocation(merchantLocationKey, shippingZip);
   // (No extra GET needed here; ensureLocation already verified.)
-   // Build itemSpecifics from mapping table values (omit when null/empty)
-    const itemSpecifics: Array<{ name: string; values: string[] }> = [];
-    const pushIf = (name: string, val: unknown) => {
-      const s = String(val ?? '').trim();
-      if (s) itemSpecifics.push({ name, values: [s] });
-    };
-    pushIf('Type',      mappedSpecifics.type);
-    pushIf('Model',     mappedSpecifics.model);
-    pushIf('Franchise', mappedSpecifics.franchise);
-    pushIf('Sport',     mappedSpecifics.sport);
+
+  // Build itemSpecifics from mapping table values (omit when null/empty)
+  const itemSpecifics: Array<{ name: string; values: string[] }> = [];
+  const pushIf = (name: string, val: unknown) => {
+    const s = String(val ?? '').trim();
+    if (s) itemSpecifics.push({ name, values: [s] });
+  };
+  pushIf('Type',      mappedSpecifics.type);
+  pushIf('Model',     mappedSpecifics.model);
+  pushIf('Franchise', mappedSpecifics.franchise);
+  pushIf('Sport',     mappedSpecifics.sport);
+
+  // Card categories where eBay requires Card Condition (40001)
+  const isCardCategoryForItemSpecifics =
+    ebayCategoryId === "183050" || ebayCategoryId === "261328";
+
+  if (isCardCategoryForItemSpecifics) {
+    const cardConditionLabel = "Excellent";
+    pushIf('Card Condition', cardConditionLabel);
+    console.log('[ebay:cards.itemSpecifics.cardCondition]', {
+      ebayCategoryId,
+      cardConditionLabel
+    });
+  }
     
    const offerBody: any = {
     sku,
