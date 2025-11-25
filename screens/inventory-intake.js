@@ -1499,10 +1499,16 @@ function setMarketplaceVisibility() {
   // Mark invalid/valid for a batch
   function markBatchValidity(nodes, isValidFn) {
     let allOk = true;
-    for (const n of nodes) {
-      const ok = isValidFn(n);
-      n.setAttribute("aria-invalid", ok ? "false" : "true");
-      if (!ok) allOk = false;
+  
+    for (const el of nodes) {
+      const ok = isValidFn(el);
+  
+      if (!ok) {
+        showFieldError(el, "This field is required");
+        allOk = false;
+      } else {
+        clearFieldError(el);
+      }
     }
     return allOk;
   }
@@ -2438,7 +2444,29 @@ function setMarketplaceVisibility() {
         
           if (!done) setEbayStatus("Unknown", { tone: "muted" });
         }
-  
+
+        function showFieldError(el, message) {
+          if (!el) return;
+        
+          // 1) red border
+          el.classList.add("border-red-500");
+        
+          // 2) error label below field (auto-created once)
+          let err = el.parentElement.querySelector(".rp-error");
+          if (!err) {
+            err = document.createElement("div");
+            err.className = "rp-error text-xs text-red-600 mt-1";
+            el.parentElement.appendChild(err);
+          }
+          err.textContent = message;
+        }
+        
+        function clearFieldError(el) {
+          if (!el) return;
+          el.classList.remove("border-red-500");
+          const err = el.parentElement.querySelector(".rp-error");
+          if (err) err.remove();
+        }
        
         function computeValidity() {
           // BASIC — always required (explicit control list)
