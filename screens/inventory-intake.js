@@ -950,16 +950,16 @@ export async function init() {
               (snap && typeof snap === "object" && snap.vendoo_mapping)
                 ? snap.vendoo_mapping
                 : null;
-            
-            // ⭐ FIX: Only override if snap mapping HAS REAL FIELDS
-            if (
-              fromSnapVendooMapping &&
-              typeof fromSnapVendooMapping === "object" &&
-              Object.keys(fromSnapVendooMapping).length > 0
-            ) {
-              vendooDetail.vendoo_mapping = fromSnapVendooMapping;
-            }
-
+              // Correct behavior: if snap provides a valid vendoo_mapping,
+              // it should always override the placeholder/null values.
+              // ⭐ FIX: Only override if snap mapping HAS REAL FIELDS
+              if (
+                fromSnapVendooMapping &&
+                typeof fromSnapVendooMapping === "object" &&
+                Object.keys(fromSnapVendooMapping).length > 0
+              ) {
+                vendooDetail.vendoo_mapping = fromSnapVendooMapping;
+              }
 
               console.log("[intake.js] vendoo: enrich from snap (FIXED)", {
                 beforeVendooMapping,
@@ -2225,10 +2225,7 @@ function setMarketplaceVisibility() {
         try { computeValidity(); } catch {}
       } else {
         // Generic placeholder card for other marketplaces (no filler lists yet)
-        body.innerHTML = `
-          <div class="muted text-sm">Marketplace-specific fields coming soon.</div>
-        `;
-        card.appendChild(body);
+        
       }
 
       return card;
@@ -3346,31 +3343,40 @@ function setMarketplaceVisibility() {
               marketplaces_selected: detail.marketplaces_selected || null,
             };
 
-           // 1. Open Vendoo window (required so Tampermonkey loads)
-          let vendooWin = window.open("https://web.vendoo.co/app/item/new", "_blank");
+            // 1. Open Vendoo window (required so Tampermonkey loads)
+              const vendooWin = window.open("https://web.vendoo.co/app/item/new", "_blank");
           
-          if (!vendooWin || vendooWin.closed) {
-            console.warn("[vendoo] popup blocked – allow popups for resellpros.com");
-          } else {
-            console.log("[vendoo] Vendoo window opened");
-          }
+              if (!vendooWin || vendooWin.closed) {
+                console.warn("[vendoo] popup blocked – allow popups for resellpros.com");
+              } else {
+                console.log("[vendoo] Vendoo window opened");
+              }
           
-          // 2. Post message to Tampermonkey in THIS window
-          console.log("[vendoo] posting message to window for Tampermonkey", message);
-          window.postMessage(message, "*");
+              // 2. Post message to this window (in case TM is listening here too)
+              console.log("[vendoo] Posting message to current window", message);
+              window.postMessage(message, "*");
           
-           // 3. ALSO send the payload into the Vendoo tab (Tampermonkey listens there too)
-            try {
-              vendooWin.postMessage(message, "*");
-              console.log("[vendoo] posted message to Vendoo window");
-            } catch (e) {
-              console.warn("[vendoo] failed to post to vendooWin", e);
+              // 3. After a short delay, send the payload into the Vendoo tab
+              //    This gives Vendoo + Tampermonkey time to load.
+              setTimeout(() => {
+                try {
+                  if (!vendooWin || vendooWin.closed) {
+                    console.warn("[vendoo] Vendoo window is not available for postMessage");
+                    return;
+                  }
+                  vendooWin.postMessage(message, "*");
+                  console.log("[vendoo] posted message to Vendoo window (delayed send)");
+                } catch (e) {
+                  console.warn("[vendoo] failed to post to Vendoo window", e);
+                }
+              }, 1500);
+          
+            } catch (err) {
+              console.warn("[vendoo] intake:vendoo-ready handler error", err);
             }
-          } catch (err) {
-            console.warn("[vendoo] intake:vendoo-ready handler error", err);
-          }
-        });
-        //end vendoo process 
+          });
+          //end vendoo process
+ 
 
 
   

@@ -340,6 +340,120 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
       }
     }
 
+    // ---------------------------------------------------------------------
+    // Shared Vendoo Mapping Builder (used by ACTIVE CREATE + ACTIVE UPDATE)
+    // ---------------------------------------------------------------------
+    async function buildVendooMapping(sql: any, tenant_id: string, item_id: string) {
+      const hydratedLstRows = await sql/*sql*/`
+        SELECT
+          listing_category_key, condition_key, brand_key, color_key, shipping_box_key,
+          listing_category, item_condition, brand_name, primary_color, shipping_box,
+          weight_lb, weight_oz, shipbx_length, shipbx_width, shipbx_height
+          
+        FROM app.item_listing_profile
+        WHERE item_id = ${item_id} AND tenant_id = ${tenant_id}
+        LIMIT 1
+      `;
+      const hydrated = hydratedLstRows[0] || {};
+      console.log("[intake.Shared2] hydrated listing for Vendoo mapping", hydrated);
+      
+      // ⭐ NEW — build Vendoo mapping for POST responses
+  
+      // Prefer the UUID key; we key mappings by this
+      const listingCategoryKey =
+        lst.listing_category_key || null;
+      
+      // Load category mapping (expects category_key_uuid)
+      const vendooCatRows = await loadVendooCategoryMap(
+        sql,
+        tenant_id,
+        listingCategoryKey
+      );
+      
+      // Derive per-marketplace categories from rows
+      let category_vendoo: string | null = null;
+      let category_ebay: string | null = null;
+      let category_facebook: string | null = null;
+      let category_depop: string | null = null;
+      let conditionOptions: string | null = null; // for eBay condition mapping
+  
+      if (Array.isArray(vendooCatRows)) {
+        for (const r of vendooCatRows) {
+          const mp = Number(r.marketplace_id);
+          if (mp === 13) {
+            category_vendoo = r.vendoo_category_path || null;
+          }
+          if (mp === 1) {
+            category_ebay = r.vendoo_category_path || null;
+            // eBay row also carries condition_options we use below
+            conditionOptions = conditionOptions || r.condition_options || null;
+          }
+          if (mp === 2) {
+            category_facebook = r.vendoo_category_path || null;
+          }
+          if (mp === 4) {
+            category_depop = r.vendoo_category_path || null;
+          }
+        }
+      }
+      
+      
+      // Load base condition mapping
+      const vendooCondRows = await loadMarketplaceConditions(
+        sql,
+        tenant_id,
+        hydrated.item_condition || null
+      );
+  
+      // Load Vendoo–eBay condition mapping, using condition_options from the category row
+      let vendooEbayRows: any[] = [];
+      //let conditionOptions: string | null = null;
+  
+      if (Array.isArray(vendooCatRows) && vendooCatRows.length > 0) {
+        const ebayRow = vendooCatRows.find(
+          (r: any) => Number(r.marketplace_id) === 1
+        );
+        conditionOptions = ebayRow?.condition_options || null;
+      }
+  
+      if (hydrated.item_condition && conditionOptions) {
+        vendooEbayRows = await loadVendooEbayConditionMap(
+          sql,
+          tenant_id,
+          hydrated.item_condition,
+          conditionOptions
+        );
+      }
+  
+     // Shape mapping in the SAME format as GET /api/inventory/intake
+      const vendoo_mapping = {
+        // Category mapping
+        category_key: listingCategoryKey || null,
+        category_vendoo,
+        category_ebay,
+        category_facebook,
+        category_depop,
+        // Base condition mapping
+        condition_main: vendooCondRows?.[0]?.vendoo_map || null,
+        condition_fb: vendooCondRows?.[0]?.fb_map || null,
+        condition_depop: vendooCondRows?.[0]?.depop_map || null,
+  
+        // Vendoo–eBay condition mapping
+        condition_ebay: vendooEbayRows?.[0]?.ebay_conditions || null,
+        condition_ebay_option: vendooEbayRows?.[0]?.condition_options || null,
+      };
+  
+      console.log("[intake.Shared3] vendoo_mapping (POST)", {
+        tenant_id,
+        item_id,
+        listingCategoryKey,
+        item_condition: hydrated.item_condition,
+        vendoo_mapping,
+      });
+
+      // ⭐ FIXED — RETURN IT
+      return vendoo_mapping;
+    }
     
      
     // === Helper: enqueue marketplace publish jobs (create vs update + no-change short-circuit) ===
@@ -350,6 +464,15 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
       status: "draft" | "active"
     ): Promise<void> {
       try {
+        // 🚫 Skip ALL marketplace logic for drafts & store-only
+        const isStoreOnly = String(body?.inventory?.instore_online || "")
+            .toLowerCase()
+            .includes("store only");
+
+        if (status === "draft" || isStoreOnly) {
+          console.log("[enqueuePublishJobs] Skipped: draft or store-only");
+          return;
+        }
         console.log("[intake.enqueuePublishJobs] enter", {
           tenant_id,
           item_id,
@@ -461,6 +584,22 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
           WHERE (${slugs.length > 0} AND ma.slug = ANY(${slugs}))
              OR (${ids.length > 0}   AND ma.id   = ANY(${ids}))
         `;
+
+         // NEW: load ALL tenant-enabled marketplaces for Vendoo expansion
+        const allTenantEnabled = await sql/*sql*/`
+          SELECT ma.id, ma.slug
+          FROM app.marketplaces_available ma
+          JOIN app.tenant_marketplaces tm
+            ON tm.marketplace_id = ma.id
+           AND tm.tenant_id = ${tenant_id}
+           AND tm.enabled = true
+        `;
+        console.log("[intake] allTenantEnabled", {
+          count: Array.isArray(allTenantEnabled) ? allTenantEnabled.length : null,
+          allTenantEnabled,
+        }); 
+
+        
         console.log("[intake] enqueue.match_enabled", {
           count: Array.isArray(rows) ? rows.length : null,
           rows,
@@ -576,68 +715,15 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
           });
     
           if (slug === "vendoo") {
-            console.log("[intake] vendoo.skip_enqueue_tampermonkey", {
+            console.log("[intake] vendoo.master_expand", {
+              tenant_id,
               item_id,
-              marketplace_id: r.id,
-              slug,
-              desiredAction,
+              vendoo_marketplace_id: r.id,
+              slugs_selected: slugs,
+              rows_enabled: rows,
             });
-    
-            // Ensure stub exists so UI can reflect progress while Tampermonkey/Vendoo runs
-            await sql/*sql*/`
-              INSERT INTO app.item_marketplace_listing
-                (item_id, tenant_id, marketplace_id, status)
-              VALUES
-                (${item_id}, ${tenant_id}, ${r.id}, 'publishing')
-              ON CONFLICT (item_id, marketplace_id)
-              DO UPDATE SET
-                status = 'publishing',
-                updated_at = now()
-            `;
-    
-            await sql/*sql*/`
-              INSERT INTO app.item_marketplace_events
-                (item_id, tenant_id, marketplace_id, kind, payload)
-              VALUES
-                (${item_id}, ${tenant_id}, ${r.id}, 'publish_started', jsonb_build_object('source','vendoo_enqueue'))
-            `;
-    
-            console.log("[intake.enqueuePublishJobs] vendoo.stub_upserted_and_event_logged", {
-              item_id,
-              marketplace_id: r.id,
-              slug,
-            });
-    
-            // No server-runner job for Vendoo; browser/Tampermonkey flow will complete it.
-            continue;
-          }
-    
           
-          if (slug === "facebook") {
-            const statusNorm = String(iml?.status || "").toLowerCase();
-            const isLiveLike = statusNorm === "active" || statusNorm === "live";
-    
-            console.log("[intake.enqueuePublishJobs] facebook.status_check", {
-              item_id,
-              marketplace_id: r.id,
-              current_status: statusNorm,
-              desiredAction,
-              isLiveLike,
-            });
-    
-            // If Facebook is already live/active and we're not explicitly deleting,
-            // don't keep flipping it back to "publishing" or emitting new publish_started events.
-            if (isLiveLike && desiredAction !== "delete") {
-              console.log("[intake] fb.skip_already_live", {
-                item_id,
-                marketplace_id: r.id,
-                current_status: statusNorm,
-                desiredAction,
-              });
-              continue;
-            }
-    
-            // Ensure stub exists so UI reflects progress for first-time or non-live publishes
+            // Always stub Vendoo itself
             await sql/*sql*/`
               INSERT INTO app.item_marketplace_listing
                 (item_id, tenant_id, marketplace_id, status)
@@ -645,24 +731,57 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
                 (${item_id}, ${tenant_id}, ${r.id}, 'publishing')
               ON CONFLICT (item_id, marketplace_id)
               DO UPDATE SET
-                status = 'publishing',
-                updated_at = now()
+                status='publishing',
+                updated_at=now()
             `;
-    
-            // Emit a progress event (no server-runner for FB; browser/Tampermonkey will finish)
             await sql/*sql*/`
               INSERT INTO app.item_marketplace_events
                 (item_id, tenant_id, marketplace_id, kind, payload)
               VALUES
-                (${item_id}, ${tenant_id}, ${r.id}, 'publish_started', jsonb_build_object('source','enqueue'))
+                (${item_id}, ${tenant_id}, ${r.id}, 'publish_started',
+                 jsonb_build_object('source','vendoo_master'))
             `;
-    
-            console.log("[intake.enqueuePublishJobs] facebook.stub_upserted_and_event_logged", {
-              item_id,
-              marketplace_id: r.id,
-              slug,
-            });
-    
+          
+            // ⭐ FIXED — Expand Vendoo to all tenant-enabled marketplaces
+            for (const m of allTenantEnabled) {
+              const mSlug = String(m.slug || "").toLowerCase();
+            
+              // Skip Vendoo itself (already handled)
+              if (mSlug === "vendoo") continue;
+            
+              // eBay: only stub if user selected eBay tile
+              if (mSlug === "ebay" && !slugs.includes("ebay")) {
+                console.log("[intake] vendoo.skip_ebay_not_selected", { m });
+                continue;
+              }
+            
+              console.log("[intake] vendoo.expand_stub_fixed", {
+                item_id,
+                marketplace_id: m.id,
+                slug: mSlug,
+              });
+            
+              await sql/*sql*/`
+                INSERT INTO app.item_marketplace_listing
+                  (item_id, tenant_id, marketplace_id, status)
+                VALUES
+                  (${item_id}, ${tenant_id}, ${m.id}, 'publishing')
+                ON CONFLICT (item_id, marketplace_id)
+                DO UPDATE SET
+                  status='publishing',
+                  updated_at=now()
+              `;
+            
+              await sql/*sql*/`
+                INSERT INTO app.item_marketplace_events
+                  (item_id, tenant_id, marketplace_id, kind, payload)
+                VALUES
+                  (${item_id}, ${tenant_id}, ${m.id}, 'publish_started',
+                    jsonb_build_object('source','vendoo_expand'))
+              `;
+            }
+          
+            // ⭐ Same behavior — Vendoo itself never gets a server-runner job
             continue;
           }
     
@@ -1107,6 +1226,53 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
 
         // === DRAFT UPDATE: update any inventory fields; also upsert listing if sent ===
         if (isDraft) {
+           // ⭐ NEW: Optional SKU creation for draft updates
+          let draftSku = existing[0].sku;
+        
+          if (!draftSku && inv?.category_nm) {
+            // Lookup category code
+            const catRowsDraft = await sql`
+              SELECT category_code 
+              FROM app.sku_categories 
+              WHERE category_name = ${inv.category_nm}
+              LIMIT 1
+            `;
+            if (catRowsDraft.length > 0) {
+              const category_code_d = catRowsDraft[0].category_code;
+        
+              // Allocate next sequence number
+              const seqRowsDraft = await sql`
+                SELECT last_number 
+                FROM app.sku_sequence
+                WHERE tenant_id = ${tenant_id} AND category_code = ${category_code_d}
+                FOR UPDATE
+              `;
+              let nextDraft = 0;
+        
+              if (seqRowsDraft.length === 0) {
+                await sql`
+                  INSERT INTO app.sku_sequence (tenant_id, category_code, last_number)
+                  VALUES (${tenant_id}, ${category_code_d}, 0)
+                  ON CONFLICT DO NOTHING
+                `;
+                nextDraft = 1;
+                await sql`
+                  UPDATE app.sku_sequence
+                  SET last_number = ${nextDraft}
+                  WHERE tenant_id = ${tenant_id} AND category_code = ${category_code_d}
+                `;
+              } else {
+                nextDraft = Number(seqRowsDraft[0].last_number || 0) + 1;
+                await sql`
+                  UPDATE app.sku_sequence
+                  SET last_number = ${nextDraft}
+                  WHERE tenant_id = ${tenant_id} AND category_code = ${category_code_d}
+                `;
+              }
+        
+              draftSku = `${category_code_d}${String(nextDraft).padStart(4, "0")}`;
+            }
+          }
           const updInv = await sql<{ item_id: string; sku: string | null }[]>`
             WITH s AS (
               SELECT set_config('app.actor_user_id', ${actor_user_id}, true)
@@ -1234,7 +1400,7 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
             sku: updInv[0].sku,
             status,
             intent: { marketplaces: intentMarketplaces },
-            vendoo_mapping,
+           // vendoo_mapping,
             ms: Date.now() - t0
           }, 200);
         }
@@ -1251,6 +1417,10 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
           marketplaces_selected: body?.marketplaces_selected ?? null,
           intentMarketplaces
         });
+          
+        // ⭐ FIX: ensure vendoo_mapping exists in this entire scope
+        let vendoo_mapping: any = null;
+          
         // Look up category_code only when needed for SKU allocation
         const catRows = await sql<{ category_code: string }[]>`
           SELECT category_code FROM app.sku_categories WHERE category_name = ${inv.category_nm} LIMIT 1
@@ -1365,6 +1535,8 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
                 shipbx_height    = EXCLUDED.shipbx_height
             `;
 
+              
+            
               console.log("[intake.ACTIVE] listing_profile_upserted", {
                 tenant_id,
                 item_id,
@@ -1372,70 +1544,9 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
                 condition_key: lst.condition_key
               });
 
-              // ⭐ FIX: Hydrate listing profile BEFORE doing Vendoo mappings
-              const hydratedLstRows = await sql/*sql*/`
-                SELECT
-                  listing_category_key, condition_key, brand_key, color_key, shipping_box_key,
-                  listing_category, item_condition, brand_name, primary_color, shipping_box,
-                  weight_lb, weight_oz, shipbx_length, shipbx_width, shipbx_height
-                  
-                FROM app.item_listing_profile
-                WHERE item_id = ${item_id} AND tenant_id = ${tenant_id}
-                LIMIT 1
-              `;
-              
-              const hydrated = hydratedLstRows[0] || {};
-              console.log("[intake.CREATE_ACTIVE] hydrated listing for Vendoo mapping", hydrated);
-              
-              // ⭐ Use hydrated.item_condition and hydrated.listing_category_key
-              const vendooCategoryRows = await loadVendooCategoryMap(
-                sql,
-                tenant_id,
-                lst.listing_category_key
-              );
-              
-              const vendooConditionRows = await loadMarketplaceConditions(
-                sql,
-                tenant_id,
-                hydrated.item_condition || null
-              );
-              
-              const vendooEbayConditionRows = await loadVendooEbayConditionMap(
-                sql,
-                tenant_id,
-                hydrated.item_condition || null,
-                hydrated.condition_options || null
-              );
-
-              // Derive per-marketplace categories from rows
-              let vendoo_category_vendoo: string | null = null;
-              let vendoo_category_ebay: string | null = null;
-              let vendoo_category_facebook: string | null = null;
-              let vendoo_category_depop: string | null = null;
-              
-              // ⭐ NEW: Shape Vendoo mapping (Option A)
-              const vendoo_mapping = {
-              vendoo_category_key:
-                vendooCategoryRows?.[0]?.category_key_uuid || null,
-              vendoo_category_vendoo,
-              vendoo_category_ebay,
-              vendoo_category_facebook,
-              vendoo_category_depop,
-              
-                vendoo_condition_main:
-                  vendooConditionRows?.[0]?.vendoo_map || null,
-                vendoo_condition_fb:
-                  vendooConditionRows?.[0]?.fb_map || null,
-                vendoo_condition_depop:
-                  vendooConditionRows?.[0]?.depop_map || null,
-              
-                vendoo_condition_ebay:
-                  vendooEbayConditionRows?.[0]?.ebay_conditions || null,
-                vendoo_condition_ebay_option:
-                  vendooEbayConditionRows?.[0]?.condition_options || null
-              };
-              
-              console.log("[intake.ACTIVE] vendoo_mapping (POST)", vendoo_mapping);
+              // ⭐ Unified shared Vendoo mapping call (UPDATE ACTIVE)
+              vendoo_mapping = await buildVendooMapping(sql, tenant_id, item_id);
+              console.log("[intake.ACTIVE_UPDATE] vendoo_mapping (POST)", vendoo_mapping);
             
               // Handle per-marketplace DELETE intent (e.g., deselecting the eBay tile on update)
              if (EBAY_MARKETPLACE_ID && intentMarketplaces.length) {
@@ -1732,7 +1843,7 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
           });
 
           // 🟦 Log exactly what we're about to return for vendoo_mapping
-          console.log("[intake.ACTIVE] vendoo_mapping (RETURN)", {
+          console.log("[intake.ACTIVE_retrun] vendoo_mapping (RETURN)", {
             tenant_id,
             item_id,
             vendoo_mapping
@@ -1807,6 +1918,52 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
     // === CREATE DRAFT: store any provided inventory fields; also upsert listing if sent ===
     if (isDraft) {
       console.log("[intake] branch", { kind: "CREATE_DRAFT" });
+      // ⭐ NEW: Optional SKU creation for draft create
+      let draftSkuCreate: string | null = null;
+    
+      if (inv?.category_nm) {
+        const catRowsCreate = await sql`
+          SELECT category_code
+          FROM app.sku_categories
+          WHERE category_name = ${inv.category_nm}
+          LIMIT 1
+        `;
+        if (catRowsCreate.length > 0) {
+          const category_code_c = catRowsCreate[0].category_code;
+    
+          // Allocate next number
+          const seqRowsCreate = await sql`
+            SELECT last_number
+            FROM app.sku_sequence
+            WHERE tenant_id = ${tenant_id} AND category_code = ${category_code_c}
+            FOR UPDATE
+          `;
+          let nextCreate = 0;
+    
+          if (seqRowsCreate.length === 0) {
+            await sql`
+              INSERT INTO app.sku_sequence (tenant_id, category_code, last_number)
+              VALUES (${tenant_id}, ${category_code_c}, 0)
+              ON CONFLICT DO NOTHING
+            `;
+            nextCreate = 1;
+            await sql`
+              UPDATE app.sku_sequence
+              SET last_number = ${nextCreate}
+              WHERE tenant_id = ${tenant_id} AND category_code = ${category_code_c}
+            `;
+          } else {
+            nextCreate = Number(seqRowsCreate[0].last_number || 0) + 1;
+            await sql`
+              UPDATE app.sku_sequence
+              SET last_number = ${nextCreate}
+              WHERE tenant_id = ${tenant_id} AND category_code = ${category_code_c}
+            `;
+          }
+    
+          draftSkuCreate = `${category_code_c}${String(nextCreate).padStart(4, "0")}`;
+        }
+      }
       const invRows = await sql<{ item_id: string }[]>`
         WITH s AS (
           SELECT set_config('app.actor_user_id', ${actor_user_id}, true)
@@ -1814,7 +1971,7 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
         INSERT INTO app.inventory
           (tenant_id, sku, product_short_title, price, qty, cost_of_goods, category_nm, instore_loc, case_bin_shelf, instore_online, item_status)
         VALUES
-          (${tenant_id}, NULL, ${inv.product_short_title}, ${inv.price}, ${inv.qty}, ${inv.cost_of_goods},
+          (${tenant_id}, ${draftSkuCreate}, ${inv.product_short_title}, ${inv.price}, ${inv.qty}, ${inv.cost_of_goods},
            ${inv.category_nm}, ${inv.instore_loc}, ${inv.case_bin_shelf}, ${inv.instore_online}, 'draft')
         RETURNING item_id
       `;
@@ -1939,19 +2096,19 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
       }
 
       // 🟦 Log exactly what we're about to return for vendoo_mapping
-      console.log("[intake.ACTIVE] vendoo_mapping (RETURN)", {
-        tenant_id,
-        item_id,
-        vendoo_mapping
-      });
+     // console.log("[intake.ACTIVE_return] vendoo_mapping (RETURN)", {
+     //   tenant_id,
+     //   item_id,
+     //   vendoo_mapping
+     // });
       
       return json({
         ok: true,
         item_id,
-        sku: null,
+        sku: draftSkuCreate,
         status: "draft",
         intent: { marketplaces: intentMarketplaces },
-        vendoo_mapping,
+       // vendoo_mapping,
         ms: Date.now() - t0
       }, 200);
     }
@@ -2132,115 +2289,19 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
       ORDER BY created_at ASC
     `;
 
-    // ⭐ FIX: hydrate listing profile before computing Vendoo mappings (CREATE_ACTIVE)
-    const hydratedLstRows = await sql/*sql*/`
-      SELECT
-        listing_category_key, condition_key, brand_key, color_key, shipping_box_key,
-        listing_category, item_condition, brand_name, primary_color, shipping_box,
-        weight_lb, weight_oz, shipbx_length, shipbx_width, shipbx_height
-        
-      FROM app.item_listing_profile
-      WHERE item_id = ${item_id} AND tenant_id = ${tenant_id}
-      LIMIT 1
-    `;
-    const hydrated = hydratedLstRows[0] || {};
-    console.log("[intake.CREATE_ACTIVE] hydrated listing for Vendoo mapping", hydrated);
-    
-    // ⭐ NEW — build Vendoo mapping for POST responses
+    // ⭐ Unified shared Vendoo mapping call (CREATE ACTIVE)
+    const vendoo_mapping = await buildVendooMapping(sql, tenant_id, item_id);
+    console.log("[intake.Shared1] vendoo_mapping (POST)", vendoo_mapping);
 
-    // Prefer the UUID key; we key mappings by this
-    const listingCategoryKey =
-      lst.listing_category_key || null;
-    
-    // Load category mapping (expects category_key_uuid)
-    const vendooCatRows = await loadVendooCategoryMap(
-      sql,
-      tenant_id,
-      listingCategoryKey
-    );
-    
-    // Derive per-marketplace categories from rows
-    let category_vendoo: string | null = null;
-    let category_ebay: string | null = null;
-    let category_facebook: string | null = null;
-    let category_depop: string | null = null;
-    let conditionOptions: string | null = null; // for eBay condition mapping
-
-    if (Array.isArray(vendooCatRows)) {
-      for (const r of vendooCatRows) {
-        const mp = Number(r.marketplace_id);
-        if (mp === 13) {
-          category_vendoo = r.vendoo_category_path || null;
-        }
-        if (mp === 1) {
-          category_ebay = r.vendoo_category_path || null;
-          // eBay row also carries condition_options we use below
-          conditionOptions = conditionOptions || r.condition_options || null;
-        }
-        if (mp === 2) {
-          category_facebook = r.vendoo_category_path || null;
-        }
-        if (mp === 4) {
-          category_depop = r.vendoo_category_path || null;
-        }
-      }
-    }
-    
-    
-    // Load base condition mapping
-    const vendooCondRows = await loadMarketplaceConditions(
-      sql,
-      tenant_id,
-      hydrated.item_condition || null
-    );
-
-    // Load Vendoo–eBay condition mapping, using condition_options from the category row
-    let vendooEbayRows: any[] = [];
-    //let conditionOptions: string | null = null;
-
-    if (Array.isArray(vendooCatRows) && vendooCatRows.length > 0) {
-      const ebayRow = vendooCatRows.find(
-        (r: any) => Number(r.marketplace_id) === 1
-      );
-      conditionOptions = ebayRow?.condition_options || null;
-    }
-
-    if (hydrated.item_condition && conditionOptions) {
-      vendooEbayRows = await loadVendooEbayConditionMap(
-        sql,
-        tenant_id,
-        hydrated.item_condition,
-        conditionOptions
-      );
-    }
-
-   // Shape mapping in the SAME format as GET /api/inventory/intake
-    const vendoo_mapping = {
-      // Category mapping
-      category_key: listingCategoryKey || null,
-      category_vendoo,
-      category_ebay,
-      category_facebook,
-      category_depop,
-      // Base condition mapping
-      condition_main: vendooCondRows?.[0]?.vendoo_map || null,
-      condition_fb: vendooCondRows?.[0]?.fb_map || null,
-      condition_depop: vendooCondRows?.[0]?.depop_map || null,
-
-      // Vendoo–eBay condition mapping
-      condition_ebay: vendooEbayRows?.[0]?.ebay_conditions || null,
-      condition_ebay_option: vendooEbayRows?.[0]?.condition_options || null,
-    };
-
-    console.log("[intake.ACTIVE] vendoo_mapping (POST)", {
-      tenant_id,
-      item_id,
-      listingCategoryKey,
-      item_condition: hydrated.item_condition,
-      vendoo_mapping,
-    });
     const job_ids = Array.isArray(enqueued) ? enqueued.map((r: any) => String(r.job_id)) : [];
 
+   // 🟦 Log exactly what we're about to return for vendoo_mapping
+    console.log("[intake.ACTIVE_Create_return] vendoo_mapping (RETURN)", {
+      tenant_id,
+      item_id,
+      vendoo_mapping
+    });  
+    
     return json({
       ok: true,
       item_id,
