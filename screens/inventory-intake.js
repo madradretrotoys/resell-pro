@@ -2958,6 +2958,51 @@ function setMarketplaceVisibility() {
         });
 
         // begin vendoo process
+        /** Vendoo: handle result from Tampermonkey and call callback API */
+        window.addEventListener("message", async (ev) => {
+          try {
+            // Only trust messages from our own origin
+            if (ev.origin !== location.origin) return;
+
+            const data = ev.data || {};
+            if (data.type !== "mrad_vendoo_result") return;
+
+            const payload = data.payload || {};
+            console.log("[vendoo] received mrad_vendoo_result from Vendoo window", payload);
+
+            const itemId   = payload.item_id || null;
+            const tenantId = payload.tenant_id || null;
+
+            if (!itemId || !tenantId) {
+              console.warn("[vendoo] mrad_vendoo_result missing item_id or tenant_id", {
+                itemId,
+                tenantId,
+                payload,
+              });
+              return;
+            }
+
+            try {
+              const res = await api("/api/marketplaces/vendoo/callback", {
+                method: "POST",
+                headers: { "content-type": "application/json" },
+                body: JSON.stringify(payload),
+              });
+              console.log("[vendoo] vendoo.callback API response", res);
+            } catch (err) {
+              console.error("[vendoo] error POSTing /api/marketplaces/vendoo/callback", err);
+            }
+
+            // After callback, refresh the Vendoo tile to reflect live status/URL
+            try { await refreshVendooTile(); } catch (e) {
+              console.warn("[vendoo] refreshVendooTile error after callback", e);
+            }
+          } catch (err) {
+            console.error("[vendoo] message handler error for mrad_vendoo_result", err);
+          }
+        });
+
+  
         // ===== Vendoo: payload builder + emit helper (Tampermonkey bridge) =====
         function rpBuildVendooPayload(detail) {
           console.log("[vendoo] rpBuildVendooPayload: incoming detail", detail);
