@@ -1971,7 +1971,7 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
         INSERT INTO app.inventory
           (tenant_id, sku, product_short_title, price, qty, cost_of_goods, category_nm, instore_loc, case_bin_shelf, instore_online, item_status)
         VALUES
-          (${tenant_id}, NULL, ${inv.product_short_title}, ${inv.price}, ${inv.qty}, ${inv.cost_of_goods},
+          (${tenant_id}, sku, ${inv.product_short_title}, ${inv.price}, ${inv.qty}, ${inv.cost_of_goods},
            ${inv.category_nm}, ${inv.instore_loc}, ${inv.case_bin_shelf}, ${inv.instore_online}, 'draft')
         RETURNING item_id
       `;
