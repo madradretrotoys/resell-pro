@@ -29,7 +29,8 @@ export async function init() {
   
     el.value = title ? `${title}\n\n${BASE_DESCRIPTION}` : BASE_DESCRIPTION;
   }
-  
+
+    
   // ====== Photos state & helpers (NEW) ======
   const MAX_PHOTOS = 15;
   let __photos = [];              // [{image_id, cdn_url, is_primary, sort_order, r2_key, width, height, bytes, content_type}]
@@ -2225,7 +2226,10 @@ function setMarketplaceVisibility() {
         try { computeValidity(); } catch {}
       } else {
         // Generic placeholder card for other marketplaces (no filler lists yet)
-        
+        body.innerHTML = `
+          <div class="muted text-sm">Marketplace-specific fields coming soon.</div>
+        `;
+        card.appendChild(body);
       }
 
       return card;

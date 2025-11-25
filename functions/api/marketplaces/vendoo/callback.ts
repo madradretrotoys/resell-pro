@@ -1,8 +1,5 @@
 import { neon } from "@neondatabase/serverless";
 
-// Vendoo callback: updates the existing stub row in app.item_marketplace_listing
-// using the Vendoo item id + URL that Tampermonkey sends back.
-// Pattern is intentionally parallel to facebook/callback.ts.
 export const onRequestPost = async ({ request, env }) => {
   const sql = neon(env.DATABASE_URL);
   const body = await request.json().catch(() => ({}));
@@ -10,94 +7,120 @@ export const onRequestPost = async ({ request, env }) => {
   console.log("[vendoo.callback] raw body →", body);
 
   const item_id = String(body?.item_id || "").trim();
-  const status  = String(body?.status || "").trim().toLowerCase();
-  const message = String(body?.message || "").trim() || null;
+  const tenant_id = String(body?.tenant_id || "").trim();
+  
+  if (!item_id) {
+    return new Response(JSON.stringify({ ok: false, error: "missing_item_id" }), {
+      status: 400,
+      headers: { "content-type": "application/json" }
+    });
+  }
+  
+  if (!tenant_id) {
+    return new Response(JSON.stringify({ ok: false, error: "missing_tenant_id" }), {
+      status: 400,
+      headers: { "content-type": "application/json" }
+    });
+  }
+  
+  console.log("[vendoo.callback] using item_id + tenant_id →", { item_id, tenant_id });
 
-  // Vendoo-specific fields coming from the app / Tampermonkey
-  const vendoo_item_number =
-    body?.vendoo_item_number ? String(body.vendoo_item_number).trim() : null;
-  const vendoo_item_url =
-    body?.vendoo_item_url ? String(body.vendoo_item_url).trim() : null;
+  const vendooRoot = body?.vendoo || {};
+  const marketplaces = body?.marketplaces || {};
 
-  console.log("[vendoo.callback] parsed →", {
-    item_id,
-    status,
-    message,
-    vendoo_item_number,
-    vendoo_item_url,
+  // -------------------------
+  // Helper: map Vendoo → DB
+  // -------------------------
+  const normalizeStatus = (s) => {
+    if (!s) return "error";
+    const t = s.toLowerCase().trim();
+    if (t === "listed") return "live";
+    if (t === "error") return "error";
+    return "error";
+  };
+
+  // -------------------------
+  // Marketplace id map
+  // -------------------------
+  const MP_IDS = {
+    ebay: 1,
+    facebook: 2,
+    whatnot: 3,
+    depop: 4,
+    shopify: 5,
+    vendoo: 13
+  };
+
+  const updates = [];
+
+  // ------------------------------------------
+  // 1) Process Vendoo (marketplace_id = 13)
+  // ------------------------------------------
+  updates.push({
+    marketplace: "vendoo",
+    marketplace_id: 13,
+    mp_item_id: vendooRoot?.id ?? null,
+    mp_item_url: vendooRoot?.url ?? null,
+    status: normalizeStatus(vendooRoot?.raw?.status ?? "listed")
   });
 
-  // Require a valid item_id and a normalized status we understand
-  if (!item_id || !["live", "error"].includes(status)) {
-    console.warn("[vendoo.callback] bad payload — skipping DB write");
-    return new Response(
-      JSON.stringify({ ok: false, error: "bad_payload" }),
-      {
-        status: 400,
-        headers: { "content-type": "application/json" },
-      }
-    );
+  // ------------------------------------------
+  // 2) Process each marketplace (ebay/shopify/whatnot)
+  // ------------------------------------------
+  for (const [mpName, mpData] of Object.entries(marketplaces)) {
+    if (!(mpName in MP_IDS)) continue;
+
+    updates.push({
+      marketplace: mpName,
+      marketplace_id: MP_IDS[mpName],
+      mp_item_id: vendooRoot?.id ?? null,                // per Melissa: vendoo.id in mp_item_id
+      mp_item_url: mpData?.listing_url ?? null,          // marketplace listing URL
+      status: normalizeStatus(mpData?.status)            // listed → live
+    });
   }
 
-  // Vendoo marketplace id (keep this in sync with your seed data)
-  const marketplace_id = 13; // Vendoo
+  console.log("[vendoo.callback] normalized updates →", updates);
 
-  try {
-    console.log("[vendoo.callback] updating DB →", {
-      item_id,
-      marketplace_id,
-      status,
-      vendoo_item_number,
-      vendoo_item_url,
-    });
+  // ------------------------------------------
+  // 3) Write to DB
+  // ------------------------------------------
+  let successful = 0;
 
-    // 1) Update the existing stub row created earlier (status: 'publishing')
-    //    We only UPDATE, same as the Facebook temp flow.
-    const result = await sql`
-      UPDATE app.item_marketplace_listing
-         SET status     = ${status},
-             last_error = ${message},
-             mp_item_id = COALESCE(${vendoo_item_number}, app.item_marketplace_listing.mp_item_id),
-             mp_item_url = COALESCE(${vendoo_item_url}, app.item_marketplace_listing.mp_item_url),
-             updated_at = NOW()
-       WHERE item_id = ${item_id}
-         AND marketplace_id = ${marketplace_id};
-    `;
+  for (const row of updates) {
+    try {
+      console.log("[vendoo.callback] writing:", row);
 
-    // 2) If nothing was updated, report clearly (we won't INSERT in this flow)
-    const updated =
-      Array.isArray(result) ? result[0]?.rowCount ?? 0 : result?.rowCount ?? 0;
+      const result = await sql`
+        UPDATE app.item_marketplace_listing
+           SET status     = ${row.status},
+               mp_item_id = ${row.mp_item_id},
+               mp_item_url = ${row.mp_item_url},
+               updated_at = NOW()
+         WHERE item_id = ${item_id}
+           AND marketplace_id = ${row.marketplace_id};
+      `;
 
-    if (!updated) {
-      console.warn(
-        "[vendoo.callback] no row updated — missing stub? item_id:",
-        item_id,
-        "mp:",
-        marketplace_id
-      );
-      return new Response(
-        JSON.stringify({ ok: false, error: "missing_stub_row" }),
-        {
-          status: 409,
-          headers: { "content-type": "application/json" },
-        }
-      );
+      const count =
+        Array.isArray(result)
+          ? result[0]?.rowCount ?? 0
+          : result?.rowCount ?? 0;
+
+      if (!count) {
+        console.warn("[vendoo.callback] ❗ No stub row found:", row);
+      } else {
+        successful++;
+      }
+    } catch (err) {
+      console.error("[vendoo.callback] ❌ DB error", err);
     }
-
-    console.log("[vendoo.callback] DB write complete ✅");
-
-    return new Response(JSON.stringify({ ok: true }), {
-      headers: { "content-type": "application/json" },
-    });
-  } catch (err) {
-    const msg = (err && (err.message || err.toString())) || "unknown";
-    console.error("[vendoo.callback] DB error ❌", msg);
-    return new Response(
-      JSON.stringify({ ok: false, error: "db_error", detail: msg }),
-      {
-        status: 500,
-        headers: { "content-type": "application/json" },
-      }
-    );
   }
+
+  return new Response(
+    JSON.stringify({
+      ok: true,
+      updated: successful,
+      attempted: updates.length
+    }),
+    { headers: { "content-type": "application/json" } }
+  );
 };
