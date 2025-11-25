@@ -29,6 +29,23 @@ export async function init() {
   
     el.value = title ? `${title}\n\n${BASE_DESCRIPTION}` : BASE_DESCRIPTION;
   }
+
+  function revealMissingFields() {
+    const valid = computeValidity();  // this sets all current errors
+  
+    if (valid) return;
+  
+    // scroll to first error
+    const firstError = document.querySelector('.border-red-500');
+    if (firstError) {
+      firstError.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+  
+    // optional toast
+    if (window.uiToast) {
+      uiToast("Please complete the highlighted required fields.");
+    }
+  }
   
   // ====== Photos state & helpers (NEW) ======
   const MAX_PHOTOS = 15;
