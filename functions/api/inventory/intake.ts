@@ -1344,7 +1344,7 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
             sku: updInv[0].sku,
             status,
             intent: { marketplaces: intentMarketplaces },
-            vendoo_mapping,
+           // vendoo_mapping,
             ms: Date.now() - t0
           }, 200);
         }
