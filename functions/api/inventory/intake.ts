@@ -1226,6 +1226,53 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
 
         // === DRAFT UPDATE: update any inventory fields; also upsert listing if sent ===
         if (isDraft) {
+           // ⭐ NEW: Optional SKU creation for draft updates
+          let draftSku = existing[0].sku;
+        
+          if (!draftSku && inv?.category_nm) {
+            // Lookup category code
+            const catRowsDraft = await sql`
+              SELECT category_code 
+              FROM app.sku_categories 
+              WHERE category_name = ${inv.category_nm}
+              LIMIT 1
+            `;
+            if (catRowsDraft.length > 0) {
+              const category_code_d = catRowsDraft[0].category_code;
+        
+              // Allocate next sequence number
+              const seqRowsDraft = await sql`
+                SELECT last_number 
+                FROM app.sku_sequence
+                WHERE tenant_id = ${tenant_id} AND category_code = ${category_code_d}
+                FOR UPDATE
+              `;
+              let nextDraft = 0;
+        
+              if (seqRowsDraft.length === 0) {
+                await sql`
+                  INSERT INTO app.sku_sequence (tenant_id, category_code, last_number)
+                  VALUES (${tenant_id}, ${category_code_d}, 0)
+                  ON CONFLICT DO NOTHING
+                `;
+                nextDraft = 1;
+                await sql`
+                  UPDATE app.sku_sequence
+                  SET last_number = ${nextDraft}
+                  WHERE tenant_id = ${tenant_id} AND category_code = ${category_code_d}
+                `;
+              } else {
+                nextDraft = Number(seqRowsDraft[0].last_number || 0) + 1;
+                await sql`
+                  UPDATE app.sku_sequence
+                  SET last_number = ${nextDraft}
+                  WHERE tenant_id = ${tenant_id} AND category_code = ${category_code_d}
+                `;
+              }
+        
+              draftSku = `${category_code_d}${String(nextDraft).padStart(4, "0")}`;
+            }
+          }
           const updInv = await sql<{ item_id: string; sku: string | null }[]>`
             WITH s AS (
               SELECT set_config('app.actor_user_id', ${actor_user_id}, true)
@@ -1871,6 +1918,52 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
     // === CREATE DRAFT: store any provided inventory fields; also upsert listing if sent ===
     if (isDraft) {
       console.log("[intake] branch", { kind: "CREATE_DRAFT" });
+      // ⭐ NEW: Optional SKU creation for draft create
+      let draftSkuCreate: string | null = null;
+    
+      if (inv?.category_nm) {
+        const catRowsCreate = await sql`
+          SELECT category_code
+          FROM app.sku_categories
+          WHERE category_name = ${inv.category_nm}
+          LIMIT 1
+        `;
+        if (catRowsCreate.length > 0) {
+          const category_code_c = catRowsCreate[0].category_code;
+    
+          // Allocate next number
+          const seqRowsCreate = await sql`
+            SELECT last_number
+            FROM app.sku_sequence
+            WHERE tenant_id = ${tenant_id} AND category_code = ${category_code_c}
+            FOR UPDATE
+          `;
+          let nextCreate = 0;
+    
+          if (seqRowsCreate.length === 0) {
+            await sql`
+              INSERT INTO app.sku_sequence (tenant_id, category_code, last_number)
+              VALUES (${tenant_id}, ${category_code_c}, 0)
+              ON CONFLICT DO NOTHING
+            `;
+            nextCreate = 1;
+            await sql`
+              UPDATE app.sku_sequence
+              SET last_number = ${nextCreate}
+              WHERE tenant_id = ${tenant_id} AND category_code = ${category_code_c}
+            `;
+          } else {
+            nextCreate = Number(seqRowsCreate[0].last_number || 0) + 1;
+            await sql`
+              UPDATE app.sku_sequence
+              SET last_number = ${nextCreate}
+              WHERE tenant_id = ${tenant_id} AND category_code = ${category_code_c}
+            `;
+          }
+    
+          draftSkuCreate = `${category_code_c}${String(nextCreate).padStart(4, "0")}`;
+        }
+      }
       const invRows = await sql<{ item_id: string }[]>`
         WITH s AS (
           SELECT set_config('app.actor_user_id', ${actor_user_id}, true)
