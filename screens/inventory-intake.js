@@ -507,49 +507,38 @@ export async function init() {
   }
 
   
-  // Wire inputs
-  function wirePhotoPickers() {
-    // Camera modal open
-    $("openCameraBtn")?.addEventListener("click", async ()=>{
-      const dlg = $("cameraDialog");
-      const video = $("cameraVideo");
-      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" }, audio: false }).catch(()=>null);
-      if (!stream) { alert("Camera not available. Use Upload Photo."); return; }
-      video.srcObject = stream;
-      dlg.showModal();
+    // Wire inputs
+    function wirePhotoPickers() {
+      // Camera “Take Photo” — use native camera UI via hidden file input
+      $("openCameraBtn")?.addEventListener("click", () => {
+        const input = $("photoCameraInput");
+        if (!input) {
+          alert("Camera input not available. Please use Upload Photo instead.");
+          return;
+        }
   
-      const stop = ()=>{ try { stream.getTracks().forEach(t=>t.stop()); } catch {} };
+        // Respect max-photos limit
+        if (__photos.length + __pendingFiles.length >= MAX_PHOTOS) {
+          alert(`You can only attach up to ${MAX_PHOTOS} photos.`);
+          return;
+        }
   
-      $("cameraCancelBtn").onclick = ()=>{ stop(); dlg.close(); };
-      $("cameraSnapBtn").onclick   = async ()=>{
-        const canvas = $("cameraCanvas");
-        const ctx = canvas.getContext("2d");
-        // draw current frame
-        const vw = video.videoWidth || 1280, vh = video.videoHeight || 720;
-        canvas.width = vw; canvas.height = vh;
-        ctx.drawImage(video, 0, 0, vw, vh);
-        canvas.toBlob(async (blob)=>{
-          if (!blob) return;
-          stop();
-          dlg.close();
-          const file = new File([blob], `camera_${Date.now()}.jpg`, { type: "image/jpeg" });
-          const ds = await downscaleToBlob(file);
+        // Trigger the native camera app (with zoom, HDR, etc.)
+        input.click();
+      });
+  
+      // Camera input (opens native camera on mobile)
+      $("photoCameraInput")?.addEventListener("change", async (e) => {
+        const files = Array.from(e.target.files || []);
+        for (const f of files) {
+          if (__photos.length + __pendingFiles.length >= MAX_PHOTOS) break;
+          const ds = await downscaleToBlob(f);
           await uploadAndAttach(ds);
-        }, "image/jpeg", 0.92);
-      };
-    });
-  
-    // Fallback “camera” input (kept hidden)
-    $("photoCameraInput")?.addEventListener("change", async (e) => {
-      const files = Array.from(e.target.files || []);
-      for (const f of files) {
-        if (__photos.length + __pendingFiles.length >= MAX_PHOTOS) break;
-        const ds = await downscaleToBlob(f);
-        await uploadAndAttach(ds);
-      }
-      e.target.value = "";
-      try { computeValidity(); } catch {}
-    });
+        }
+        e.target.value = "";
+        try { computeValidity(); } catch {}
+      });
+
   
     // Upload from gallery/files
     $("photoFileInput")?.addEventListener("change", async (e) => {
