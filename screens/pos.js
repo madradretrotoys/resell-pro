@@ -720,6 +720,7 @@ export async function init(ctx) {
             
               // Terminal Approved → advance to next card part, or finalize once when all parts are done
               if (el.valorApprove) el.valorApprove.onclick = async () => {
+                setUiLocked(false);
                 try {
                   el.valorApprove.disabled = true;
                   el.valorRetry.disabled = true;
