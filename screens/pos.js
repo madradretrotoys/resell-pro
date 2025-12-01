@@ -690,7 +690,15 @@ export async function init(ctx) {
               if (window.__ffTimerHandle) clearTimeout(window.__ffTimerHandle);
               window.__ffTimerHandle = setTimeout(() => {
                 if (el.valorModalInvoice) el.valorModalInvoice.textContent = "—";
-                if (el.valorModal) el.valorModal.style.display = "";
+                if (el.valorModal) {
+                  if (el.valorModal.showModal) {
+                    el.valorModal.showModal();
+                  } else {
+                    el.valorModal.style.display = "block";
+                  }
+                  el.valorModal.focus();
+                  el.valorModal.scrollIntoView({ behavior: "smooth", block: "center" });
+                }
               }, 10000);
             }
             // --- /timer ---
@@ -742,7 +750,15 @@ export async function init(ctx) {
                       if (window.__ffTimerHandle) clearTimeout(window.__ffTimerHandle);
                       window.__ffTimerHandle = setTimeout(() => {
                         if (el.valorModalInvoice) el.valorModalInvoice.textContent = "—";
-                        if (el.valorModal) el.valorModal.style.display = "";
+                        if (el.valorModal) {
+                          if (el.valorModal.showModal) {
+                            el.valorModal.showModal();
+                          } else {
+                            el.valorModal.style.display = "block";
+                          }
+                          el.valorModal.focus();
+                          el.valorModal.scrollIntoView({ behavior: "smooth", block: "center" });
+                        }
                       }, 10000);
               
                       // Publish this slice to /start (override total to the slice amount)
