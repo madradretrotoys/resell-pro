@@ -957,7 +957,8 @@ export async function init(ctx) {
       if (to) q.set("to", to);
       const res = await api(`/api/pos/sales?${q.toString()}`, { method: "GET" });
       const rows = res?.rows || [];
-      el.salesBody.innerHTML = rows
+      // build all rows
+      let html = rows
         .map((r) => {
           return `<tr>
             <td class="whitespace-nowrap">${escapeHtml(r.time)}</td>
@@ -975,6 +976,20 @@ export async function init(ctx) {
           </tr>`;
         })
         .join("");
+      
+      // compute grand total
+      const grand = rows.reduce((sum, r) => sum + Number(r.total || 0), 0);
+      
+      // append TOTAL row
+      html += `
+        <tr class="font-semibold border-t">
+          <td colspan="3" class="text-right pr-4">Grand Total:</td>
+          <td class="whitespace-nowrap">${fmtCurrency(grand)}</td>
+          <td></td>
+        </tr>
+      `;
+      
+      el.salesBody.innerHTML = html;
     } catch (err) {
       log(`sales load failed: ${err?.message || err}`);
     }
