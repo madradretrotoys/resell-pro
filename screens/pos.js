@@ -208,12 +208,32 @@ export async function init(ctx) {
     }
   }
   
+  function hideValorModal() {
+    if (!el.valorModal) return;
+  
+    // Properly close <dialog> so its backdrop stops intercepting clicks
+    if (typeof el.valorModal.close === "function") {
+      try {
+        el.valorModal.close();
+      } catch {
+        // ignore if already closed
+      }
+    }
+  
+    // Fallback for non-<dialog> environments
+    el.valorModal.style.display = "none";
+  }
+  
   async function resetScreen() {
     // Cancel any pending force-finalize timer between sales
     if (window.__ffTimerHandle) { clearTimeout(window.__ffTimerHandle); window.__ffTimerHandle = null; }
+    
+    // Clear all transient UI and state to prepare for next sale
+    //if (el.valorModal) el.valorModal.style.display = "none";
 
     // Clear all transient UI and state to prepare for next sale
-    if (el.valorModal) el.valorModal.style.display = "none";
+    hideValorModal();
+    
     if (el.valorBar) el.valorBar.classList.add("hidden");
     if (el.banner) {
       el.banner.classList.add("hidden");
@@ -828,8 +848,8 @@ export async function init(ctx) {
             
               // Retry — resend the CURRENT card slice; also unlock UI for edits
               if (el.valorRetry) el.valorRetry.onclick = async () => {
-                // Close modal; keep the bar visible while retrying
-                if (el.valorModal) el.valorModal.style.display = "none";
+               // Close modal; keep the bar visible while retrying
+                hideValorModal();
                 el.valorBar?.classList.remove("hidden");
                 el.valorMsg.textContent = "Waiting…";
               
@@ -900,8 +920,9 @@ export async function init(ctx) {
               if (window.__ffTimerHandle) { clearTimeout(window.__ffTimerHandle); window.__ffTimerHandle = null; }
               // Ensure Valor UI stays hidden for non-card flows
               if (el.valorBar) el.valorBar.classList.add("hidden");
-              if (el.valorModal) el.valorModal.style.display = "none";
-
+              hideValorModal();
+              
+              
               state.cardSeqIndex = -1; // clean slate for next sale
               showBanner(`Sale completed. Receipt #${escapeHtml(res.sale_id)}`);
               await resetScreen();
