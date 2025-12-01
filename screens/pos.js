@@ -28,6 +28,9 @@ export async function init(ctx) {
     cart: root.querySelector("#pos-cart"),
     discountInput: root.querySelector("#pos-discount-input"),
     discountApply: root.querySelector("#pos-discount-apply"),
+    ticketDiscountInput: root.querySelector("#pos-ticket-discount-input"),
+    ticketDiscountApply: root.querySelector("#pos-ticket-discount-apply"),
+    ticketDiscountMode: root.querySelectorAll("input[name='pos-ticket-discount-mode']"),
     ticketEmpty: root.querySelector("#pos-ticket-empty"),
     // totals
     subtotal: root.querySelector("#pos-subtotal"),
@@ -281,6 +284,8 @@ export async function init(ctx) {
 
     // sequencing for split card flows (-1 = not sequencing; otherwise index in payment.parts)
     cardSeqIndex: -1,
+    // ticket-level discount
+    ticketDiscount: { mode: "percent", value: 0 },
   };
 }
 
@@ -579,7 +584,22 @@ export async function init(ctx) {
           el.payment.value = ""; // reflect split (no single method selected)
           refreshCompleteEnabled();
         });
-    
+        // --- Ticket-level Discount Apply ---
+        el.ticketDiscountApply.addEventListener("click", async () => {
+          let mode = "percent";
+          el.ticketDiscountMode.forEach(r => {
+            if (r.checked) mode = r.value;
+          });
+
+          const val = Number(el.ticketDiscountInput.value || 0);
+
+          state.ticketDiscount = {
+            mode,
+            value: Number.isFinite(val) ? val : 0
+          };
+
+          await refreshTotalsViaServer();
+        });
         // ---------- COMPLETE ----------
         el.complete.addEventListener("click", async () => {
           if (!state.items.length || !state.payment) return;
@@ -1133,16 +1153,42 @@ export async function init(ctx) {
   
     function computeTotalsClient() {
       let subtotal = 0, discountTotal = 0;
+      
+      // Line-level discounts
       for (const it of state.items) {
         const line = (it.price || 0) * (it.qty || 0);
         subtotal += line;
+      
         const d = it.discount || { mode: "percent", value: 0 };
-        const ld = d.mode === "percent" ? (line * (Number(d.value || 0) / 100)) : Number(d.value || 0);
+        const ld =
+          d.mode === "percent"
+            ? (line * (Number(d.value || 0) / 100))
+            : Number(d.value || 0);
+      
         discountTotal += Math.min(ld, line);
       }
-      const taxable = Math.max(0, subtotal - discountTotal);
+      
+      // Ticket-level discount
+      let taxable = Math.max(0, subtotal - discountTotal);
+      
+      if (state.ticketDiscount) {
+        const t = state.ticketDiscount;
+        let td = 0;
+      
+        if (t.mode === "percent") {
+          td = taxable * (t.value / 100);
+        } else {
+          td = t.value;
+        }
+      
+        td = Math.min(td, taxable);
+        discountTotal += td;
+        taxable = Math.max(0, taxable - td);
+      }
+      
       const tax = taxable * Number(state.taxRate || 0);
       const total = taxable + tax;
+      
       state.totals = { subtotal, discount: discountTotal, tax, total };
     }
 
@@ -1156,7 +1202,10 @@ export async function init(ctx) {
       }
     
       try {
-        const body = { items: state.items };
+        const body = {
+          items: state.items,
+          ticket_discount: state.ticketDiscount
+        };
         const r = await api("/api/pos/price/preview", { method: "POST", json: body });
         if (r && typeof r.subtotal === "number") {
           state.totals = {
