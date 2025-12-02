@@ -146,12 +146,14 @@ export async function init(ctx) {
       });
       render();
     
-      // Put the caret in the newly-added Misc price field so you can type immediately
+     // Put the caret in the newly-added Misc price field so you can type immediately
+      // NOTE: items are newest-first, so the new Misc row is the FIRST data-price input.
       const priceInputs = el.cart.querySelectorAll("[data-price]");
-      const last = priceInputs[priceInputs.length - 1];
-      if (last) {
-        last.focus();
-        last.select?.();
+      const first = priceInputs[0];
+      if (first) {
+        first.scrollIntoView({ behavior: "smooth", block: "nearest" });
+        first.focus();
+        first.select?.();
       }
     });
   }
