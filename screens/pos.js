@@ -137,7 +137,7 @@ export async function init(ctx) {
     });
     // + Misc (adds a custom line so ticket UI can be tested without search)
     el.quickMisc.addEventListener("click", () => {
-      state.items.push({
+      state.items.unshift({
         sku: null,
         name: "Misc item",
         price: 0,
@@ -427,7 +427,7 @@ export async function init(ctx) {
         found.qty += 1;
         render();               // ensure the visible qty updates immediately
       } else {
-        state.items.push({
+        state.items.unshift({
           ...data,
           qty: 1,
           discount: { mode: "percent", value: 0 },
