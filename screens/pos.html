@@ -98,29 +98,32 @@
             </div>
           </div>
 
-          <!-- NEW: Ticket-level Discount -->
-          <div id="pos-ticket-discount" class="mt-3 p-2 border rounded">
-            <div class="text-sm text-muted mb-1">Ticket Discount</div>  
-              <label class="inline-flex items-center gap-1">
-                <input type="radio" name="ticket-discount-mode" value="percent" checked />
-                <span>%</span>
-              </label>
-            
-              <label class="inline-flex items-center gap-1">
-                <input type="radio" name="ticket-discount-mode" value="amount" />
-                <span>$</span>
-              </label>
-      
-              <input
-                id="pos-ticket-discount-input"
-                class="input input-sm w-[120px]"
-                placeholder="0"
-              />
-          
-              <button id="pos-ticket-discount-apply" class="btn btn-primary btn-sm">
-                Apply
-              </button>
-          </div>  
+         <!-- Ticket-level Discount -->
+        <div id="pos-ticket-discount" class="mt-3 p-2 border rounded">
+          <div class="pos-ticket-discount-row">
+            <div class="pos-ticket-discount-label">Ticket Discount</div>
+        
+            <label class="inline-flex items-center gap-1">
+              <input type="radio" name="ticket-discount-mode" value="percent" checked />
+              <span>%</span>
+            </label>
+        
+            <label class="inline-flex items-center gap-1">
+              <input type="radio" name="ticket-discount-mode" value="amount" />
+              <span>$</span>
+            </label>
+        
+            <input
+              id="pos-ticket-discount-input"
+              class="input input-sm pos-discount-val"
+              placeholder="0"
+            />
+        
+            <button id="pos-ticket-discount-apply" class="btn btn-primary btn-sm">
+              Apply
+            </button>
+          </div>
+        </div>
           
             <!-- PAYMENT ROW (single horizontal row; wraps nicely on small screens) -->
             <div class="mt-2 pos-pay-row pos-compact">
