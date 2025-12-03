@@ -583,6 +583,77 @@ label{
   flex-wrap: wrap;
 }
 
+/* ===== POS Ticket: Header row (Ticket + Empty) ===== */
+.pos-ticket-header{
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.pos-ticket-header #pos-ticket-empty{
+  margin-left: auto; /* hard push to far right */
+}
+
+/* ===== POS Ticket: QTY stacked above Price on the far right ===== */
+.ticket-controls--item{
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: nowrap;
+}
+
+.ticket-controls-left{
+  flex: 1 1 auto; /* intentionally empty spacer */
+  min-width: 0;
+}
+
+.ticket-controls-right{
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-left: auto;
+  flex: 0 0 auto;
+}
+
+.ticket-qty-price{
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 6px;
+}
+
+.ticket-qty{
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.ticket-qty-val{
+  width: 32px;
+  text-align: center;
+  font-weight: 600;
+}
+
+/* keep the price input/div aligned to the right in the stack */
+.ticket-price{
+  display: flex;
+  justify-content: flex-end;
+}
+
+/* Mobile: allow wrapping so nothing overflows */
+@media (max-width: 640px){
+  .ticket-controls--item{
+    flex-wrap: wrap;
+  }
+  .ticket-controls-right{
+    width: 100%;
+    justify-content: flex-end;
+  }
+}
+
+
+
 .ticket-line-total{
   min-width: 80px;
   text-align: right;
