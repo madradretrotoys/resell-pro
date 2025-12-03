@@ -650,9 +650,9 @@ label{
 /* ===== POS: compact line-level price field (Misc price) =====
    Goal: only ~7 characters visible (e.g., "1500.00") */
 #pos-cart .pos-line-price{
-  width: 7ch;
-  min-width: 7ch;
-  max-width: 8ch;              /* tiny breathing room */
+  width: 10ch;
+  min-width: 10ch;
+  max-width: 11ch;              /* tiny breathing room */
   padding-left: 8px;
   padding-right: 8px;
   text-align: right;
@@ -661,9 +661,9 @@ label{
 
 /* Keep inventoried price cell aligned to the same width as the input */
 #pos-cart .pos-line-price-static{
-  width: 7ch;
-  min-width: 7ch;
-  max-width: 8ch;
+  width: 10ch;
+  min-width: 10ch;
+  max-width: 11ch;
   padding-left: 8px;
   padding-right: 8px;
   text-align: right;
