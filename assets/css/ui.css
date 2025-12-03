@@ -594,33 +594,22 @@ label{
   margin-left: auto; /* hard push to far right */
 }
 
-/* ===== POS Ticket: QTY stacked above Price on the far right ===== */
-.ticket-controls--item{
+/* ===== POS Ticket: compact rows (QTY on same row as name) ===== */
+.ticket-title-row{
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
-  gap: 12px;
-  flex-wrap: nowrap;
+  gap: 10px;
 }
 
-.ticket-controls-left{
-  flex: 1 1 auto; /* intentionally empty spacer */
+.ticket-title-left{
+  flex: 1 1 auto;
   min-width: 0;
 }
 
-.ticket-controls-right{
-  display: flex;
-  align-items: center;
-  gap: 10px;
+.ticket-title-right{
   margin-left: auto;
   flex: 0 0 auto;
-}
-
-.ticket-qty-price{
-  display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  gap: 6px;
 }
 
 .ticket-qty{
@@ -630,25 +619,40 @@ label{
 }
 
 .ticket-qty-val{
-  width: 32px;
+  width: 28px;
   text-align: center;
   font-weight: 600;
 }
 
-/* keep the price input/div aligned to the right in the stack */
+/* Row 2 stays one-line tight */
+.ticket-controls--compact{
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  flex-wrap: nowrap;
+}
+
+.ticket-controls--compact .ticket-controls-right{
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-left: auto;
+}
+
+/* Price stays right-aligned */
 .ticket-price{
   display: flex;
   justify-content: flex-end;
 }
 
-/* Mobile: allow wrapping so nothing overflows */
+/* Mobile: allow wrap when truly needed */
 @media (max-width: 640px){
-  .ticket-controls--item{
-    flex-wrap: wrap;
+  .ticket-title-row{
+    align-items: center;
   }
-  .ticket-controls-right{
-    width: 100%;
-    justify-content: flex-end;
+  .ticket-controls--compact{
+    flex-wrap: wrap;
   }
 }
 
