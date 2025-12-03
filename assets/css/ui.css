@@ -690,63 +690,6 @@ label{
   gap: 8px;
   flex-wrap: wrap;        /* wrap gracefully on smaller widths */
 }
-/* ===== POS Action Strip: Discount (left) + Payment (right) + Complete Sale (right underneath) ===== */
-.pos-action-strip{
-  display: grid;
-  grid-template-columns: 1fr auto; /* left grows, right fits content */
-  grid-template-rows: auto auto;   /* top row, then button row */
-  column-gap: 16px;
-  row-gap: 10px;
-  align-items: center;
-}
-
-/* Place pieces explicitly */
-.pos-action-strip #pos-ticket-discount{
-  grid-column: 1;
-  grid-row: 1;
-}
-
-.pos-action-strip .pos-pay-top{
-  grid-column: 2;
-  grid-row: 1;
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  gap: 10px;
-  flex-wrap: nowrap; /* keep select + split on one line on desktop */
-}
-
-.pos-action-strip .pos-pay-bottom{
-  grid-column: 2;
-  grid-row: 2;
-  display: flex;
-  justify-content: flex-end;
-}
-
-/* Responsive: on small screens, stack everything */
-@media (max-width: 780px){
-  .pos-action-strip{
-    grid-template-columns: 1fr;
-    grid-template-rows: auto auto auto;
-  }
-  .pos-action-strip #pos-ticket-discount{
-    grid-column: 1;
-    grid-row: 1;
-  }
-  .pos-action-strip .pos-pay-top{
-    grid-column: 1;
-    grid-row: 2;
-    justify-content: flex-start;
-    flex-wrap: wrap; /* allow wrap on phones */
-  }
-  .pos-action-strip .pos-pay-bottom{
-    grid-column: 1;
-    grid-row: 3;
-    justify-content: stretch;
-  }
-}
-
-
 
 /* Ticket Discount: force single-line layout (wins vs any framework rules) */
 #pos-ticket-discount .pos-ticket-discount-row{
