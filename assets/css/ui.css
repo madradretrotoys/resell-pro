@@ -691,25 +691,53 @@ label{
   flex-wrap: wrap;        /* wrap gracefully on smaller widths */
 }
 
-/* Ticket Discount row: keep everything on one line on desktop */
-.pos-ticket-discount-row{
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  flex-wrap: nowrap;
+/* Ticket Discount: force single-line layout (wins vs any framework rules) */
+#pos-ticket-discount .pos-ticket-discount-row{
+  display: flex !important;
+  align-items: center !important;
+  gap: 10px !important;
+  flex-wrap: nowrap !important;
 }
-.pos-ticket-discount-label{
+
+#pos-ticket-discount .pos-ticket-discount-label{
   font-size: 14px;
   color: var(--muted);
   font-weight: 600;
   white-space: nowrap;
-  margin-right: 6px;
+  flex: 0 0 auto;
 }
 
-/* On small screens, allow Ticket Discount to wrap nicely */
+/* Labels in this row must NEVER become block and break the line */
+#pos-ticket-discount .pos-ticket-discount-row label{
+  display: inline-flex !important;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+  flex: 0 0 auto;
+  margin: 0;
+}
+
+/* If any global .input/.select CSS forces width:100%, kill it here */
+#pos-ticket-discount .pos-ticket-discount-row .input,
+#pos-ticket-discount .pos-ticket-discount-row .select,
+#pos-ticket-discount .pos-ticket-discount-row input,
+#pos-ticket-discount .pos-ticket-discount-row select,
+#pos-ticket-discount .pos-ticket-discount-row button{
+  width: auto !important;
+  flex: 0 0 auto !important;
+  max-width: 100%;
+}
+
+/* Keep discount value width stable */
+#pos-ticket-discount #pos-ticket-discount-input{
+  width: 120px !important;
+  text-align: left;
+}
+
+/* Mobile: allow wrap */
 @media (max-width: 640px){
-  .pos-ticket-discount-row{
-    flex-wrap: wrap;
+  #pos-ticket-discount .pos-ticket-discount-row{
+    flex-wrap: wrap !important;
   }
 }
 
