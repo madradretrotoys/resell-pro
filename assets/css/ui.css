@@ -647,6 +647,41 @@ label{
   align-items: center; /* NEW: fixes the "sunk" look */
 }
 
+/* ===== POS: compact line-level price field (Misc price) =====
+   Goal: only ~7 characters visible (e.g., "1500.00") */
+#pos-cart .pos-line-price{
+  width: 7ch;
+  min-width: 7ch;
+  max-width: 8ch;              /* tiny breathing room */
+  padding-left: 8px;
+  padding-right: 8px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Keep inventoried price cell aligned to the same width as the input */
+#pos-cart .pos-line-price-static{
+  width: 7ch;
+  min-width: 7ch;
+  max-width: 8ch;
+  padding-left: 8px;
+  padding-right: 8px;
+  text-align: right;
+  font-weight: 600;
+  line-height: 32px;           /* matches .input-sm height */
+  font-variant-numeric: tabular-nums;
+}
+
+/* On very small screens, squeeze slightly more */
+@media (max-width: 420px){
+  #pos-cart .pos-line-price,
+  #pos-cart .pos-line-price-static{
+    width: 6ch;
+    min-width: 6ch;
+    max-width: 7ch;
+  }
+}
+
 /* Keep the line total vertically aligned with the price input */
 .ticket-line-total{
   line-height: 32px; /* NEW: matches .input-sm height */
