@@ -1078,6 +1078,23 @@ export async function init(ctx) {
   
         <!-- ROW 2: controls (QTY stacked above Price at far right, then total + remove) -->
         <div class="ticket-controls ticket-controls--item">
+          <!-- ROW 3: discount (single line; Apply at far right) -->
+          <div class="mt-2 discount-row">
+            <span class="text-sm text-muted">Discount</span>
+            <div class="flex items-center gap-2">
+              <label class="inline-flex items-center gap-1">
+                <input type="radio" name="pos-discount-mode-${idx}" value="percent" ${modePercent ? "checked" : ""} />
+                <span>%</span>
+              </label>
+              <label class="inline-flex items-center gap-1">
+                <input type="radio" name="pos-discount-mode-${idx}" value="amount" ${!modePercent ? "checked" : ""} />
+                <span>$</span>
+              </label>
+            </div>
+            <input class="input input-sm w-[120px]" id="pos-discount-input-${idx}" value="${discVal}" placeholder="${modePercent ? 'Enter percent' : 'Enter dollars'}" />
+            <button class="btn btn-primary btn-sm" data-apply-discount="${idx}">Apply</button>
+          </div>
+          
           <div class="ticket-controls-left"></div>
         
           <div class="ticket-controls-right">
@@ -1094,24 +1111,6 @@ export async function init(ctx) {
             <button class="btn btn-danger btn-xs" data-remove="${idx}" ${state.uiLocked ? "disabled aria-disabled='true'" : ""}>Remove</button>
           </div>
         
-
-  
-        <!-- ROW 3: discount (single line; Apply at far right) -->
-        <div class="mt-2 discount-row">
-          <span class="text-sm text-muted">Discount</span>
-          <div class="flex items-center gap-2">
-            <label class="inline-flex items-center gap-1">
-              <input type="radio" name="pos-discount-mode-${idx}" value="percent" ${modePercent ? "checked" : ""} />
-              <span>%</span>
-            </label>
-            <label class="inline-flex items-center gap-1">
-              <input type="radio" name="pos-discount-mode-${idx}" value="amount" ${!modePercent ? "checked" : ""} />
-              <span>$</span>
-            </label>
-          </div>
-          <input class="input input-sm w-[120px]" id="pos-discount-input-${idx}" value="${discVal}" placeholder="${modePercent ? 'Enter percent' : 'Enter dollars'}" />
-          <button class="btn btn-primary btn-sm" data-apply-discount="${idx}">Apply</button>
-        </div>
         </div>
       </div>
     `;
