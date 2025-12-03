@@ -1073,22 +1073,23 @@ export async function init(ctx) {
             <button class="btn btn-xs" data-qty="${idx}|-">−</button>
             <span class="ticket-qty-val">${it.qty}</span>
             <button class="btn btn-xs" data-qty="${idx}|+">+</button>
-          </div>
+          
           
         
-          <div class="ticket-controls-right">
-            <div class="ticket-qty-price">
-              
-        
-              <div class="ticket-price">
-                ${priceCell}
+            <div class="ticket-controls-right">
+              <div class="ticket-qty-price">
+                
+          
+                <div class="ticket-price">
+                  ${priceCell}
+                </div>
               </div>
+          
+              <div class="ticket-line-total text-right">${lineTotal}</div>
+          
+             
             </div>
-        
-            <div class="ticket-line-total text-right">${lineTotal}</div>
-        
-           
-          </div>
+            </div>
         </div>
   
         <!-- ROW 2: controls (QTY stacked above Price at far right, then total + remove) -->
