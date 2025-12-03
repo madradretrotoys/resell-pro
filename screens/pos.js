@@ -1097,7 +1097,7 @@ export async function init(ctx) {
 
   
         <!-- ROW 3: discount (single line; Apply at far right) -->
-        //<div class="mt-2 discount-row">
+        <div class="mt-2 discount-row">
           <span class="text-sm text-muted">Discount</span>
           <div class="flex items-center gap-2">
             <label class="inline-flex items-center gap-1">
@@ -1111,7 +1111,7 @@ export async function init(ctx) {
           </div>
           <input class="input input-sm w-[120px]" id="pos-discount-input-${idx}" value="${discVal}" placeholder="${modePercent ? 'Enter percent' : 'Enter dollars'}" />
           <button class="btn btn-primary btn-sm" data-apply-discount="${idx}">Apply</button>
-        //</div>
+        </div>
         </div>
       </div>
     `;
