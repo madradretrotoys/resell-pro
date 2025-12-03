@@ -528,6 +528,30 @@ label{
   margin-top: 8px;
 }
 
+/* POS cart density + collapsible discount editor (Option A) */
+#pos-cart .ticket-row{
+  padding: 8px;   /* was 12px via .ticket-row */
+  gap: 3px;       /* was 4px via .ticket-row */
+}
+
+.discount-editor{
+  display: none; /* collapsed by default */
+  margin-top: 6px;
+}
+.ticket-row.is-discount-open .discount-editor{
+  display: block;
+}
+
+/* When the keyboard is open (short viewport), go extra-dense */
+@media (max-height: 720px){
+  #pos-cart .ticket-row{
+    padding: 6px;
+  }
+  .discount-editor{
+    margin-top: 4px;
+  }
+}
+
 /* Ticket header row should not wrap on desktop */
 @media (min-width: 641px){
   .pos-ticket-header{
@@ -566,13 +590,15 @@ label{
 }
 
 @media (max-width: 640px){
+  /* Keep controls in-row to avoid tall cards on tablets/phones */
   .ticket-controls{
-    flex-direction: column;
-    align-items: flex-end;
-    gap: 4px;
+    flex-direction: row;
+    align-items: center;
+    gap: 6px;
   }
   .ticket-line-total{
-    width: 100%;
+    width: auto;
+    min-width: 80px; /* keep total stable */
     text-align: right;
   }
 }
