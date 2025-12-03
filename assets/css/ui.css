@@ -691,7 +691,7 @@ label{
   flex-wrap: wrap;        /* wrap gracefully on smaller widths */
 }
 
-/* Ticket Discount: force single-line layout (wins vs any framework rules) */
+/* Ticket Discount + Payment (same row) */
 #pos-ticket-discount .pos-ticket-discount-row{
   display: flex !important;
   align-items: center !important;
@@ -699,6 +699,7 @@ label{
   flex-wrap: nowrap !important;
 }
 
+/* Label styling */
 #pos-ticket-discount .pos-ticket-discount-label{
   font-size: 14px;
   color: var(--muted);
@@ -734,10 +735,34 @@ label{
   text-align: left;
 }
 
+/* NEW: Right-side payment cluster pushed to the far right */
+#pos-ticket-discount .pos-ticket-pay-inline{
+  margin-left: auto !important;     /* THIS is the “push to right” */
+  display: inline-flex !important;
+  align-items: center !important;
+  gap: 10px !important;
+  flex: 0 0 auto !important;
+}
+
+/* Optional: stabilize method width so it doesn't collapse */
+#pos-ticket-discount .pos-ticket-pay-inline #pos-payment{
+  width: 220px !important;
+  max-width: 100%;
+}
+
 /* Mobile: allow wrap */
 @media (max-width: 640px){
   #pos-ticket-discount .pos-ticket-discount-row{
     flex-wrap: wrap !important;
+  }
+  /* When wrapped, don't force it to stay pushed right */
+  #pos-ticket-discount .pos-ticket-pay-inline{
+    margin-left: 0 !important;
+    width: 100%;
+    justify-content: flex-start;
+  }
+  #pos-ticket-discount .pos-ticket-pay-inline #pos-payment{
+    width: 100% !important;
   }
 }
 
