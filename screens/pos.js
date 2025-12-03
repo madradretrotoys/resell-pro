@@ -1064,34 +1064,36 @@ export async function init(ctx) {
     );
   
     return `
-      <div class="ticket-row border rounded p-2 flex items-start justify-between gap-3">
-        <!-- ROW 1: product title and meta -->
-        <div class="flex flex-col gap-0.5 mb-1">
+      <div class="ticket-row border rounded p-2 flex items-start gap-3">
+        <!-- LEFT: product title + meta -->
+        <div class="min-w-0 flex-1">
           <div class="font-medium truncate">${escapeHtml(it.name)}</div>
           <div class="text-xs muted truncate">${escapeHtml(meta)}</div>
         </div>
 
-        <!-- ONE compact controls row -->
-        <div class="mt-1 flex items-center justify-between gap-2">
-          <!-- LEFT: qty -->
-          <div class="ticket-qty flex items-center gap-2">
-            <button class="btn btn-xs" data-qty="${idx}|-">−</button>
-            <span class="ticket-qty-val">${it.qty}</span>
-            <button class="btn btn-xs" data-qty="${idx}|+">+</button>
-          </div>
-
-          <!-- RIGHT: price + total + remove (all inline, pinned right) -->
+        <!-- RIGHT: controls (everything aligned together) -->
+        <div class="flex flex-col items-end gap-2 flex-shrink-0">
+          <!-- Top controls row: QTY + PRICE + LINE TOTAL + REMOVE (one row) -->
           <div class="flex items-center justify-end gap-2">
+            <div class="ticket-qty flex items-center gap-2">
+              <button class="btn btn-xs" data-qty="${idx}|-" ${state.uiLocked ? "disabled aria-disabled='true'" : ""}>−</button>
+              <span class="ticket-qty-val">${it.qty}</span>
+              <button class="btn btn-xs" data-qty="${idx}|+" ${state.uiLocked ? "disabled aria-disabled='true'" : ""}>+</button>
+            </div>
+
             <div class="ticket-price">
               ${priceCell}
             </div>
-            <div class="ticket-line-total text-right">${lineTotal}</div>
+
+            <div class="ticket-line-total text-right min-w-[72px]">${lineTotal}</div>
+
+            <button class="btn btn-danger btn-xs"
+              data-remove="${idx}"
+              ${state.uiLocked ? "disabled aria-disabled='true'" : ""}>Remove</button>
           </div>
-        </div>
-        
-        <!-- ROW 2: controls (QTY stacked above Price at far right, then total + remove) -->
-        <div class="ticket-controls ticket-controls--item">
-          <div class="mt-2 discount-row">
+
+          <!-- Discount row (compact, no extra padding pushing it down) -->
+          <div class="discount-row flex flex-wrap items-center justify-end gap-2">
             <span class="text-sm text-muted">Discount</span>
             <div class="flex items-center gap-2">
               <label class="inline-flex items-center gap-1">
@@ -1103,13 +1105,9 @@ export async function init(ctx) {
                 <span>$</span>
               </label>
             </div>
-            <input class="input input-sm w-[120px]" id="pos-discount-input-${idx}" value="${discVal}" placeholder="${modePercent ? 'Enter percent' : 'Enter dollars'}" />
-            <button class="btn btn-primary btn-sm" data-apply-discount="${idx}">Apply</button>
+            <input class="input input-sm w-[120px]" id="pos-discount-input-${idx}" value="${discVal}" placeholder="${modePercent ? "Enter percent" : "Enter dollars"}" ${state.uiLocked ? "disabled aria-disabled='true'" : ""} />
+            <button class="btn btn-primary btn-sm" data-apply-discount="${idx}" ${state.uiLocked ? "disabled aria-disabled='true'" : ""}>Apply</button>
           </div>
-          <button class="btn btn-danger btn-xs" data-remove="${idx}" ${state.uiLocked ? "disabled aria-disabled='true'" : ""}>Remove</button>
-          
-          
-        
         </div>
       </div>
     `;
