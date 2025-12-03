@@ -1079,13 +1079,13 @@ export async function init(ctx) {
             <span class="ticket-qty-val">${it.qty}</span>
             <button class="btn btn-xs" data-qty="${idx}|+">+</button>
           </div>
-
+          <div class="ticket-price">
+            ${priceCell}
+          </div>
+          <div class="ticket-line-total text-right">${lineTotal}</div>
           <!-- RIGHT: price + total + remove (all inline, pinned right) -->
           <div class="flex items-center justify-end gap-2">
-            <div class="ticket-price">
-              ${priceCell}
-            </div>
-            <div class="ticket-line-total text-right">${lineTotal}</div>
+            
           </div>
         </div>
         
