@@ -640,10 +640,16 @@ label{
   margin-left: auto;
 }
 
-/* Price stays right-aligned */
+/* Price stays right-aligned (and vertically aligned with QTY buttons) */
 .ticket-price{
   display: flex;
   justify-content: flex-end;
+  align-items: center; /* NEW: fixes the "sunk" look */
+}
+
+/* Keep the line total vertically aligned with the price input */
+.ticket-line-total{
+  line-height: 32px; /* NEW: matches .input-sm height */
 }
 
 /* Mobile: allow wrap when truly needed */
