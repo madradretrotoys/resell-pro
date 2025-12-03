@@ -1074,7 +1074,7 @@ export async function init(ctx) {
             <span class="ticket-qty-val">${it.qty}</span>
             <button class="btn btn-xs" data-qty="${idx}|+">+</button>
           </div>
-          <div class="ticket-controls-left"></div>
+          
         
           <div class="ticket-controls-right">
             <div class="ticket-qty-price">
