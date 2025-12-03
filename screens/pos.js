@@ -201,7 +201,7 @@ export async function init(ctx) {
     setPaymentControlsEnabled(!on);
   
     // Dynamic cart controls (render will re-bind, but clamp now too)
-    el.cart?.querySelectorAll("[data-qty],[data-remove],[data-price],[data-apply-discount]")
+    el.cart?.querySelectorAll("[data-qty],[data-remove],[data-price],[data-toggle-discount],[data-apply-discount]")
       .forEach(n => { n.disabled = on; n.setAttribute("aria-disabled", String(on)); });
   
     // Visual busy hint on the main button
@@ -1064,7 +1064,7 @@ export async function init(ctx) {
     );
   
     return `
-      <div class="ticket-row border rounded p-2">
+      <div class="ticket-row" data-row-idx="${idx}">
         <!-- ROW 1: product title and meta -->
         <div class="flex flex-col gap-0.5 mb-1">
           <div class="font-medium truncate">${escapeHtml(it.name)}</div>
@@ -1080,6 +1080,15 @@ export async function init(ctx) {
           </div>
   
           <div class="flex items-center gap-2 flex-1 justify-end flex-wrap">
+            <button class="btn btn-ghost btn-xs" type="button" data-toggle-discount="${idx}">
+              ${escapeHtml((() => {
+                const mode = it.discount?.mode;
+                const v = Number(it.discount?.value || 0);
+                if (!mode || !v) return "Disc: —";
+                if (mode === "percent") return `Disc: ${v}%`;
+                return `Disc: ${fmtCurrency(v)}`;
+              })())}
+            </button>
             ${priceCell}
             <div class="ticket-line-total text-right">${lineTotal}</div>
             <button class="btn btn-danger btn-xs" data-remove="${idx}" ${state.uiLocked ? "disabled aria-disabled='true'" : ""}>Remove</button>
@@ -1087,21 +1096,23 @@ export async function init(ctx) {
           
         </div>
   
-        <!-- ROW 3: discount (single line; Apply at far right) -->
-        <div class="mt-2 discount-row">
-          <span class="text-sm text-muted">Discount</span>
-          <div class="flex items-center gap-2">
-            <label class="inline-flex items-center gap-1">
-              <input type="radio" name="pos-discount-mode-${idx}" value="percent" ${modePercent ? "checked" : ""} />
-              <span>%</span>
-            </label>
-            <label class="inline-flex items-center gap-1">
-              <input type="radio" name="pos-discount-mode-${idx}" value="amount" ${!modePercent ? "checked" : ""} />
-              <span>$</span>
-            </label>
+        <!-- ROW 3: discount editor (collapsed by default) -->
+        <div class="discount-editor">
+          <div class="discount-row">
+            <span class="text-sm text-muted">Discount</span>
+            <div class="flex items-center gap-2">
+              <label class="inline-flex items-center gap-1">
+                <input type="radio" name="pos-discount-mode-${idx}" value="percent" ${modePercent ? "checked" : ""} />
+                <span>%</span>
+              </label>
+              <label class="inline-flex items-center gap-1">
+                <input type="radio" name="pos-discount-mode-${idx}" value="amount" ${!modePercent ? "checked" : ""} />
+                <span>$</span>
+              </label>
+            </div>
+            <input class="input input-sm w-[120px] push" id="pos-discount-input-${idx}" value="${discVal}" placeholder="${modePercent ? 'Enter percent' : 'Enter dollars'}" />
+            <button class="btn btn-primary btn-sm" data-apply-discount="${idx}">Apply</button>
           </div>
-          <input class="input input-sm w-[120px]" id="pos-discount-input-${idx}" value="${discVal}" placeholder="${modePercent ? 'Enter percent' : 'Enter dollars'}" />
-          <button class="btn btn-primary btn-sm" data-apply-discount="${idx}">Apply</button>
         </div>
       </div>
     `;
@@ -1115,9 +1126,19 @@ export async function init(ctx) {
 
     // NEW: enforce lock on newly rendered controls
     if (state.uiLocked) {
-      el.cart.querySelectorAll("[data-qty],[data-remove],[data-price],[data-apply-discount]")
+      el.cart.querySelectorAll("[data-qty],[data-remove],[data-price],[data-toggle-discount],[data-apply-discount]")
         .forEach(n => { n.disabled = true; n.setAttribute("aria-disabled", "true"); });
     }
+    
+    // discount toggle (collapsed by default)
+    el.cart.querySelectorAll("[data-toggle-discount]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        if (btn.disabled) return;
+        const row = btn.closest(".ticket-row");
+        if (!row) return;
+        row.classList.toggle("is-discount-open");
+      });
+    });
 
       // bind qty/remove once per render
       el.cart.querySelectorAll("[data-qty]").forEach((btn) => {
