@@ -1064,7 +1064,7 @@ export async function init(ctx) {
     );
   
    return `
-      <div class="ticket-row border rounded p-2 flex items-start justify-between gap-3">
+      <div class="ticket-row border rounded p-2 flex items-start justify-between gap-3 min-w-0">
         <!-- ROW 1: product title and meta -->
         <div class="flex flex-col gap-0.5 mb-1">
           <div class="font-medium truncate">${escapeHtml(it.name)}</div>
