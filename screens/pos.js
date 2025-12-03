@@ -1069,6 +1069,11 @@ export async function init(ctx) {
         <div class="flex flex-col gap-0.5 mb-1">
           <div class="font-medium truncate">${escapeHtml(it.name)}</div>
           <div class="text-xs muted truncate">${escapeHtml(meta)}</div>
+          <div class="ticket-qty">
+            <button class="btn btn-xs" data-qty="${idx}|-">−</button>
+            <span class="ticket-qty-val">${it.qty}</span>
+            <button class="btn btn-xs" data-qty="${idx}|+">+</button>
+          </div>
         </div>
   
         <!-- ROW 2: controls (QTY stacked above Price at far right, then total + remove) -->
@@ -1077,11 +1082,7 @@ export async function init(ctx) {
         
           <div class="ticket-controls-right">
             <div class="ticket-qty-price">
-              <div class="ticket-qty">
-                <button class="btn btn-xs" data-qty="${idx}|-">−</button>
-                <span class="ticket-qty-val">${it.qty}</span>
-                <button class="btn btn-xs" data-qty="${idx}|+">+</button>
-              </div>
+              
         
               <div class="ticket-price">
                 ${priceCell}
