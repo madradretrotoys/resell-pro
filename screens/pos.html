@@ -123,23 +123,25 @@
               Apply
             </button>
           </div>
+
+           <select id="pos-payment" class="select pos-pay-item pos-w-method">
+            <option value="" selected disabled>Select payment…</option>
+            <option value="cash">CASH</option>
+            <option value="card:visa">Visa (Valor)</option>
+            <option value="card:mastercard">MasterCard (Valor)</option>
+            <option value="card:amex">Amex (Valor)</option>
+            <option value="card:discover">Discover (Valor)</option>
+            <option value="wallet:venmo">Venmo</option>
+            <option value="wallet:zelle">Zelle</option>
+            <option value="wallet:cashapp">Cash App</option>
+          </select>
+
+          <button id="pos-split" class="btn btn-ghost pos-pay-item">Split payment</button>
         </div>
           
             <!-- PAYMENT ROW (single horizontal row; wraps nicely on small screens) -->
             <div class="mt-2 pos-pay-row pos-compact">
-              <select id="pos-payment" class="select pos-pay-item pos-w-method">
-                <option value="" selected disabled>Select payment…</option>
-                <option value="cash">CASH</option>
-                <option value="card:visa">Visa (Valor)</option>
-                <option value="card:mastercard">MasterCard (Valor)</option>
-                <option value="card:amex">Amex (Valor)</option>
-                <option value="card:discover">Discover (Valor)</option>
-                <option value="wallet:venmo">Venmo</option>
-                <option value="wallet:zelle">Zelle</option>
-                <option value="wallet:cashapp">Cash App</option>
-              </select>
-  
-              <button id="pos-split" class="btn btn-ghost pos-pay-item">Split payment</button>
+             
               <button id="pos-complete" class="btn btn-primary pos-pay-item pos-pay-push" disabled>Complete Sale</button>
             </div>
 
