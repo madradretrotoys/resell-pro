@@ -1081,8 +1081,6 @@ export async function init(ctx) {
               </div>
               <div class="ticket-line-total text-right">${lineTotal}</div>
             </div>
-          
-            <button class="btn btn-danger btn-xs" data-remove="${idx}" ${state.uiLocked ? "disabled aria-disabled='true'" : ""}>Remove</button>
           </div>
         </div>
   
@@ -1102,8 +1100,8 @@ export async function init(ctx) {
             </div>
             <input class="input input-sm w-[120px]" id="pos-discount-input-${idx}" value="${discVal}" placeholder="${modePercent ? 'Enter percent' : 'Enter dollars'}" />
             <button class="btn btn-primary btn-sm" data-apply-discount="${idx}">Apply</button>
-           <button class="btn btn-danger btn-xs" data-remove="${idx}" ${state.uiLocked ? "disabled aria-disabled='true'" : ""}>Remove</button>
           </div>
+          <button class="btn btn-danger btn-xs" data-remove="${idx}" ${state.uiLocked ? "disabled aria-disabled='true'" : ""}>Remove</button>
           
           
         
