@@ -1064,50 +1064,57 @@ export async function init(ctx) {
     );
   
   return `
-      <div class="ticket-row ticket-row--item">
-      <!-- HEADER ROW: title/meta on left, qty+price+total on right -->
-      <div class="ticket-item-header">
-        <div class="ticket-item-meta">
-          <div class="ticket-item-name">${escapeHtml(it.name)}</div>
-          <div class="ticket-item-sub muted">${escapeHtml(meta)}</div>
-        </div>
-  
-        <div class="ticket-item-controls">
-          <div class="ticket-qty">
-            <button class="btn btn-xs" data-qty="${idx}|-">−</button>
-            <span class="ticket-qty-val">${it.qty}</span>
-            <button class="btn btn-xs" data-qty="${idx}|+">+</button>
+      <div class="ticket-row">
+        <!-- ROW 1: name/meta (left) + qty/price/total/remove (right) -->
+        <div class="ticket-title-row">
+          <div class="ticket-title-left">
+            <div class="font-medium truncate">${escapeHtml(it.name)}</div>
+            <div class="text-xs muted truncate">${escapeHtml(meta)}</div>
           </div>
-  
-          <div class="ticket-price">
-            ${priceCell}
-          </div>
-  
-          <div class="ticket-line-total">${lineTotal}</div>
-        </div>
-      </div>
-        
-        <!-- ROW 2: controls (QTY stacked above Price at far right, then total + remove) -->
-        <div class="ticket-controls ticket-controls--item">
-          <div class="mt-2 discount-row">
-            <span class="text-sm text-muted">Discount</span>
-            <div class="flex items-center gap-2">
-              <label class="inline-flex items-center gap-1">
-                <input type="radio" name="pos-discount-mode-${idx}" value="percent" ${modePercent ? "checked" : ""} />
-                <span>%</span>
-              </label>
-              <label class="inline-flex items-center gap-1">
-                <input type="radio" name="pos-discount-mode-${idx}" value="amount" ${!modePercent ? "checked" : ""} />
-                <span>$</span>
-              </label>
+
+          <div class="ticket-controls--compact">
+            <div class="ticket-qty">
+              <button class="btn btn-xs" data-qty="${idx}|-">−</button>
+              <span class="ticket-qty-val">${it.qty}</span>
+              <button class="btn btn-xs" data-qty="${idx}|+">+</button>
             </div>
-            <input class="input input-sm w-[120px]" id="pos-discount-input-${idx}" value="${discVal}" placeholder="${modePercent ? 'Enter percent' : 'Enter dollars'}" />
-            <button class="btn btn-primary btn-sm" data-apply-discount="${idx}">Apply</button>
+
+            <div class="ticket-price">
+              ${priceCell}
+            </div>
+
+            <div class="ticket-line-total">${lineTotal}</div>
+
+            <button
+              class="btn btn-danger btn-xs"
+              data-remove="${idx}"
+              ${state.uiLocked ? "disabled aria-disabled='true'" : ""}
+            >Remove</button>
           </div>
-          <button class="btn btn-danger btn-xs" data-remove="${idx}" ${state.uiLocked ? "disabled aria-disabled='true'" : ""}>Remove</button>
-          
-          
-        
+        </div>
+
+        <!-- ROW 2: discount editor -->
+        <div class="discount-row">
+          <span class="text-sm text-muted">Discount</span>
+
+          <label class="inline-flex items-center gap-1">
+            <input type="radio" name="pos-discount-mode-${idx}" value="percent" ${modePercent ? "checked" : ""} />
+            <span>%</span>
+          </label>
+
+          <label class="inline-flex items-center gap-1">
+            <input type="radio" name="pos-discount-mode-${idx}" value="amount" ${!modePercent ? "checked" : ""} />
+            <span>$</span>
+          </label>
+
+          <input
+            class="input input-sm pos-discount-val"
+            id="pos-discount-input-${idx}"
+            value="${discVal}"
+            placeholder="${modePercent ? "Enter percent" : "Enter dollars"}"
+          />
+
+          <button class="btn btn-primary btn-sm push" data-apply-discount="${idx}">Apply</button>
         </div>
       </div>
     `;
