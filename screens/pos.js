@@ -1069,23 +1069,24 @@ export async function init(ctx) {
         <div class="flex flex-col gap-0.5 min-w-0">
           <div class="font-medium truncate">${escapeHtml(it.name)}</div>
           <div class="text-xs muted truncate">${escapeHtml(meta)}</div>
-        </div>
+        
 
-        <!-- ONE compact controls row -->
-        <div class="flex items-center justify-between gap-2 flex-shrink-0">
-          <!-- LEFT: qty -->
-          <div class="ticket-qty flex items-center gap-2">
-            <button class="btn btn-xs" data-qty="${idx}|-">−</button>
-            <span class="ticket-qty-val">${it.qty}</span>
-            <button class="btn btn-xs" data-qty="${idx}|+">+</button>
-          </div>
-          <div class="ticket-price">
-            ${priceCell}
-          </div>
-          <div class="ticket-line-total text-right">${lineTotal}</div>
-          <!-- RIGHT: price + total + remove (all inline, pinned right) -->
-          <div class="flex items-center justify-end gap-2">
-            
+          <!-- ONE compact controls row -->
+          <div class="flex items-center justify-between gap-2 flex-shrink-0">
+            <!-- LEFT: qty -->
+            <div class="ticket-qty flex items-center gap-2">
+              <button class="btn btn-xs" data-qty="${idx}|-">−</button>
+              <span class="ticket-qty-val">${it.qty}</span>
+              <button class="btn btn-xs" data-qty="${idx}|+">+</button>
+            </div>
+            <div class="ticket-price">
+              ${priceCell}
+            </div>
+            <div class="ticket-line-total text-right">${lineTotal}</div>
+            <!-- RIGHT: price + total + remove (all inline, pinned right) -->
+            <div class="flex items-center justify-end gap-2">
+              
+            </div>
           </div>
         </div>
         
