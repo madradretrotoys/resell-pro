@@ -1071,21 +1071,29 @@ export async function init(ctx) {
           <div class="text-xs muted truncate">${escapeHtml(meta)}</div>
         </div>
   
-        <!-- ROW 2: controls (qty, discount, total, remove) -->
-        <div class="ticket-controls flex items-center justify-between gap-2 flex-wrap">
-          <div class="inline-flex items-center gap-1">
-            <button class="btn btn-xs" data-qty="${idx}|-">−</button>
-            <span class="w-8 text-center">${it.qty}</span>
-            <button class="btn btn-xs" data-qty="${idx}|+">+</button>
-          </div>
-  
-          <div class="flex items-center gap-2 flex-1 justify-end flex-wrap">
-            ${priceCell}
+        <!-- ROW 2: controls (QTY stacked above Price at far right, then total + remove) -->
+        <div class="ticket-controls ticket-controls--item">
+          <div class="ticket-controls-left"></div>
+        
+          <div class="ticket-controls-right">
+            <div class="ticket-qty-price">
+              <div class="ticket-qty">
+                <button class="btn btn-xs" data-qty="${idx}|-">−</button>
+                <span class="ticket-qty-val">${it.qty}</span>
+                <button class="btn btn-xs" data-qty="${idx}|+">+</button>
+              </div>
+        
+              <div class="ticket-price">
+                ${priceCell}
+              </div>
+            </div>
+        
             <div class="ticket-line-total text-right">${lineTotal}</div>
+        
             <button class="btn btn-danger btn-xs" data-remove="${idx}" ${state.uiLocked ? "disabled aria-disabled='true'" : ""}>Remove</button>
           </div>
-          
         </div>
+
   
         <!-- ROW 3: discount (single line; Apply at far right) -->
         <div class="mt-2 discount-row">
