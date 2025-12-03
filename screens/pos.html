@@ -150,7 +150,17 @@
           <button id="pos-complete" class="btn btn-primary pos-pay-item pos-pay-push" disabled>Complete Sale</button>
         </div>
 
+        <!-- VALOR STATUS / FALLBACK (initially hidden; shown when card flow starts) -->
+        <div id="pos-valor-bar" class="mt-2 hidden">
+          <div class="card p-2 flex items-center gap-3 flex-wrap">
+            <div class="text-sm">
+              <span class="font-semibold">VALOR:</span>
+              <span id="pos-valor-msg" class="align-middle">Idle</span>
+            </div>
             
+          </div>
+        </div>
+
 
             <!-- anchor: VALOR FORCE-FINALIZE MODAL (inserted) -->
             <dialog id="pos-valor-modal" class="modal">
