@@ -691,6 +691,64 @@ label{
   flex-wrap: wrap;        /* wrap gracefully on smaller widths */
 }
 
+/* Ticket Discount row: keep everything on one line on desktop */
+.pos-ticket-discount-row{
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: nowrap;
+}
+.pos-ticket-discount-label{
+  font-size: 14px;
+  color: var(--muted);
+  font-weight: 600;
+  white-space: nowrap;
+  margin-right: 6px;
+}
+
+/* On small screens, allow Ticket Discount to wrap nicely */
+@media (max-width: 640px){
+  .pos-ticket-discount-row{
+    flex-wrap: wrap;
+  }
+}
+
+/* Payment: two-row layout (top-right controls, bottom-right CTA) */
+.pos-pay-stack{
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.pos-pay-top{
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;  /* push to the right */
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.pos-pay-bottom{
+  display: flex;
+  justify-content: flex-end;  /* button sits on right */
+}
+
+/* Match your “big CTA” behavior without relying on old .pos-pay-row selector */
+.pos-pay-cta{
+  width: 360px;
+  max-width: 100%;
+}
+
+/* On smaller widths, let CTA go full width */
+@media (max-width: 780px){
+  .pos-pay-bottom{
+    justify-content: stretch;
+  }
+  .pos-pay-cta{
+    width: 100%;
+  }
+}
+
 .pos-pay-item{
   flex: 0 0 auto;         /* keep natural size */
 }
