@@ -1069,21 +1069,27 @@ export async function init(ctx) {
         <div class="flex flex-col gap-0.5 mb-1">
           <div class="font-medium truncate">${escapeHtml(it.name)}</div>
           <div class="text-xs muted truncate">${escapeHtml(meta)}</div>
-          <div class="ticket-qty">
+        </div>
+
+        <!-- ONE compact controls row -->
+        <div class="mt-1 flex items-center justify-between gap-2">
+          <!-- LEFT: qty -->
+          <div class="ticket-qty flex items-center gap-2">
             <button class="btn btn-xs" data-qty="${idx}|-">−</button>
             <span class="ticket-qty-val">${it.qty}</span>
             <button class="btn btn-xs" data-qty="${idx}|+">+</button>
           </div>
-          <div class="ticket-controls-right flex flex-col items-end gap-2">
-            <div class="ticket-qty-price flex items-center gap-3">
-              <div class="ticket-price">
-                ${priceCell}
-              </div>
-              <div class="ticket-line-total text-right">${lineTotal}</div>
+
+          <!-- RIGHT: price + total + remove (all inline, pinned right) -->
+          <div class="flex items-center justify-end gap-2">
+            <div class="ticket-price">
+              ${priceCell}
             </div>
+            <div class="ticket-line-total text-right">${lineTotal}</div>
+            <button class="btn btn-danger btn-xs" data-remove="${idx}" ${state.uiLocked ? "disabled aria-disabled='true'" : ""}>Remove</button>
           </div>
         </div>
-  
+        
         <!-- ROW 2: controls (QTY stacked above Price at far right, then total + remove) -->
         <div class="ticket-controls ticket-controls--item">
           <div class="mt-2 discount-row">
