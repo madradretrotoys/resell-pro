@@ -1086,7 +1086,6 @@ export async function init(ctx) {
               ${priceCell}
             </div>
             <div class="ticket-line-total text-right">${lineTotal}</div>
-            <button class="btn btn-danger btn-xs" data-remove="${idx}" ${state.uiLocked ? "disabled aria-disabled='true'" : ""}>Remove</button>
           </div>
         </div>
         
