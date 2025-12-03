@@ -1064,7 +1064,7 @@ export async function init(ctx) {
     );
   
     return `
-      <div class="ticket-row border rounded p-2">
+      <div class="ticket-row border rounded p-2 flex items-start justify-between gap-3">
         <!-- ROW 1: product title and meta -->
         <div class="flex flex-col gap-0.5 mb-1">
           <div class="font-medium truncate">${escapeHtml(it.name)}</div>
@@ -1073,15 +1073,16 @@ export async function init(ctx) {
             <button class="btn btn-xs" data-qty="${idx}|-">−</button>
             <span class="ticket-qty-val">${it.qty}</span>
             <button class="btn btn-xs" data-qty="${idx}|+">+</button>
-          
-            <div class="ticket-controls-right">
-              <div class="ticket-qty-price">
-                <div class="ticket-price">
-                  ${priceCell}
-                </div>
+          </div>
+          <div class="ticket-controls-right flex flex-col items-end gap-2">
+            <div class="ticket-qty-price flex items-center gap-3">
+              <div class="ticket-price">
+                ${priceCell}
               </div>
-              <div class="ticket-line-total text-right">${lineTotal}</div> 
+              <div class="ticket-line-total text-right">${lineTotal}</div>
             </div>
+          
+            <button class="btn btn-danger btn-xs" data-remove="${idx}" ${state.uiLocked ? "disabled aria-disabled='true'" : ""}>Remove</button>
           </div>
         </div>
   
