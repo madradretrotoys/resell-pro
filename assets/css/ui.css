@@ -691,12 +691,22 @@ label{
   flex-wrap: wrap;        /* wrap gracefully on smaller widths */
 }
 
-/* Ticket Discount + Payment (same row) */
+/* Ticket Discount + Payment: 2-column layout (LEFT controls, RIGHT payment) */
 #pos-ticket-discount .pos-ticket-discount-row{
+  display: grid !important;
+  grid-template-columns: 1fr auto !important;  /* left grows, right hugs content */
+  align-items: center !important;
+  column-gap: 10px !important;
+  row-gap: 10px !important;
+}
+
+/* LEFT side: allow wrapping inside the left column if it’s tight */
+#pos-ticket-discount .pos-ticket-discount-left{
   display: flex !important;
   align-items: center !important;
   gap: 10px !important;
-  flex-wrap: nowrap !important;
+  flex-wrap: wrap !important;              /* key: wrap only LEFT, not the right cluster */
+  min-width: 0;
 }
 
 /* Label styling */
@@ -708,8 +718,8 @@ label{
   flex: 0 0 auto;
 }
 
-/* Labels in this row must NEVER become block and break the line */
-#pos-ticket-discount .pos-ticket-discount-row label{
+/* Keep labels inline */
+#pos-ticket-discount .pos-ticket-discount-left label{
   display: inline-flex !important;
   align-items: center;
   gap: 6px;
@@ -718,12 +728,12 @@ label{
   margin: 0;
 }
 
-/* If any global .input/.select CSS forces width:100%, kill it here */
-#pos-ticket-discount .pos-ticket-discount-row .input,
-#pos-ticket-discount .pos-ticket-discount-row .select,
-#pos-ticket-discount .pos-ticket-discount-row input,
-#pos-ticket-discount .pos-ticket-discount-row select,
-#pos-ticket-discount .pos-ticket-discount-row button{
+/* Kill any width:100% inside this strip */
+#pos-ticket-discount .pos-ticket-discount-left .input,
+#pos-ticket-discount .pos-ticket-discount-left .select,
+#pos-ticket-discount .pos-ticket-discount-left input,
+#pos-ticket-discount .pos-ticket-discount-left select,
+#pos-ticket-discount .pos-ticket-discount-left button{
   width: auto !important;
   flex: 0 0 auto !important;
   max-width: 100%;
@@ -735,36 +745,34 @@ label{
   text-align: left;
 }
 
-/* NEW: Right-side payment cluster pushed to the far right */
+/* RIGHT side: always pinned to the right column */
 #pos-ticket-discount .pos-ticket-pay-inline{
-  margin-left: auto !important;     /* THIS is the “push to right” */
   display: inline-flex !important;
   align-items: center !important;
+  justify-content: flex-end !important;
   gap: 10px !important;
-  flex: 0 0 auto !important;
+  white-space: nowrap;
 }
 
-/* Optional: stabilize method width so it doesn't collapse */
+/* Stabilize payment method select width */
 #pos-ticket-discount .pos-ticket-pay-inline #pos-payment{
   width: 220px !important;
   max-width: 100%;
 }
 
-/* Mobile: allow wrap */
+/* On very small screens, stack right cluster under left */
 @media (max-width: 640px){
   #pos-ticket-discount .pos-ticket-discount-row{
-    flex-wrap: wrap !important;
+    grid-template-columns: 1fr !important;
   }
-  /* When wrapped, don't force it to stay pushed right */
   #pos-ticket-discount .pos-ticket-pay-inline{
-    margin-left: 0 !important;
-    width: 100%;
-    justify-content: flex-start;
+    justify-content: flex-start !important;
   }
   #pos-ticket-discount .pos-ticket-pay-inline #pos-payment{
     width: 100% !important;
   }
 }
+
 
 /* Payment: two-row layout (top-right controls, bottom-right CTA) */
 .pos-pay-stack{
