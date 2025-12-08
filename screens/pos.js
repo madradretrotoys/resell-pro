@@ -119,7 +119,6 @@ export async function init(ctx) {
     wireCart();
     wireTotals();
     wireSales();
-    wireValorModalSafety();
     render();
     // NEW: show today's sales automatically on boot
     try { await loadSales({ preset: "today" }); } catch {}
@@ -226,39 +225,6 @@ export async function init(ctx) {
     // Fallback for non-<dialog> environments
     el.valorModal.style.display = "none";
   }
-
-  function wireValorModalSafety() {
-    if (!el.valorModal) return;
-    if (window.__ffModalSafetyWired) return;
-    window.__ffModalSafetyWired = true;
-  
-    // If the dialog is dismissed (Esc), don’t leave POS locked forever.
-    el.valorModal.addEventListener("cancel", (e) => {
-      // Prevent default so it doesn’t silently close without cleanup in some browsers
-      e.preventDefault();
-  
-      // stop any pending timer
-      if (window.__ffTimerHandle) { clearTimeout(window.__ffTimerHandle); window.__ffTimerHandle = null; }
-  
-      hideValorModal();
-  
-      // unlock so cashier can retry without logging out
-      setUiLocked(false);
-  
-      // Hide Valor bar if we’re not actively waiting
-      el.valorBar?.classList.add("hidden");
-      el.valorMsg.textContent = "Idle";
-      render();
-    });
-  
-    // If it closes via any other mechanism, still clean up timer.
-    el.valorModal.addEventListener("close", () => {
-      if (window.__ffTimerHandle) { clearTimeout(window.__ffTimerHandle); window.__ffTimerHandle = null; }
-    });
-  }
-
-
-
   
   async function resetScreen() {
     // Cancel any pending force-finalize timer between sales
@@ -290,10 +256,7 @@ export async function init(ctx) {
     state.cardSeqIndex = -1; // ensure new sale starts with no active card slice
   
     // Fully reset PAYMENT UI (dropdown, panels, and any disabled controls)
-    if (el.payment) {
-      el.payment.value = "";      // try value reset
-      el.payment.selectedIndex = 0; // force placeholder selection
-    }
+    if (el.payment) el.payment.value = "";                  // back to "Select payment…"
     if (el.complete) {
       el.complete.disabled = true;                          // requires a payment + at least one item
       el.complete.classList.remove("btn-success");
@@ -748,9 +711,6 @@ export async function init(ctx) {
               if (el.valorModalAmount) el.valorModalAmount.textContent = fmtCurrency(uiAmount);
               if (window.__ffTimerHandle) clearTimeout(window.__ffTimerHandle);
               window.__ffTimerHandle = setTimeout(() => {
-                // mark timer as consumed so the next sale can schedule cleanly
-                window.__ffTimerHandle = null;
-              
                 if (el.valorModalInvoice) el.valorModalInvoice.textContent = "—";
                 if (el.valorModal) {
                   if (el.valorModal.showModal) {
@@ -990,31 +950,12 @@ export async function init(ctx) {
               return;
             }
 
-            // Fallback for unexpected response (don’t stay locked forever)
-            if (window.__ffTimerHandle) { clearTimeout(window.__ffTimerHandle); window.__ffTimerHandle = null; }
-            hideValorModal();
-            el.valorBar?.classList.add("hidden");
-            el.valorMsg.textContent = "Idle";
-
-            setUiLocked(false);
-            if (el.complete) el.complete.disabled = false;
-
+            // Fallback for unexpected response
             el.banner.classList.remove("hidden");
-            el.banner.innerHTML = `<div class="card p-2">Checkout returned an unexpected response. Try again.</div>`;
-            render();
+            el.banner.innerHTML = `<div class="card p-2">Checkout started. Waiting on processor…</div>`;
           } catch (err) {
-            // Ensure we never strand the cashier in a locked state
-            if (window.__ffTimerHandle) { clearTimeout(window.__ffTimerHandle); window.__ffTimerHandle = null; }
-            hideValorModal();
-            el.valorBar?.classList.add("hidden");
-            el.valorMsg.textContent = "Idle";
-
-            setUiLocked(false);
-            if (el.complete) el.complete.disabled = false;
-
             el.banner.classList.remove("hidden");
             el.banner.innerHTML = `<div class="card p-2">Checkout failed: ${escapeHtml(err?.message || String(err))}</div>`;
-            render();
           }
         });
     
