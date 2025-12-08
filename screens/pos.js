@@ -225,6 +225,14 @@ export async function init(ctx) {
     // Fallback for non-<dialog> environments
     el.valorModal.style.display = "none";
   }
+
+  function hardRefreshAfterSale() {
+    // Forces a clean in-memory state (same effect as logging out/in, but faster)
+    // Keep it deferred so UI can show the receipt banner briefly.
+    setTimeout(() => {
+      window.location.reload();
+    }, 250);
+  }
   
   async function resetScreen() {
     // Cancel any pending force-finalize timer between sales
@@ -837,6 +845,7 @@ export async function init(ctx) {
                     state.cardSeqIndex = -1; // clean slate for next sale
                     showBanner(`Sale finalized. Receipt #${escapeHtml(ff.sale_id)}`);
                     await resetScreen();
+                    hardRefreshAfterSale();
                   } else {
                     showToast("Finalize failed — server did not return sale_id.");
                   }
@@ -928,6 +937,7 @@ export async function init(ctx) {
               state.cardSeqIndex = -1; // clean slate for next sale
               showBanner(`Sale completed. Receipt #${escapeHtml(res.sale_id)}`);
               await resetScreen();
+              hardRefreshAfterSale();
               return;
             }
 
