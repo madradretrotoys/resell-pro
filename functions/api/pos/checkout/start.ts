@@ -95,6 +95,8 @@ export const onRequest: PagesFunction<Env> = async (ctx) => {
   
   const txnId = makeTxnId();
 
+  console.log("[pos.start] begin", { tenantId, txnId, invoicenumber, amount: repriced.totals.total });
+
   // Record outbound intent
   await insertValorPublish(env, {
     tenant_id: tenantId,
@@ -144,6 +146,7 @@ export const onRequest: PagesFunction<Env> = async (ctx) => {
     invoice: invoicenumber,
     attempt: 1,
   });
+  console.log("[pos.start] respond", { tenantId, txnId, invoicenumber });
 };
 
 // ---------- helpers (minimal implementations / placeholders) ----------
