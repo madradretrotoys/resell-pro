@@ -48,6 +48,9 @@ export const onRequestPost = async ({ request, env }) => {
     whatnot: 3,
     depop: 4,
     shopify: 5,
+    etsy: 6,
+    poshmark: 7,
+    mercari: 8,
     vendoo: 13
   };
 
