@@ -4775,9 +4775,65 @@ document.addEventListener("intake:item-changed", () => refreshInventory({ force:
       } catch {}
     }
     
+   // Prevent double-load races
+    let __loadingItem = false;
+
+    // Wait for UI to flush (DOM + layout) before we inject new values
+    function __nextFrame() {
+      return new Promise((resolve) => requestAnimationFrame(() => resolve()));
+    }
+
+    /**
+     * Hard reset the intake UI/state so loading a different item can't retain
+     * anything from the previously loaded item (photos, marketplace selection,
+     * edit mode flags, etc).
+     */
+    async function resetIntakeBeforeLoad() {
+      // 1) Clear "current item" + duplicate-carry state
+      try { __currentItemId = null; } catch {}
+      try { __lockDraft = false; } catch {}
+      try { __duplicateSourceImages = []; } catch {}
+      try { __duplicateCarryPhotos = true; } catch {}
+
+      // 2) Clear photos + pending uploads and re-render
+      try { __photos = []; } catch {}
+      try { __pendingFiles = []; } catch {}
+      try { renderPhotosGrid(); } catch {}
+      try { updatePhotosUIBasic(); } catch {}
+
+      // 3) Clear marketplace selection + cards/required errors
+      try { selectedMarketplaceIds.clear(); } catch {}
+      try {
+        // These helpers exist in your file; call them if present
+        if (typeof renderMarketplaceTiles === "function") renderMarketplaceTiles(__metaCache);
+        if (typeof renderMarketplaceCards === "function") renderMarketplaceCards();
+      } catch {}
+      try { showMarketplaceTilesError(false); } catch {}
+
+      // 4) Clear form fields by reusing your existing population logic
+      //    (this avoids missing any newer fields added later)
+      try { populateFromSaved({}, null); } catch {}
+
+      // 5) Restore default long description for a clean baseline (if helper exists)
+      try { ensureDefaultLongDescription(); } catch {}
+
+      // 6) Recompute gating/validity after reset
+      try { computeValidity(); } catch {}
+
+      // 7) Let the DOM settle fully before we load + apply new values
+      await __nextFrame();
+      await __nextFrame();
+    }
+
     /** Click handler: Load a draft into the form and switch to edit path */
     async function handleLoadDraft(item_id) {
+      if (__loadingItem) return;
+      __loadingItem = true;
+
       try {
+        // ✅ NEW: hard reset + wait before fetching & populating
+        await resetIntakeBeforeLoad();
+
         const res = await api(`/api/inventory/intake?item_id=${encodeURIComponent(item_id)}`, { method: "GET" });
         if (!res || res.ok === false) throw new Error(res?.error || "fetch_failed");
 
