@@ -4876,6 +4876,8 @@ document.addEventListener("intake:item-changed", () => refreshInventory({ force:
       } catch (err) {
         console.error("drafts:load:error", err);
         alert("Failed to load draft.");
+      } finally {
+        __loadingItem = false;
       }
     }
 
