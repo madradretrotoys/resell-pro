@@ -79,25 +79,27 @@
   <header class="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-3">
     <div>
       <h2 class="text-xl font-semibold">Cash Tracking</h2>
-      <p class="opacity-70 text-sm">Record opening/closing counts. Totals update automatically.</p>
+      
     </div>
     <div class="cd-controls">
       <select id="drawer" class="border rounded px-2 py-1">
         <option value="1">Drawer 1</option>
         <option value="2">Drawer 2</option>
       </select>
-      <select id="period" class="border rounded px-2 py-1">
-        <option value="">Select period…</option>
-        <option value="OPEN">Open</option>
-        <option value="CLOSE">Close</option>
-      </select>
-      <button id="btnLoad" class="btn btn--neutral btn--sm">Load Today</button>
+      
     </div>
   </header>
 
   <section class="grid grid-cols-1 lg:grid-cols-2 gap-4">
     <div class="cd-card">
-      <h3 class="font-medium mb-2">Coins & Bills</h3>
+      <h3 class="font-medium mb-2">Drawer Counts</h3>
+      <p class="opacity-70 text-sm">Record opening/closing counts. Totals update automatically.</p>
+      <select id="period" class="border rounded px-2 py-1">
+        <option value="">Select period…</option>
+        <option value="OPEN">Open</option>
+        <option value="CLOSE">Close</option>
+      </select>
+      <button id="btnLoad" class="btn btn--neutral btn--sm">Load Today</button> 
       <div class="cd-grid">
         <label class="cd-field"><span>Pennies (1¢)</span><input type="number" id="pennies" class="border rounded px-2 py-1" min="0" step="1"></label>
         <label class="cd-field"><span>Nickels (5¢)</span><input type="number" id="nickels" class="border rounded px-2 py-1" min="0" step="1"></label>
