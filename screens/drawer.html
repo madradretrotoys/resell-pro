@@ -1,30 +1,88 @@
 <style>
-  /* Local to this fragment */
-  .cd-controls { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
-  .cd-card { border: 1px solid var(--border, #2a2a2a); border-radius: 6px; padding: 12px; }
-
-  /* Grid of compact pairs; each pair keeps label immediately next to its input */
-  .cd-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 12px; }
-  .cd-field {
-    display: inline-flex;
+   /* Local to this fragment */
+  .cd-controls {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
     align-items: center;
-    gap: 10px;
-    white-space: nowrap;
   }
-  .cd-field > input { width: 120px; }
 
-  .cd-card textarea { width: 100%; min-height: 88px; }
+  .cd-card {
+    border: 1px solid var(--border, #e5e7eb);
+    border-radius: 12px;
+    padding: 12px;
+  }
 
-  .cd-totals { display: grid; gap: 6px; }
-  .cd-actions { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+  /* ✅ MORE COMPACT GRID */
+  .cd-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr)); /* 2 columns by default */
+    gap: 10px;
+  }
 
+  /* ✅ label + input stay together without huge spacing */
+  .cd-field {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    min-width: 0;
+  }
+
+  .cd-field span {
+    font-size: 13px;
+    line-height: 1.2;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .cd-field > input {
+    width: 70px;              /* ✅ smaller so two columns fit easily */
+    min-width: 70px;
+    padding: 6px 8px;
+    height: 36px;
+  }
+
+  /* Notes */
+  .cd-card textarea {
+    width: 100%;
+    min-height: 80px;
+  }
+
+  .cd-totals {
+    display: grid;
+    gap: 4px;
+  }
+
+  /* Actions */
+  .cd-actions {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    flex-wrap: wrap;
+  }
+
+  /* ✅ Mobile responsiveness */
   @media (max-width: 640px) {
-    .cd-actions { flex-direction: column; align-items: stretch; }
-    #btnSave { width: 100%; }
+    .cd-grid {
+      grid-template-columns: 1fr; /* stack in 1 column if screen is very tight */
+      gap: 8px;
+    }
+
+    .cd-actions {
+      flex-direction: column;
+      align-items: stretch;
+    }
+
+    #btnSave {
+      width: 100%;
+    }
   }
 </style>
 
-<div class="p-4 space-y-4">
+<div class="p-2 space-y-3 sm:p-4">
   <header class="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-3">
     <div>
       <h2 class="text-xl font-semibold">Cash Drawer</h2>
