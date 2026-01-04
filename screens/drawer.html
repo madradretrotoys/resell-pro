@@ -20,28 +20,21 @@
     gap: 10px;
   }
 
-  /* ✅ label + input stay together without huge spacing */
   .cd-field {
     display: flex;
     align-items: center;
-    justify-content: space-between;
     gap: 8px;
     min-width: 0;
   }
 
   .cd-field span {
-    font-size: 13px;
-    line-height: 1.2;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-  }
+     min-width: 92px;
+     font-size: 12px;
+   }
 
   .cd-field > input {
-    width: 70px;              /* ✅ smaller so two columns fit easily */
+    width: 70px;
     min-width: 70px;
-    padding: 6px 8px;
-    height: 36px;
   }
 
   /* Notes */
