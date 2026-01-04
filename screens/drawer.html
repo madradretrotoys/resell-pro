@@ -140,6 +140,23 @@
        <label class="block mb-2">Notes</label>
        <textarea id="notesCSHMV" class="w-full border rounded px-2 py-1" rows="4" placeholder="Notes are required when making a purchase…"></textarea>
       </section>
+
+      <div class="cd-controls">
+          <select id="MoveFrm" class="border rounded px-2 py-1">
+           <option value="">Select From Location…</option>
+           <option value="Drawer">Drawer</option>
+           <option value="Safe">Safe</option>
+           <option value="Bank">Bank</option>  
+         </select>
+         <select id="MoveTo" class="border rounded px-2 py-1">
+           <option value="">Select to Location…</option>
+           <option value="Drawer">Drawer</option>
+           <option value="Safe">Safe</option>
+           <option value="Bank">Bank</option>
+            <option value="Purchase">Purchase</option>  
+         </select>
+         
+      </div>
        
       <div class="cd-actions mt-3">
          <div id="status" class="opacity-70 text-sm"></div>
