@@ -27,7 +27,28 @@ function bind(root){
 
 function wire(){
   // Enable Save only when a period is selected
-  els.period.addEventListener('change', () => els.btnSave.disabled = !els.period.value);
+  els.period.addEventListener('change', async () => {
+    els.btnSave.disabled = !els.period.value;
+
+    // If user picks a period, auto-load today's counts for the currently selected drawer
+    if (els.period.value) {
+      await loadToday();
+    }
+  });
+
+  // If user switches drawers, auto-load today's counts for that drawer (only if period selected)
+  els.drawer.addEventListener('change', async () => {
+    if (els.period.value) {
+      await loadToday();
+    } else {
+      // If no period selected yet, clear fields to avoid stale data confusion
+      ['pennies','nickels','dimes','quarters','halfdollars','ones','twos','fives','tens','twenties','fifties','hundreds']
+        .forEach(k => els[k].value = '');
+      els.notes.value = '';
+      recalc();
+      els.status.textContent = '';
+    }
+  });
 
   // Recalculate on every input
   ['pennies','nickels','dimes','quarters','halfdollars',
@@ -38,6 +59,7 @@ function wire(){
   els.btnSave.addEventListener('click', save);
   if (els.btnPing) els.btnPing.addEventListener('click', ping); // <-- safe if missing
 }
+
 
 function autosize(root){
   // Keep it simple for now; layout is responsive via CSS classes
