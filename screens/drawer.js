@@ -21,6 +21,9 @@ function bind(root){
     'pennies','nickels','dimes','quarters','halfdollars',
     'ones','twos','fives','tens','twenties','fifties','hundreds',
     'coin_total','bill_total','grand_total','notes','status'
+    // Phase 1: balance + movement
+    'balanceBanner',
+    'move_from','move_to','move_amount','move_notes','btnMoveSave','move_status'
   ];
   ids.forEach(id => els[id] = root.querySelector('#' + id));
 }
@@ -57,6 +60,9 @@ function wire(){
 
   els.btnLoad.addEventListener('click', loadToday);
   els.btnSave.addEventListener('click', save);
+  if (els.btnMoveSave) {
+    els.btnMoveSave.addEventListener('click', saveMovement);
+  }
   if (els.btnPing) els.btnPing.addEventListener('click', ping); // <-- safe if missing
 }
 
@@ -93,6 +99,7 @@ async function loadToday(){
     els.status.textContent = 'Loading…';
     const drawer = els.drawer.value || '1';
     const data = await api(`/api/cash-drawer/today?drawer=${encodeURIComponent(drawer)}`);
+    renderBalanceBanner(data);
     // Prefill OPEN/CLOSE buckets if present; leave current inputs alone unless the matching period is loaded
     const p = els.period.value;
     const row = p === 'OPEN' ? data.open : p === 'CLOSE' ? data.close : null;
@@ -115,6 +122,93 @@ async function loadToday(){
     els.status.textContent = 'Load failed';
   }
 }
+
+function renderBalanceBanner(data) {
+  if (!els.balanceBanner) return;
+
+  // Expected/variance will be added in today.ts Phase 1
+  const expected = Number(data?.expected_open_total ?? NaN);
+  const variance = Number(data?.variance_open_total ?? NaN);
+
+  if (!Number.isFinite(expected)) {
+    els.balanceBanner.classList.add('hidden');
+    return;
+  }
+
+  els.balanceBanner.classList.remove('hidden');
+
+  const hasVariance = Number.isFinite(variance) && Math.abs(variance) > 0.009;
+
+  if (!hasVariance) {
+    els.balanceBanner.textContent = `Expected opening balance: $${expected.toFixed(2)} ✅ Balanced`;
+    els.balanceBanner.className = 'mb-2 p-2 rounded border text-sm bg-green-50 border-green-200 text-green-800';
+    return;
+  }
+
+  const label = variance > 0 ? `Over by $${variance.toFixed(2)}` : `Short by $${Math.abs(variance).toFixed(2)}`;
+  const severe = Math.abs(variance) >= 5;
+
+  els.balanceBanner.textContent = `Expected opening: $${expected.toFixed(2)} • Variance: ${label}`;
+
+  if (severe) {
+    els.balanceBanner.className = 'mb-2 p-2 rounded border text-sm bg-red-50 border-red-200 text-red-800';
+  } else {
+    els.balanceBanner.className = 'mb-2 p-2 rounded border text-sm bg-yellow-50 border-yellow-200 text-yellow-800';
+  }
+}
+
+async function saveMovement() {
+  try {
+    const from_location = els.move_from.value;
+    const to_location = els.move_to.value;
+    const amount = Number(els.move_amount.value || 0);
+    const notes = (els.move_notes.value || '').trim();
+
+    if (!from_location || !to_location) { showToast('Choose From and To locations'); return; }
+    if (from_location === to_location) { showToast('From and To cannot match'); return; }
+    if (!amount || amount <= 0) { showToast('Enter a valid amount'); return; }
+
+    // Require notes if Purchase involved
+    if ((from_location === 'Purchase' || to_location === 'Purchase') && !notes) {
+      showToast('Notes are required for purchases');
+      return;
+    }
+
+    els.btnMoveSave.disabled = true;
+    els.move_status.textContent = 'Saving movement…';
+
+    const body = { from_location, to_location, amount, notes: notes || null };
+    const resp = await api('/api/cash-ledger/save', { method: 'POST', body });
+
+    showToast('Movement saved');
+    els.move_status.textContent = `Saved (${resp.row.ledger_id})`;
+
+    // reset fields
+    els.move_from.value = '';
+    els.move_to.value = '';
+    els.move_amount.value = '';
+    els.move_notes.value = '';
+
+    // Refresh today payload (so expected/variance reflects new movement)
+    await loadToday();
+
+  } catch (e) {
+    const status = e?.status || 500;
+    if (status === 400) {
+      showToast('Invalid movement entry');
+      els.move_status.textContent = 'Invalid movement';
+    } else if (status === 401) {
+      showToast('You are not logged in');
+      els.move_status.textContent = 'Unauthorized';
+    } else {
+      showToast('Movement save failed');
+      els.move_status.textContent = 'Save failed';
+    }
+  } finally {
+    els.btnMoveSave.disabled = false;
+  }
+}
+
 
 async function save(){
   try{
