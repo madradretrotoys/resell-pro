@@ -127,8 +127,8 @@ function renderBalanceBanner(data) {
   if (!els.balanceBanner) return;
 
   // Expected/variance will be added in today.ts Phase 1
-  const expected = Number(data?.expected_open_total ?? NaN);
-  const variance = Number(data?.variance_open_total ?? NaN);
+  const expected = Number(data?.expected_now_total ?? NaN);
+  const variance = Number(data?.variance_now_total ?? NaN);
 
   if (!Number.isFinite(expected)) {
     els.balanceBanner.classList.add('hidden');
@@ -140,7 +140,7 @@ function renderBalanceBanner(data) {
   const hasVariance = Number.isFinite(variance) && Math.abs(variance) > 0.009;
 
   if (!hasVariance) {
-    els.balanceBanner.textContent = `Expected opening balance: $${expected.toFixed(2)} ✅ Balanced`;
+    els.balanceBanner.textContent = `Expected balance: $${expected.toFixed(2)} ✅ Balanced`;
     els.balanceBanner.className = 'mb-2 p-2 rounded border text-sm bg-green-50 border-green-200 text-green-800';
     return;
   }
@@ -148,7 +148,7 @@ function renderBalanceBanner(data) {
   const label = variance > 0 ? `Over by $${variance.toFixed(2)}` : `Short by $${Math.abs(variance).toFixed(2)}`;
   const severe = Math.abs(variance) >= 5;
 
-  els.balanceBanner.textContent = `Expected opening: $${expected.toFixed(2)} • Variance: ${label}`;
+  els.balanceBanner.textContent = `Expected balance: $${expected.toFixed(2)} • Variance: ${label}`;
 
   if (severe) {
     els.balanceBanner.className = 'mb-2 p-2 rounded border text-sm bg-red-50 border-red-200 text-red-800';
