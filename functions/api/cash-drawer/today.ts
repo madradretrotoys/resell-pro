@@ -52,49 +52,47 @@ export const onRequestGet: PagesFunction = async ({ request, env }) => {
     const open = rowsToday.find((r: any) => r.period === "OPEN") || null;
     const closeToday = rowsToday.find((r: any) => r.period === "CLOSE") || null;
 
-    // 2) Find the most recent CLOSE record for this drawer (usually yesterday)
-    // We use count_id ordering since your count_id starts with YYYY-MM-DD
-    const lastCloseRows = await sql/*sql*/`
+    // ✅ 2) Find the most recent snapshot count for this drawer (any period)
+    const lastCountRows = await sql/*sql*/`
       SELECT *
       FROM app.cash_drawer_counts
       WHERE drawer = ${drawer}
-        AND period = 'CLOSE'
-        AND count_id < ${ymd + "#" + drawer + "#OPEN"}
-      ORDER BY count_id DESC
+      ORDER BY created_at DESC
       LIMIT 1
     `;
 
-    const lastClose = lastCloseRows[0] || null;
+    const last_count = lastCountRows[0] || null;
 
-    // If no prior close exists, expected_open_total can't be computed
-    let expected_open_total: number | null = null;
-    let variance_open_total: number | null = null;
+    // Snapshot expected values
+    let expected_now_total: number | null = null;
+    let variance_now_total: number | null = null;
+    let net_since_last_count: number | null = null;
 
-    if (lastClose) {
-      // We use created_at as the "effective point" the drawer was counted closed.
-      // Everything after that should move the expected balance.
-      const closeTs = lastClose.created_at;
+   
+    if (last_count) {
+      const baselineTotal = toMoney(last_count.grand_total);
+      const baselineTs = last_count.created_at;
 
-      // 3) Sum ledger movements affecting this drawer AFTER the last close timestamp
-      // Net = (inflows) - (outflows)
+      // ✅ 3) Sum ledger movements affecting this drawer AFTER the last snapshot timestamp
       const ledgerRows = await sql/*sql*/`
         SELECT
           COALESCE(SUM(CASE WHEN to_location = ${drawerLocation} THEN amount ELSE 0 END), 0) AS inflow,
           COALESCE(SUM(CASE WHEN from_location = ${drawerLocation} THEN amount ELSE 0 END), 0) AS outflow
         FROM app.cash_ledger
-        WHERE created_at > ${closeTs}
+        WHERE created_at > ${baselineTs}
           AND (from_location = ${drawerLocation} OR to_location = ${drawerLocation})
       `;
 
       const inflow = toMoney(ledgerRows?.[0]?.inflow);
       const outflow = toMoney(ledgerRows?.[0]?.outflow);
 
-      const closeTotal = toMoney(lastClose.grand_total);
-      expected_open_total = toMoney(closeTotal + inflow - outflow);
+      net_since_last_count = toMoney(inflow - outflow);
+      expected_now_total = toMoney(baselineTotal + net_since_last_count);
 
-      if (open) {
-        const openTotal = toMoney(open.grand_total);
-        variance_open_total = toMoney(openTotal - expected_open_total);
+      // ✅ variance only if we already have a count loaded today (open or close)
+      if (current) {
+        const currentTotal = toMoney(current.grand_total);
+        variance_now_total = toMoney(currentTotal - expected_now_total);
       }
     }
 
