@@ -20,7 +20,7 @@ function bind(root){
     'drawer','period','btnLoad','btnSave','btnPing',
     'pennies','nickels','dimes','quarters','halfdollars',
     'ones','twos','fives','tens','twenties','fifties','hundreds',
-    'coin_total','bill_total','grand_total','notes','status'
+    'coin_total','bill_total','grand_total','notes','status',
     // Phase 1: balance + movement
     'balanceBanner',
     'move_from','move_to','move_amount','move_notes','btnMoveSave','move_status'
