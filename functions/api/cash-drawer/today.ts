@@ -1,9 +1,5 @@
 // GET /api/cash-drawer/today?drawer=1
-// Snapshot-driven expected amount:
-// - Find the most recent cash_drawer_counts row for this drawer (any period)
-// - expected_now_total = last_count.grand_total + net ledger movements since last_count.created_at
-// Returns { open, close, last_count, expected_now_total, variance_now_total, net_since_last_count } (America/Denver)
-
+// Returns { open, close, expected_open_total, variance_open_total } (America/Denver)
 import { neon } from "@neondatabase/serverless";
 
 const json = (data: any, status = 200) =>
@@ -46,7 +42,7 @@ export const onRequestGet: PagesFunction = async ({ request, env }) => {
 
     const sql = neon(env.DATABASE_URL);
 
-    // 1) Load today's OPEN and CLOSE (same as your original)
+    // 1) Load today's OPEN and CLOSE (same as before)
     const rowsToday = await sql/*sql*/`
       SELECT *
       FROM app.cash_drawer_counts
@@ -56,49 +52,49 @@ export const onRequestGet: PagesFunction = async ({ request, env }) => {
     const open = rowsToday.find((r: any) => r.period === "OPEN") || null;
     const closeToday = rowsToday.find((r: any) => r.period === "CLOSE") || null;
 
-    // ✅ 2) Find the most recent snapshot count for this drawer (any period)
-    const lastCountRows = await sql/*sql*/`
+    // 2) Find the most recent CLOSE record for this drawer (usually yesterday)
+    // We use count_id ordering since your count_id starts with YYYY-MM-DD
+    const lastCloseRows = await sql/*sql*/`
       SELECT *
       FROM app.cash_drawer_counts
       WHERE drawer = ${drawer}
-      ORDER BY created_at DESC
+        AND period = 'CLOSE'
+        AND count_id < ${ymd + "#" + drawer + "#OPEN"}
+      ORDER BY count_id DESC
       LIMIT 1
     `;
 
-    const last_count = lastCountRows[0] || null;
+    const lastClose = lastCloseRows[0] || null;
 
-    // Snapshot expected values
-    let expected_now_total: number | null = null;
-    let variance_now_total: number | null = null;
-    let net_since_last_count: number | null = null;
+    // If no prior close exists, expected_open_total can't be computed
+    let expected_open_total: number | null = null;
+    let variance_open_total: number | null = null;
 
-    // We’ll measure variance against the record the user is currently loading (OPEN if exists, else CLOSE)
-    const current = open || closeToday || null;
+    if (lastClose) {
+      // We use created_at as the "effective point" the drawer was counted closed.
+      // Everything after that should move the expected balance.
+      const closeTs = lastClose.created_at;
 
-    if (last_count) {
-      const baselineTotal = toMoney(last_count.grand_total);
-      const baselineTs = last_count.created_at;
-
-      // ✅ 3) Sum ledger movements affecting this drawer AFTER the last snapshot timestamp
+      // 3) Sum ledger movements affecting this drawer AFTER the last close timestamp
+      // Net = (inflows) - (outflows)
       const ledgerRows = await sql/*sql*/`
         SELECT
           COALESCE(SUM(CASE WHEN to_location = ${drawerLocation} THEN amount ELSE 0 END), 0) AS inflow,
           COALESCE(SUM(CASE WHEN from_location = ${drawerLocation} THEN amount ELSE 0 END), 0) AS outflow
         FROM app.cash_ledger
-        WHERE created_at > ${baselineTs}
+        WHERE created_at > ${closeTs}
           AND (from_location = ${drawerLocation} OR to_location = ${drawerLocation})
       `;
 
       const inflow = toMoney(ledgerRows?.[0]?.inflow);
       const outflow = toMoney(ledgerRows?.[0]?.outflow);
 
-      net_since_last_count = toMoney(inflow - outflow);
-      expected_now_total = toMoney(baselineTotal + net_since_last_count);
+      const closeTotal = toMoney(lastClose.grand_total);
+      expected_open_total = toMoney(closeTotal + inflow - outflow);
 
-      // ✅ variance only if we already have a count loaded today (open or close)
-      if (current) {
-        const currentTotal = toMoney(current.grand_total);
-        variance_now_total = toMoney(currentTotal - expected_now_total);
+      if (open) {
+        const openTotal = toMoney(open.grand_total);
+        variance_open_total = toMoney(openTotal - expected_open_total);
       }
     }
 
@@ -107,18 +103,14 @@ export const onRequestGet: PagesFunction = async ({ request, env }) => {
       drawer,
       open,
       close: closeToday,
-
-      // ✅ Snapshot-driven additions
-      last_count,
-      expected_now_total,
-      variance_now_total,
-      net_since_last_count,
-
-      // Debug helpers (keep during Phase 1)
+      // Phase 1 additions
+      expected_open_total,
+      variance_open_total,
+      // Helpful debug fields (keep for Phase 1, can remove later)
       _debug: {
         drawerLocation,
-        last_count_id: last_count?.count_id || null,
-        last_count_created_at: last_count?.created_at || null,
+        last_close_count_id: lastClose?.count_id || null,
+        last_close_created_at: lastClose?.created_at || null,
       },
     });
   } catch (e: any) {
