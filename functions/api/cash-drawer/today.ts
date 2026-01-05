@@ -1,35 +1,118 @@
 // GET /api/cash-drawer/today?drawer=1
-// Returns { open, close } (today in America/Denver)
+// Returns { open, close, expected_open_total, variance_open_total } (America/Denver)
 import { neon } from "@neondatabase/serverless";
 
 const json = (data: any, status = 200) =>
-  new Response(JSON.stringify(data), { status, headers: { "content-type": "application/json", "cache-control": "no-store" } });
+  new Response(JSON.stringify(data), {
+    status,
+    headers: { "content-type": "application/json", "cache-control": "no-store" },
+  });
+
+function ymdKeyTZ(date: Date, tz = "America/Denver") {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: tz,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  })
+    .formatToParts(date)
+    .reduce((acc, p) => ((acc[p.type] = p.value), acc), {} as any);
+
+  return `${parts.year}-${parts.month}-${parts.day}`; // YYYY-MM-DD
+}
 
 function todayKeyTZ(tz = "America/Denver") {
-  const d = new Date();
-  const parts = new Intl.DateTimeFormat("en-US", { timeZone: tz, year: "numeric", month: "2-digit", day: "2-digit" })
-    .formatToParts(d)
-    .reduce((acc, p) => (acc[p.type] = p.value, acc), {} as any);
-  return `${parts.year}-${parts.month}-${parts.day}`; // YYYY-MM-DD
+  return ymdKeyTZ(new Date(), tz);
+}
+
+function toMoney(n: any) {
+  const x = Number(n);
+  if (!Number.isFinite(x)) return 0;
+  return Math.round(x * 100) / 100;
 }
 
 export const onRequestGet: PagesFunction = async ({ request, env }) => {
   try {
     const url = new URL(request.url);
     const drawer = String(url.searchParams.get("drawer") || "1");
-    const ymd = todayKeyTZ();
+    const tz = "America/Denver";
+
+    const ymd = todayKeyTZ(tz);
+    const drawerLocation = `Drawer ${drawer}`;
 
     const sql = neon(env.DATABASE_URL);
-    const rows = await sql/*sql*/`
+
+    // 1) Load today's OPEN and CLOSE (same as before)
+    const rowsToday = await sql/*sql*/`
       SELECT *
       FROM app.cash_drawer_counts
       WHERE count_id IN (${ymd + "#" + drawer + "#OPEN"}, ${ymd + "#" + drawer + "#CLOSE"})
     `;
 
-    const open = rows.find((r: any) => r.period === "OPEN") || null;
-    const close = rows.find((r: any) => r.period === "CLOSE") || null;
+    const open = rowsToday.find((r: any) => r.period === "OPEN") || null;
+    const closeToday = rowsToday.find((r: any) => r.period === "CLOSE") || null;
 
-    return json({ date: ymd, drawer, open, close });
+    // 2) Find the most recent CLOSE record for this drawer (usually yesterday)
+    // We use count_id ordering since your count_id starts with YYYY-MM-DD
+    const lastCloseRows = await sql/*sql*/`
+      SELECT *
+      FROM app.cash_drawer_counts
+      WHERE drawer = ${drawer}
+        AND period = 'CLOSE'
+        AND count_id < ${ymd + "#" + drawer + "#OPEN"}
+      ORDER BY count_id DESC
+      LIMIT 1
+    `;
+
+    const lastClose = lastCloseRows[0] || null;
+
+    // If no prior close exists, expected_open_total can't be computed
+    let expected_open_total: number | null = null;
+    let variance_open_total: number | null = null;
+
+    if (lastClose) {
+      // We use created_at as the "effective point" the drawer was counted closed.
+      // Everything after that should move the expected balance.
+      const closeTs = lastClose.created_at;
+
+      // 3) Sum ledger movements affecting this drawer AFTER the last close timestamp
+      // Net = (inflows) - (outflows)
+      const ledgerRows = await sql/*sql*/`
+        SELECT
+          COALESCE(SUM(CASE WHEN to_location = ${drawerLocation} THEN amount ELSE 0 END), 0) AS inflow,
+          COALESCE(SUM(CASE WHEN from_location = ${drawerLocation} THEN amount ELSE 0 END), 0) AS outflow
+        FROM app.cash_ledger
+        WHERE created_at > ${closeTs}
+          AND (from_location = ${drawerLocation} OR to_location = ${drawerLocation})
+      `;
+
+      const inflow = toMoney(ledgerRows?.[0]?.inflow);
+      const outflow = toMoney(ledgerRows?.[0]?.outflow);
+
+      const closeTotal = toMoney(lastClose.grand_total);
+      expected_open_total = toMoney(closeTotal + inflow - outflow);
+
+      if (open) {
+        const openTotal = toMoney(open.grand_total);
+        variance_open_total = toMoney(openTotal - expected_open_total);
+      }
+    }
+
+    return json({
+      date: ymd,
+      drawer,
+      open,
+      close: closeToday,
+      // Phase 1 additions
+      expected_open_total,
+      variance_open_total,
+      // Helpful debug fields (keep for Phase 1, can remove later)
+      _debug: {
+        drawerLocation,
+        last_close_count_id: lastClose?.count_id || null,
+        last_close_created_at: lastClose?.created_at || null,
+      },
+    });
   } catch (e: any) {
     return json({ error: e?.message || "load_failed" }, 500);
   }
