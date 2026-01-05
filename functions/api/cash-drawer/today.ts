@@ -101,14 +101,18 @@ export const onRequestGet: PagesFunction = async ({ request, env }) => {
       drawer,
       open,
       close: closeToday,
-      // Phase 1 additions
-      expected_open_total,
-      variance_open_total,
-      // Helpful debug fields (keep for Phase 1, can remove later)
+
+      // ✅ Snapshot-driven additions
+      last_count,
+      expected_now_total,
+      variance_now_total,
+      net_since_last_count,
+
+      // Debug helpers (keep during Phase 1)
       _debug: {
         drawerLocation,
-        last_close_count_id: lastClose?.count_id || null,
-        last_close_created_at: lastClose?.created_at || null,
+        last_count_id: last_count?.count_id || null,
+        last_count_created_at: last_count?.created_at || null,
       },
     });
   } catch (e: any) {
