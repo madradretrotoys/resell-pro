@@ -1,127 +1,117 @@
+// GET /api/cash-drawer/today?drawer=1
+// Returns { open, close, expected_open_total, variance_open_total } (America/Denver)
 import { neon } from "@neondatabase/serverless";
-import { getSessionFromRequest } from "../../lib/auth";
 
-export const onRequestGet: PagesFunction = async (context) => {
+const json = (data: any, status = 200) =>
+  new Response(JSON.stringify(data), {
+    status,
+    headers: { "content-type": "application/json", "cache-control": "no-store" },
+  });
+
+function ymdKeyTZ(date: Date, tz = "America/Denver") {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: tz,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  })
+    .formatToParts(date)
+    .reduce((acc, p) => ((acc[p.type] = p.value), acc), {} as any);
+
+  return `${parts.year}-${parts.month}-${parts.day}`; // YYYY-MM-DD
+}
+
+function todayKeyTZ(tz = "America/Denver") {
+  return ymdKeyTZ(new Date(), tz);
+}
+
+function toMoney(n: any) {
+  const x = Number(n);
+  if (!Number.isFinite(x)) return 0;
+  return Math.round(x * 100) / 100;
+}
+
+export const onRequestGet: PagesFunction = async ({ request, env }) => {
   try {
-    const session = await getSessionFromRequest(context.request);
-    if (!session) {
-      return new Response(JSON.stringify({ ok: false, error: "unauthorized" }), {
-        status: 401,
-        headers: { "content-type": "application/json" },
-      });
-    }
+    const url = new URL(request.url);
+    const drawer = String(url.searchParams.get("drawer") || "1");
+    const tz = "America/Denver";
 
-    const tenantId = session.active_tenant_id;
-    if (!tenantId) {
-      return new Response(JSON.stringify({ ok: false, error: "missing tenant" }), {
-        status: 400,
-        headers: { "content-type": "application/json" },
-      });
-    }
+    const ymd = todayKeyTZ(tz);
+    const drawerLocation = `Drawer ${drawer}`;
 
-    const url = new URL(context.request.url);
-    const drawer = Number(url.searchParams.get("drawer") || "1");
+    const sql = neon(env.DATABASE_URL);
 
-    const sql = neon(context.env.DATABASE_URL);
-
-    // 1) Get latest drawer count record for this drawer (Open or Close)
-    const lastCountRows = await sql`
+    // 1) Load today's OPEN and CLOSE (same as before)
+    const rowsToday = await sql/*sql*/`
       SELECT *
       FROM app.cash_drawer_counts
-      WHERE drawer = ${drawer}
-      ORDER BY COALESCE(count_ts, updated_at) DESC
+      WHERE count_id IN (${ymd + "#" + drawer + "#OPEN"}, ${ymd + "#" + drawer + "#CLOSE"})
+    `;
+
+    const open = rowsToday.find((r: any) => r.period === "OPEN") || null;
+    const closeToday = rowsToday.find((r: any) => r.period === "CLOSE") || null;
+
+    // 2) Find the most recent CLOSE record for this drawer (before today)
+    const lastCloseRows = await sql/*sql*/`
+      SELECT *
+      FROM app.cash_drawer_counts
+      WHERE drawer = ${Number(drawer)}
+        AND period = 'CLOSE'
+        AND count_id < ${ymd + "#" + drawer + "#OPEN"}
+      ORDER BY count_id DESC
       LIMIT 1
     `;
 
-    const lastCount = lastCountRows?.[0] || null;
+    const lastClose = lastCloseRows[0] || null;
 
-    // If no counts exist yet, expected opening is just 0 + ledger since "beginning of time"
-    const baselineTotal = lastCount?.grand_total ? Number(lastCount.grand_total) : 0;
+    // If no prior close exists, expected_open_total can't be computed
+    let expected_open_total: number | null = null;
+    let variance_open_total: number | null = null;
 
-    const baselineTs =
-      lastCount?.count_ts ||
-      lastCount?.updated_at ||
-      null;
+    if (lastClose) {
+      // ✅ FIX: cash_drawer_counts does not have created_at
+      // Use count_ts if available, otherwise updated_at
+      const closeTs = lastClose.count_ts || lastClose.updated_at;
 
-    // 2) Sum ledger moves affecting THIS drawer since baseline timestamp
-    // Drawer movements are represented by from_location / to_location text values like "Drawer 1"
-    const drawerLabel = `Drawer ${drawer}`;
+      // 3) Sum ledger movements affecting this drawer AFTER the last close timestamp
+      // Net = inflows - outflows
+      const ledgerRows = await sql/*sql*/`
+        SELECT
+          COALESCE(SUM(CASE WHEN to_location = ${drawerLocation} THEN amount ELSE 0 END), 0) AS inflow,
+          COALESCE(SUM(CASE WHEN from_location = ${drawerLocation} THEN amount ELSE 0 END), 0) AS outflow
+        FROM app.cash_ledger
+        WHERE created_at > ${closeTs}
+          AND (from_location = ${drawerLocation} OR to_location = ${drawerLocation})
+      `;
 
-    // Net effect:
-    // - If cash moves INTO Drawer X: +amount
-    // - If cash moves OUT of Drawer X: -amount
-    //
-    // We compute this as:
-    //   sum(amount where to_location = Drawer X)
-    // - sum(amount where from_location = Drawer X)
+      const inflow = toMoney(ledgerRows?.[0]?.inflow);
+      const outflow = toMoney(ledgerRows?.[0]?.outflow);
 
-    const ledgerRows = baselineTs
-      ? await sql`
-          SELECT
-            COALESCE(SUM(CASE WHEN to_location = ${drawerLabel} THEN amount ELSE 0 END), 0) AS in_total,
-            COALESCE(SUM(CASE WHEN from_location = ${drawerLabel} THEN amount ELSE 0 END), 0) AS out_total
-          FROM app.cash_ledger
-          WHERE tenant_id = ${tenantId}
-            AND created_at > ${baselineTs}
-        `
-      : await sql`
-          SELECT
-            COALESCE(SUM(CASE WHEN to_location = ${drawerLabel} THEN amount ELSE 0 END), 0) AS in_total,
-            COALESCE(SUM(CASE WHEN from_location = ${drawerLabel} THEN amount ELSE 0 END), 0) AS out_total
-          FROM app.cash_ledger
-          WHERE tenant_id = ${tenantId}
-        `;
+      const closeTotal = toMoney(lastClose.grand_total);
+      expected_open_total = toMoney(closeTotal + inflow - outflow);
 
-    const inTotal = ledgerRows?.[0]?.in_total ? Number(ledgerRows[0].in_total) : 0;
-    const outTotal = ledgerRows?.[0]?.out_total ? Number(ledgerRows[0].out_total) : 0;
-
-    const netMoves = inTotal - outTotal;
-
-    // Expected = baseline count total + net moves since then
-    const expectedTotal = baselineTotal + netMoves;
-
-    return new Response(
-      JSON.stringify({
-        ok: true,
-        drawer,
-        last_count: lastCount
-          ? {
-              count_id: lastCount.count_id,
-              count_ts: lastCount.count_ts,
-              updated_at: lastCount.updated_at,
-              period: lastCount.period,
-              drawer: lastCount.drawer,
-              coin_total: lastCount.coin_total,
-              bill_total: lastCount.bill_total,
-              grand_total: lastCount.grand_total,
-              notes: lastCount.notes,
-            }
-          : null,
-        baseline_total: baselineTotal,
-        baseline_ts: baselineTs,
-        ledger: {
-          in_total: inTotal,
-          out_total: outTotal,
-          net_moves: netMoves,
-        },
-        expected_total: expectedTotal,
-      }),
-      {
-        status: 200,
-        headers: { "content-type": "application/json" },
+      if (open) {
+        const openTotal = toMoney(open.grand_total);
+        variance_open_total = toMoney(openTotal - expected_open_total);
       }
-    );
-  } catch (err: any) {
-    return new Response(
-      JSON.stringify({
-        ok: false,
-        error: "server_error",
-        message: err?.message || String(err),
-      }),
-      {
-        status: 500,
-        headers: { "content-type": "application/json" },
-      }
-    );
+    }
+
+    return json({
+      date: ymd,
+      drawer,
+      open,
+      close: closeToday,
+      expected_open_total,
+      variance_open_total,
+      _debug: {
+        drawerLocation,
+        last_close_count_id: lastClose?.count_id || null,
+        last_close_ts: lastClose?.count_ts || null,
+        last_close_updated_at: lastClose?.updated_at || null,
+      },
+    });
+  } catch (e: any) {
+    return json({ error: e?.message || "load_failed" }, 500);
   }
 };
