@@ -126,10 +126,11 @@ async function loadToday(){
 function renderBalanceBanner(data) {
   if (!els.balanceBanner) return;
 
-  // Expected/variance will be added in today.ts Phase 1
-  const expected = Number(data?.expected_open_total ?? NaN);
-  const variance = Number(data?.variance_open_total ?? NaN);
+  const expected = Number(data?.expected_now_total ?? NaN);
+  const variance = Number(data?.variance_now_total ?? NaN);
+  const net = Number(data?.net_since_last_count ?? NaN);
 
+  // If we don't have a baseline snapshot yet, hide banner
   if (!Number.isFinite(expected)) {
     els.balanceBanner.classList.add('hidden');
     return;
@@ -139,8 +140,19 @@ function renderBalanceBanner(data) {
 
   const hasVariance = Number.isFinite(variance) && Math.abs(variance) > 0.009;
 
+  // Helper label for net movements
+  let netLabel = '';
+  if (Number.isFinite(net) && Math.abs(net) > 0.009) {
+    netLabel = net > 0
+      ? ` • Net movements: +$${net.toFixed(2)}`
+      : ` • Net movements: -$${Math.abs(net).toFixed(2)}`;
+  } else {
+    netLabel = ` • Net movements: $0.00`;
+  }
+
   if (!hasVariance) {
-    els.balanceBanner.textContent = `Expected opening balance: $${expected.toFixed(2)} ✅ Balanced`;
+    // If we have a count today and it matches expected
+    els.balanceBanner.textContent = `Expected now: $${expected.toFixed(2)} ✅ Balanced${netLabel}`;
     els.balanceBanner.className = 'mb-2 p-2 rounded border text-sm bg-green-50 border-green-200 text-green-800';
     return;
   }
@@ -148,7 +160,7 @@ function renderBalanceBanner(data) {
   const label = variance > 0 ? `Over by $${variance.toFixed(2)}` : `Short by $${Math.abs(variance).toFixed(2)}`;
   const severe = Math.abs(variance) >= 5;
 
-  els.balanceBanner.textContent = `Expected opening: $${expected.toFixed(2)} • Variance: ${label}`;
+  els.balanceBanner.textContent = `Expected now: $${expected.toFixed(2)} • Variance: ${label}${netLabel}`;
 
   if (severe) {
     els.balanceBanner.className = 'mb-2 p-2 rounded border text-sm bg-red-50 border-red-200 text-red-800';
@@ -156,6 +168,7 @@ function renderBalanceBanner(data) {
     els.balanceBanner.className = 'mb-2 p-2 rounded border text-sm bg-yellow-50 border-yellow-200 text-yellow-800';
   }
 }
+
 
 async function saveMovement() {
   try {
