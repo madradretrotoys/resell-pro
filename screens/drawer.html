@@ -93,6 +93,8 @@
   <section class="grid grid-cols-1 lg:grid-cols-2 gap-4">
     <div class="cd-card">
       <h3 class="font-medium mb-2">Drawer Counts</h3>
+      <!-- Balance Banner (Phase 1) -->
+      <div id="balanceBanner" class="hidden mb-2 p-2 rounded border text-sm"></div> 
       <div class="cd-controls">
           <select id="period" class="border rounded px-2 py-1">
            <option value="">Select period…</option>
@@ -134,41 +136,47 @@
       </div> 
     </div>
 
-    <div class="cd-card">
-      <h3 class="font-medium mb-2">Cash Movement</h3>
-
-      <div class="cd-controls">
-          <select id="MoveFrm" class="border rounded px-2 py-1">
-           <option value="">Select From Location…</option>
-           <option value="frDrawer1">Drawer 1</option>
-            <option value="frDrawer2">Drawer 2</option>
-           <option value="frSafe">Safe</option>
-           <option value="frBank">Bank</option>  
-         </select>
-         <select id="MoveTo" class="border rounded px-2 py-1">
-           <option value="">Select to Location…</option>
-           <option value="toDrawer1">Drawer 1</option>
-           <option value="toDrawer2">Drawer 2</option>
-           <option value="toSafe">Safe</option>
-           <option value="toBank">Bank</option>
-            <option value="toPurchase">Purchase</option>  
-         </select>
-
-         <label class="cd-field"><span>$ Amount</span><input type="number" id="amount" class="border rounded px-2 py-1" min="0" step="1"></label>
-         
-      </div>
-
-      <section class="cd-card">
-       <label class="block mb-2">Notes</label>
-       <textarea id="notesCSHMV" class="w-full border rounded px-2 py-1" rows="4" placeholder="Notes are required when making a purchase…"></textarea>
-      </section>
-       
-      <div class="cd-actions mt-3">
-         <div id="status" class="opacity-70 text-sm"></div>
-         <button id="btnSaveCSHMV" class="btn btn--success btn--lg" disabled>Save</button>
-      </div> 
-     
-    </div>
+    <section class="cd-card">
+     <h3 class="font-medium mb-2">Cash Movement</h3>
+   
+     <div class="cd-controls">
+       <select id="move_from" class="border rounded px-2 py-1">
+         <option value="">Select From Location…</option>
+         <option value="Drawer 1">Drawer 1</option>
+         <option value="Drawer 2">Drawer 2</option>
+         <option value="Safe">Safe</option>
+         <option value="Bank">Bank</option>
+       </select>
+   
+       <select id="move_to" class="border rounded px-2 py-1">
+         <option value="">Select To Location…</option>
+         <option value="Drawer 1">Drawer 1</option>
+         <option value="Drawer 2">Drawer 2</option>
+         <option value="Safe">Safe</option>
+         <option value="Bank">Bank</option>
+         <option value="Purchase">Purchase</option>
+       </select>
+   
+       <div class="flex items-center gap-2">
+         <span class="text-sm">$ Amount</span>
+         <input id="move_amount" type="number" class="border rounded px-2 py-1 w-28" min="0" step="0.01" />
+       </div>
+     </div>
+   
+     <div class="mt-2">
+       <label class="block text-sm font-medium mb-1">Notes</label>
+       <textarea
+         id="move_notes"
+         class="border rounded px-2 py-2 w-full"
+         placeholder="Notes are required when making a purchase..."
+       ></textarea>
+     </div>
+   
+     <div class="cd-actions mt-2">
+       <div id="move_status" class="text-sm text-gray-600"></div>
+       <button id="btnMoveSave" class="btn btn--primary">Save</button>
+     </div>
+   </section>
   </section>
 
   
