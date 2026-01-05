@@ -1,121 +1,45 @@
-// GET /api/cash-drawer/today?drawer=1
-// Returns { open, close, expected_open_total, variance_open_total } (America/Denver)
-import { neon } from "@neondatabase/serverless";
+function renderBalanceBanner(data) {
+  if (!els.balanceBanner) return;
 
-const json = (data: any, status = 200) =>
-  new Response(JSON.stringify(data), {
-    status,
-    headers: { "content-type": "application/json", "cache-control": "no-store" },
-  });
+  const expected = Number(data?.expected_now_total ?? NaN);
+  const variance = Number(data?.variance_now_total ?? NaN);
+  const net = Number(data?.net_since_last_count ?? NaN);
 
-function ymdKeyTZ(date: Date, tz = "America/Denver") {
-  const parts = new Intl.DateTimeFormat("en-US", {
-    timeZone: tz,
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  })
-    .formatToParts(date)
-    .reduce((acc, p) => ((acc[p.type] = p.value), acc), {} as any);
-
-  return `${parts.year}-${parts.month}-${parts.day}`; // YYYY-MM-DD
-}
-
-function todayKeyTZ(tz = "America/Denver") {
-  return ymdKeyTZ(new Date(), tz);
-}
-
-function toMoney(n: any) {
-  const x = Number(n);
-  if (!Number.isFinite(x)) return 0;
-  return Math.round(x * 100) / 100;
-}
-
-export const onRequestGet: PagesFunction = async ({ request, env }) => {
-  try {
-    const url = new URL(request.url);
-    const drawer = String(url.searchParams.get("drawer") || "1");
-    const tz = "America/Denver";
-
-    const ymd = todayKeyTZ(tz);
-    const drawerLocation = `Drawer ${drawer}`;
-
-    const sql = neon(env.DATABASE_URL);
-
-    // 1) Load today's OPEN and CLOSE (same as before)
-    const rowsToday = await sql/*sql*/`
-      SELECT *
-      FROM app.cash_drawer_counts
-      WHERE count_id IN (${ymd + "#" + drawer + "#OPEN"}, ${ymd + "#" + drawer + "#CLOSE"})
-    `;
-
-    const open = rowsToday.find((r: any) => r.period === "OPEN") || null;
-    const closeToday = rowsToday.find((r: any) => r.period === "CLOSE") || null;
-
-    // ✅ 2) Find the most recent snapshot count for this drawer (any period)
-    const lastCountRows = await sql/*sql*/`
-      SELECT *
-      FROM app.cash_drawer_counts
-      WHERE drawer = ${drawer}
-      ORDER BY created_at DESC
-      LIMIT 1
-    `;
-
-    const last_count = lastCountRows[0] || null;
-
-    // Snapshot expected values
-    let expected_now_total: number | null = null;
-    let variance_now_total: number | null = null;
-    let net_since_last_count: number | null = null;
-
-   
-    if (last_count) {
-      const baselineTotal = toMoney(last_count.grand_total);
-      const baselineTs = last_count.created_at;
-
-      // ✅ 3) Sum ledger movements affecting this drawer AFTER the last snapshot timestamp
-      const ledgerRows = await sql/*sql*/`
-        SELECT
-          COALESCE(SUM(CASE WHEN to_location = ${drawerLocation} THEN amount ELSE 0 END), 0) AS inflow,
-          COALESCE(SUM(CASE WHEN from_location = ${drawerLocation} THEN amount ELSE 0 END), 0) AS outflow
-        FROM app.cash_ledger
-        WHERE created_at > ${baselineTs}
-          AND (from_location = ${drawerLocation} OR to_location = ${drawerLocation})
-      `;
-
-      const inflow = toMoney(ledgerRows?.[0]?.inflow);
-      const outflow = toMoney(ledgerRows?.[0]?.outflow);
-
-      net_since_last_count = toMoney(inflow - outflow);
-      expected_now_total = toMoney(baselineTotal + net_since_last_count);
-
-      // ✅ variance only if we already have a count loaded today (open or close)
-      if (current) {
-        const currentTotal = toMoney(current.grand_total);
-        variance_now_total = toMoney(currentTotal - expected_now_total);
-      }
-    }
-
-    return json({
-      date: ymd,
-      drawer,
-      open,
-      close: closeToday,
-
-      // ✅ Snapshot-driven additions
-      last_count,
-      expected_now_total,
-      variance_now_total,
-      net_since_last_count,
-
-      // Debug helpers (keep during Phase 1)
-      _debug: {
-        drawerLocation,
-        last_count_id: last_count?.count_id || null,
-        last_count_created_at: last_count?.created_at || null,
-      },
-    });
-  } catch (e: any) {
-    return json({ error: e?.message || "load_failed" }, 500);
+  // If we don't have a baseline snapshot yet, hide banner
+  if (!Number.isFinite(expected)) {
+    els.balanceBanner.classList.add('hidden');
+    return;
   }
-};
+
+  els.balanceBanner.classList.remove('hidden');
+
+  const hasVariance = Number.isFinite(variance) && Math.abs(variance) > 0.009;
+
+  // Helper label for net movements
+  let netLabel = '';
+  if (Number.isFinite(net) && Math.abs(net) > 0.009) {
+    netLabel = net > 0
+      ? ` • Net movements: +$${net.toFixed(2)}`
+      : ` • Net movements: -$${Math.abs(net).toFixed(2)}`;
+  } else {
+    netLabel = ` • Net movements: $0.00`;
+  }
+
+  if (!hasVariance) {
+    // If we have a count today and it matches expected
+    els.balanceBanner.textContent = `Expected now: $${expected.toFixed(2)} ✅ Balanced${netLabel}`;
+    els.balanceBanner.className = 'mb-2 p-2 rounded border text-sm bg-green-50 border-green-200 text-green-800';
+    return;
+  }
+
+  const label = variance > 0 ? `Over by $${variance.toFixed(2)}` : `Short by $${Math.abs(variance).toFixed(2)}`;
+  const severe = Math.abs(variance) >= 5;
+
+  els.balanceBanner.textContent = `Expected now: $${expected.toFixed(2)} • Variance: ${label}${netLabel}`;
+
+  if (severe) {
+    els.balanceBanner.className = 'mb-2 p-2 rounded border text-sm bg-red-50 border-red-200 text-red-800';
+  } else {
+    els.balanceBanner.className = 'mb-2 p-2 rounded border text-sm bg-yellow-50 border-yellow-200 text-yellow-800';
+  }
+}
