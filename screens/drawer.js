@@ -126,35 +126,56 @@ async function loadToday(){
 function renderBalanceBanner(data) {
   if (!els.balanceBanner) return;
 
-  // Expected/variance will be added in today.ts Phase 1
-  const expected = Number(data?.expected_now_total ?? NaN);
-  const variance = Number(data?.variance_now_total ?? NaN);
+  const canEdit = !!sessionUser?.permissions?.can_cash_edit;
 
-  if (!Number.isFinite(expected)) {
+  const status = String(data?.review_status || '');
+  const expected = Number(data?.expected_at_latest ?? NaN);
+  const variance = Number(data?.variance_at_latest ?? NaN);
+
+  // If no evaluation is possible yet, hide banner
+  if (!status) {
     els.balanceBanner.classList.add('hidden');
     return;
   }
 
   els.balanceBanner.classList.remove('hidden');
 
-  const hasVariance = Number.isFinite(variance) && Math.abs(variance) > 0.009;
+  const isBalanced = status === 'balanced';
+  const severe = Number.isFinite(variance) && Math.abs(variance) >= 5;
 
-  if (!hasVariance) {
-    els.balanceBanner.textContent = `Expected balance: $${expected.toFixed(2)} ✅ Balanced`;
+  // Employees (no edit permission) get status only, no amounts.
+  if (!canEdit) {
+    els.balanceBanner.textContent = isBalanced ? `✅ Balanced` : `⚠ Needs review — Call manager`;
+    els.balanceBanner.className = isBalanced
+      ? 'mb-2 p-2 rounded border text-sm bg-green-50 border-green-200 text-green-800'
+      : 'mb-2 p-2 rounded border text-sm bg-red-50 border-red-200 text-red-800';
+    return;
+  }
+
+  // Managers get full transparency
+  if (!Number.isFinite(expected)) {
+    els.balanceBanner.textContent = isBalanced ? `✅ Balanced` : `⚠ Needs review`;
+    els.balanceBanner.className = isBalanced
+      ? 'mb-2 p-2 rounded border text-sm bg-green-50 border-green-200 text-green-800'
+      : 'mb-2 p-2 rounded border text-sm bg-red-50 border-red-200 text-red-800';
+    return;
+  }
+
+  if (isBalanced) {
+    els.balanceBanner.textContent = `Expected: $${expected.toFixed(2)} ✅ Balanced`;
     els.balanceBanner.className = 'mb-2 p-2 rounded border text-sm bg-green-50 border-green-200 text-green-800';
     return;
   }
 
-  const label = variance > 0 ? `Over by $${variance.toFixed(2)}` : `Short by $${Math.abs(variance).toFixed(2)}`;
-  const severe = Math.abs(variance) >= 5;
+  const label = variance > 0
+    ? `Over by $${variance.toFixed(2)}`
+    : `Short by $${Math.abs(variance).toFixed(2)}`;
 
-  els.balanceBanner.textContent = `Expected balance: $${expected.toFixed(2)} • Variance: ${label}`;
+  els.balanceBanner.textContent = `Expected: $${expected.toFixed(2)} • Variance: ${label}`;
 
-  if (severe) {
-    els.balanceBanner.className = 'mb-2 p-2 rounded border text-sm bg-red-50 border-red-200 text-red-800';
-  } else {
-    els.balanceBanner.className = 'mb-2 p-2 rounded border text-sm bg-yellow-50 border-yellow-200 text-yellow-800';
-  }
+  els.balanceBanner.className = severe
+    ? 'mb-2 p-2 rounded border text-sm bg-red-50 border-red-200 text-red-800'
+    : 'mb-2 p-2 rounded border text-sm bg-yellow-50 border-yellow-200 text-yellow-800';
 }
 
 async function saveMovement() {
@@ -226,6 +247,8 @@ async function save(){
     const resp = await api('/api/cash-drawer/save', { method:'POST', body });
     showToast('Saved');
     els.status.textContent = `Saved (${resp.count_id})`;
+    // Refresh banner/status after save
+    await loadToday();
   }catch(e){
     const status = e?.status || 500;
     if(status === 409){
