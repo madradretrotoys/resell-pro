@@ -114,7 +114,7 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
     // First-write wins: insert, else 409
     try {
       const rows = await sql/*sql*/`
-        INSERT INTO app.safe_counts
+        INSERT INTO app.cash_safe_counts
           (safe_count_id, tenant_id, user_id, user_name, count_ts, count_date, period, amount, notes, updated_at)
         VALUES
           (${safe_count_id}, ${tenant_id}, ${user_id}, ${actor_name}, now(), ${ymd}, ${period}, ${amount}, ${notes}, now())
