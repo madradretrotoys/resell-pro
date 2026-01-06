@@ -77,7 +77,7 @@ function wire(){
 
 async function saveSafeCount() {
   try {
-    const period = els.safe_period.value;
+    const period = (els.safe_period?.value || '').replace(/^Safe/i, '').trim().toUpperCase();
     const amount = Number(els.safe_amount?.value || 0);
     const notes = (els.safe_notes?.value || '').trim();
 
