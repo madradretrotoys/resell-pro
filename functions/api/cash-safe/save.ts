@@ -40,7 +40,7 @@ export const onRequestPost: PagesFunction = async (ctx) => {
     // Insert safe count row (count_date defaults to current_date)
     // Unique constraint expected on (tenant_id, count_date, period)
     const rows = await sql`
-      INSERT INTO app.safe_counts (
+      INSERT INTO app.cash_safe_counts (
         tenant_id,
         user_id,
         period,
