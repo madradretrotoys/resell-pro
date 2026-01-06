@@ -1,5 +1,5 @@
 // GET /api/cash-drawer/today?drawer=1
-// Returns { open, close, expected_open_total, variance_open_total } (America/Denver)
+// Returns { open, close, expected_now_total, variance_now_total } (America/Denver)
 import { neon } from "@neondatabase/serverless";
 
 const json = (data: any, status = 200) =>
@@ -42,7 +42,7 @@ export const onRequestGet: PagesFunction = async ({ request, env }) => {
 
     const sql = neon(env.DATABASE_URL);
 
-    // 1) Load today's OPEN and CLOSE (same as before)
+    // 1) Load today's OPEN and CLOSE (count_id based)
     const rowsToday = await sql/*sql*/`
       SELECT *
       FROM app.cash_drawer_counts
@@ -52,48 +52,52 @@ export const onRequestGet: PagesFunction = async ({ request, env }) => {
     const open = rowsToday.find((r: any) => r.period === "OPEN") || null;
     const closeToday = rowsToday.find((r: any) => r.period === "CLOSE") || null;
 
-    // 2) Find the most recent CLOSE record for this drawer (before today)
-    const lastCloseRows = await sql/*sql*/`
+    // 2) Find the MOST RECENT count for this drawer (OPEN or CLOSE, any date)
+    // Anchor = last counted truth for this drawer.
+    const anchorRows = await sql/*sql*/`
       SELECT *
       FROM app.cash_drawer_counts
       WHERE drawer = ${Number(drawer)}
-        AND period = 'CLOSE'
-        AND count_id < ${ymd + "#" + drawer + "#OPEN"}
-      ORDER BY count_id DESC
+      ORDER BY
+        COALESCE(count_ts, updated_at) DESC,
+        count_id DESC
       LIMIT 1
     `;
 
-    const lastClose = lastCloseRows[0] || null;
+    const anchor = anchorRows[0] || null;
 
-    // If no prior close exists, expected_open_total can't be computed
-    let expected_open_total: number | null = null;
-    let variance_open_total: number | null = null;
+    let expected_now_total: number | null = null;
+    let variance_now_total: number | null = null;
 
-    if (lastClose) {
-      // ✅ FIX: cash_drawer_counts does not have created_at
-      // Use count_ts if available, otherwise updated_at
-      const closeTs = lastClose.count_ts || lastClose.updated_at;
+    if (anchor) {
+      const anchorTs = anchor.count_ts || anchor.updated_at;
+      const anchorTotal = toMoney(anchor.grand_total);
 
-      // 3) Sum ledger movements affecting this drawer AFTER the last close timestamp
-      // Net = inflows - outflows
+      // 3) Sum ledger movements affecting this drawer AFTER the anchor timestamp
       const ledgerRows = await sql/*sql*/`
         SELECT
           COALESCE(SUM(CASE WHEN to_location = ${drawerLocation} THEN amount ELSE 0 END), 0) AS inflow,
           COALESCE(SUM(CASE WHEN from_location = ${drawerLocation} THEN amount ELSE 0 END), 0) AS outflow
         FROM app.cash_ledger
-        WHERE created_at > ${closeTs}
+        WHERE created_at > ${anchorTs}
           AND (from_location = ${drawerLocation} OR to_location = ${drawerLocation})
       `;
 
       const inflow = toMoney(ledgerRows?.[0]?.inflow);
       const outflow = toMoney(ledgerRows?.[0]?.outflow);
 
-      const closeTotal = toMoney(lastClose.grand_total);
-      expected_open_total = toMoney(closeTotal + inflow - outflow);
+      expected_now_total = toMoney(anchorTotal + inflow - outflow);
 
-      if (open) {
-        const openTotal = toMoney(open.grand_total);
-        variance_open_total = toMoney(openTotal - expected_open_total);
+      // 4) Variance logic:
+      // - If CLOSE exists today, compare CLOSE vs expected_now_total
+      // - Else if OPEN exists today, compare OPEN vs expected_at_open (which is expected_now_total
+      //   only if anchor == last close/prev count, but we keep it simple for Phase 1)
+      if (closeToday) {
+        variance_now_total = toMoney(toMoney(closeToday.grand_total) - expected_now_total);
+      } else if (open) {
+        // If user is opening, compare OPEN to expected based on prior anchor snapshot
+        // (If the anchor itself is the open, this will evaluate to ~0)
+        variance_now_total = toMoney(toMoney(open.grand_total) - expected_now_total);
       }
     }
 
@@ -102,13 +106,14 @@ export const onRequestGet: PagesFunction = async ({ request, env }) => {
       drawer,
       open,
       close: closeToday,
-      expected_open_total,
-      variance_open_total,
+      expected_now_total,
+      variance_now_total,
       _debug: {
         drawerLocation,
-        last_close_count_id: lastClose?.count_id || null,
-        last_close_ts: lastClose?.count_ts || null,
-        last_close_updated_at: lastClose?.updated_at || null,
+        anchor_count_id: anchor?.count_id || null,
+        anchor_period: anchor?.period || null,
+        anchor_ts: anchor?.count_ts || null,
+        anchor_updated_at: anchor?.updated_at || null,
       },
     });
   } catch (e: any) {
