@@ -52,68 +52,69 @@ export const onRequestGet: PagesFunction = async ({ request, env }) => {
     const open = rowsToday.find((r: any) => r.period === "OPEN") || null;
     const closeToday = rowsToday.find((r: any) => r.period === "CLOSE") || null;
 
-    // 2) Find the MOST RECENT count for this drawer (OPEN or CLOSE, any date)
-    // Anchor = last counted truth for this drawer.
-    const anchorRows = await sql/*sql*/`
+    // Evaluate the MOST RECENT saved count against the PREVIOUS saved count + ledger between them.
+    // This is the canonical "needs review" signal for managers.
+    const latestRows = await sql/*sql*/`
       SELECT *
       FROM app.cash_drawer_counts
       WHERE drawer = ${Number(drawer)}
       ORDER BY
         COALESCE(count_ts, updated_at) DESC,
         count_id DESC
-      LIMIT 1
+      LIMIT 2
     `;
 
-    const anchor = anchorRows[0] || null;
+    const latest = latestRows[0] || null;
+    const prev = latestRows[1] || null;
 
-    let expected_now_total: number | null = null;
-    let variance_now_total: number | null = null;
+    let expected_at_latest: number | null = null;
+    let variance_at_latest: number | null = null;
+    let review_status: "balanced" | "needs_review" | null = null;
 
-    if (anchor) {
-      const anchorTs = anchor.count_ts || anchor.updated_at;
-      const anchorTotal = toMoney(anchor.grand_total);
+    if (latest && prev) {
+      const prevTs = prev.count_ts || prev.updated_at;
+      const prevTotal = toMoney(prev.grand_total);
 
-      // 3) Sum ledger movements affecting this drawer AFTER the anchor timestamp
       const ledgerRows = await sql/*sql*/`
         SELECT
           COALESCE(SUM(CASE WHEN to_location = ${drawerLocation} THEN amount ELSE 0 END), 0) AS inflow,
           COALESCE(SUM(CASE WHEN from_location = ${drawerLocation} THEN amount ELSE 0 END), 0) AS outflow
         FROM app.cash_ledger
-        WHERE created_at > ${anchorTs}
+        WHERE created_at > ${prevTs}
+          AND created_at <= ${latest.count_ts || latest.updated_at}
           AND (from_location = ${drawerLocation} OR to_location = ${drawerLocation})
       `;
 
       const inflow = toMoney(ledgerRows?.[0]?.inflow);
       const outflow = toMoney(ledgerRows?.[0]?.outflow);
 
-      expected_now_total = toMoney(anchorTotal + inflow - outflow);
-
-      // 4) Variance logic:
-      // - If CLOSE exists today, compare CLOSE vs expected_now_total
-      // - Else if OPEN exists today, compare OPEN vs expected_at_open (which is expected_now_total
-      //   only if anchor == last close/prev count, but we keep it simple for Phase 1)
-      if (closeToday) {
-        variance_now_total = toMoney(toMoney(closeToday.grand_total) - expected_now_total);
-      } else if (open) {
-        // If user is opening, compare OPEN to expected based on prior anchor snapshot
-        // (If the anchor itself is the open, this will evaluate to ~0)
-        variance_now_total = toMoney(toMoney(open.grand_total) - expected_now_total);
-      }
+      expected_at_latest = toMoney(prevTotal + inflow - outflow);
+      variance_at_latest = toMoney(toMoney(latest.grand_total) - expected_at_latest);
+      review_status = Math.abs(variance_at_latest) <= 0.009 ? "balanced" : "needs_review";
+    } else {
+      expected_at_latest = null;
+      variance_at_latest = null;
+      review_status = null;
     }
 
-    return json({
+   return json({
       date: ymd,
       drawer,
       open,
       close: closeToday,
-      expected_now_total,
-      variance_now_total,
+
+      // latest evaluation status (manager signal)
+      review_status,
+      expected_at_latest,
+      variance_at_latest,
+
+      latest_count_id: latest?.count_id || null,
+      latest_grand_total: latest ? toMoney(latest.grand_total) : null,
+      prev_count_id: prev?.count_id || null,
+      prev_grand_total: prev ? toMoney(prev.grand_total) : null,
+
       _debug: {
         drawerLocation,
-        anchor_count_id: anchor?.count_id || null,
-        anchor_period: anchor?.period || null,
-        anchor_ts: anchor?.count_ts || null,
-        anchor_updated_at: anchor?.updated_at || null,
       },
     });
   } catch (e: any) {
