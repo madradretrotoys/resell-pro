@@ -23,7 +23,11 @@ function bind(root){
     'coin_total','bill_total','grand_total','notes','status',
     // Phase 1: balance + movement
     'balanceBanner',
-    'move_from','move_to','move_amount','move_notes','btnMoveSave','move_status'
+    'move_from','move_to','move_amount','move_notes','btnMoveSave','move_status',
+
+    // ✅ Safe counts
+    'safe_period','safe_amount','safe_notes','btnSafeSave','safe_status'
+    
   ];
   ids.forEach(id => els[id] = root.querySelector('#' + id));
 }
@@ -63,9 +67,60 @@ function wire(){
   if (els.btnMoveSave) {
     els.btnMoveSave.addEventListener('click', saveMovement);
   }
+  
+  if (els.btnSafeSave) {
+    els.btnSafeSave.addEventListener('click', saveSafeCount);
+  }
   if (els.btnPing) els.btnPing.addEventListener('click', ping); // <-- safe if missing
 }
 
+
+async function saveSafeCount() {
+  try {
+    const period = (els.safe_period?.value || '').trim();
+    const amount = Number(els.safe_amount?.value || 0);
+    const notes = (els.safe_notes?.value || '').trim();
+
+    if (!period) { showToast('Choose a Safe period'); return; }
+    if (!amount || amount <= 0) { showToast('Enter a valid Safe amount'); return; }
+
+    els.btnSafeSave.disabled = true;
+    els.safe_status.textContent = 'Saving safe count…';
+
+    const body = {
+      period,
+      amount,
+      notes: notes || null
+    };
+
+    // ✅ new endpoint we will create
+    const resp = await api('/api/cash-safe/save', { method: 'POST', body });
+
+    showToast('Safe count saved');
+    els.safe_status.textContent = `Saved (${resp.safe_count_id})`;
+
+    // Reset UI fields (optional)
+    els.safe_period.value = '';
+    els.safe_amount.value = '';
+    els.safe_notes.value = '';
+
+  } catch (e) {
+    const status = e?.status || 500;
+
+    if (status === 409) {
+      showToast('Safe count already saved for today');
+      els.safe_status.textContent = 'Already saved today';
+    } else if (status === 401) {
+      showToast('You are not logged in');
+      els.safe_status.textContent = 'Unauthorized';
+    } else {
+      showToast('Safe save failed');
+      els.safe_status.textContent = 'Save failed';
+    }
+  } finally {
+    els.btnSafeSave.disabled = false;
+  }
+}
 
 function autosize(root){
   // Keep it simple for now; layout is responsive via CSS classes
