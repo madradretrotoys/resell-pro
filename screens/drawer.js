@@ -285,6 +285,53 @@ async function saveMovement() {
   }
 }
 
+async function saveSafeCount() {
+  try {
+    const period = (els.safe_period?.value || '').trim();
+    const amount = Number(els.safe_amount?.value || 0);
+    const notes = (els.safe_notes?.value || '').trim();
+
+    if (!period) { showToast('Choose a Safe period'); return; }
+    if (!Number.isFinite(amount) || amount <= 0) { showToast('Enter a valid Safe amount'); return; }
+
+    els.btnSafeSave.disabled = true;
+    els.safe_status.textContent = 'Saving safe count…';
+
+    const body = {
+      period,
+      amount,
+      notes: notes || null
+    };
+
+    const resp = await api('/api/cash-safe/save', { method: 'POST', body });
+
+    showToast('Safe count saved');
+    els.safe_status.textContent = `Saved (${resp.safe_count_id})`;
+
+    // Reset fields after save
+    if (els.safe_period) els.safe_period.value = '';
+    if (els.safe_amount) els.safe_amount.value = '';
+    if (els.safe_notes) els.safe_notes.value = '';
+
+  } catch (e) {
+    const status = e?.status || 500;
+
+    if (status === 409) {
+      showToast('Safe count already saved for today');
+      els.safe_status.textContent = 'Already saved today';
+    } else if (status === 401) {
+      showToast('You are not logged in');
+      els.safe_status.textContent = 'Unauthorized';
+    } else {
+      showToast('Safe save failed');
+      els.safe_status.textContent = 'Save failed';
+    }
+  } finally {
+    if (els.btnSafeSave) els.btnSafeSave.disabled = false;
+  }
+}
+
+
 
 async function save(){
   try{
