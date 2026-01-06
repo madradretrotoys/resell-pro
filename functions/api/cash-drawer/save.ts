@@ -16,6 +16,12 @@ function todayKeyTZ(tz = "America/Denver") {
 
 function asInt(n: any){ const x = Number(n || 0); return Number.isFinite(x) ? Math.max(0, Math.floor(x)) : 0; }
 
+function toMoney(n: any) {
+  const x = Number(n);
+  if (!Number.isFinite(x)) return 0;
+  return Math.round(x * 100) / 100;
+}
+
 function readCookie(header: string, name: string): string | null {
   if (!header) return null;
   for (const part of header.split(/; */)) {
@@ -125,7 +131,78 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
       // Note: we record the actor as a placeholder "${user}" for Phase 1;
       // in Phase 2 we will pull login_id from /api/auth/session (middleware or fetch).
       const row = rows[0];
-      return json({ ok: true, count_id: row.count_id, period: row.period, drawer: row.drawer, grand_total: row.grand_total });
+      // Immediately evaluate balance at save time:
+      // Compare this new count against the previous saved count + ledger movements between them.
+      const drawerLocation = `Drawer ${drawer}`;
+
+      // Find the previous count for this drawer (exclude the count we just inserted)
+      const prevRows = await sql/*sql*/`
+        SELECT *
+        FROM app.cash_drawer_counts
+        WHERE drawer = ${Number(drawer)}
+          AND count_id <> ${count_id}
+        ORDER BY
+          COALESCE(count_ts, updated_at) DESC,
+          count_id DESC
+        LIMIT 1
+      `;
+      const prev = prevRows[0] || null;
+
+      let expected_at_count: number | null = null;
+      let variance_at_count: number | null = null;
+      let review_status: "balanced" | "needs_review" | null = null;
+
+      if (prev) {
+        const prevTs = prev.count_ts || prev.updated_at;
+        const prevTotal = toMoney(prev.grand_total);
+
+        // Ledger movements AFTER prev count up to (and including) this new count timestamp
+        // We treat the saved count timestamp as "now()" used in insert.
+        const ledgerRows = await sql/*sql*/`
+          SELECT
+            COALESCE(SUM(CASE WHEN to_location = ${drawerLocation} THEN amount ELSE 0 END), 0) AS inflow,
+            COALESCE(SUM(CASE WHEN from_location = ${drawerLocation} THEN amount ELSE 0 END), 0) AS outflow
+          FROM app.cash_ledger
+          WHERE created_at > ${prevTs}
+            AND created_at <= now()
+            AND (from_location = ${drawerLocation} OR to_location = ${drawerLocation})
+        `;
+
+        const inflow = toMoney(ledgerRows?.[0]?.inflow);
+        const outflow = toMoney(ledgerRows?.[0]?.outflow);
+
+        expected_at_count = toMoney(prevTotal + inflow - outflow);
+        variance_at_count = toMoney(toMoney(grand_total) - expected_at_count);
+
+        // Review threshold: anything non-zero should be review
+        // (we can later add a tolerance like <= $1.00)
+        review_status = Math.abs(variance_at_count) <= 0.009 ? "balanced" : "needs_review";
+      } else {
+        // No previous snapshot = can't evaluate variance yet
+        expected_at_count = null;
+        variance_at_count = null;
+        review_status = null;
+      }
+
+      return json({
+        ok: true,
+        count_id: row.count_id,
+        period: row.period,
+        drawer: row.drawer,
+        grand_total: row.grand_total,
+
+        // evaluation results
+        expected_at_count,
+        variance_at_count,
+        review_status,
+
+        // helpful context for managers/debug
+        prev_count_id: prev?.count_id || null,
+        prev_grand_total: prev ? toMoney(prev.grand_total) : null
+      });
+
+      
+      
     } catch (e: any) {
       // If the PK (count_id) already exists, treat as conflict
       if ((e?.message || '').toLowerCase().includes('duplicate key')) {
