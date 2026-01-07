@@ -1440,12 +1440,26 @@ function setMarketplaceVisibility() {
           photosLen: __photos.length,
         });
 
-        // Hydrate form + photos (thumbnails only; originals will be cloned on the server)
-        try {
-          populateFromSaved(inv, listing);
-        } catch (e) {
-          console.error("[intake.js] populateFromSaved failed for duplicateSeed", e);
+       // Hydrate form + photos (thumbnails only; originals will be cloned on the server)
+      try {
+        // IMPORTANT: Prevent duplicate-title stacking in Long Description.
+        // The stored listing.product_description already includes the ORIGINAL title
+        // (added by ensureDefaultLongDescription / server rules).
+        // If we carry it into the duplicate, saving after changing the title will prepend
+        // the NEW title, resulting in OLD + NEW titles in the description.
+        const listingDup = listing ? { ...listing } : null;
+        if (listingDup) {
+          listingDup.product_description = ""; // force clean rebuild for the new item
         }
+      
+        populateFromSaved(inv, listingDup);
+      
+        // Rebuild default long description using the *current* title in the form
+        // so the duplicate starts clean (NEW title + base sentence).
+        try { ensureDefaultLongDescription(); } catch {}
+      } catch (e) {
+        console.error("[intake.js] duplicateSeed: populateFromSaved failed", e);
+      }
 
         try {
           renderPhotosGrid();
