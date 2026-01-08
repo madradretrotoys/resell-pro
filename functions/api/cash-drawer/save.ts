@@ -93,24 +93,7 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
 
     const sql = neon(env.DATABASE_URL);
 
-    // Resolve actor (prefer full name; fallback to login/email/sub)
-    let actor_name = "unknown";
-    try {
-      const cookieHeader = request.headers.get("cookie") || "";
-      const token = readCookie(cookieHeader, "__Host-rp_session");
-      if (token && env.JWT_SECRET) {
-        const payload = await verifyJwt(token, String(env.JWT_SECRET));
-        const uid = String((payload as any).sub);
-        const rowsActor = await sql/*sql*/`
-          SELECT name, login_id, email FROM app.users WHERE user_id = ${uid} LIMIT 1
-        `;
-        actor_name =
-          rowsActor[0]?.name ||
-          rowsActor[0]?.login_id ||
-          rowsActor[0]?.email ||
-          uid;
-      }
-    } catch { /* non-fatal: keep "unknown" */ }
+    
     
         // ✅ Enforce session + permissions
     const cookieHeader = request.headers.get("cookie") || "";
