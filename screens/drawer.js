@@ -8,6 +8,9 @@ export async function init({ container, session }) {
   sessionUser = session?.user || null;
   bind(container);
   wire();
+   // ✅ Load section previews
+  await refreshSafePreview();
+  await refreshMovementPreview();
   autosize(container);
 }
 
@@ -120,6 +123,8 @@ async function saveSafeCount() {
     els.safe_amount.value = '';
     els.safe_notes.value = '';
 
+    await refreshSafePreview();
+    
   } catch (e) {
     const status = e?.status || 500;
 
@@ -188,6 +193,20 @@ async function loadToday(){
       recalc();
       els.status.textContent = `No ${p ? p.toLowerCase() : ''} record yet`;
     }
+
+    // ✅ Last saved preview for drawer counts (use most recent of open/close for selected drawer)
+    const last = (data?.close && data.close.count_ts) ? data.close : (data?.open && data.open.count_ts) ? data.open : null;
+
+    if (els.drawer_last_saved) {
+      if (!last) {
+        els.drawer_last_saved.textContent = 'No records yet today';
+      } else {
+        const ts = fmtDate(last.count_ts);
+        const amt = fmtMoney(last.grand_total);
+        els.drawer_last_saved.textContent = `Last saved: ${ts} • Drawer ${drawer} ${last.period} • ${amt}`;
+      }
+    }
+    
   }catch(e){
     showToast('Failed to load today');
     els.status.textContent = 'Load failed';
@@ -284,6 +303,7 @@ async function saveMovement() {
 
     // Refresh today payload (so expected/variance reflects new movement)
     await loadToday();
+    await refreshMovementPreview();
 
   } catch (e) {
     const status = e?.status || 500;
@@ -302,6 +322,39 @@ async function saveMovement() {
   }
 }
 
+async function refreshSafePreview() {
+  try {
+    const data = await api('/api/cash-safe/today');
+    if (!els.safe_last_saved) return;
+
+    if (!data?.row) {
+      els.safe_last_saved.textContent = 'No records yet today';
+      return;
+    }
+
+    const r = data.row;
+    els.safe_last_saved.textContent = `Last saved: ${fmtDate(r.count_date)} • ${r.period} • ${fmtMoney(r.amount)}`;
+  } catch {
+    // ignore
+  }
+}
+
+async function refreshMovementPreview() {
+  try {
+    const data = await api('/api/cash-ledger/history?limit=1');
+    if (!els.move_last_saved) return;
+
+    const r = data?.rows?.[0];
+    if (!r) {
+      els.move_last_saved.textContent = 'No movements yet';
+      return;
+    }
+
+    els.move_last_saved.textContent = `Last saved: ${fmtDate(r.created_at)} • ${r.from_location} → ${r.to_location} • ${fmtMoney(r.amount)}`;
+  } catch {
+    // ignore
+  }
+}
 
 function openHistory(type) {
   if (!els.historyModal) return;
