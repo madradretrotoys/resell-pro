@@ -48,6 +48,11 @@ export const onRequestGet: PagesFunction = async ({ request, env }) => {
   try {
     const sql = neon(env.DATABASE_URL);
 
+    // ✅ Define limit (fixes "limit is not defined")
+    const url = new URL(request.url);
+    const limit = Math.min(Number(url.searchParams.get("limit") || 30), 100);
+
+
     // ✅ Auth
     const cookieHeader = request.headers.get("cookie") || "";
     const token = readCookie(cookieHeader, "__Host-rp_session");
