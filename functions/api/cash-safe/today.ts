@@ -1,6 +1,6 @@
 import { json, error } from '../../_shared/http';
 import { requireSession } from '../../_shared/auth';
-import { db } from '../../_shared/db';
+import { db } from '../../_shared/db';  
 
 export async function onRequest({ request, env }: any) {
   const session = await requireSession({ request, env });
