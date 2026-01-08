@@ -88,7 +88,7 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
     const grand_total = coin_total + bill_total;
 
     // Build key in store timezone
-    const ymd = todayKeyTZ();
+    const ymd = todayKeyTZ("America/Denver");
     const count_id = `${ymd}#${drawer}#${period}`;
 
     const sql = neon(env.DATABASE_URL);
@@ -112,104 +112,112 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
       }
     } catch { /* non-fatal: keep "unknown" */ }
     
-    // First-write wins (Phase 1): insert if not exists, else 409
-    // count_id is the PK in app.cash_drawer_counts
-    try {
-      const rows = await sql/*sql*/`
-        INSERT INTO app.cash_drawer_counts
-          (count_id, count_ts, period, drawer, user_name,
-           pennies, nickels, dimes, quarters, halfdollars,
-           ones, twos, fives, tens, twenties, fifties, hundreds,
-           coin_total, bill_total, grand_total, notes, updated_at)
-        VALUES
-          (${count_id}, now(), ${period}, ${drawer}, ${actor_name},
-           ${pennies}, ${nickels}, ${dimes}, ${quarters}, ${halfdollars},
-           ${ones}, ${twos}, ${fives}, ${tens}, ${twenties}, ${fifties}, ${hundreds},
-           ${coin_total}, ${bill_total}, ${grand_total}, ${notes}, now())
+        // ✅ Enforce session + permissions
+    const cookieHeader = request.headers.get("cookie") || "";
+    const token = readCookie(cookieHeader, "__Host-rp_session");
+    if (!token || !env.JWT_SECRET) return json({ error: "unauthorized" }, 401);
+
+    const payload = await verifyJwt(token, String(env.JWT_SECRET));
+    const uid = String((payload as any).sub);
+
+    // Load permissions for this user
+    const permRows = await sql/*sql*/`
+      SELECT can_cash_edit
+      FROM app.permissions
+      WHERE user_id = ${uid}
+      LIMIT 1
+    `;
+    const can_cash_edit = !!permRows?.[0]?.can_cash_edit;
+
+    // Determine actor_name for audit field
+    let actor_name = "unknown";
+    const rowsActor = await sql/*sql*/`
+      SELECT name, login_id, email FROM app.users WHERE user_id = ${uid} LIMIT 1
+    `;
+    actor_name =
+      rowsActor[0]?.name ||
+      rowsActor[0]?.login_id ||
+      rowsActor[0]?.email ||
+      uid;
+
+    // ✅ If an entry already exists, allow UPDATE only if can_cash_edit=true
+    const existingRows = await sql/*sql*/`
+      SELECT count_id
+      FROM app.cash_drawer_counts
+      WHERE count_id = ${count_id}
+      LIMIT 1
+    `;
+    const exists = !!existingRows?.[0]?.count_id;
+
+    if (exists && !can_cash_edit) {
+      return json({ error: "exists" }, 409);
+    }
+
+    if (exists && can_cash_edit) {
+      const upd = await sql/*sql*/`
+        UPDATE app.cash_drawer_counts
+        SET
+          count_ts = now(),
+          user_name = ${actor_name},
+          pennies = ${pennies},
+          nickels = ${nickels},
+          dimes = ${dimes},
+          quarters = ${quarters},
+          halfdollars = ${halfdollars},
+          ones = ${ones},
+          twos = ${twos},
+          fives = ${fives},
+          tens = ${tens},
+          twenties = ${twenties},
+          fifties = ${fifties},
+          hundreds = ${hundreds},
+          coin_total = ${coin_total},
+          bill_total = ${bill_total},
+          grand_total = ${grand_total},
+          notes = ${notes},
+          updated_at = now()
+        WHERE count_id = ${count_id}
         RETURNING count_id, period, drawer, grand_total
       `;
-      // Note: we record the actor as a placeholder "${user}" for Phase 1;
-      // in Phase 2 we will pull login_id from /api/auth/session (middleware or fetch).
-      const row = rows[0];
-      // Immediately evaluate balance at save time:
-      // Compare this new count against the previous saved count + ledger movements between them.
-      const drawerLocation = `Drawer ${drawer}`;
 
-      // Find the previous count for this drawer (exclude the count we just inserted)
-      const prevRows = await sql/*sql*/`
-        SELECT *
-        FROM app.cash_drawer_counts
-        WHERE drawer = ${Number(drawer)}
-          AND count_id <> ${count_id}
-        ORDER BY
-          COALESCE(count_ts, updated_at) DESC,
-          count_id DESC
-        LIMIT 1
-      `;
-      const prev = prevRows[0] || null;
-
-      let expected_at_count: number | null = null;
-      let variance_at_count: number | null = null;
-      let review_status: "balanced" | "needs_review" | null = null;
-
-      if (prev) {
-        const prevTs = prev.count_ts || prev.updated_at;
-        const prevTotal = toMoney(prev.grand_total);
-
-        // Ledger movements AFTER prev count up to (and including) this new count timestamp
-        // We treat the saved count timestamp as "now()" used in insert.
-        const ledgerRows = await sql/*sql*/`
-          SELECT
-            COALESCE(SUM(CASE WHEN to_location = ${drawerLocation} THEN amount ELSE 0 END), 0) AS inflow,
-            COALESCE(SUM(CASE WHEN from_location = ${drawerLocation} THEN amount ELSE 0 END), 0) AS outflow
-          FROM app.cash_ledger
-          WHERE created_at > ${prevTs}
-            AND created_at <= now()
-            AND (from_location = ${drawerLocation} OR to_location = ${drawerLocation})
-        `;
-
-        const inflow = toMoney(ledgerRows?.[0]?.inflow);
-        const outflow = toMoney(ledgerRows?.[0]?.outflow);
-
-        expected_at_count = toMoney(prevTotal + inflow - outflow);
-        variance_at_count = toMoney(toMoney(grand_total) - expected_at_count);
-
-        // Review threshold: anything non-zero should be review
-        // (we can later add a tolerance like <= $1.00)
-        review_status = Math.abs(variance_at_count) <= 0.009 ? "balanced" : "needs_review";
-      } else {
-        // No previous snapshot = can't evaluate variance yet
-        expected_at_count = null;
-        variance_at_count = null;
-        review_status = null;
-      }
+      const row = upd[0];
 
       return json({
         ok: true,
+        updated: true,
         count_id: row.count_id,
         period: row.period,
         drawer: row.drawer,
-        grand_total: row.grand_total,
-
-        // evaluation results
-        expected_at_count,
-        variance_at_count,
-        review_status,
-
-        // helpful context for managers/debug
-        prev_count_id: prev?.count_id || null,
-        prev_grand_total: prev ? toMoney(prev.grand_total) : null
+        grand_total: row.grand_total
       });
-
-      
-      
-    } catch (e: any) {
-      // If the PK (count_id) already exists, treat as conflict
-      if ((e?.message || '').toLowerCase().includes('duplicate key')) {
-        return json({ error: "exists" }, 409);
-      }
-      throw e;
     }
+
+    // ✅ Otherwise this is first write: INSERT
+    const rows = await sql/*sql*/`
+      INSERT INTO app.cash_drawer_counts
+        (count_id, count_ts, period, drawer, user_name,
+         pennies, nickels, dimes, quarters, halfdollars,
+         ones, twos, fives, tens, twenties, fifties, hundreds,
+         coin_total, bill_total, grand_total, notes, updated_at)
+      VALUES
+        (${count_id}, now(), ${period}, ${drawer}, ${actor_name},
+         ${pennies}, ${nickels}, ${dimes}, ${quarters}, ${halfdollars},
+         ${ones}, ${twos}, ${fives}, ${tens}, ${twenties}, ${fifties}, ${hundreds},
+         ${coin_total}, ${bill_total}, ${grand_total}, ${notes}, now())
+      RETURNING count_id, period, drawer, grand_total
+    `;
+
+    const row = rows[0];
+
+    return json({
+      ok: true,
+      inserted: true,
+      count_id: row.count_id,
+      period: row.period,
+      drawer: row.drawer,
+      grand_total: row.grand_total
+    });
+
   } catch (e: any) {
     return json({ error: e?.message || "save_failed" }, 500);
   }
