@@ -26,7 +26,15 @@ function bind(root){
     'move_from','move_to','move_amount','move_notes','btnMoveSave','move_status',
 
     // ✅ Safe counts
-    'safe_period','safe_amount','safe_notes','btnSafeSave','safe_status'
+    'safe_period','safe_amount','safe_notes','btnSafeSave','safe_status',
+
+    // ✅ history + last saved preview
+  'drawer_last_saved','safe_last_saved','move_last_saved',
+  'btnDrawerHistory','btnSafeHistory','btnMoveHistory',
+
+  // ✅ modal
+  'historyModal','historyBackdrop','btnCloseHistory','historyTitle','historySubtitle',
+  'historyLoading','historyEmpty','historyRows'
     
   ];
   ids.forEach(id => els[id] = root.querySelector('#' + id));
@@ -72,6 +80,14 @@ function wire(){
     els.btnSafeSave.addEventListener('click', saveSafeCount);
   }
   if (els.btnPing) els.btnPing.addEventListener('click', ping); // <-- safe if missing
+  // History buttons
+  if (els.btnDrawerHistory) els.btnDrawerHistory.addEventListener('click', () => openHistory('drawer'));
+  if (els.btnSafeHistory) els.btnSafeHistory.addEventListener('click', () => openHistory('safe'));
+  if (els.btnMoveHistory) els.btnMoveHistory.addEventListener('click', () => openHistory('movement'));
+
+  // Modal close
+  if (els.btnCloseHistory) els.btnCloseHistory.addEventListener('click', closeHistory);
+  if (els.historyBackdrop) els.historyBackdrop.addEventListener('click', closeHistory);
 }
 
 
@@ -286,6 +302,136 @@ async function saveMovement() {
   }
 }
 
+
+function openHistory(type) {
+  if (!els.historyModal) return;
+
+  els.historyModal.classList.remove('hidden');
+  els.historyRows.innerHTML = '';
+  els.historyEmpty.classList.add('hidden');
+  els.historyLoading.classList.remove('hidden');
+
+  if (type === 'drawer') {
+    els.historyTitle.textContent = 'Drawer Counts History';
+    els.historySubtitle.textContent = 'Recent OPEN/CLOSE counts for this drawer';
+    loadDrawerHistory();
+  }
+
+  if (type === 'safe') {
+    els.historyTitle.textContent = 'Safe Counts History';
+    els.historySubtitle.textContent = 'Recent OPEN/CLOSE safe counts';
+    loadSafeHistory();
+  }
+
+  if (type === 'movement') {
+    els.historyTitle.textContent = 'Cash Movement & Payouts History';
+    els.historySubtitle.textContent = 'Recent ledger entries';
+    loadMovementHistory();
+  }
+}
+
+function closeHistory() {
+  if (!els.historyModal) return;
+  els.historyModal.classList.add('hidden');
+}
+
+function fmtDate(ts) {
+  try {
+    const d = new Date(ts);
+    return d.toLocaleString();
+  } catch {
+    return String(ts || '');
+  }
+}
+
+function fmtMoney(n) {
+  const x = Number(n);
+  if (!Number.isFinite(x)) return '';
+  return `$${x.toFixed(2)}`;
+}
+
+function rowHtml(date, details, amount) {
+  return `
+    <tr class="border-b">
+      <td class="px-3 py-2 whitespace-nowrap">${date}</td>
+      <td class="px-3 py-2">${details}</td>
+      <td class="px-3 py-2 whitespace-nowrap">${amount}</td>
+    </tr>
+  `;
+}
+
+async function loadDrawerHistory() {
+  try {
+    const drawer = els.drawer?.value || '1';
+    const data = await api(`/api/cash-drawer/history?drawer=${encodeURIComponent(drawer)}&limit=30`);
+
+    els.historyLoading.classList.add('hidden');
+
+    if (!data?.rows?.length) {
+      els.historyEmpty.classList.remove('hidden');
+      return;
+    }
+
+    els.historyRows.innerHTML = data.rows.map(r => {
+      const date = fmtDate(r.count_ts);
+      const details = `Drawer ${r.drawer} • ${r.period}`;
+      const amount = fmtMoney(r.grand_total);
+      return rowHtml(date, details, amount);
+    }).join('');
+
+  } catch (e) {
+    els.historyLoading.classList.add('hidden');
+    els.historyEmpty.classList.remove('hidden');
+  }
+}
+
+async function loadSafeHistory() {
+  try {
+    const data = await api(`/api/cash-safe/history?limit=30`);
+
+    els.historyLoading.classList.add('hidden');
+
+    if (!data?.rows?.length) {
+      els.historyEmpty.classList.remove('hidden');
+      return;
+    }
+
+    els.historyRows.innerHTML = data.rows.map(r => {
+      const date = fmtDate(r.count_date);
+      const details = `${r.period}`;
+      const amount = fmtMoney(r.amount);
+      return rowHtml(date, details, amount);
+    }).join('');
+
+  } catch (e) {
+    els.historyLoading.classList.add('hidden');
+    els.historyEmpty.classList.remove('hidden');
+  }
+}
+
+async function loadMovementHistory() {
+  try {
+    const data = await api(`/api/cash-ledger/history?limit=30`);
+
+    els.historyLoading.classList.add('hidden');
+
+    if (!data?.rows?.length) {
+      els.historyEmpty.classList.remove('hidden');
+      return;
+    }
+
+    els.historyRows.innerHTML = data.rows.map(r => {
+      const date = fmtDate(r.created_at);
+      const details = `${r.from_location} → ${r.to_location}`;
+      const amount = fmtMoney(r.amount);
+      return rowHtml(date, details, amount);
+    }).join('');
+
+  } catch (e) {
+    els.historyLoading.classList.add('hidden');
+    els.historyEmpty.classList.remove('hidden');
+  }
+}
 
 
 
