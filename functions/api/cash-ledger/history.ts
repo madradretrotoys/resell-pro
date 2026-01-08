@@ -56,25 +56,21 @@ export const onRequestGet: PagesFunction = async ({ request, env }) => {
     const payload = await verifyJwt(token, String(env.JWT_SECRET));
     const uid = String(payload?.sub || "");
 
-    // ✅ Tenant lookup
-    const membership = await sql/*sql*/`
-      SELECT tenant_id
-      FROM app.user_tenants
+    // ✅ Optional permission gate
+    const permRows = await sql/*sql*/`
+      SELECT can_cash_edit
+      FROM app.permissions
       WHERE user_id = ${uid}
-      ORDER BY created_at ASC
       LIMIT 1
     `;
-    const tenant_id = membership?.[0]?.tenant_id;
-    if (!tenant_id) return json({ error: "no_tenant_membership" }, 403);
-
-    const url = new URL(request.url);
-    const limit = Math.min(Number(url.searchParams.get("limit") || 30), 100);
-
+    const can_cash_edit = !!permRows?.[0]?.can_cash_edit;
+    if (!can_cash_edit) return json({ error: "forbidden" }, 403);
+    
+    // ✅ History (NO tenant table)
     const rows = await sql/*sql*/`
       SELECT ledger_id, from_location, to_location, amount, notes, created_at
       FROM app.cash_ledger
-      WHERE tenant_id = ${tenant_id}
-        AND created_at >= now() - interval '30 days'
+      WHERE created_at >= now() - interval '30 days'
       ORDER BY created_at DESC
       LIMIT ${limit}
     `;
