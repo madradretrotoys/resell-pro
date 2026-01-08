@@ -86,7 +86,14 @@
 
   <section class="grid grid-cols-1 lg:grid-cols-2 gap-4">
     <div class="cd-card">
-      <h3 class="font-medium mb-2">Drawer Counts</h3>
+      <div class="flex items-start justify-between gap-3 mb-2">
+        <div>
+          <h3 class="font-medium">Drawer Counts</h3>
+          <div id="drawer_last_saved" class="text-xs text-gray-600 mt-0.5"></div>
+        </div>
+        <button id="btnDrawerHistory" class="btn btn--neutral btn--sm">History</button>
+      </div>
+       
       <!-- Balance Banner (Phase 1) -->
       <div id="balanceBanner" class="hidden mb-2 p-2 rounded border text-sm"></div> 
       <div class="cd-controls">
