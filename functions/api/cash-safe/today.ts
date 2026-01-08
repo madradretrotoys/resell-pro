@@ -40,46 +40,45 @@ async function verifyJwt(token: string, secret: string): Promise<any> {
   const ok = await crypto.subtle.verify("HMAC", key, base64urlToBytes(s), enc.encode(data));
   if (!ok) throw new Error("bad_sig");
 
-  const payload = JSON.parse(new TextDecoder().decode(base64urlToBytes(p)));
-  if (payload?.exp && Date.now() / 1000 > payload.exp) throw new Error("expired");
-  return payload;
-}
-
-export const onRequestGet: PagesFunction = async ({ request, env }) => {
-  try {
-    const sql = neon(env.DATABASE_URL);
-
-    // ✅ Auth
-    const cookieHeader = request.headers.get("cookie") || "";
-    const token = readCookie(cookieHeader, "__Host-rp_session");
-    if (!token || !env.JWT_SECRET) return json({ error: "unauthorized" }, 401);
-
-    const payload = await verifyJwt(token, String(env.JWT_SECRET));
-    const uid = String(payload?.sub || "");
-
-    // ✅ Tenant lookup (same as other endpoints)
-    const membership = await sql/*sql*/`
-      SELECT tenant_id
-      FROM app.user_tenants
+    const payload = JSON.parse(new TextDecoder().decode(base64urlToBytes(p)));
+    if (payload?.exp && Date.now() / 1000 > payload.exp) throw new Error("expired");
+    return payload;
+  }
+  
+  export const onRequestGet: PagesFunction = async ({ request, env }) => {
+    try {
+      const sql = neon(env.DATABASE_URL);
+  
+      // ✅ Auth
+      const cookieHeader = request.headers.get("cookie") || "";
+      const token = readCookie(cookieHeader, "__Host-rp_session");
+      if (!token || !env.JWT_SECRET) return json({ error: "unauthorized" }, 401);
+  
+      const payload = await verifyJwt(token, String(env.JWT_SECRET));
+      const uid = String(payload?.sub || "");
+  
+      // ✅ Optional: enforce permissions (same as drawer/save.ts)
+    const permRows = await sql/*sql*/`
+      SELECT can_cash_edit
+      FROM app.permissions
       WHERE user_id = ${uid}
-      ORDER BY created_at ASC
       LIMIT 1
     `;
-    const tenant_id = membership?.[0]?.tenant_id;
-    if (!tenant_id) return json({ error: "no_tenant_membership" }, 403);
-
-    // ✅ Today row
+    const can_cash_edit = !!permRows?.[0]?.can_cash_edit;
+    if (!can_cash_edit) return json({ error: "forbidden" }, 403);
+    
+    // ✅ Today row (NO tenant table)
     const rows = await sql/*sql*/`
       SELECT safe_count_id, period, amount, notes, count_date
       FROM app.cash_safe_counts
-      WHERE tenant_id = ${tenant_id}
-        AND count_date::date = current_date
+      WHERE count_date::date = current_date
       ORDER BY count_date DESC
       LIMIT 1
     `;
-
-    return json({ row: rows?.[0] || null });
-  } catch (e: any) {
-    return json({ error: e?.message || "today_failed" }, 500);
-  }
-};
+  
+  
+      return json({ row: rows?.[0] || null });
+    } catch (e: any) {
+      return json({ error: e?.message || "today_failed" }, 500);
+    }
+  };
