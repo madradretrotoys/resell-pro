@@ -47,6 +47,9 @@ async function verifyJwt(token: string, secret: string): Promise<any> {
 export const onRequestGet: PagesFunction = async ({ request, env }) => {
   try {
     const sql = neon(env.DATABASE_URL);
+    // ✅ Define limit (fixes "limit is not defined")
+    const url = new URL(request.url);
+    const limit = Math.min(Number(url.searchParams.get("limit") || 30), 100);
 
     // ✅ Auth
     const cookieHeader = request.headers.get("cookie") || "";
