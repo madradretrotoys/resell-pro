@@ -48,8 +48,9 @@ export const onRequestGet: PagesFunction = async ({ request, env }) => {
   try {
     const sql = neon(env.DATABASE_URL);
 
-    // ✅ Define limit (fixes "limit is not defined")
+    // ✅ Read query params
     const url = new URL(request.url);
+    const drawer = String(url.searchParams.get("drawer") || "1");
     const limit = Math.min(Number(url.searchParams.get("limit") || 30), 100);
 
 
