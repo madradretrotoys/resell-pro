@@ -181,7 +181,8 @@ async function loadToday(){
 function renderBalanceBanner(data) {
   if (!els.balanceBanner) return;
 
-  const canEdit = !!sessionUser?.permissions?.can_cash_edit;
+   // can_cash_edit may be exposed either directly on the user or nested under permissions
+  const canEdit = !!(sessionUser?.permissions?.can_cash_edit ?? sessionUser?.can_cash_edit);
 
   const status = String(data?.review_status || '');
   const expected = Number(data?.expected_at_latest ?? NaN);
