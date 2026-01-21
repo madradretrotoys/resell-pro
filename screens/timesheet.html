@@ -1,0 +1,101 @@
+<!-- screens/timesheet.html -->
+<section class="rp-screen rp-timesheet">
+  <style>
+    /* Ported from your old Apps Script Timesheet theme/styles */
+    :root{
+      --brand: #2563eb; --brand-600:#1d4ed8; --brand-700:#1e40af;
+      --ok: #10b981; --ok-600:#059669;
+      --warn: #f59e0b; --warn-600:#d97706;
+      --info: #3b82f6; --info-600:#2563eb;
+      --danger:#ef4444; --danger-600:#dc2626;
+      --fg:#111827; --muted:#6b7280; --border:#e5e7eb;
+      --bg:#ffffff; --bg-soft:#f9fafb;
+      --shadow: 0 8px 20px rgba(0,0,0,0.06);
+      --radius: 10px;
+    }
+    .rp-timesheet{ background:var(--bg); color:var(--fg); }
+    .rp-timesheet h2{ margin:0 0 12px 0; }
+    .row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+    .card{border:1px solid var(--border);border-radius:var(--radius);padding:12px;background:#fff;margin-top:12px;box-shadow:var(--shadow)}
+    .muted{color:var(--muted)}
+    .pill{border:1px solid var(--border);border-radius:999px;padding:4px 10px;font-size:12px;background:var(--bg-soft)}
+    .status { padding: 6px 12px; border-radius: 6px; display: inline-block; margin-bottom: 10px; }
+    .status.open { background: #fff7ed; color:#9a3412; border:1px solid #fed7aa;}
+    .status.complete { background: #ecfdf5; color:#065f46; border:1px solid #bbf7d0;}
+    .status.needsreview { background: #fef2f2; color:#991b1b; border:1px solid #fecaca;}
+    table { border-collapse: collapse; width: 100%; margin-top: 15px; background:#fff; border-radius:var(--radius); overflow:hidden; box-shadow:var(--shadow) }
+    th, td { border: 1px solid var(--border); padding: 10px; text-align: center; }
+    th{background:var(--bg-soft); font-weight:600}
+    .actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:8px}
+    .btn{
+      --btn-bg:#fff; --btn-fg:var(--fg); --btn-bd:var(--border); --btn-bg-h:#fff; --btn-bd-h:var(--border);
+      display:inline-flex; align-items:center; justify-content:center; gap:8px;
+      padding:10px 16px; border-radius:10px; font-weight:600; border:1px solid var(--btn-bd);
+      background:var(--btn-bg); color:var(--btn-fg); cursor:pointer; transition:all .15s ease;
+      box-shadow:0 2px 6px rgba(0,0,0,0.04);
+    }
+    .btn:hover{ background:var(--btn-bg-h); border-color:var(--btn-bd-h); transform:translateY(-1px) }
+    .btn:active{ transform:translateY(0) }
+    .btn:disabled{ opacity:.5; cursor:not-allowed; transform:none }
+    .btn-primary{ --btn-bg:var(--brand); --btn-fg:#fff; --btn-bd:var(--brand);
+                  --btn-bg-h:linear-gradient(180deg,var(--brand) 0%, var(--brand-600) 100%); --btn-bd-h:var(--brand-700) }
+    .btn-success{ --btn-bg:var(--ok); --btn-fg:#fff; --btn-bd:var(--ok);
+                  --btn-bg-h:linear-gradient(180deg,var(--ok) 0%, var(--ok-600) 100%); --btn-bd-h:var(--ok-600) }
+    .btn-warning{ --btn-bg:var(--warn); --btn-fg:#111; --btn-bd:var(--warn);
+                  --btn-bg-h:linear-gradient(180deg,var(--warn) 0%, var(--warn-600) 100%); --btn-bd-h:var(--warn-600) }
+    .btn-info{    --btn-bg:var(--info); --btn-fg:#fff; --btn-bd:var(--info);
+                  --btn-bg-h:linear-gradient(180deg,var(--info) 0%, var(--info-600) 100%); --btn-bd-h:var(--info-600) }
+    .btn-danger{  --btn-bg:var(--danger); --btn-fg:#fff; --btn-bd:var(--danger);
+                  --btn-bg-h:linear-gradient(180deg,var(--danger) 0%, var(--danger-600) 100%); --btn-bd-h:var(--danger-600) }
+    .btn-ghost{   --btn-bg:#fff; --btn-fg:var(--fg); --btn-bd:var(--border);
+                  --btn-bg-h:#fff; --btn-bd-h:#cbd5e1 }
+
+    input[type="text"], input[type="date"]{
+      border:1px solid var(--border);border-radius:8px;padding:10px 12px;outline:none
+    }
+    input[type="text"]:focus, input[type="date"]:focus{ border-color:var(--brand); box-shadow:0 0 0 3px rgba(37,99,235,.15) }
+    .log { font-size: 12px; color: var(--muted); margin-top: 20px; white-space: pre-wrap; background: var(--bg-soft); padding: 10px; border: 1px solid var(--border); border-radius:var(--radius) }
+
+    /* Working overlay (matches your UX requirement: disable + spinner overlay) */
+    .rp-busy {
+      position: fixed; inset: 0; display:none; align-items:center; justify-content:center;
+      background: rgba(255,255,255,0.75); backdrop-filter: blur(2px); z-index: 9999;
+    }
+    .rp-busy[aria-hidden="false"]{ display:flex; }
+    .rp-busy .box{
+      border:1px solid var(--border); border-radius: 14px; background:#fff; box-shadow: var(--shadow);
+      padding: 14px 16px; font-weight: 700;
+    }
+  </style>
+
+  <div class="rp-busy" id="rpBusy" aria-hidden="true" aria-live="polite" aria-busy="false">
+    <div class="box">Working…</div>
+  </div>
+
+  <h2>Resell Pro – TimeSheet</h2>
+
+  <div id="today">Loading today…</div>
+
+  <div id="mgrBox" class="card" style="display:none">
+    <div class="row"><strong>Manager Edit</strong> <span class="muted">(edit any employee/date)</span></div>
+    <div class="row">
+      <input id="mgrLogin" placeholder="Login ID (e.g. mblock)" />
+      <input id="mgrDate" type="date" />
+      <input id="mgrIn" placeholder="Clock In (e.g. 9:00 AM)" />
+      <input id="mgrLout" placeholder="Lunch Out (e.g. 12:00 PM)" />
+      <input id="mgrLin" placeholder="Lunch In (e.g. 12:30 PM)" />
+      <input id="mgrOut" placeholder="Clock Out (e.g. 5:45 PM)" />
+    </div>
+    <div class="row" style="margin-top:6px;">
+      <input id="mgrNote" style="flex:1" placeholder="Note for audit…" />
+      <button class="btn btn-primary" id="btnMgrSave">Save</button>
+    </div>
+  </div>
+
+  <h3>This Pay Period</h3>
+  <table id="periodTable"></table>
+
+  <div id="logs" class="log"></div>
+
+  <script src="/assets/js/timesheet.js"></script>
+</section>
