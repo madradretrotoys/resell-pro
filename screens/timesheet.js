@@ -1,5 +1,5 @@
 
-// assets/js/timesheet.js
+// /timesheet.js
 (() => {
   // Mirrors the old behavior: token required, load profile, load today + pay period
   // Old code used localStorage('mrad_token') and 'apiVerify' before calling timesheet APIs. :contentReference[oaicite:5]{index=5}
