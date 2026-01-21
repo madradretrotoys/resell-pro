@@ -1463,9 +1463,13 @@ function setMarketplaceVisibility() {
       
         populateFromSaved(inv, listingDup);
       
-        // Rebuild default long description using the *current* title in the form
-        // so the duplicate starts clean (NEW title + base sentence).
-        try { ensureDefaultLongDescription({ includeTitle: false }); } catch {}
+         // DUPLICATE RULE: always overwrite Long Description to base-only (no title).
+          try {
+            const el =
+              document.getElementById("longDescriptionTextarea") ||
+              findControlByLabel("Long Description");
+            if (el) el.value = BASE_DESCRIPTION;
+          } catch {}
       } catch (e) {
         console.error("[intake.js] duplicateSeed: populateFromSaved failed", e);
       }
