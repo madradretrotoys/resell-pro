@@ -13,7 +13,9 @@ export async function init() {
   const BASE_DESCRIPTION =
     "The photos are part of the description. Be sure to look them over for condition and details. This is sold as is, and it's ready for a new home.";
   
-  function ensureDefaultLongDescription() {
+  function ensureDefaultLongDescription(opts = {}) {
+    const { includeTitle = true } = opts || {};
+  
     const el =
       document.getElementById("longDescriptionTextarea") ||
       findControlByLabel("Long Description");
@@ -23,8 +25,15 @@ export async function init() {
     // If user/server already filled it, leave it alone
     if (val && val !== "Enter a detailed description…") return;
   
+    if (!includeTitle) {
+      el.value = BASE_DESCRIPTION;
+      return;
+    }
+  
     // Pull Item Name / Description and prepend it above the base sentence
-    const titleEl = document.getElementById("titleInput") || findControlByLabel("Item Name / Description");
+    const titleEl =
+      document.getElementById("titleInput") ||
+      findControlByLabel("Item Name / Description");
     const title = String(titleEl?.value || "").trim();
   
     el.value = title ? `${title}\n\n${BASE_DESCRIPTION}` : BASE_DESCRIPTION;
@@ -1456,7 +1465,7 @@ function setMarketplaceVisibility() {
       
         // Rebuild default long description using the *current* title in the form
         // so the duplicate starts clean (NEW title + base sentence).
-        try { ensureDefaultLongDescription(); } catch {}
+        try { ensureDefaultLongDescription({ includeTitle: false }); } catch {}
       } catch (e) {
         console.error("[intake.js] duplicateSeed: populateFromSaved failed", e);
       }
