@@ -10,6 +10,7 @@ const SCREENS = {
   inventory: { html: '/screens/inventory.html', js: '/screens/inventory.js', title: 'Inventory' },
   intake: { html: '/screens/inventory-intake.html', js: '/screens/inventory-intake.js', title: 'Inventory Intake' },
   research:  { html: '/screens/research.html',  js: '/screens/research.js',  title: 'Research' },
+   timesheet:  { html: '/screens/timesheet.html',  js: '/screens/timesheet.js',  title: 'Timesheet' },
 
   // Settings landing (chooser)
   settings: {
