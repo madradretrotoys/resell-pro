@@ -27,6 +27,18 @@
       }
       .pos-thumb--ph { display: inline-block; }
       .muted { color: #6b7280; }
+
+      /* Sales-to-delist overdue highlight ( > 24 hours ) */
+      #pos-sales-delist tr.delist-overdue td {
+        background: #ff0000 !important;   /* bright red */
+        color: #ffffff !important;        /* white text */
+        font-weight: 700;
+      }
+      #pos-sales-delist tr.delist-overdue a,
+      #pos-sales-delist tr.delist-overdue .link {
+        color: #ffffff !important;
+        text-decoration: underline;
+      }
     </style>
 
     <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
