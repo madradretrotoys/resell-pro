@@ -285,17 +285,33 @@ async function finalizeSale(
     RETURNING sale_id
   `;
   // PHASE 1 INVENTORY UPDATE (simple): decrement app.inventory.qty and set item_status='sold' when qty hits 0.
-  // NOTE: This is intentionally minimal. No idempotency or ledger yet.
+    // NOTE: This is intentionally minimal. No idempotency or ledger yet.
   // TODO(Phase 2): add idempotency mark and audit ledger; trigger marketplace jobs when qty=0.
+
+  const saleId = rows[0]?.sale_id || null;
+  const saleTs = rows[0]?.sale_ts || null; // IMPORTANT: used for sales_to_delist.sale_ts (NOT NULL)
+
+  // ---------- Inventory decrement ----------
   try {
-    const perSku = new Map<string, number>();
+    const perSkuQty = new Map<string, number>();
+    const perSkuFinal = new Map<string, number>(); // total line_final across qty for this sku
+
     for (const it of Array.isArray(args.items) ? args.items : []) {
-      const sku = (it && it.sku) ? String(it.sku) : '';
+      const sku = (it && it.sku) ? String(it.sku) : "";
       const q = Number(it?.qty || 0);
       if (!sku || !(q > 0)) continue; // skip MISC or invalid
-      perSku.set(sku, (perSku.get(sku) || 0) + q);
+
+      perSkuQty.set(sku, (perSkuQty.get(sku) || 0) + q);
+
+      // UI sends line_final for each line (pre-tax, post-discount) :contentReference[oaicite:9]{index=9}
+      // line_final is a LINE TOTAL, so we aggregate and later divide by qty to get final UNIT price.
+      const lf = Number(it?.line_final ?? 0);
+      if (Number.isFinite(lf) && lf >= 0) {
+        perSkuFinal.set(sku, (perSkuFinal.get(sku) || 0) + lf);
+      }
     }
-    for (const [sku, sold] of perSku.entries()) {
+
+    for (const [sku, sold] of perSkuQty.entries()) {
       // Clamp to 0 and set sold when depleted
       await sql/*sql*/`
         UPDATE app.inventory
@@ -305,13 +321,71 @@ async function finalizeSale(
            AND sku = ${sku}
       `;
     }
+
+    // ---------- Sales-to-delist insert ----------
+    // Only if we have a saleId+saleTs and at least one SKU line.
+    if (saleId && saleTs && perSkuQty.size) {
+      const skus = Array.from(perSkuQty.keys());
+
+      // Look up inventory rows so we can enforce:
+      //  - sku not null (already ensured)
+      //  - instore_online != 'Store Only'
+      const invRows = await sql/*sql*/`
+        SELECT sku, item_id, instore_online
+        FROM app.inventory
+        WHERE tenant_id = ${tenantId}::uuid
+          AND sku = ANY(${skus}::text[])
+      `;
+
+      const invBySku = new Map<string, any>();
+      for (const r of invRows || []) invBySku.set(String(r.sku), r);
+
+      for (const sku of skus) {
+        const inv = invBySku.get(sku);
+        if (!inv) continue;
+
+        // Rule #1: only items that are not Store Only
+        if (String(inv.instore_online || "").trim() === "Store Only") continue;
+
+        const qtySold = Number(perSkuQty.get(sku) || 0);
+        if (!(qtySold > 0)) continue;
+
+        // Rule: final unit price (NOT multiplied by qty)
+        // We stored line_final as line total, so unit = total / qty.
+        const finalTotal = Number(perSkuFinal.get(sku) || 0);
+        const unitFinal = qtySold > 0 ? (finalTotal / qtySold) : 0;
+
+        // De-dupe safety (in case finalize is called twice)
+        await sql/*sql*/`
+          INSERT INTO app.sales_to_delist
+            (tenant_id, sale_id, sale_ts, sku, item_id, qty_sold, final_price, vendoo_url)
+          SELECT
+            ${tenantId}::uuid,
+            ${String(saleId)},
+            ${saleTs},
+            ${sku},
+            ${inv.item_id}::uuid,
+            ${qtySold}::integer,
+            ${unitFinal}::numeric,
+            NULL::text
+          WHERE NOT EXISTS (
+            SELECT 1
+            FROM app.sales_to_delist x
+            WHERE x.tenant_id = ${tenantId}::uuid
+              AND x.sale_id = ${String(saleId)}
+              AND x.sku = ${sku}
+          )
+        `;
+      }
+    }
   } catch (e) {
     // Keep sale successful; log-only for now so registers aren't blocked.
     // TODO(Phase 2): surface a banner and retry queue if inventory update fails.
-    console.error('inventory-update-failed', { tenantId, error: String(e) });
+    console.error("inventory-update-failed", { tenantId, error: String(e) });
   }
 
-  return rows[0]?.sale_id || null;
+  return saleId;
+
 }
 
 // Upsert-by-phase so we always persist what we sent/received for this txn_id.
