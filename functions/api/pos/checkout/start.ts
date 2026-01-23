@@ -282,14 +282,14 @@ async function finalizeSale(
       ${args.payment},
       ${itemsJson}
     )
-    RETURNING sale_id
+    RETURNING sale_id, sale_ts
   `;
   // PHASE 1 INVENTORY UPDATE (simple): decrement app.inventory.qty and set item_status='sold' when qty hits 0.
     // NOTE: This is intentionally minimal. No idempotency or ledger yet.
   // TODO(Phase 2): add idempotency mark and audit ledger; trigger marketplace jobs when qty=0.
 
   const saleId = rows[0]?.sale_id || null;
-  const saleTs = rows[0]?.sale_ts || null; // IMPORTANT: used for sales_to_delist.sale_ts (NOT NULL)
+  const saleTs = rows[0]?.sale_ts || null; // used for app.sales_to_delist.sale_ts
 
   // ---------- Inventory decrement ----------
   try {
