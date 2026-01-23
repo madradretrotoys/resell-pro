@@ -1171,13 +1171,24 @@ export async function init(ctx) {
         const itemTxt = r.item || r.product_short_title || "";
         const qtyTxt = Number(r.qty_sold || 0);
         const priceTxt = fmtCurrency(r.final_price || 0);
-
+      
+        // Overdue rule: older than 24 hours since sale_ts (preferred)
+        const tsRaw = r.sale_ts || r.sale_date || r.date || null;
+        let isOverdue = false;
+        if (tsRaw) {
+          const t = new Date(tsRaw);
+          if (!Number.isNaN(t.getTime())) {
+            const ageMs = Date.now() - t.getTime();
+            isOverdue = ageMs > (24 * 60 * 60 * 1000);
+          }
+        }
+      
         const vendooCell = r.vendoo_url
           ? `<a class="link" href="${escapeHtml(r.vendoo_url)}" target="_blank" rel="noreferrer">Open</a>`
           : `<span class="text-muted text-sm">—</span>`;
-
+      
         // Phase-1 action: Mark Delisted
-        return `<tr>
+        return `<tr class="${isOverdue ? "delist-overdue" : ""}">
           <td class="whitespace-nowrap">${escapeHtml(String(dateTxt))}</td>
           <td class="whitespace-nowrap">${escapeHtml(String(skuTxt))}</td>
           <td class="truncate">${escapeHtml(String(itemTxt))}</td>
