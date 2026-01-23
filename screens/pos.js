@@ -68,6 +68,10 @@ export async function init(ctx) {
     salesLoad: root.querySelector("#pos-sales-load"),
     salesBody: root.querySelector("#pos-sales-body"),
 
+    // sales-to-delist
+    salesDelistBody: root.querySelector("#pos-sales-delist-body"),
+    salesDelistRefresh: root.querySelector("#pos-sales-Refresh"),
+    
     // VALOR status / fallback
     valorBar: root.querySelector("#pos-valor-bar"),
     valorMsg: root.querySelector("#pos-valor-msg"),
@@ -122,6 +126,7 @@ export async function init(ctx) {
     render();
     // NEW: show today's sales automatically on boot
     try { await loadSales({ preset: "today" }); } catch {}
+    try { await loadSalesToDelist({ preset: "pending" }); } catch {}
 
   }
 
@@ -296,6 +301,7 @@ export async function init(ctx) {
   
     // Refresh Today list and scroll into view (unchanged)
     try { await loadSales({ preset: "today" }); } catch {}
+    try { await loadSalesToDelist({ preset: "pending" }); } catch {}
     document.getElementById("pos-sales")?.scrollIntoView({ behavior: "smooth", block: "start" });
   }
   
@@ -997,6 +1003,13 @@ export async function init(ctx) {
       const to = el.dateTo.value || null;
       await loadSales({ from, to });
     });
+
+    // NEW: Sales to Delist
+    if (el.salesDelistRefresh) {
+      el.salesDelistRefresh.addEventListener("click", async () => {
+        await loadSalesToDelist({ preset: "pending" });
+      });
+    }
   }
 
   async function loadSales({ preset, from, to } = {}) {
@@ -1131,6 +1144,82 @@ export async function init(ctx) {
 
   }    
 
+  async function loadSalesToDelist({ preset } = {}) {
+    try {
+      if (!el.salesDelistBody) return;
+
+      const q = new URLSearchParams();
+      if (preset) q.set("preset", preset); // we’ll use preset=pending
+
+      // NEW endpoint you’ll add server-side:
+      // returns rows: [{ delist_id, date, sku, item, qty_sold, final_price, vendoo_url, status }]
+      const res = await api(`/api/pos/sales-to-delist?${q.toString()}`, { method: "GET" });
+      const rows = res?.rows || [];
+
+      if (!rows.length) {
+        el.salesDelistBody.innerHTML = `
+          <tr>
+            <td colspan="7" class="text-sm text-muted">Nothing pending 🎉</td>
+          </tr>
+        `;
+        return;
+      }
+
+      el.salesDelistBody.innerHTML = rows.map((r) => {
+        const dateTxt = r.date || r.sale_date || r.sale_ts || "";
+        const skuTxt = r.sku || "";
+        const itemTxt = r.item || r.product_short_title || "";
+        const qtyTxt = Number(r.qty_sold || 0);
+        const priceTxt = fmtCurrency(r.final_price || 0);
+
+        const vendooCell = r.vendoo_url
+          ? `<a class="link" href="${escapeHtml(r.vendoo_url)}" target="_blank" rel="noreferrer">Open</a>`
+          : `<span class="text-muted text-sm">—</span>`;
+
+        // Phase-1 action: Mark Delisted
+        return `<tr>
+          <td class="whitespace-nowrap">${escapeHtml(String(dateTxt))}</td>
+          <td class="whitespace-nowrap">${escapeHtml(String(skuTxt))}</td>
+          <td class="truncate">${escapeHtml(String(itemTxt))}</td>
+          <td class="whitespace-nowrap">${escapeHtml(String(qtyTxt))}</td>
+          <td class="whitespace-nowrap">${priceTxt}</td>
+          <td class="whitespace-nowrap">${vendooCell}</td>
+          <td class="whitespace-nowrap">
+            <button class="btn btn-xs btn-success" data-delist-done="${escapeHtml(r.delist_id)}">Delisted</button>
+          </td>
+        </tr>`;
+      }).join("");
+
+      // Delegate action clicks
+      el.salesDelistBody.onclick = async (e) => {
+        const btn = e.target.closest("button[data-delist-done]");
+        if (!btn) return;
+
+        // UX: disable immediately
+        btn.disabled = true;
+        const prevTxt = btn.textContent;
+        btn.textContent = "Working…";
+
+        try {
+          const delistId = btn.getAttribute("data-delist-done");
+          await api("/api/pos/sales-to-delist/mark-delisted", {
+            method: "POST",
+            json: { delist_id: delistId }
+          });
+
+          // Refresh list after update
+          await loadSalesToDelist({ preset: "pending" });
+          showToast("Marked delisted.");
+        } catch (err) {
+          showToast(`Failed: ${err?.message || err}`);
+          btn.disabled = false;
+          btn.textContent = prevTxt;
+        }
+      };
+    } catch (err) {
+      log(`sales-to-delist load failed: ${err?.message || err}`);
+    }
+  }
 
 
   function render() {
