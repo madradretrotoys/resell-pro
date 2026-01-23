@@ -1,5 +1,5 @@
-// /api/pos/sales
-// Returns { rows: [...] } for the POS "Sales (Today / Custom)" table.
+// /api/pos/sales-delist
+// Returns { rows: [...] } for the POS "Sales delist" table.
 
 import { neon } from "@neondatabase/serverless";
 
