@@ -95,9 +95,10 @@ async function finalizePendingSale(env: Env, tenantId: string, sess: any) {
       ${totals.subtotal}::numeric, ${totals.tax}::numeric, ${totals.total}::numeric,
       ${paymentMethod}, ${itemsJson}
     )
-    RETURNING sale_id
+    RETURNING sale_id, sale_ts
   `;
   const saleId = ins?.[0]?.sale_id || null;
+  const saleTs = ins?.[0]?.sale_ts || null;
 
   // Keep session pending; just stamp sale_id so webhook can reconcile later.
   if (saleId) {
@@ -135,7 +136,73 @@ async function finalizePendingSale(env: Env, tenantId: string, sess: any) {
       console.error('inventory-update-failed', { tenantId, error: String(e) });
     }
   }
+  // ---------- Sales-to-delist insert (card force-finalize session fallback) ----------
+  try {
+    const perSkuQty = new Map<string, number>();
+    const perSkuFinal = new Map<string, number>();
 
+    for (const it of Array.isArray(items) ? items : []) {
+      const sku = (it && it.sku) ? String(it.sku) : "";
+      const q = Number(it?.qty || 0);
+      if (!sku || !(q > 0)) continue;
+
+      perSkuQty.set(sku, (perSkuQty.get(sku) || 0) + q);
+
+      const lf = Number(it?.line_final ?? 0);
+      if (Number.isFinite(lf) && lf >= 0) {
+        perSkuFinal.set(sku, (perSkuFinal.get(sku) || 0) + lf);
+      }
+    }
+
+    if (saleId && saleTs && perSkuQty.size) {
+      const skus = Array.from(perSkuQty.keys());
+
+      const invRows = await sql/*sql*/`
+        SELECT sku, item_id, instore_online
+          FROM app.inventory
+         WHERE tenant_id = ${tenantId}::uuid
+           AND sku = ANY(${skus}::text[])
+      `;
+
+      const invBySku = new Map<string, any>();
+      for (const r of invRows || []) invBySku.set(String(r.sku), r);
+
+      for (const sku of skus) {
+        const inv = invBySku.get(sku);
+        if (!inv) continue;
+        if (String(inv.instore_online || "").trim() === "Store Only") continue;
+
+        const qtySold = Number(perSkuQty.get(sku) || 0);
+        if (!(qtySold > 0)) continue;
+
+        const finalTotal = Number(perSkuFinal.get(sku) || 0);
+        const unitFinal = qtySold > 0 ? (finalTotal / qtySold) : 0;
+
+        await sql/*sql*/`
+          INSERT INTO app.sales_to_delist
+            (tenant_id, sale_id, sale_ts, sku, item_id, qty_sold, final_price, vendoo_url)
+          SELECT
+            ${tenantId}::uuid,
+            ${String(saleId)},
+            ${saleTs},
+            ${sku},
+            ${inv.item_id}::uuid,
+            ${qtySold}::integer,
+            ${unitFinal}::numeric,
+            NULL::text
+          WHERE NOT EXISTS (
+            SELECT 1
+              FROM app.sales_to_delist x
+             WHERE x.tenant_id = ${tenantId}::uuid
+               AND x.sale_id = ${String(saleId)}
+               AND x.sku = ${sku}
+          )
+        `;
+      }
+    }
+  } catch (e) {
+    console.error("force-finalize:delist-insert-failed", { tenantId, error: String(e) });
+  }
   return saleId;
 }
 
@@ -170,20 +237,32 @@ async function finalizeSale(
       ${args.payment},
       ${itemsJson}
     )
-    RETURNING sale_id
+    RETURNING sale_id, sale_ts
   `;
-  // PHASE 1 INVENTORY UPDATE (simple): decrement app.inventory.qty and set item_status='sold' when qty hits 0.
-  // NOTE: This is intentionally minimal. No idempotency or ledger yet.
-  // TODO(Phase 2): add idempotency mark and audit ledger; trigger marketplace jobs when qty=0.
+   const saleId = rows?.[0]?.sale_id || null;
+  const saleTs = rows?.[0]?.sale_ts || null; // needed for sales_to_delist
+
+  // PHASE 1 INVENTORY UPDATE + SALES-TO-DELIST INSERT
+  // NOTE: Keep sale successful; log-only on failures so registers aren't blocked.
   try {
-    const perSku = new Map<string, number>();
+    const perSkuQty = new Map<string, number>();
+    const perSkuFinal = new Map<string, number>(); // sum line_final per sku (line_final is LINE total)
+
     for (const it of Array.isArray(args.items) ? args.items : []) {
-      const sku = (it && it.sku) ? String(it.sku) : '';
+      const sku = (it && it.sku) ? String(it.sku) : "";
       const q = Number(it?.qty || 0);
       if (!sku || !(q > 0)) continue; // skip MISC or invalid
-      perSku.set(sku, (perSku.get(sku) || 0) + q);
+
+      perSkuQty.set(sku, (perSkuQty.get(sku) || 0) + q);
+
+      const lf = Number(it?.line_final ?? 0);
+      if (Number.isFinite(lf) && lf >= 0) {
+        perSkuFinal.set(sku, (perSkuFinal.get(sku) || 0) + lf);
+      }
     }
-    for (const [sku, sold] of perSku.entries()) {
+
+    // ---------- Inventory decrement ----------
+    for (const [sku, sold] of perSkuQty.entries()) {
       await sql/*sql*/`
         UPDATE app.inventory
            SET qty = GREATEST(0, qty - ${sold}::integer),
@@ -192,10 +271,61 @@ async function finalizeSale(
            AND sku = ${sku}
       `;
     }
+
+    // ---------- Sales-to-delist insert ----------
+    if (saleId && saleTs && perSkuQty.size) {
+      const skus = Array.from(perSkuQty.keys());
+
+      const invRows = await sql/*sql*/`
+        SELECT sku, item_id, instore_online
+          FROM app.inventory
+         WHERE tenant_id = ${tenantId}::uuid
+           AND sku = ANY(${skus}::text[])
+      `;
+
+      const invBySku = new Map<string, any>();
+      for (const r of invRows || []) invBySku.set(String(r.sku), r);
+
+      for (const sku of skus) {
+        const inv = invBySku.get(sku);
+        if (!inv) continue;
+
+        // Rule: only items that are not Store Only
+        if (String(inv.instore_online || "").trim() === "Store Only") continue;
+
+        const qtySold = Number(perSkuQty.get(sku) || 0);
+        if (!(qtySold > 0)) continue;
+
+        // final unit price = total line_final / qty
+        const finalTotal = Number(perSkuFinal.get(sku) || 0);
+        const unitFinal = qtySold > 0 ? (finalTotal / qtySold) : 0;
+
+        await sql/*sql*/`
+          INSERT INTO app.sales_to_delist
+            (tenant_id, sale_id, sale_ts, sku, item_id, qty_sold, final_price, vendoo_url)
+          SELECT
+            ${tenantId}::uuid,
+            ${String(saleId)},
+            ${saleTs},
+            ${sku},
+            ${inv.item_id}::uuid,
+            ${qtySold}::integer,
+            ${unitFinal}::numeric,
+            NULL::text
+          WHERE NOT EXISTS (
+            SELECT 1
+              FROM app.sales_to_delist x
+             WHERE x.tenant_id = ${tenantId}::uuid
+               AND x.sale_id = ${String(saleId)}
+               AND x.sku = ${sku}
+          )
+        `;
+      }
+    }
   } catch (e) {
-    console.error('inventory-update-failed', { tenantId, error: String(e) });
+    console.error("force-finalize:inventory-or-delist-failed", { tenantId, error: String(e) });
   }
 
-  return rows[0]?.sale_id || null;
+  return saleId;
 }
 // --- /anchor: force-finalize local finalizeSale ---
