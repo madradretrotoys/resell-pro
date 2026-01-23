@@ -1201,10 +1201,12 @@ export async function init(ctx) {
         btn.textContent = "Working…";
 
         try {
-          const delistId = btn.getAttribute("data-delist-done");
+          const delistId = (btn.getAttribute("data-delist-done") || "").trim();
+
           await api("/api/pos/sales-to-delist/mark-delisted", {
             method: "POST",
-            json: { delist_id: delistId }
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ delist_id: delistId })
           });
 
           // Refresh list after update
