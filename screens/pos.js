@@ -362,10 +362,68 @@ export async function init(ctx) {
       }
       renderResults(items);
     } catch (err) {
-      el.results.innerHTML = `<div class="text-danger text-sm">Search failed</div>`;
-      const msg = err?.message || String(err);
-      log(`[pos.ui] search: error ${msg}`);
-      console.error("[pos.ui] search: error", err);
+      // api() throws Error("API error") with { status, data } when the server returns non-2xx
+      // Network errors (offline, DNS, very slow/unstable) often throw without status.
+      const status = err?.status;
+      const apiError = err?.data?.error;   // e.g. "no_cookie" | "missing_tenant" | "forbidden" | "server_error"
+      const apiMsg = err?.data?.message;   // optional server message
+      const rawMsg = err?.message || String(err);
+
+      let title = "Search failed";
+      let detail = "Please try again.";
+      let hint = "";
+
+      if (!status) {
+        // Usually fetch/network error
+        title = "Network issue";
+        detail = "Connection was interrupted.";
+        hint = "Check Wi-Fi/cell signal and try again.";
+      } else if (status === 401) {
+        title = "Session expired";
+        detail = "Please refresh and sign in again.";
+        hint = "If it keeps happening, your browser may be blocking cookies.";
+      } else if (status === 403) {
+        title = "Access denied";
+        detail = "Your account is not allowed to search inventory.";
+        hint = "Ask a manager to verify your role/permissions.";
+      } else if (status === 400 && apiError === "missing_tenant") {
+        title = "Store/tenant not loaded";
+        detail = "Please refresh the POS screen.";
+        hint = "If you opened a deep link, go to Dashboard first, then open POS.";
+      } else if (status >= 500) {
+        title = "Server error";
+        detail = "The POS search service had a problem.";
+        hint = "Try again in a moment. If it persists, tell an admin.";
+      } else {
+        // Other 4xx
+        title = `Search failed (${status})`;
+        detail = apiMsg || "Please try again.";
+      }
+
+      // Render a staff-friendly error panel + Retry button
+      const safeDetail = escapeHtml(String(detail || ""));
+      const safeHint = hint ? escapeHtml(String(hint)) : "";
+      const safeCode = apiError ? escapeHtml(String(apiError)) : "";
+
+      el.results.innerHTML = `
+        <div class="text-danger text-sm" style="display:flex;gap:10px;align-items:flex-start;justify-content:space-between;">
+          <div>
+            <div style="font-weight:600;">${escapeHtml(title)}</div>
+            <div class="text-xs">${safeDetail}</div>
+            ${safeHint ? `<div class="text-xs muted" style="margin-top:4px;">${safeHint}</div>` : ""}
+            ${safeCode ? `<div class="text-xs muted" style="margin-top:4px;">Code: <span style="font-family:monospace;">${safeCode}</span></div>` : ""}
+          </div>
+          <button type="button" class="btn btn-sm btn-outline" id="pos-search-retry">Retry</button>
+        </div>
+      `;
+
+      // Wire Retry button
+      const retryBtn = document.getElementById("pos-search-retry");
+      if (retryBtn) retryBtn.addEventListener("click", () => doSearch(), { once: true });
+
+      // Keep your existing logging (but include status + apiError for debugging)
+      log(`[pos.ui] search: error status=${status || "n/a"} code=${apiError || "n/a"} msg=${rawMsg}`);
+      console.error("[pos.ui] search: error", { status, apiError, apiMsg, rawMsg, err });
     }
   }
 
