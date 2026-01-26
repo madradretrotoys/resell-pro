@@ -145,7 +145,7 @@ export async function init(ctx) {
       state.items.unshift({
         sku: null,
         name: "Misc item",
-        price: 0,
+        price: null,
         qty: 1,
         discount: { mode: "percent", value: 0 }
       });
@@ -1137,9 +1137,10 @@ export async function init(ctx) {
   
     const priceCell = isMisc
       ? `<input type="number" inputmode="decimal" step="0.01" min="0"
-           class="input input-sm pos-line-price"
-           value="${Number(it.price || 0).toFixed(2)}"
-           data-price="${idx}" />`
+       class="input input-sm pos-line-price"
+       placeholder="Price"
+       value="${(it.price === null || it.price === undefined || it.price === "") ? "" : Number(it.price).toFixed(2)}"
+       data-price="${idx}" />`
       : `<div class="pos-line-price-static">${fmtCurrency(it.price)}</div>`;
   
     const lineTotal = fmtCurrency(
