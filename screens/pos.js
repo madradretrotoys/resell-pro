@@ -579,13 +579,18 @@ export async function init(ctx) {
         el.cashReceived.addEventListener("input", paintCash);
     
         el.cashConfirm.addEventListener("click", () => {
+          const toCents = (x) => Math.round(Number(x || 0) * 100);
+        
           const total = Number(state.totals.total || 0);
           const received = Number(el.cashReceived.value || 0);
-          if (!(received >= total)) {
+        
+          // Compare rounded cents to avoid float edge cases (tax/discount math)
+          if (toCents(received) < toCents(total)) {
             showBanner("Amount received must be at least the total due.");
             return;
           }
-          const change = Math.max(0, received - total);
+        
+          const change = Math.max(0, (toCents(received) - toCents(total)) / 100);
           state.payment = { type: "cash", amount: total, received, change };
         
           // Keep panel visible; lock so user sees exactly what will be sent
