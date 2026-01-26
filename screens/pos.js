@@ -236,6 +236,7 @@ export async function init(ctx) {
     if (el.qBtn) el.qBtn.disabled = on;
     if (el.qClear) el.qClear.disabled = on;
     if (el.quickMisc) el.quickMisc.disabled = on;
+    el.quickMiscPrices?.querySelectorAll("button").forEach(b => b.disabled = on);
     // disable “Add” buttons in results
     el.results?.querySelectorAll("button").forEach(b => b.disabled = on);
   
