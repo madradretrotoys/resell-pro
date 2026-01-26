@@ -24,6 +24,7 @@ export async function init(ctx) {
     qClear: root.querySelector("#pos-search-clear"),
     results: root.querySelector("#pos-results"),
     quickMisc: root.querySelector("#pos-quick-misc"),
+    quickMiscPrices: root.querySelector("#pos-quick-misc-prices"),
     // cart
     cart: root.querySelector("#pos-cart"),
     discountInput: root.querySelector("#pos-discount-input"),
@@ -161,6 +162,46 @@ export async function init(ctx) {
         first.select?.();
       }
     });
+
+    // NEW: Quick Misc Prices (Option A)
+    if (el.quickMiscPrices) {
+      el.quickMiscPrices.addEventListener("click", async (e) => {
+        const btn = e.target.closest("button[data-quick-misc]");
+        if (!btn) return;
+        if (state.uiLocked) return;
+  
+        const raw = btn.getAttribute("data-quick-misc");
+        const amount = Number(raw || 0);
+        if (!Number.isFinite(amount) || amount <= 0) return;
+  
+        // UX: prevent double-taps
+        btn.disabled = true;
+        const prevTxt = btn.textContent;
+        btn.textContent = "…";
+  
+        try {
+          state.items.unshift({
+            sku: null,
+            name: "Misc item",
+            price: amount,
+            qty: 1,
+            discount: { mode: "percent", value: 0 }
+          });
+  
+          render();
+          await refreshTotalsViaServer();
+  
+          // Keep flow fast: return focus to search for the next scan/type
+          setTimeout(() => el.q?.focus?.(), 0);
+        } finally {
+          // restore button quickly
+          setTimeout(() => {
+            btn.disabled = false;
+            btn.textContent = prevTxt;
+          }, 250);
+        }
+      });
+    }
   }
 
    function swap(which) {
