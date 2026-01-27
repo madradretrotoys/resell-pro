@@ -188,13 +188,7 @@ export async function init(ctx) {
             discount: { mode: "percent", value: 0 }
           });
 
-          // NEW: Mobile-friendly — prevent keyboard from opening
-          // If the search box (or any input) was focused, blur it so the keyboard closes.
-          const ae = document.activeElement;
-          if (ae && (ae.tagName === "INPUT" || ae.tagName === "TEXTAREA")) {
-            ae.blur();
-          }
-
+          
           render();
           await refreshTotalsViaServer();
 
