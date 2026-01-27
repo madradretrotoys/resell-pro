@@ -187,12 +187,20 @@ export async function init(ctx) {
             qty: 1,
             discount: { mode: "percent", value: 0 }
           });
-  
+
+          // NEW: Mobile-friendly — prevent keyboard from opening
+          // If the search box (or any input) was focused, blur it so the keyboard closes.
+          const ae = document.activeElement;
+          if (ae && (ae.tagName === "INPUT" || ae.tagName === "TEXTAREA")) {
+            ae.blur();
+          }
+
           render();
           await refreshTotalsViaServer();
-  
-          // Keep flow fast: return focus to search for the next scan/type
-          setTimeout(() => el.q?.focus?.(), 0);
+
+          // IMPORTANT: Do NOT auto-focus the search box here.
+          // On mobile, focusing an input opens the keyboard.
+           
         } finally {
           // restore button quickly
           setTimeout(() => {
