@@ -650,9 +650,9 @@ label{
 /* ===== POS: compact line-level price field (Misc price) =====
    Goal: only ~7 characters visible (e.g., "1500.00") */
 #pos-cart .pos-line-price{
-  width: 10ch;
-  min-width: 10ch;
-  max-width: 11ch;              /* tiny breathing room */
+  width: 8ch;
+  min-width: 8ch;
+  max-width: 9ch;              /* tiny breathing room */
   padding-left: 8px;
   padding-right: 8px;
   text-align: right;
