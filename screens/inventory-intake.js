@@ -4689,6 +4689,9 @@ document.addEventListener("intake:item-changed", () => refreshInventory({ force:
       tr.className = "border-b";
       tr.innerHTML = `
         <td class="px-3 py-2 whitespace-nowrap">${fmtSaved(row.saved_at)}</td>
+        <td class="px-3 py-2 whitespace-nowrap font-mono text-xs">
+          ${row.sku ? String(row.sku) : "—"}
+        </td>
         <td class="px-3 py-2">${row.product_short_title || "—"}</td>
         <td class="px-3 py-2">${row.price != null ? `$${Number(row.price).toFixed(2)}` : "—"}</td>
         <td class="px-3 py-2">${row.qty ?? "—"}</td>
@@ -4943,7 +4946,7 @@ document.addEventListener("intake:item-changed", () => refreshInventory({ force:
         tbody.innerHTML = "";
         if (rows.length === 0) {
           const tr = document.createElement("tr");
-          tr.innerHTML = `<td class="px-3 py-2 text-gray-500" colspan="6">No drafts yet.</td>`;
+          tr.innerHTML = `<td class="px-3 py-2 text-gray-500" colspan="7">No drafts yet.</td>`;
           tbody.appendChild(tr);
           return;
         }
