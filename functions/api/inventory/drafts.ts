@@ -76,6 +76,11 @@ export const onRequestGet: PagesFunction = async ({ request, env }) => {
       category_nm: string | null;
       has_listing_profile: boolean;
     }[]>`
+      WITH imgs AS (
+        SELECT item_id, cdn_url AS image_url
+        FROM app.item_images
+        WHERE tenant_id = ${tenant_id} AND is_primary = TRUE
+      )
       SELECT
         i.item_id,
         i.sku,
