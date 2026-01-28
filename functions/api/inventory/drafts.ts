@@ -74,8 +74,8 @@ export const onRequestGet: PagesFunction = async ({ request, env }) => {
       price: string | number | null;
       qty: number | null;
       category_nm: string | null;
-      image_url: string | null;
       has_listing_profile: boolean;
+      image_url: string | null;
     }[]>`
       WITH imgs AS (
         SELECT item_id, cdn_url AS image_url
@@ -93,13 +93,14 @@ export const onRequestGet: PagesFunction = async ({ request, env }) => {
         imgs.image_url,
         (lp.item_id IS NOT NULL) AS has_listing_profile
       FROM app.inventory i
-      LEFT JOIN imgs ON imgs.item_id = i.item_id
       LEFT JOIN app.item_listing_profile lp
         ON lp.item_id = i.item_id AND lp.tenant_id = ${tenant_id}
+      LEFT JOIN imgs ON imgs.item_id = i.item_id
       WHERE i.item_status = 'draft'
         AND i.tenant_id = ${tenant_id}
       ORDER BY i.updated_at DESC
       LIMIT 50
+    `;
 
     return json({ ok: true, rows }, 200);
   } catch (e: any) {
