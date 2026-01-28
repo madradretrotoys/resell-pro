@@ -5003,6 +5003,14 @@ document.addEventListener("intake:item-changed", () => refreshInventory({ force:
             btn.addEventListener("click", () => handleDeleteInventory(id, btn.closest("tr")));
           }
         });
+
+        // Wire image thumbnail clicks → open shared Image Preview dialog
+        try {
+          wireInventoryImageLightbox(tbody);
+        } catch (err) {
+          console.warn("[drafts] wireInventoryImageLightbox failed", err);
+        }
+        
       } catch (err) {
         console.error("drafts:load:error", err);
       }
