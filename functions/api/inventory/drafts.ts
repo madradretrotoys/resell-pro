@@ -99,7 +99,7 @@ export const onRequestGet: PagesFunction = async ({ request, env }) => {
       WHERE i.item_status = 'draft'
         AND i.tenant_id = ${tenant_id}
       ORDER BY i.updated_at DESC
-      LIMIT 100
+      LIMIT 200
     `;
 
     return json({ ok: true, rows }, 200);
