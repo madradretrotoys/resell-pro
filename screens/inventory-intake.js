@@ -4684,18 +4684,41 @@ document.addEventListener("intake:item-changed", () => refreshInventory({ force:
     }
     
     /** Render a single draft row */
-    function renderDraftRow(row) {
+        function renderDraftRow(row) {
       const tr = document.createElement("tr");
       tr.className = "border-b";
+
+      const imgHtml = row?.image_url
+        ? `
+          <button type="button" class="inventory-thumb-btn" data-image-url="${String(row.image_url)}" aria-label="Preview image">
+            <img
+              src="${String(row.image_url)}"
+              alt="Item image"
+              class="w-14 h-14 object-cover rounded border"
+              loading="lazy"
+            />
+          </button>
+        `
+        : `
+          <div class="w-14 h-14 bg-gray-100 rounded border flex items-center justify-center text-xs text-gray-400">—</div>
+        `;
+
       tr.innerHTML = `
         <td class="px-3 py-2 whitespace-nowrap">${fmtSaved(row.saved_at)}</td>
+
+        <td class="px-3 py-2 whitespace-nowrap">
+          ${imgHtml}
+        </td>
+
         <td class="px-3 py-2 whitespace-nowrap font-mono text-xs">
           ${row.sku ? String(row.sku) : "—"}
         </td>
+
         <td class="px-3 py-2">${row.product_short_title || "—"}</td>
         <td class="px-3 py-2">${row.price != null ? `$${Number(row.price).toFixed(2)}` : "—"}</td>
         <td class="px-3 py-2">${row.qty ?? "—"}</td>
         <td class="px-3 py-2">${row.category_nm || "—"}</td>
+
         <td class="px-3 py-2">
           <div class="flex gap-2">
             <button type="button" class="btn btn-primary btn-sm" data-action="load" data-item-id="${row.item_id}">Load</button>
@@ -4706,6 +4729,7 @@ document.addEventListener("intake:item-changed", () => refreshInventory({ force:
       `;
       return tr;
     }
+
     
         
     /** Enter existing-view mode (disabled fields + Edit/Add New/Delete CTAs) */
