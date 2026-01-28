@@ -4946,7 +4946,7 @@ document.addEventListener("intake:item-changed", () => refreshInventory({ force:
         tbody.innerHTML = "";
         if (rows.length === 0) {
           const tr = document.createElement("tr");
-          tr.innerHTML = `<td class="px-3 py-2 text-gray-500" colspan="7">No drafts yet.</td>`;
+          tr.innerHTML = `<td class="px-3 py-2 text-gray-500" colspan="8">No drafts yet.</td>`;
           tbody.appendChild(tr);
           return;
         }
