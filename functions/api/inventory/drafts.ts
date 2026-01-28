@@ -68,6 +68,7 @@ export const onRequestGet: PagesFunction = async ({ request, env }) => {
     // but we also compute whether this tenant has a listing profile for the item.
     const rows = await sql<{
       item_id: string;
+      sku: string | null;
       saved_at: string;
       product_short_title: string | null;
       price: string | number | null;
@@ -77,6 +78,7 @@ export const onRequestGet: PagesFunction = async ({ request, env }) => {
     }[]>`
       SELECT
         i.item_id,
+        i.sku,
         i.updated_at AS saved_at,
         i.product_short_title,
         i.price,
