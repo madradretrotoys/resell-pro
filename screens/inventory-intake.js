@@ -4688,20 +4688,28 @@ document.addEventListener("intake:item-changed", () => refreshInventory({ force:
       const tr = document.createElement("tr");
       tr.className = "border-b";
 
-      const imgHtml = row?.image_url
-        ? `
-          <button type="button" class="inventory-thumb-btn" data-image-url="${String(row.image_url)}" aria-label="Preview image">
-            <img
-              src="${String(row.image_url)}"
-              alt="Item image"
-              class="w-14 h-14 object-cover rounded border"
-              loading="lazy"
-            />
-          </button>
-        `
-        : `
-          <div class="w-14 h-14 bg-gray-100 rounded border flex items-center justify-center text-xs text-gray-400">—</div>
-        `;
+      const imgUrl = row?.image_url ? String(row.image_url) : "";
+      const imgHtml = `
+        <div class="w-10 h-10 rounded-lg overflow-hidden border" style="width:40px;height:40px">
+          ${
+            imgUrl
+              ? `<button
+                   type="button"
+                   class="w-10 h-10 block inventory-thumb-btn"
+                   data-image-url="${imgUrl}"
+                   aria-label="Preview image"
+                 >
+                   <img
+                     src="${imgUrl}"
+                     alt=""
+                     style="width:40px;height:40px;object-fit:cover"
+                     loading="lazy"
+                   >
+                 </button>`
+              : `<div class="w-10 h-10 bg-gray-100"></div>`
+          }
+        </div>
+      `;
 
       tr.innerHTML = `
         <td class="px-3 py-2 whitespace-nowrap">${fmtSaved(row.saved_at)}</td>
