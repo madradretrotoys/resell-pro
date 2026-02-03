@@ -56,9 +56,11 @@ function wireInventoryImageLightbox(root){
     return arr.filter(u => (seen.has(u) ? false : (seen.add(u), true)));
   };
 
-  const render = () => {
+    const render = () => {
     const itemId = state.viewer.itemId;
     const urls = normalizeUrls(state.imageMap.get(itemId), img.getAttribute('src'));
+    state.viewer.urls = urls;
+
     const total = urls.length || 0;
 
     if (!total) {
@@ -66,6 +68,7 @@ function wireInventoryImageLightbox(root){
       if (thumbs) thumbs.innerHTML = '';
       if (prev) prev.disabled = true;
       if (next) next.disabled = true;
+      console.debug('[invLightbox] render: no images', { itemId });
       return;
     }
 
@@ -78,6 +81,8 @@ function wireInventoryImageLightbox(root){
 
     if (prev) prev.disabled = (state.viewer.idx === 0);
     if (next) next.disabled = (state.viewer.idx >= total - 1);
+
+    console.debug('[invLightbox] render', { itemId, idx: state.viewer.idx, total, url });
 
     if (thumbs) {
       thumbs.innerHTML = urls.map((u, i) => {
@@ -95,18 +100,29 @@ function wireInventoryImageLightbox(root){
       }).join('');
 
       thumbs.querySelectorAll('button[data-idx]').forEach(b => {
-        b.onclick = () => { state.viewer.idx = Number(b.getAttribute('data-idx') || 0); render(); };
+        b.onclick = () => {
+          state.viewer.idx = Number(b.getAttribute('data-idx') || 0);
+          render();
+        };
       });
     }
   };
 
   const step = (dir) => {
-    state.viewer.idx += dir;
+    const total = state.viewer.urls?.length || 0;
+    if (total <= 1) {
+      console.debug('[invLightbox] step ignored (total<=1)', { total });
+      return;
+    }
+    const nextIdx = state.viewer.idx + dir;
+    state.viewer.idx = Math.max(0, Math.min(nextIdx, total - 1));
+    console.debug('[invLightbox] step', { dir, idx: state.viewer.idx, total });
     render();
   };
 
   if (prev) prev.onclick = () => step(-1);
   if (next) next.onclick = () => step(+1);
+
 
   // Keyboard support while dialog is open
   dlg.addEventListener('keydown', (e) => {
@@ -114,7 +130,7 @@ function wireInventoryImageLightbox(root){
     if (e.key === 'ArrowRight') { e.preventDefault(); step(+1); }
   });
 
-  root.addEventListener('click', (e) => {
+    root.addEventListener('click', (e) => {
     const btn = e.target.closest('.inventory-thumb-btn');
     if (!btn) return;
 
@@ -123,13 +139,21 @@ function wireInventoryImageLightbox(root){
     if (!url) return;
 
     state.viewer.itemId = itemId || null;
-    state.viewer.idx = 0;
+
+    // Build gallery list immediately and start on the clicked image if present
+    const urls = normalizeUrls(state.imageMap.get(state.viewer.itemId), url);
+    state.viewer.urls = urls;
+    const found = urls.indexOf(String(url));
+    state.viewer.idx = (found >= 0) ? found : 0;
 
     img.setAttribute('src', url);
+
+    console.debug('[invLightbox] open', { itemId: state.viewer.itemId, total: urls.length, idx: state.viewer.idx });
+
     try { dlg.showModal(); } catch {}
     render();
   });
-}
+
 
 export async function init({ container, session }) {
   state.session = session?.user ? session : await ensureSession();
