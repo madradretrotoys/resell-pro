@@ -136,7 +136,7 @@ export const onRequestGet: PagesFunction = async ({ request, env }) => {
       WHERE i.tenant_id = ${tenant_id}
         AND i.item_status = 'active'
       ORDER BY i.updated_at DESC
-      LIMIT ${limit}
+      
     `;
 
      
