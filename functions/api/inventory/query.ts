@@ -116,7 +116,7 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
     const add = (frag: string, ...vals: any[]) => { where.push(frag); params.push(...vals); };
 
     if (q && SEARCH_SCOPE.length) {
-      const ors = SEARCH_SCOPE.map((c) => `${c} ILIKE $${params.length + 1}`).join(" OR ");
+      const ors = SEARCH_SCOPE.map((c) => `i.${c} ILIKE $${params.length + 1}`).join(" OR ");
       add(`(${ors})`, ...SEARCH_SCOPE.map(() => `%${q}%`));
     }
 
@@ -126,22 +126,22 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
       const colType = typeOf(byName.get(col)!.data_type);
       const op = (f?.op || "eq").toString().toLowerCase();
       if (op === "isnull" || op === "notnull") {
-        where.push(`${col} IS ${op === "isnull" ? "" : "NOT "}NULL`);
+        where.push(`i.${col} IS ${op === "isnull" ? "" : "NOT "}NULL`);
         continue;
       }
       const val = f?.value;
       if (colType === "num") {
         if (op === "gt" || op === "gte" || op === "lt" || op === "lte" || op === "eq") {
-          add(`${col} ${op === "eq" ? "=" : op === "gt" ? ">" : op === "gte" ? ">=" : op === "lt" ? "<" : "<="} $${params.length + 1}`, Number(val));
+          add(`i.${col} ${op === "eq" ? "=" : op === "gt" ? ">" : op === "gte" ? ">=" : op === "lt" ? "<" : "<="} $${params.length + 1}`, Number(val));
         }
       } else if (colType === "date") {
         if (op === "gt" || op === "gte" || op === "lt" || op === "lte" || op === "eq") {
-          add(`${col} ${op === "eq" ? "=" : op === "gt" ? ">" : op === "gte" ? ">=" : op === "lt" ? "<" : "<="} $${params.length + 1}`, String(val));
+          add(`i.${col} ${op === "eq" ? "=" : op === "gt" ? ">" : op === "gte" ? ">=" : op === "lt" ? "<" : "<="} $${params.length + 1}`, String(val));
         }
       } else {
-        if (op === "eq") add(`${col} = $${params.length + 1}`, String(val));
-        else if (op === "like") add(`${col} LIKE $${params.length + 1}`, String(val));
-        else add(`${col} ILIKE $${params.length + 1}`, `%${String(val)}%`);
+        if (op === "eq") add(`i.${col} = $${params.length + 1}`, String(val));
+        else if (op === "like") add(`i.${col} LIKE $${params.length + 1}`, String(val));
+        else add(`i.${col} ILIKE $${params.length + 1}`, `%${String(val)}%`);
       }
     }
 
