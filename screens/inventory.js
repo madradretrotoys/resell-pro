@@ -20,7 +20,7 @@ const state = {
   total: 0,
   approximate: false,
   imageMap: new Map(),  // item_id -> string[] of image urls
-  viewer: { itemId: null, idx: 0 },
+  viewer: { itemId: null, idx: 0, urls: [] },
   
 };
 
