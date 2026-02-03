@@ -146,11 +146,42 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
     }
 
     const whereSql = where.length ? `WHERE ${where.join(" AND ")}` : "";
-    const orderSql = `ORDER BY ${sortCol} ${sortDir === "desc" ? "DESC" : "ASC"} NULLS LAST`;
-    const limitSql = `LIMIT ${limit} OFFSET ${offset}`;
 
-    const rows = await sql(`SELECT * FROM app.inventory ${whereSql} ${orderSql} ${limitSql}`, params);
-    const cnt  = await sql(`SELECT COUNT(*)::bigint AS count FROM app.inventory ${whereSql}`, params);
+    // Qualify ORDER BY with inventory alias now that we join images
+    const orderSql = `ORDER BY i.${sortCol} ${sortDir === "desc" ? "DESC" : "ASC"} NULLS LAST`;
+    const limitSql = `LIMIT ${limit} OFFSET ${offset}`;
+    
+    // Primary image per item (same pattern as POS search)
+    const baseSql = `
+      WITH imgs AS (
+        SELECT
+          item_id,
+          image_url,
+          ROW_NUMBER() OVER (PARTITION BY item_id ORDER BY COALESCE(sort_order, 9999) ASC, created_at ASC) AS rn
+        FROM app.item_images
+      ),
+      primary_img AS (
+        SELECT item_id, image_url
+        FROM imgs
+        WHERE rn = 1
+      )
+      SELECT i.*, p.image_url
+      FROM app.inventory i
+      LEFT JOIN primary_img p ON p.item_id = i.item_id
+      ${whereSql}
+      ${orderSql}
+      ${limitSql}
+    `;
+    
+    // Count should match the same WHERE (inventory only)
+    const countSql = `
+      SELECT COUNT(*)::bigint AS count
+      FROM app.inventory i
+      ${whereSql}
+    `;
+    
+    const rows = await sql(baseSql, params);
+    const cnt  = await sql(countSql, params);
     const total = Number((cnt[0] && (cnt[0].count as any)) || 0);
 
     return json({
