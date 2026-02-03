@@ -4964,14 +4964,27 @@ document.addEventListener("intake:item-changed", () => refreshInventory({ force:
       }
     }
     
-    /** Load and render all pending drafts */
-    async function loadDrafts() {
+    /** Load and render all pending drafts (optionally filtered) */
+    async function loadDrafts(filters = null) {
       try {
         const tbody = document.getElementById("recentDraftsTbody");
         if (!tbody) return;
-        // Fetch recent drafts
-        const res = await api("/api/inventory/drafts", { method: "GET" });
+    
+        const sku = (filters?.sku ?? "").trim();
+        const category_nm = (filters?.category_nm ?? "").trim();
+        const product_short_title = (filters?.product_short_title ?? "").trim();
+    
+        const qs = new URLSearchParams();
+        if (sku) qs.set("sku", sku);
+        if (category_nm) qs.set("category_nm", category_nm);
+        if (product_short_title) qs.set("product_short_title", product_short_title);
+    
+        const url = "/api/inventory/drafts" + (qs.toString() ? `?${qs.toString()}` : "");
+    
+        // Fetch drafts
+        const res = await api(url, { method: "GET" });
         if (!res || res.ok === false) throw new Error(res?.error || "drafts_failed");
+    
         const rows = Array.isArray(res.rows) ? res.rows : [];
     
         // Clear tbody
@@ -5225,12 +5238,24 @@ document.addEventListener("intake:item-changed", () => refreshInventory({ force:
 
 
     
-      async function loadInventory() {
+      async function loadInventory(filters = null) {
         try {
           const tbody = document.getElementById("recentInventoryTbody");
           if (!tbody) return;
       
-          const res = await api("/api/inventory/recent?limit=50", { method: "GET" });
+          const sku = (filters?.sku ?? "").trim();
+          const category_nm = (filters?.category_nm ?? "").trim();
+          const product_short_title = (filters?.product_short_title ?? "").trim();
+      
+          const qs = new URLSearchParams();
+          qs.set("limit", "50"); // keep your existing limit behavior
+          if (sku) qs.set("sku", sku);
+          if (category_nm) qs.set("category_nm", category_nm);
+          if (product_short_title) qs.set("product_short_title", product_short_title);
+      
+          const url = "/api/inventory/recent" + `?${qs.toString()}`;
+      
+          const res = await api(url, { method: "GET" });
           if (!res || res.ok === false) throw new Error(res?.error || "inventory_failed");
           const rows = Array.isArray(res.rows) ? res.rows : [];
       
@@ -5285,6 +5310,83 @@ document.addEventListener("intake:item-changed", () => refreshInventory({ force:
       
       wireCtas();
       wireCopyXeasy();  // enable/wire the Xeasy copy button
+      wireIntakeTabSearch();
+      function wireIntakeTabSearch() {
+        // Drafts controls
+        const dSku = document.getElementById("draftsSkuFilter");
+        const dCat = document.getElementById("draftsCategoryFilter");
+        const dTit = document.getElementById("draftsTitleFilter");
+        const dGo  = document.getElementById("draftsSearchBtn");
+        const dClr = document.getElementById("draftsClearBtn");
+      
+        // Inventory controls
+        const iSku = document.getElementById("invSkuFilter");
+        const iCat = document.getElementById("invCategoryFilter");
+        const iTit = document.getElementById("invTitleFilter");
+        const iGo  = document.getElementById("invSearchBtn");
+        const iClr = document.getElementById("invClearBtn");
+      
+        function setBtnBusy(btn, busy) {
+          if (!btn) return;
+          btn.disabled = !!busy;
+          btn.textContent = busy ? "Working…" : (btn.id.includes("Clear") ? "Clear" : "Search");
+        }
+      
+        async function runDraftsSearch() {
+          setBtnBusy(dGo, true);
+          try {
+            await loadDrafts({
+              sku: dSku?.value || "",
+              category_nm: dCat?.value || "",
+              product_short_title: dTit?.value || "",
+            });
+          } finally {
+            setBtnBusy(dGo, false);
+          }
+        }
+      
+        async function runInvSearch() {
+          setBtnBusy(iGo, true);
+          try {
+            await loadInventory({
+              sku: iSku?.value || "",
+              category_nm: iCat?.value || "",
+              product_short_title: iTit?.value || "",
+            });
+          } finally {
+            setBtnBusy(iGo, false);
+          }
+        }
+      
+        // Click handlers
+        dGo?.addEventListener("click", runDraftsSearch);
+        iGo?.addEventListener("click", runInvSearch);
+      
+        dClr?.addEventListener("click", async () => {
+          if (dSku) dSku.value = "";
+          if (dCat) dCat.value = "";
+          if (dTit) dTit.value = "";
+          setBtnBusy(dClr, true);
+          try { await loadDrafts(null); } finally { setBtnBusy(dClr, false); }
+        });
+      
+        iClr?.addEventListener("click", async () => {
+          if (iSku) iSku.value = "";
+          if (iCat) iCat.value = "";
+          if (iTit) iTit.value = "";
+          setBtnBusy(iClr, true);
+          try { await loadInventory(null); } finally { setBtnBusy(iClr, false); }
+        });
+      
+        // Enter-to-search inside inputs (mobile friendly)
+        [dSku, dCat, dTit].forEach((el) => el?.addEventListener("keydown", (e) => {
+          if (e.key === "Enter") { e.preventDefault(); runDraftsSearch(); }
+        }));
+        [iSku, iCat, iTit].forEach((el) => el?.addEventListener("keydown", (e) => {
+          if (e.key === "Enter") { e.preventDefault(); runInvSearch(); }
+        }));
+      }
+    
     // NEW: Photos bootstrap
       wirePhotoPickers();
       renderPhotosGrid();
