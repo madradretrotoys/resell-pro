@@ -151,28 +151,47 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
     const orderSql = `ORDER BY i.${sortCol} ${sortDir === "desc" ? "DESC" : "ASC"} NULLS LAST`;
     const limitSql = `LIMIT ${limit} OFFSET ${offset}`;
     
-    // Primary image per item (match POS: cdn_url AS image_url, prefer is_primary then sort_order)
+    // Primary + all images per item (Inventory-only gallery support)
     const baseSql = `
-      WITH imgs AS (
+      WITH imgs_raw AS (
         SELECT
           im.item_id,
           im.cdn_url AS image_url,
-          ROW_NUMBER() OVER (
-            PARTITION BY im.item_id
-            ORDER BY im.is_primary DESC, im.sort_order ASC, im.created_at ASC
-          ) AS rn
+          im.is_primary,
+          im.sort_order,
+          im.created_at
         FROM app.item_images im
         WHERE im.tenant_id = '${tenant_id}'::uuid
+      ),
+      imgs AS (
+        SELECT
+          item_id,
+          image_url,
+          is_primary,
+          sort_order,
+          created_at,
+          ROW_NUMBER() OVER (
+            PARTITION BY item_id
+            ORDER BY is_primary DESC, sort_order ASC, created_at ASC
+          ) AS rn
+        FROM imgs_raw
       ),
       primary_img AS (
         SELECT item_id, image_url
         FROM imgs
         WHERE rn = 1
+      ),
+      all_imgs AS (
+        SELECT
+          item_id,
+          jsonb_agg(image_url ORDER BY is_primary DESC, sort_order ASC, created_at ASC) AS image_urls
+        FROM imgs_raw
+        GROUP BY item_id
       )
-      SELECT i.*, p.image_url
+      SELECT i.*, p.image_url, a.image_urls
       FROM app.inventory i
-      LEFT JOIN primary_img p
-        ON p.item_id = i.item_id
+      LEFT JOIN primary_img p ON p.item_id = i.item_id
+      LEFT JOIN all_imgs   a ON a.item_id = i.item_id
       ${whereSql}
       ${orderSql}
       ${limitSql}
