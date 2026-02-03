@@ -27,7 +27,28 @@ const COL_PREF_KEY = (uid) => `rp.inventory.visibleCols.${uid || 'anon'}`;
 function $(id){ return document.getElementById(id); }
 function escapeHtml(s){ return String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&','<':'<','>':'>','"':'"',"'" :"'"}[c])); }
 function fmtCurrency(n){ try{ return new Intl.NumberFormat('en-US',{style:'currency',currency:'USD'}).format(Number(n||0)); }catch{ return `$${Number(n||0).toFixed(2)}`; } }
+function wireInventoryImageLightbox(root){
+  if (!root) return;
 
+  // Avoid double-binding delegation
+  if (root.dataset?.invLightboxBound === '1') return;
+  root.dataset.invLightboxBound = '1';
+
+  const dlg = document.getElementById('inventoryImageViewer');
+  const img = document.getElementById('inventoryImageViewerImg');
+  if (!dlg || !img) return;
+
+  root.addEventListener('click', (e) => {
+    const btn = e.target.closest('.inventory-thumb-btn');
+    if (!btn) return;
+
+    const url = btn.getAttribute('data-image-url') || '';
+    if (!url) return;
+
+    img.setAttribute('src', url);
+    try { dlg.showModal(); } catch {}
+  });
+}
 export async function init({ container, session }) {
   state.session = session?.user ? session : await ensureSession();
   if (!state.session?.user) {
@@ -185,8 +206,30 @@ function renderRows(items){
         return `<td style="padding:6px; border-bottom:1px solid #f4f4f4;">${d.toLocaleString()}</td>`;
       }
       if (name === 'sku') {
-        // Placeholder "thumbnail" prefix (image to come later)
-        return `<td style="padding:6px; border-bottom:1px solid #f4f4f4;">🖼️&nbsp;${escapeHtml(v)}</td>`;
+        // Mimic POS: show first image thumbnail (if present) + click-to-expand
+        const skuTxt = escapeHtml(v);
+      
+        const url = item.image_url ? String(item.image_url) : "";
+        const thumb = url
+          ? `<button
+               type="button"
+               class="inventory-thumb-btn"
+               data-image-url="${escapeHtml(url)}"
+               style="display:inline-flex;align-items:center;gap:8px;background:none;border:0;padding:0;cursor:pointer;"
+             >
+               <img
+                 src="${escapeHtml(url)}"
+                 alt="Item image"
+                 width="48"
+                 height="48"
+                 loading="lazy"
+                 style="width:48px;height:48px;object-fit:cover;border-radius:8px;background:#f3f4f6;flex:0 0 auto;"
+               />
+               <span>${skuTxt}</span>
+             </button>`
+          : `🖼️&nbsp;${skuTxt}`;
+      
+        return `<td style="padding:6px; border-bottom:1px solid #f4f4f4;">${thumb}</td>`;
       }
       return `<td style="padding:6px; border-bottom:1px solid #f4f4f4;">${escapeHtml(v)}</td>`;
     }).join('');
@@ -194,6 +237,7 @@ function renderRows(items){
   }).join('');
 
   els.body.innerHTML = rows;
+  wireInventoryImageLightbox(els.body);
 }
 
 function renderCount(){
