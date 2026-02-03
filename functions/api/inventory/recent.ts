@@ -1,5 +1,6 @@
 //Begin recent.ts file
 // functions/api/inventory/recent.ts
+// this is used by the inventory intake screen in the Active Inventory tab
 import { neon } from "@neondatabase/serverless";
 
 type Role = "owner" | "admin" | "manager" | "clerk";
