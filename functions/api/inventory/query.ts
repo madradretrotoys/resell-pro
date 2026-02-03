@@ -150,6 +150,11 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
     // Qualify ORDER BY with inventory alias now that we join images
     const orderSql = `ORDER BY i.${sortCol} ${sortDir === "desc" ? "DESC" : "ASC"} NULLS LAST`;
     const limitSql = `LIMIT ${limit} OFFSET ${offset}`;
+
+    // IMPORTANT: tenant_id is text (often starts with digits) so it MUST be parameterized,
+    // otherwise Postgres can throw "trailing junk after numeric literal".
+    const tenantParamIx = params.length + 1;
+    params.push(tenant_id);
     
     // Primary image per item (match POS: cdn_url AS image_url, prefer is_primary then sort_order)
     const baseSql = `
@@ -162,7 +167,7 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
             ORDER BY im.is_primary DESC, im.sort_order ASC, im.created_at ASC
           ) AS rn
         FROM app.item_images im
-        WHERE im.tenant_id = ${tenant_id}
+        WHERE im.tenant_id = $${tenantParamIx}
       ),
       primary_img AS (
         SELECT item_id, image_url
