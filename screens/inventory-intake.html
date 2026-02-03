@@ -251,9 +251,35 @@
           role="tabpanel"
           aria-labelledby="tabDrafts"
         >
-          <div id="recentDraftsHeader" data-recent-drafts-header class="flex items-center justify-between mb-2">
+          <div id="recentDraftsHeader" data-recent-drafts-header class="flex items-center justify-between mb-2 gap-2 flex-wrap">
             <h3 class="sectionTitle m-0">Recent Drafts</h3>
+          
+            <!-- Drafts Search -->
+            <div class="flex items-center gap-2 flex-wrap">
+              <input
+                id="draftsSkuFilter"
+                class="input input-bordered input-sm w-36"
+                placeholder="SKU"
+                autocomplete="off"
+              />
+              <input
+                id="draftsCategoryFilter"
+                class="input input-bordered input-sm w-44"
+                placeholder="Category"
+                autocomplete="off"
+              />
+              <input
+                id="draftsTitleFilter"
+                class="input input-bordered input-sm w-56"
+                placeholder="Title"
+                autocomplete="off"
+              />
+          
+              <button id="draftsSearchBtn" type="button" class="btn btn-primary btn-sm">Search</button>
+              <button id="draftsClearBtn" type="button" class="btn btn-ghost btn-sm">Clear</button>
+            </div>
           </div>
+
         
           <table class="table text-sm">
             <thead>
@@ -282,8 +308,33 @@
           aria-hidden="true"
           hidden
         >
-          <div id="recentInventoryHeader" data-recent-inventory-header class="flex items-center justify-between mb-2">
+          <div id="recentInventoryHeader" data-recent-inventory-header class="flex items-center justify-between mb-2 gap-2 flex-wrap">
             <h3 class="sectionTitle m-0">Active Inventory</h3>
+          
+            <!-- Inventory Search -->
+            <div class="flex items-center gap-2 flex-wrap">
+              <input
+                id="invSkuFilter"
+                class="input input-bordered input-sm w-36"
+                placeholder="SKU"
+                autocomplete="off"
+              />
+              <input
+                id="invCategoryFilter"
+                class="input input-bordered input-sm w-44"
+                placeholder="Category"
+                autocomplete="off"
+              />
+              <input
+                id="invTitleFilter"
+                class="input input-bordered input-sm w-56"
+                placeholder="Title"
+                autocomplete="off"
+              />
+          
+              <button id="invSearchBtn" type="button" class="btn btn-primary btn-sm">Search</button>
+              <button id="invClearBtn" type="button" class="btn btn-ghost btn-sm">Clear</button>
+            </div>
           </div>
         
           <table class="table text-sm">
