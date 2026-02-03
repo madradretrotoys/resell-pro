@@ -1,4 +1,5 @@
 //Begin draft.ts file
+// This is used by the inventory intake screen in the recent drafts tab 
 import { neon } from "@neondatabase/serverless";
 
 type Role = "owner" | "admin" | "manager" | "clerk";
