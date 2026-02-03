@@ -72,6 +72,11 @@ export const onRequestGet: PagesFunction = async ({ request, env }) => {
     const limitRaw = Number(url.searchParams.get("limit") || 50);
     const limit = Number.isFinite(limitRaw) ? Math.max(1, Math.min(100, limitRaw)) : 50;
 
+    const sku = (url.searchParams.get("sku") || "").trim() || null;
+    const category_nm = (url.searchParams.get("category_nm") || "").trim() || null;
+    const product_short_title = (url.searchParams.get("product_short_title") || "").trim() || null;
+
+    
    // Query: latest Active items for this tenant + primary image (if any)
         const rows = await sql<{
       item_id: string;
@@ -135,7 +140,11 @@ export const onRequestGet: PagesFunction = async ({ request, env }) => {
       LEFT JOIN mp ON mp.item_id = i.item_id
       WHERE i.tenant_id = ${tenant_id}
         AND i.item_status = 'active'
+        AND (${sku}::text IS NULL OR i.sku ILIKE ('%' || ${sku} || '%'))
+        AND (${category_nm}::text IS NULL OR i.category_nm ILIKE ('%' || ${category_nm} || '%'))
+        AND (${product_short_title}::text IS NULL OR i.product_short_title ILIKE ('%' || ${product_short_title} || '%'))
       ORDER BY i.updated_at DESC
+      LIMIT ${limit}
       
     `;
 
