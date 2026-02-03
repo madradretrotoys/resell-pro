@@ -19,6 +19,8 @@ const state = {
   offset: 0,
   total: 0,
   approximate: false,
+  imageMap: new Map(),  // item_id -> string[] of image urls
+  viewer: { itemId: null, idx: 0 },
   
 };
 
@@ -34,21 +36,101 @@ function wireInventoryImageLightbox(root){
   if (root.dataset?.invLightboxBound === '1') return;
   root.dataset.invLightboxBound = '1';
 
-  const dlg = document.getElementById('inventoryImageViewer');
-  const img = document.getElementById('inventoryImageViewerImg');
+  const dlg    = document.getElementById('inventoryImageViewer');
+  const img    = document.getElementById('inventoryImageViewerImg');
+  const prev   = document.getElementById('inventoryImagePrev');
+  const next   = document.getElementById('inventoryImageNext');
+  const count  = document.getElementById('inventoryImageViewerCount');
+  const thumbs = document.getElementById('inventoryImageViewerThumbs');
   if (!dlg || !img) return;
+
+  const normalizeUrls = (urls, fallback) => {
+    let arr = urls;
+    if (typeof arr === 'string') arr = safeParse(arr);
+    if (!Array.isArray(arr)) arr = [];
+    arr = arr.filter(Boolean).map(String);
+
+    if (!arr.length && fallback) arr = [String(fallback)];
+    // De-dupe while preserving order
+    const seen = new Set();
+    return arr.filter(u => (seen.has(u) ? false : (seen.add(u), true)));
+  };
+
+  const render = () => {
+    const itemId = state.viewer.itemId;
+    const urls = normalizeUrls(state.imageMap.get(itemId), img.getAttribute('src'));
+    const total = urls.length || 0;
+
+    if (!total) {
+      if (count) count.textContent = 'No images';
+      if (thumbs) thumbs.innerHTML = '';
+      if (prev) prev.disabled = true;
+      if (next) next.disabled = true;
+      return;
+    }
+
+    // clamp idx
+    state.viewer.idx = Math.max(0, Math.min(state.viewer.idx, total - 1));
+    const url = urls[state.viewer.idx];
+
+    img.setAttribute('src', url);
+    if (count) count.textContent = `${state.viewer.idx + 1} / ${total}`;
+
+    if (prev) prev.disabled = (state.viewer.idx === 0);
+    if (next) next.disabled = (state.viewer.idx >= total - 1);
+
+    if (thumbs) {
+      thumbs.innerHTML = urls.map((u, i) => {
+        const active = (i === state.viewer.idx);
+        return `
+          <button
+            type="button"
+            data-idx="${i}"
+            style="border:${active ? '2px solid #2563eb' : '1px solid #ddd'}; padding:0; border-radius:8px; background:#fff; cursor:pointer; flex:0 0 auto;"
+            aria-label="Image ${i + 1}"
+          >
+            <img src="${escapeHtml(u)}" alt="Thumb ${i + 1}"
+                 style="width:56px;height:56px;object-fit:cover;border-radius:7px;display:block;" loading="lazy">
+          </button>`;
+      }).join('');
+
+      thumbs.querySelectorAll('button[data-idx]').forEach(b => {
+        b.onclick = () => { state.viewer.idx = Number(b.getAttribute('data-idx') || 0); render(); };
+      });
+    }
+  };
+
+  const step = (dir) => {
+    state.viewer.idx += dir;
+    render();
+  };
+
+  if (prev) prev.onclick = () => step(-1);
+  if (next) next.onclick = () => step(+1);
+
+  // Keyboard support while dialog is open
+  dlg.addEventListener('keydown', (e) => {
+    if (e.key === 'ArrowLeft') { e.preventDefault(); step(-1); }
+    if (e.key === 'ArrowRight') { e.preventDefault(); step(+1); }
+  });
 
   root.addEventListener('click', (e) => {
     const btn = e.target.closest('.inventory-thumb-btn');
     if (!btn) return;
 
     const url = btn.getAttribute('data-image-url') || '';
+    const itemId = btn.getAttribute('data-item-id') || '';
     if (!url) return;
+
+    state.viewer.itemId = itemId || null;
+    state.viewer.idx = 0;
 
     img.setAttribute('src', url);
     try { dlg.showModal(); } catch {}
+    render();
   });
 }
+
 export async function init({ container, session }) {
   state.session = session?.user ? session : await ensureSession();
   if (!state.session?.user) {
@@ -192,6 +274,12 @@ function renderRows(items){
   }
   const cols = state.visibleCols;
   const rows = items.map(item => {
+    // Cache all image urls for the dialog gallery
+    const itemId = String(item.item_id || '');
+    let urls = item.image_urls;
+    if (typeof urls === 'string') urls = safeParse(urls);
+    if (!Array.isArray(urls)) urls = [];
+    state.imageMap.set(itemId, urls);
     const tds = cols.map(name => {
       let v = item[name];
       if (name === 'vendoo_item_url' && v) {
@@ -214,7 +302,8 @@ function renderRows(items){
           ? `<button
                type="button"
                class="inventory-thumb-btn"
-               data-image-url="${escapeHtml(url)}"
+                data-item-id="${escapeHtml(itemId)}"
+                data-image-url="${escapeHtml(url)}"
                style="display:inline-flex;align-items:center;gap:8px;background:none;border:0;padding:0;cursor:pointer;"
              >
                <img
