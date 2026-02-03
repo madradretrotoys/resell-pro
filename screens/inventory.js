@@ -153,6 +153,7 @@ function wireInventoryImageLightbox(root){
     try { dlg.showModal(); } catch {}
     render();
   });
+} // <-- ADD THIS: closes wireInventoryImageLightbox()
 
 
 export async function init({ container, session }) {
