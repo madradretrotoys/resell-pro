@@ -67,6 +67,13 @@ export const onRequestGet: PagesFunction = async ({ request, env }) => {
 
     // List drafts; inventory table does not carry tenant_id, so we select drafts globally,
     // but we also compute whether this tenant has a listing profile for the item.
+
+    const url = new URL(request.url);
+    const sku = (url.searchParams.get("sku") || "").trim() || null;
+    const category_nm = (url.searchParams.get("category_nm") || "").trim() || null;
+    const product_short_title = (url.searchParams.get("product_short_title") || "").trim() || null;
+
+    
     const rows = await sql<{
       item_id: string;
       sku: string | null;
@@ -99,8 +106,11 @@ export const onRequestGet: PagesFunction = async ({ request, env }) => {
       LEFT JOIN imgs ON imgs.item_id = i.item_id
       WHERE i.item_status = 'draft'
         AND i.tenant_id = ${tenant_id}
+        AND (${sku}::text IS NULL OR i.sku ILIKE ('%' || ${sku} || '%'))
+        AND (${category_nm}::text IS NULL OR i.category_nm ILIKE ('%' || ${category_nm} || '%'))
+        AND (${product_short_title}::text IS NULL OR i.product_short_title ILIKE ('%' || ${product_short_title} || '%'))
       ORDER BY i.updated_at DESC
-     
+       
     `;
 
     return json({ ok: true, rows }, 200);
