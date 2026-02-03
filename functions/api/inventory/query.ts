@@ -162,7 +162,7 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
             ORDER BY im.is_primary DESC, im.sort_order ASC, im.created_at ASC
           ) AS rn
         FROM app.item_images im
-        WHERE im.tenant_id = ${tenant_id}
+        WHERE im.tenant_id = '${tenant_id}'::uuid
       ),
       primary_img AS (
         SELECT item_id, image_url
