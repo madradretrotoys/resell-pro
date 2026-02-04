@@ -404,6 +404,16 @@ label{
 #inventory-intake-screen .legacy-grid-3{ display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--gap); }
 #inventory-intake-screen .field{ display: flex; flex-direction: column; padding: 2px 2px; min-width: 0; }
 #inventory-intake-screen .field.wide{ grid-column: 1 / -1; }
+/* ===== Intake required-field cue: label turns red when missing ===== */
+#inventory-intake-screen .field > label.rp-req-missing{
+  color: #dc2626;      /* red-600 */
+  font-weight: 700;
+}
+
+/* Also allow section headers (Photos / Crosslist) to be flagged */
+#inventory-intake-screen .sectionTitle.rp-req-missing{
+  color: #dc2626;      /* red-600 */
+}
 /* Label-as-row (for checkbox + caption inside a label) */
 #inventory-intake-screen label.chkrow{
   margin: 0;                  /* neutralize stacked label bottom margin */
