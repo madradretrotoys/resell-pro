@@ -1288,6 +1288,14 @@ function setMarketplaceVisibility() {
     
       const sales = document.getElementById("salesChannelSelect") || findControlByLabel("Sales Channel");
       if (sales) sales.value = inv?.instore_online ?? "";
+
+      // NEW: SKU (always reflect whatever the server has)
+      const skuEl = document.getElementById("SKUInput") || findControlByLabel("SKU");
+      if (skuEl) {
+        const sku = String(inv?.sku ?? "").trim();
+        skuEl.value = sku;
+        try { window.__lastKnownSku = sku || window.__lastKnownSku; } catch {}
+      }
     
             // Marketplace Listing Details (optional for drafts)
       if (listing) {
@@ -4827,14 +4835,18 @@ document.addEventListener("intake:item-changed", () => refreshInventory({ force:
       
       // DEBUG (short): confirm server accepted and returned item_id/status
       if (res?.ok) {
-        console.log("[intake] server.ok item_id=", res.item_id, "status=", res.status);
-         // NEW: remember the SKU from the server so Copy for Xeasy can use it
-        try {
-          if (res.sku) {
-            window.__lastKnownSku = String(res.sku).trim();
-          }
-        } catch {}
-      }
+         console.log("[intake] server.ok item_id=", res.item_id, "status=", res.status);
+
+         // NEW: remember + display SKU from the server (Draft + Active)
+         try {
+           const sku = String(res?.sku ?? "").trim();
+           if (sku) {
+             window.__lastKnownSku = sku;
+             const skuEl = document.getElementById("SKUInput") || findControlByLabel("SKU");
+             if (skuEl) skuEl.value = sku;
+           }
+         } catch {}
+       }
       // Log non-OK responses with full context before throwing
       if (!res || res.ok === false) {
         try {
