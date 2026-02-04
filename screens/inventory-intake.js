@@ -2306,7 +2306,8 @@ function updateRequiredLabelColors() {
         function suggestedDelta(price) {
           // Only used when price >= 11 (we disable Best Offer <= 10)
           if (price >= 11 && price <= 25) return 1;
-          if (price >= 26 && price <= 70) return 5;
+          if (price >= 26 && price <= 35) return 3;
+          if (price >= 36 && price <= 70) return 5;
           if (price >= 71 && price <= 120) return 10;
           if (price >= 121 && price <= 220) return 15;
           if (price >= 221 && price <= 500) return 20;
