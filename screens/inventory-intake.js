@@ -5159,41 +5159,88 @@ document.addEventListener("intake:item-changed", () => refreshInventory({ force:
      * edit mode flags, etc).
      */
     async function resetIntakeBeforeLoad() {
-      // 1) Clear "current item" + duplicate-carry state
-      try { __currentItemId = null; } catch {}
-      try { __lockDraft = false; } catch {}
-      try { __duplicateSourceImages = []; } catch {}
-      try { __duplicateCarryPhotos = true; } catch {}
-
-      // 2) Clear photos + pending uploads and re-render
-      try { __photos = []; } catch {}
-      try { __pendingFiles = []; } catch {}
-      try { renderPhotosGrid(); } catch {}
-      try { updatePhotosUIBasic(); } catch {}
-
-      // 3) Clear marketplace selection + cards/required errors
-      try { selectedMarketplaceIds.clear(); } catch {}
+      console.groupCollapsed?.("[intake] resetIntakeBeforeLoad");
       try {
-        // These helpers exist in your file; call them if present
-        if (typeof renderMarketplaceTiles === "function") renderMarketplaceTiles(__metaCache);
-        if (typeof renderMarketplaceCards === "function") renderMarketplaceCards();
-      } catch {}
-      try { showMarketplaceTilesError(false); } catch {}
-
-      // 4) Clear form fields by reusing your existing population logic
-      //    (this avoids missing any newer fields added later)
-      try { populateFromSaved({}, null); } catch {}
-
-      // 5) Restore default long description for a clean baseline (if helper exists)
-      try { ensureDefaultLongDescription(); } catch {}
-
-      // 6) Recompute gating/validity after reset
-      try { computeValidity(); } catch {}
-
-      // 7) Let the DOM settle fully before we load + apply new values
-      await __nextFrame();
-      await __nextFrame();
+        // 0) Clear cached snapshots / helpers that can rehydrate fields
+        try { window.__intakeSnap = null; } catch {}
+        try { window.__lastKnownSku = ""; } catch {}
+    
+        // 1) Clear "current item" + duplicate-carry state
+        try { __currentItemId = null; } catch {}
+        try { __lockDraft = false; } catch {}
+        try { __duplicateSourceImages = []; } catch {}
+        try { __duplicateCarryPhotos = true; } catch {}
+    
+        // 2) Clear photos + pending uploads and re-render
+        try {
+          if (Array.isArray(__pendingFiles)) {
+            for (const f of __pendingFiles) {
+              try { if (f && f._previewUrl) URL.revokeObjectURL(f._previewUrl); } catch {}
+            }
+          }
+        } catch {}
+    
+        try { __photos = []; } catch {}
+        try { __pendingFiles = []; } catch {}
+        try { renderPhotosGrid(); } catch {}
+        try { updatePhotosUIBasic(); } catch {}
+    
+        // 3) Clear marketplace selection + cards/required errors
+        try { selectedMarketplaceIds.clear(); } catch {}
+    
+        try {
+          if (typeof renderMarketplaceTiles === "function") renderMarketplaceTiles(__metaCache);
+          if (typeof renderMarketplaceCards === "function") renderMarketplaceCards();
+        } catch {}
+    
+        try { showMarketplaceTilesError(false); } catch {}
+    
+        // Explicitly clear eBay inputs that sometimes linger
+        try {
+          const ebaySelectors = [
+            "#ebay_shippingPolicy",
+            "#ebay_paymentPolicy",
+            "#ebay_returnPolicy",
+            "#ebay_shipZip",
+            "#ebay_formatSelect",
+            "#ebay_bin",
+            "#ebay_duration",
+            "#ebay_start",
+            "#ebay_autoAccept",
+            "#ebay_minOffer",
+            "#ebay_promotePct",
+            "#ebay_bestOffer",
+            "#ebay_promote"
+          ];
+          for (const sel of ebaySelectors) {
+            const el = document.querySelector(sel);
+            if (!el) continue;
+            if (el.type === "checkbox") el.checked = false;
+            else el.value = "";
+            try { el.dispatchEvent(new Event("input", { bubbles: true })); } catch {}
+            try { el.dispatchEvent(new Event("change", { bubbles: true })); } catch {}
+          }
+        } catch {}
+    
+        // 4) Clear form fields using existing logic
+        try { populateFromSaved({}, null); } catch {}
+    
+        // 5) Restore description defaults
+        try { ensureDefaultLongDescription(); } catch {}
+    
+        // 6) Recompute validity
+        try { computeValidity(); } catch {}
+    
+        // 7) Allow DOM to fully settle
+        await __nextFrame();
+        await __nextFrame();
+    
+        console.log("[intake] reset complete");
+      } finally {
+        console.groupEnd?.();
+      }
     }
+
 
     /** Click handler: Load a draft into the form and switch to edit path */
     async function handleLoadDraft(item_id) {
