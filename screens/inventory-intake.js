@@ -1524,6 +1524,49 @@ function setMarketplaceVisibility() {
     return allOk;
   }
 
+  // ===== Required label coloring (single source of truth = computeValidity required lists) =====
+function getFieldLabelForControl(ctrl){
+  try{
+    const field = ctrl?.closest?.(".field");
+    if (!field) return null;
+    // Your markup is consistently: <div class="field"><label>...</label><input/select/...></div>
+    return field.querySelector("label") || null;
+  } catch {
+    return null;
+  }
+}
+
+function setLabelMissing(labelEl, missing){
+  if (!labelEl) return;
+  labelEl.classList.toggle("rp-req-missing", !!missing);
+}
+
+function updateRequiredLabelColors(){
+  // Use the SAME required sets computeValidity uses (no new “validation system”).
+  const basic = getBasicRequiredControls();
+  const market = marketplaceActive() ? getMarketplaceRequiredControls() : [];
+
+  // Mark basic required labels
+  for (const ctrl of basic){
+    const lbl = getFieldLabelForControl(ctrl);
+    setLabelMissing(lbl, !hasValue(ctrl));
+  }
+
+  // Mark marketplace required labels ONLY when marketplace flow is active
+  for (const ctrl of market){
+    const lbl = getFieldLabelForControl(ctrl);
+    setLabelMissing(lbl, !hasValue(ctrl));
+  }
+
+  // If marketplace is NOT active, ensure marketplace labels don’t stay red from prior state
+  if (!marketplaceActive()){
+    for (const ctrl of getMarketplaceRequiredControls()){
+      const lbl = getFieldLabelForControl(ctrl);
+      setLabelMissing(lbl, false);
+    }
+  }
+}
+  
   // Enable/disable CTAs:
   // - ACTIVE CTAs (Add Single / Add to Bulk) depend on full validity
   // - DRAFT CTA depends only on the Title being non-empty
@@ -2464,45 +2507,64 @@ function setMarketplaceVisibility() {
           // BASIC — always required (explicit control list)
           const basicControls = getBasicRequiredControls();
           const basicOk = markBatchValidity(basicControls, hasValue);
-      
+        
           // PHOTOS — must have at least one (persisted or pending)
           const photoCount = (__photos?.length || 0) + (__pendingFiles?.length || 0);
           const photosOk = photoCount >= 1;
+        
           // Light accessibility cue on the Photos card/header when missing
           (function markPhotos(ok) {
-            const host = document.getElementById("photosCard")
-                     || document.getElementById("photosGrid")
-                     || document.getElementById("photosCount");
+            const host =
+              document.getElementById("photosCard") ||
+              document.getElementById("photosGrid") ||
+              document.getElementById("photosCount");
             if (host) host.setAttribute("aria-invalid", ok ? "false" : "true");
+        
+            // Also color the Photos header red when missing
+            const h2 = document.querySelector("#photosCard .sectionTitle");
+            if (h2) h2.classList.toggle("rp-req-missing", !ok);
           })(photosOk);
-      
-          
+        
           // MARKETPLACE — required only when active
           let marketOk = true;
+          let hasAnyMarketplace = true;
+        
           if (marketplaceActive()) {
             const marketControls = getMarketplaceRequiredControls();
             marketOk = markBatchValidity(marketControls, hasValue);
-      
+        
             // Require ≥1 selected marketplace tile when marketplace flow is active
             if (marketOk) {
-              const hasAny = selectedMarketplaceIds.size >= 1;
-              marketOk = marketOk && hasAny;
-              showMarketplaceTilesError(!hasAny);
+              hasAnyMarketplace = selectedMarketplaceIds.size >= 1;
+              marketOk = marketOk && hasAnyMarketplace;
+              showMarketplaceTilesError(!hasAnyMarketplace);
             } else {
               showMarketplaceTilesError(false);
             }
+        
+            // Color the Crosslist section title red if tile-selection is missing
+            const crossHdr = document.querySelector("#marketplaceCrosslistBlock .sectionTitle");
+            if (crossHdr) crossHdr.classList.toggle("rp-req-missing", !hasAnyMarketplace);
           } else {
             // clear invalid state for marketplace when not required
             getMarketplaceRequiredControls().forEach(n => n.setAttribute("aria-invalid", "false"));
             showMarketplaceTilesError(false);
+        
+            // Ensure header isn’t left red
+            const crossHdr = document.querySelector("#marketplaceCrosslistBlock .sectionTitle");
+            if (crossHdr) crossHdr.classList.remove("rp-req-missing");
           }
-      
+        
+          // NEW: drive label colors from the same required lists
+          try { updateRequiredLabelColors(); } catch {}
+        
           // ⬅️ photos are part of the gate
           const allOk = basicOk && photosOk && marketOk;
           setCtasEnabled(allOk);
           document.dispatchEvent(new CustomEvent("intake:validity-changed", { detail: { valid: allOk } }));
           return allOk;
         }
+
 
         // --- Copy for Xeasy: helpers & click handler (anchored insert) ---
         function enableCopyXeasy(enabled = true) {
