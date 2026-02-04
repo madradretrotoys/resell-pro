@@ -3604,15 +3604,42 @@ document.addEventListener("intake:item-changed", () => refreshInventory({ force:
   
   function wireValidation() {
     // Always (re)validate when any required control changes/inputs
-    const controls = [
-      ...getBasicRequiredControls(),
-      ...getMarketplaceRequiredControls(),
+    // IMPORTANT: do NOT rely on get*RequiredControls() here because they filter out
+    // disabled/hidden fields at wire-time (e.g., Custom Box enables fields later).
+    const requiredSpecs = [
+      ...BASIC_REQUIRED,
+      ...MARKETPLACE_REQUIRED,
     ];
+  
+    const seen = new Set();
+    const controls = requiredSpecs
+      .map(({ id, label }) => resolveControl(id, label))
+      .filter(Boolean)
+      .filter((el) => {
+        // de-dupe in case resolve finds the same element multiple ways
+        if (seen.has(el)) return false;
+        seen.add(el);
+        return true;
+      });
   
     const listen = (el) => {
       if (!el) return;
-      const evt = (el.tagName === "SELECT") ? "change" : "input";
-      el.addEventListener(evt, computeValidity);
+  
+      // Selects: change
+      if (el.tagName === "SELECT") {
+        el.addEventListener("change", computeValidity);
+        return;
+      }
+  
+      // Checkboxes/radios: change
+      if (el.type === "checkbox" || el.type === "radio") {
+        el.addEventListener("change", computeValidity);
+        return;
+      }
+  
+      // Text/number/textarea: input + change (covers mobile + autofill quirks)
+      el.addEventListener("input", computeValidity);
+      el.addEventListener("change", computeValidity);
     };
   
     controls.forEach(listen);
