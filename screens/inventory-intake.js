@@ -2498,8 +2498,7 @@ function updateRequiredLabelColors() {
 
         // First paint: align UI *and* button states to current values
         applyEbayVisibility();
-        try { computeValidity(); } catch {}
-      } else {
+        
         // Generic placeholder card for other marketplaces (no filler lists yet)
         body.innerHTML = `
           <div class="muted text-sm">Marketplace-specific fields coming soon.</div>
