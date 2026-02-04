@@ -1541,31 +1541,56 @@ function setLabelMissing(labelEl, missing){
   labelEl.classList.toggle("rp-req-missing", !!missing);
 }
 
-function updateRequiredLabelColors(){
-  // Use the SAME required sets computeValidity uses (no new “validation system”).
-  const basic = getBasicRequiredControls();
-  const market = marketplaceActive() ? getMarketplaceRequiredControls() : [];
-
-  // Mark basic required labels
-  for (const ctrl of basic){
-    const lbl = getFieldLabelForControl(ctrl);
-    setLabelMissing(lbl, !hasValue(ctrl));
-  }
-
-  // Mark marketplace required labels ONLY when marketplace flow is active
-  for (const ctrl of market){
-    const lbl = getFieldLabelForControl(ctrl);
-    setLabelMissing(lbl, !hasValue(ctrl));
-  }
-
-  // If marketplace is NOT active, ensure marketplace labels don’t stay red from prior state
-  if (!marketplaceActive()){
-    for (const ctrl of getMarketplaceRequiredControls()){
+function updateRequiredLabelColors() {
+    // Use the SAME required sets computeValidity uses (no new “validation system”).
+    const basic = getBasicRequiredControls();
+  
+    // Mark basic required labels
+    for (const ctrl of basic) {
       const lbl = getFieldLabelForControl(ctrl);
+      setLabelMissing(lbl, !hasValue(ctrl));
+    }
+  
+    // Marketplace handling
+    const mpActive = marketplaceActive();
+  
+    // --- Always clear ALL eBay label state first (prevents “stuck red” when switching tiles) ---
+    const ebaySelectors = [
+      "#ebay_shippingPolicy",
+      "#ebay_paymentPolicy",
+      "#ebay_returnPolicy",
+      "#ebay_shipZip",
+      "#ebay_formatSelect",
+      "#ebay_bin",
+      "#ebay_duration",
+      "#ebay_start",
+      "#ebay_autoAccept",
+      "#ebay_minOffer",
+      "#ebay_promotePct"
+    ];
+    for (const sel of ebaySelectors) {
+      const n = document.querySelector(sel);
+      if (!n) continue;
+      const lbl = getFieldLabelForControl(n);
       setLabelMissing(lbl, false);
     }
+  
+    if (mpActive) {
+      // Mark marketplace required labels ONLY when marketplace flow is active
+      const market = getMarketplaceRequiredControls();
+      for (const ctrl of market) {
+        const lbl = getFieldLabelForControl(ctrl);
+        setLabelMissing(lbl, !hasValue(ctrl));
+      }
+    } else {
+      // If marketplace is NOT active, ensure marketplace labels don’t stay red from prior state
+      for (const ctrl of getMarketplaceRequiredControls()) {
+        const lbl = getFieldLabelForControl(ctrl);
+        setLabelMissing(lbl, false);
+      }
+    }
   }
-}
+
   
   // Enable/disable CTAs:
   // - ACTIVE CTAs (Add Single / Add to Bulk) depend on full validity
@@ -1657,18 +1682,25 @@ function updateRequiredLabelColors(){
         if (n.offsetParent === null) return false;
         return true;
       });
-
-     // Determine if the eBay tile is actually selected right now.
-    // If not selected, we must NOT treat eBay fields as required.
-    const ebaySelected = (() => {
+  
+    // Determine which marketplace tiles are selected right now
+    const mpState = (() => {
       const rows = (__metaCache?.marketplaces || []);
       const byId = new Map(rows.map(r => [Number(r.id), String(r.slug || "").toLowerCase()]));
+      let ebaySelected = false;
+      let vendooSelected = false;
+  
       for (const id of selectedMarketplaceIds) {
-        if (byId.get(Number(id)) === "ebay") return true;
+        const slug = byId.get(Number(id));
+        if (slug === "ebay") ebaySelected = true;
+        if (slug === "vendoo") vendooSelected = true;
       }
-      return false;
+      return { ebaySelected, vendooSelected };
     })();
-
+  
+    // If Vendoo is selected, we want the eBay card fields to be treated as required too
+    const ebayRequired = mpState.ebaySelected || mpState.vendooSelected;
+  
     // eBay card fields (when the eBay card is rendered and the fields are visible)
     const ebaySelectors = [
       "#ebay_shippingPolicy",
@@ -1677,7 +1709,7 @@ function updateRequiredLabelColors(){
       "#ebay_shipZip",
       "#ebay_formatSelect",
       "#ebay_bin",
-
+  
       // These are conditionally shown; include only if visible
       "#ebay_duration",
       "#ebay_start",
@@ -1685,9 +1717,9 @@ function updateRequiredLabelColors(){
       "#ebay_minOffer",
       "#ebay_promotePct"
     ];
-
-    // Only treat eBay-specific fields as required when the eBay tile is actually selected.
-    const ebayNodes = !ebaySelected
+  
+    // Only treat eBay-specific fields as required when eBay is required (eBay tile OR Vendoo tile)
+    const ebayNodes = !ebayRequired
       ? []
       : ebaySelectors
           .map(sel => document.querySelector(sel))
@@ -1698,9 +1730,11 @@ function updateRequiredLabelColors(){
             if (n.offsetParent === null) return false;    // not in layout flow
             return true;
           });
-
+  
+    // IMPORTANT: return a flat list of nodes
     return [...base, ...ebayNodes];
   }
+
   // === [END ADD] ===
   
   function marketplaceActive() {
