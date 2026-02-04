@@ -2277,15 +2277,42 @@ function updateRequiredLabelColors() {
           }
         })();
 
-        // Wire local show/hide inside the eBay card (client-only)
+                // Wire local show/hide inside the eBay card (client-only)
         const formatSel   = body.querySelector("#ebay_formatSelect");
+        const binEl       = body.querySelector("#ebay_bin");
         const bestOffer   = body.querySelector("#ebay_bestOffer");
         const promoteChk  = body.querySelector("#ebay_promote");
+        const autoAccEl   = body.querySelector("#ebay_autoAccept");
+        const minOffEl    = body.querySelector("#ebay_minOffer");
+
+        // Basic Item Details: Price (USD)
+        const basicPriceEl = document.getElementById("priceInput");
 
         const fixedOnly     = () => body.querySelectorAll(".ebay-fixed-only");
         const auctionOnly   = () => body.querySelectorAll(".ebay-auction-only");
         const bestOfferOnly = () => body.querySelectorAll(".ebay-bestoffer-only");
         const promoOnly     = () => body.querySelectorAll(".ebay-promote-only");
+
+        const toNum = (v) => {
+          const n = Number(v);
+          return Number.isFinite(n) ? n : NaN;
+        };
+
+        const money2 = (n) => {
+          const x = Math.round((Number(n) + Number.EPSILON) * 100) / 100;
+          return x.toFixed(2);
+        };
+
+        function suggestedDelta(price) {
+          // Only used when price >= 11 (we disable Best Offer <= 10)
+          if (price >= 11 && price <= 25) return 1;
+          if (price >= 26 && price <= 70) return 5;
+          if (price >= 71 && price <= 120) return 10;
+          if (price >= 121 && price <= 220) return 15;
+          if (price >= 221 && price <= 500) return 20;
+          if (price >= 501) return 30;
+          return 1;
+        }
 
         function applyEbayVisibility() {
           const fmt = (formatSel?.value || "").toLowerCase(); // "" | "fixed" | "auction"
@@ -2300,23 +2327,168 @@ function updateRequiredLabelColors() {
           promoOnly().forEach(n => n.classList.toggle("hidden", !promo));
 
           // When Best Offer is unchecked, clear and mark not required
-          const autoAcc = body.querySelector("#ebay_autoAccept");
-          const minOff  = body.querySelector("#ebay_minOffer");
-          if (autoAcc) autoAcc.required = isFixed && hasBO;
-          if (minOff)  minOff.required  = isFixed && hasBO;
+          if (autoAccEl) autoAccEl.required = isFixed && hasBO;
+          if (minOffEl)  minOffEl.required  = isFixed && hasBO;
 
           // Re-evaluate button enablement whenever fields become shown/hidden or required flips
           try { computeValidity(); } catch {}
         }
 
-        // Any change that can flip visibility/required should re-run validity
-        formatSel?.addEventListener("change", applyEbayVisibility);
-        bestOffer?.addEventListener("change", applyEbayVisibility);
+        function syncBinFromBasicPrice() {
+          if (!binEl || !basicPriceEl) return;
+
+          // If the user manually edited BIN, don't overwrite it.
+          if (binEl.dataset.manual === "1") return;
+
+          const p = toNum(basicPriceEl.value);
+          if (!Number.isFinite(p)) return;
+
+          // Only auto-fill when empty, OR when it was previously auto-filled (manual != 1)
+          if (String(binEl.value || "").trim() === "" || binEl.dataset.autofill === "1") {
+            binEl.value = money2(p);
+            binEl.dataset.autofill = "1";
+          }
+        }
+
+        function enforceBestOfferByPrice() {
+          if (!binEl || !bestOffer) return;
+
+          const fmt = (formatSel?.value || "").toLowerCase();
+          const isFixed = fmt === "" || fmt === "fixed"; // treat empty like fixed until default is applied
+          const p = toNum(binEl.value);
+
+          // Only enforce when Fixed Price flow is relevant
+          if (!isFixed) {
+            // In Auction mode, Best Offer isn't relevant anyway (hidden by visibility), but keep it enabled.
+            bestOffer.disabled = false;
+            bestOffer.title = "";
+            return;
+          }
+
+          if (Number.isFinite(p) && p <= 10) {
+            // Requirement #3: if BIN <= $10, don't allow Best Offer
+            bestOffer.checked = false;
+            bestOffer.disabled = true;
+            bestOffer.title = "Best Offer is disabled for Buy It Now prices of $10.00 or less.";
+          } else {
+            bestOffer.disabled = false;
+            bestOffer.title = "";
+          }
+        }
+
+        function applySuggestedBestOfferPrices({ force = false } = {}) {
+          if (!binEl || !bestOffer || !autoAccEl || !minOffEl) return;
+
+          const fmt = (formatSel?.value || "").toLowerCase();
+          const isFixed = fmt === "fixed";
+          if (!isFixed) return;
+
+          const p = toNum(binEl.value);
+          if (!Number.isFinite(p)) return;
+
+          // If <= 10, best offer is disabled anyway.
+          if (p <= 10) return;
+
+          if (!bestOffer.checked) return;
+
+          const d = suggestedDelta(p);
+          const auto = Math.max(0, p - d);
+          const min  = Math.max(0, auto - d);
+
+          // Don't stomp on user edits unless forced (or they haven't edited)
+          if (force || autoAccEl.dataset.manual !== "1") {
+            autoAccEl.value = money2(auto);
+            autoAccEl.dataset.autofill = "1";
+          }
+          if (force || minOffEl.dataset.manual !== "1") {
+            minOffEl.value = money2(min);
+            minOffEl.dataset.autofill = "1";
+          }
+        }
+
+        // ===== Defaults on first render =====
+        // Requirement #1: default Pricing Format to Fixed Price (but don't override loaded drafts)
+        if (formatSel && !String(formatSel.value || "").trim()) {
+          formatSel.value = "fixed";
+        }
+
+        // Requirement #2: BIN auto-populates from Basic Price
+        syncBinFromBasicPrice();
+
+        // Apply initial enforcement + visibility
+        enforceBestOfferByPrice();
+        applyEbayVisibility();
+
+        // If Best Offer is on (draft load), apply suggestions (but don't override manual)
+        applySuggestedBestOfferPrices({ force: false });
+
+        // ===== Listeners =====
+
+        // When user edits BIN directly, mark manual so Basic Price changes won't overwrite it
+        binEl?.addEventListener("input", () => {
+          if (!binEl) return;
+          binEl.dataset.manual = "1";
+          binEl.dataset.autofill = "0";
+          enforceBestOfferByPrice();
+          // If BO is checked, keep the suggested accept/min in sync (unless user manually edited those)
+          applySuggestedBestOfferPrices({ force: false });
+          try { computeValidity(); } catch {}
+        });
+
+        // When user edits accept/min directly, mark manual so we don't stomp
+        autoAccEl?.addEventListener("input", () => {
+          autoAccEl.dataset.manual = "1";
+          autoAccEl.dataset.autofill = "0";
+          try { computeValidity(); } catch {}
+        });
+        minOffEl?.addEventListener("input", () => {
+          minOffEl.dataset.manual = "1";
+          minOffEl.dataset.autofill = "0";
+          try { computeValidity(); } catch {}
+        });
+
+        // Format changes can flip which fields matter
+        formatSel?.addEventListener("change", () => {
+          // Ensure Fixed defaults behavior
+          if (String(formatSel.value || "").toLowerCase() === "fixed") {
+            syncBinFromBasicPrice();
+            enforceBestOfferByPrice();
+            applySuggestedBestOfferPrices({ force: false });
+          }
+          applyEbayVisibility();
+        });
+
+        // Best Offer toggle: if turning ON, clear manual flags so suggestions can fill
+        bestOffer?.addEventListener("change", () => {
+          enforceBestOfferByPrice();
+
+          if (bestOffer.checked) {
+            if (autoAccEl) { autoAccEl.dataset.manual = "0"; autoAccEl.dataset.autofill = "1"; }
+            if (minOffEl)  { minOffEl.dataset.manual  = "0"; minOffEl.dataset.autofill  = "1"; }
+            applySuggestedBestOfferPrices({ force: true });
+          }
+          applyEbayVisibility();
+        });
+
         promoteChk?.addEventListener("change", applyEbayVisibility);
 
-        // First paint: align UI *and* button states to current values
-        applyEbayVisibility();
+        // If Basic Price changes and BIN wasn't manually set, keep BIN synced
+        basicPriceEl?.addEventListener("input", () => {
+          syncBinFromBasicPrice();
+          enforceBestOfferByPrice();
+          applySuggestedBestOfferPrices({ force: false });
+          applyEbayVisibility();
+        });
+        basicPriceEl?.addEventListener("change", () => {
+          syncBinFromBasicPrice();
+          enforceBestOfferByPrice();
+          applySuggestedBestOfferPrices({ force: false });
+          applyEbayVisibility();
+        });
+
+        // Final: ensure the form buttons are in the right enabled/disabled state
         try { computeValidity(); } catch {}
+
       } else {
         // Generic placeholder card for other marketplaces (no filler lists yet)
         body.innerHTML = `
