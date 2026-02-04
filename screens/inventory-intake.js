@@ -847,48 +847,44 @@ export async function init() {
         // Vendoo should be created, this will feed the Tampermonkey bridge.
         if (shouldEmitVendoo) {
           try {
-            // Prefer an existing snapshot (Facebook gate may have already loaded it)
+            // IMPORTANT: for Vendoo we must use the latest saved data.
+            // A draft load can leave a stale window.__intakeSnap in memory,
+            // so we always fetch a fresh snapshot after an ACTIVE save.
             let snap = null;
+            let hadCachedSnap = false;
+
             try {
-              snap = window.__intakeSnap || null;
-            } catch (e) {
-              console.warn("[intake.js] vendoo: error reading window.__intakeSnap", e);
-              snap = null;
-            }
-        
-            console.log("[intake.js] vendoo: initial snap from window.__intakeSnap", {
-              hasSnap: !!snap,
-              snapKeys: snap ? Object.keys(snap) : null,
-              snapPreview: snap ? {
-                inventory_meta: snap.inventory_meta,
-                listing: snap.listing || snap.listing_profile,
-                vendoo_mapping: snap.vendoo_mapping || null,
-              } : null,
-            });
-        
-            // If we don't have a snapshot yet, load a fresh one for this item.
-            if (!snap && __currentItemId) {
-              console.log("[intake.js] vendoo: loading snapshot for payload enrich", {
+              hadCachedSnap = !!window.__intakeSnap;
+            } catch {}
+
+            if (__currentItemId) {
+              console.log("[intake.js] vendoo: loading FRESH snapshot for payload enrich", {
                 item_id: __currentItemId,
+                hadCachedSnap,
               });
+
               snap = await api(
                 `/api/inventory/intake?item_id=${encodeURIComponent(__currentItemId)}`,
                 { method: "GET" }
               );
-              console.log("[intake.js] vendoo: snapshot loaded from /api/inventory/intake", {
-                snapRaw: snap,
+
+              console.log("[intake.js] vendoo: fresh snapshot loaded from /api/inventory/intake", {
                 snapKeys: snap ? Object.keys(snap) : null,
                 inventory_meta: snap?.inventory_meta || snap?.inventory || null,
                 listing_profile: snap?.listing_profile || snap?.listing || null,
                 vendoo_mapping: snap?.vendoo_mapping || null,
                 ebay_payload_snapshot: snap?.ebay_payload_snapshot || null,
               });
+
               try {
                 window.__intakeSnap = snap;
               } catch (e) {
                 console.warn("[intake.js] vendoo: failed to write window.__intakeSnap", e);
               }
+            } else {
+              console.warn("[intake.js] vendoo: __currentItemId missing; cannot load snapshot");
             }
+
         
             const vendooDetail = {
               ...ev.detail,
