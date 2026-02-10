@@ -9,6 +9,20 @@ export async function init() {
 
   // ——— Local helpers (screen-scoped) ———
   const $ = (id) => document.getElementById(id);
+
+
+ // Enforce 80-character limit on Item Name / Description
+  (function enforceTitleLength() {
+    const titleInput = document.getElementById("titleInput");
+    if (!titleInput) return;
+  
+    titleInput.addEventListener("input", () => {
+      if (titleInput.value.length > 80) {
+        titleInput.value = titleInput.value.slice(0, 80);
+      }
+    });
+  })();
+  
   // --- Default Long Description for new items ---
   const BASE_DESCRIPTION =
     "The photos are part of the description. Be sure to look them over for condition and details. This is sold as is, and it's ready for a new home.";
