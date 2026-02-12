@@ -4549,7 +4549,7 @@ document.addEventListener("intake:item-changed", () => refreshInventory({ force:
         return out;
       };
       
-      const title = valByIdOrLabel(null, "Item Name / Description");
+      const title = valByIdOrLabel("titleInput", "Item Name / Description");
     
       // Collect all possible fields (strings left as entered; numbers coerced when present)
       const invAll = {
