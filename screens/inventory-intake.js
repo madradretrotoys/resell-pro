@@ -9,30 +9,6 @@ export async function init() {
 
   // ——— Local helpers (screen-scoped) ———
   const $ = (id) => document.getElementById(id);
-
-
- // Enforce 80-character limit on Item Name / Description
-  (function enforceTitleLength() {
-    const titleInput = document.getElementById("titleInput");
-    const counter = document.getElementById("titleCharCounter");
-    if (!titleInput) return;
-  
-    function updateCounter() {
-      if (titleInput.value.length > 80) {
-        titleInput.value = titleInput.value.slice(0, 80);
-      }
-  
-      if (counter) {
-        const len = titleInput.value.length;
-        counter.textContent = `${len} / 80`;
-        counter.classList.toggle("text-red-600", len >= 80);
-      }
-    }
-  
-    titleInput.addEventListener("input", updateCounter);
-    updateCounter(); // initialize on load
-  })();
-  
   // --- Default Long Description for new items ---
   const BASE_DESCRIPTION =
     "The photos are part of the description. Be sure to look them over for condition and details. This is sold as is, and it's ready for a new home.";
