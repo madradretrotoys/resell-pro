@@ -3986,6 +3986,21 @@ document.addEventListener("intake:item-changed", () => refreshInventory({ force:
       textKey: "box_name",
       valueKey: "box_key",
     });
+
+    // ✅ Auto-default Shipping Box to "Custom Box"
+    (function defaultToCustomBox() {
+      const sel = document.getElementById("shippingBoxSelect");
+      if (!sel || !sel.options.length) return;
+    
+      const opt = Array.from(sel.options).find(o =>
+        String(o.textContent || "").trim().toLowerCase() === "custom box"
+      );
+    
+      if (opt) {
+        sel.value = opt.value;
+        sel.dispatchEvent(new Event("change", { bubbles: true }));
+      }
+    })();
     wireShippingBoxAutofill(meta);
 
     //Render marketplace tiles (below Shipping)
