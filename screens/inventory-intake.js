@@ -3999,7 +3999,40 @@ document.addEventListener("intake:item-changed", () => refreshInventory({ force:
       }
     })();
     wireShippingBoxAutofill(meta);
-
+    /* === NEW: Calculated Shipping Tier meta wiring (Phase 1: dropdown + cache) === */
+    (function wireCalculatedShippingTier(meta) {
+      const sel = document.getElementById("shippingTierSelect");
+      if (!sel) return;
+    
+      const tiers = Array.isArray(meta?.shipping_tiers) ? meta.shipping_tiers : [];
+      fillSelect(sel, tiers, {
+        textKey: "tier_label",
+        valueKey: "tier_key",
+        // stash useful tier rule fields on the <option> for later calculations
+        extras: (row) => ({
+          carrier: String(row?.carrier ?? ""),
+          service: String(row?.service ?? ""),
+          tierCode: String(row?.tier_code ?? ""),
+          weightOzMin: String(row?.weight_oz_min ?? ""),
+          weightOzMax: String(row?.weight_oz_max ?? ""),
+          dimDivisor: String(row?.dim_divisor ?? ""),
+          maxLengthIn: String(row?.max_length_in ?? ""),
+          maxGirthIn: String(row?.max_girth_in ?? ""),
+          maxLengthPlusGirthIn: String(row?.max_length_plus_girth_in ?? ""),
+        }),
+      });
+    
+      // Cache full datasets for Phase 2 calculation logic (no behavior change yet)
+      try {
+        window.__shippingMeta = window.__shippingMeta || {};
+        window.__shippingMeta.tiers = tiers;
+        window.__shippingMeta.packagingPresets = Array.isArray(meta?.shipping_packaging_presets)
+          ? meta.shipping_packaging_presets
+          : [];
+      } catch {}
+    })(meta);
+    
+    /* === end NEW calculated shipping wiring === */
     //Render marketplace tiles (below Shipping)
     __metaCache = meta;
 
