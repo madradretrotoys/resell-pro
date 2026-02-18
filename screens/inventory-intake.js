@@ -1170,14 +1170,11 @@ function setMarketplaceVisibility() {
   // Fields that don’t have stable IDs — target by label text:
   hideShowFieldByLabel("Long Description", hide);
 
-  // Shipping group: individual fields + the Shipping section/card
+  // Shipping: easiest + most reliable = hide the whole block by ID
+  hideShowFieldById("shippingBlock", hide);
+
+  // Keep the hidden select in sync with hide/show too (safe either way)
   hideShowFieldById("shippingBoxSelect", hide);
-  hideShowFieldByLabel("Weight (lb)", hide);
-  hideShowFieldByLabel("Weight (oz)", hide);
-  hideShowFieldByLabel("Length", hide);
-  hideShowFieldByLabel("Width", hide);
-  hideShowFieldByLabel("Height", hide);
-  hideShowSectionByHeading("Shipping", hide); // hide the container/card that holds shipping fields
 }
 
   
@@ -1232,11 +1229,11 @@ function setMarketplaceVisibility() {
     const resolve = (id, labelText) =>
       document.getElementById(id) || findControlByLabel(labelText);
   
-    const lb  = resolve("shipWeightLb", "Weight (lb)");
-    const oz  = resolve("shipWeightOz", "Weight (oz)");
-    const len = resolve("shipLength",   "Length");
-    const wid = resolve("shipWidth",    "Width");
-    const hei = resolve("shipHeight",   "Height");
+    const lb  = resolve("iWeightLbInput", "Item Weight (lb)");
+    const oz  = resolve("iWeightOzInput", "Item Weight (oz)");
+    const len = resolve("iLengthInput",   "Item Length");
+    const wid = resolve("iWidthInput",    "Item Width");
+    const hei = resolve("iHeightInput",   "Item Height");
   
     const inputs = [lb, oz, len, wid, hei].filter(Boolean);
   
@@ -1685,11 +1682,11 @@ function updateRequiredLabelColors() {
     { id: null,                         label: "Long Description" },
     // Shipping fields are required only when Sales Channel is Both/Marketplace
     { id: "shippingBoxSelect",          label: "Shipping Box" },
-    { id: "shipWeightLb",               label: "Weight (lb)" },
-    { id: "shipWeightOz",               label: "Weight (oz)" },
-    { id: "shipLength",                 label: "Length" },
-    { id: "shipWidth",                  label: "Width" },
-    { id: "shipHeight",                 label: "Height" },
+    { id: "iWeightLbInput",             label: "Item Weight (lb)" },
+    { id: "iWeightOzInput",             label: "Item Weight (oz)" },
+    { id: "iLengthInput",               label: "Item Length" },
+    { id: "iWidthInput",                label: "Item Width" },
+    { id: "iHeightInput",               label: "Item Height" },
   ];
   
   function getBasicRequiredControls() {
