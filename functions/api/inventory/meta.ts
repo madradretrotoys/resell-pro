@@ -43,6 +43,8 @@ export const onRequestGet: PagesFunction = async ({ request, env }) => {
       conditions,
       colors,
       shippingBoxes,
+      shippingTiers,
+      shippingPackagingPresets,
       storeLocations,
       salesChannels,
     ] = await Promise.all([
@@ -54,6 +56,37 @@ export const onRequestGet: PagesFunction = async ({ request, env }) => {
       sql`SELECT condition_name, condition_key FROM app.marketplace_conditions ORDER BY condition_name ASC`,
       sql`SELECT color_name, color_key FROM app.marketplace_colors ORDER BY color_name ASC`,
       sql`SELECT box_key, box_name, weight_lb, weight_oz, length, width, height FROM app.shipping_boxes ORDER BY box_name ASC`,
+      // NEW: shipping tiers (for Calculated Shipping Tier dropdown + later calc rules)
+      sql`SELECT
+            tier_key,
+            carrier,
+            service,
+            tier_code,
+            tier_label,
+            weight_oz_min,
+            weight_oz_max,
+            dim_divisor,
+            max_length_in,
+            max_girth_in,
+            max_length_plus_girth_in,
+            sort_order
+          FROM app.shipping_tiers
+          WHERE is_active = true
+          ORDER BY carrier ASC, service ASC, sort_order ASC, weight_oz_max ASC`,
+    
+      // NEW: packaging presets (for later “add weight/dims” logic)
+      sql`SELECT
+            preset_key,
+            preset_code,
+            preset_label,
+            add_weight_oz,
+            add_length_in,
+            add_width_in,
+            add_height_in,
+            sort_order
+          FROM app.shipping_packaging_presets
+          WHERE is_active = true
+          ORDER BY sort_order ASC, preset_label ASC`,
       sql`SELECT instore_locations FROM app.instore_locations_1 ORDER BY instore_locations ASC`,
       sql`SELECT sales_channel FROM app.sales_channels ORDER BY sales_channel ASC`,
     ]);
@@ -94,6 +127,9 @@ export const onRequestGet: PagesFunction = async ({ request, env }) => {
       marketplaces,
       // keep all shipping fields + the new box_key
       shipping_boxes: shippingBoxes, // [{box_key, box_name, weight_lb, weight_oz, length, width, height}]
+      // NEW: tiers + packaging presets for calculated shipping workflow
+      shipping_tiers: shippingTiers, // [{tier_key, carrier, service, tier_code, tier_label, weight_oz_min, weight_oz_max, dim_divisor, ...}]
+      shipping_packaging_presets: shippingPackagingPresets, // [{preset_key, preset_code, preset_label, add_weight_oz, add_length_in, ...}]
       store_locations: storeLocations.map((r: any) => r.instore_locations),
       sales_channels:  salesChannels.map((r: any) => r.sales_channel),
     };
