@@ -142,31 +142,58 @@
           <textarea id="longDescriptionTextarea" placeholder="Enter a detailed description…"></textarea>
         </div>
       
-        <div id="shippingBlock" style="margin-top:10px">
+         <div id="shippingBlock" style="margin-top:10px">
           <h3 class="sectionTitle" style="margin:0 0 8px">Shipping</h3>
           <div class="legacy-grid-3">
             <div class="field">
-              <label>Shipping Box</label>
+              <label>Calculated Shipping Tier</label>
               <select id="shippingBoxSelect"></select>
             </div>
             <div class="field">
-              <label>Weight (lb)</label>
+              <label>Item Weight (lb)</label>
               <input id="weightLbInput" type="number" min="0" step="1" readonly />
             </div>
             <div class="field">
-              <label>Weight (oz)</label>
+              <label>Item Weight (oz)</label>
               <input id="weightOzInput" type="number" min="0" step="1" readonly />
             </div>
             <div class="field">
-              <label>Length</label>
+              <label>Item Length</label>
               <input id="lengthInput" type="number" min="0" step="1" readonly />
             </div>
             <div class="field">
-              <label>Width</label>
+              <label>Item Width</label>
               <input id="widthInput" type="number" min="0" step="1" readonly />
             </div>
             <div class="field">
-              <label>Height</label>
+              <label>Item Height</label>
+              <input id="heightInput" type="number" min="0" step="1" readonly />
+            </div>
+          </div>
+          
+          <div class="legacy-grid-3">
+            <div class="field">
+              <label>Calculated Shipping Tier</label>
+              <select id="shippingBoxSelect"></select>
+            </div>
+            <div class="field">
+              <label>Calculated Weight (lb)</label>
+              <input id="weightLbInput" type="number" min="0" step="1" readonly />
+            </div>
+            <div class="field">
+              <label>Calculated Weight (oz)</label>
+              <input id="weightOzInput" type="number" min="0" step="1" readonly />
+            </div>
+            <div class="field">
+              <label>Calculated Length</label>
+              <input id="lengthInput" type="number" min="0" step="1" readonly />
+            </div>
+            <div class="field">
+              <label>Calculated Width</label>
+              <input id="widthInput" type="number" min="0" step="1" readonly />
+            </div>
+            <div class="field">
+              <label>Calculated Height</label>
               <input id="heightInput" type="number" min="0" step="1" readonly />
             </div>
           </div>
