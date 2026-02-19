@@ -75,65 +75,67 @@ export async function init() {
 
     function pickDefaultPreset(meta) {
       const list = Array.isArray(meta?.shipping_packaging_presets) ? meta.shipping_packaging_presets : [];
-      // No category-based presets (your requirement) → pick first enabled, else first
-      const enabled = list.find((p) => p && (p.is_active === true || p.active === true));
-      return enabled || list[0] || null;
+      if (!list.length) return null;
+
+      // Pick lowest sort_order among active presets (fallback: lowest sort_order overall)
+      const sorted = list.slice().sort((a, b) => n(a.sort_order) - n(b.sort_order));
+      const active = sorted.find((p) => p && (p.is_active === true || p.active === true));
+      return active || sorted[0] || null;
     }
 
-    function ensureTierOptions(meta) {
-      if (!el.tier) return;
-      // Don’t rebuild if already populated
-      if (el.tier.options && el.tier.options.length > 1) return;
-
-      const tiers = Array.isArray(meta?.shipping_tiers) ? meta.shipping_tiers : [];
-      el.tier.innerHTML = "";
-      const ph = document.createElement("option");
-      ph.value = "";
-      ph.textContent = "Select…";
-      el.tier.appendChild(ph);
-
-      for (const t of tiers) {
-        const opt = document.createElement("option");
-        opt.value = String(t.shipping_tier_id ?? t.id ?? "");
-        opt.textContent =
-          t.tier_name ||
-          t.name ||
-          t.shipping_tier_nm ||
-          `Tier ${String(t.shipping_tier_id ?? t.id ?? "")}`;
-        el.tier.appendChild(opt);
+      function ensureTierOptions(meta) {
+        if (!el.tier) return;
+        // Don’t rebuild if already populated
+        if (el.tier.options && el.tier.options.length > 1) return;
+  
+        const tiers = Array.isArray(meta?.shipping_tiers) ? meta.shipping_tiers : [];
+        el.tier.innerHTML = "";
+        const ph = document.createElement("option");
+        ph.value = "";
+        ph.textContent = "Select…";
+        el.tier.appendChild(ph);
+  
+        // IMPORTANT: your tiers use tier_key + tier_label (UUID keys)
+        const sorted = tiers.slice().sort((a, b) => n(a.sort_order) - n(b.sort_order));
+        for (const t of sorted) {
+          const key = t.tier_key ?? t.shipping_tier_id ?? t.id ?? "";
+          const label = t.tier_label ?? t.tier_name ?? t.name ?? t.shipping_tier_nm ?? `Tier ${String(key)}`;
+          const opt = document.createElement("option");
+          opt.value = String(key);
+          opt.textContent = String(label);
+          el.tier.appendChild(opt);
+        }
       }
-    }
+
 
     function chooseTier(meta, billableOz, billableLb) {
       const tiers = Array.isArray(meta?.shipping_tiers) ? meta.shipping_tiers : [];
       if (!tiers.length) return null;
 
-      // Prefer OZ bounds if present; else fall back to LB bounds
       const sorted = tiers.slice().sort((a, b) => n(a.sort_order) - n(b.sort_order));
 
-      // Try oz-based bounds
+      // Your schema uses weight_oz_min / weight_oz_max
       for (const t of sorted) {
-        const minOz = t.min_oz ?? t.min_weight_oz ?? null;
-        const maxOz = t.max_oz ?? t.max_weight_oz ?? null;
+        const minOz = (t.weight_oz_min ?? t.weight_min_oz ?? t.min_oz ?? t.min_weight_oz ?? null);
+        const maxOz = (t.weight_oz_max ?? t.weight_max_oz ?? t.max_oz ?? t.max_weight_oz ?? null);
         if (minOz != null || maxOz != null) {
-          const lo = minOz == null ? -Infinity : n(minOz);
-          const hi = maxOz == null ? Infinity : n(maxOz);
+          const lo = (minOz == null ? -Infinity : n(minOz));
+          const hi = (maxOz == null ? Infinity : n(maxOz));
           if (billableOz >= lo && billableOz <= hi) return t;
         }
       }
 
-      // Fall back to lb-based bounds
+      // Optional fallback if you ever add lb fields later
       for (const t of sorted) {
         const minLb = t.min_lb ?? t.min_weight_lb ?? null;
         const maxLb = t.max_lb ?? t.max_weight_lb ?? null;
         if (minLb != null || maxLb != null) {
-          const lo = minLb == null ? -Infinity : n(minLb);
-          const hi = maxLb == null ? Infinity : n(maxLb);
+          const lo = (minLb == null ? -Infinity : n(minLb));
+          const hi = (maxLb == null ? Infinity : n(maxLb));
           if (billableLb >= lo && billableLb <= hi) return t;
         }
       }
 
-      // If nothing matched, return the last tier
       return sorted[sorted.length - 1] || null;
     }
 
@@ -226,26 +228,61 @@ export async function init() {
 
       const preset = pickDefaultPreset(meta);
 
-      // Defaults if preset missing (still lets you see *something*)
-      const packAddOz = n(preset?.packaging_add_oz ?? preset?.add_oz ?? 0);
+      // ----------------------------
+      // Apply packaging preset rules
+      // ----------------------------
+      const addWeightOz = n(preset?.add_weight_oz ?? preset?.packaging_add_oz ?? preset?.add_oz ?? 0);
+      const safeBumpOz  = n(preset?.safezone_bump_oz ?? 0);
       const minBillableOz = n(preset?.min_billable_oz ?? preset?.min_oz ?? 0);
-      const roundToOz = n(preset?.round_to_oz ?? preset?.rounding_step_oz ?? 1) || 1;
+
+      // Dim padding rules (inches)
+      const addL = n(preset?.add_length_in ?? 0);
+      const addW = n(preset?.add_width_in ?? 0);
+      const addH = n(preset?.add_height_in ?? 0);
+
+      // Minimum box constraints
+      const minL = n(preset?.min_box_length_in ?? 0);
+      const minW = n(preset?.min_box_width_in ?? 0);
+      const minH = n(preset?.min_box_height_in ?? 0);
+
+      // Dim weight divisor: preset first, else tier later, else 166
       const dimDivisor = n(preset?.dim_divisor ?? preset?.dim_weight_divisor ?? 166) || 166;
 
+      // Rounding step (oz)
+      const roundToOz = n(preset?.round_to_oz ?? preset?.rounding_step_oz ?? 1) || 1;
+
+      // 1) Compute "calculated box dimensions" (never equal raw item dims unless preset says so)
+      const baseL = Math.ceil(itemLen);
+      const baseW = Math.ceil(itemWid);
+      const baseH = Math.ceil(itemHgt);
+
+      let boxL = Math.max(minL, baseL + addL);
+      let boxW = Math.max(minW, baseW + addW);
+      let boxH = Math.max(minH, baseH + addH);
+
+      // Optional preset behavior: height equals width (for certain oversize profiles)
+      if (preset?.oversize_height_equals_width === true) {
+        boxH = boxW;
+      }
+
+      // 2) Compute weight
       const itemTotalOz = (itemLb * 16) + itemOz;
-      const dimLb = calcDimWeightLb(itemLen, itemWid, itemHgt, dimDivisor);
+
+      // Dim weight is based on the BOX, not the item
+      const dimLb = calcDimWeightLb(boxL, boxW, boxH, dimDivisor);
 
       const scaleWeightLb = itemTotalOz / 16;
       const billableLbRaw = Math.max(scaleWeightLb, dimLb);
       const billableOzRaw = billableLbRaw * 16;
 
-      // Add packaging, apply minimums, and round up
-      let finalOz = billableOzRaw + packAddOz;
+      // Add packaging + safezone bump, apply minimums, round up
+      let finalOz = billableOzRaw + addWeightOz + safeBumpOz;
       if (minBillableOz > 0) finalOz = Math.max(finalOz, minBillableOz);
       finalOz = ceilToStep(finalOz, roundToOz);
 
       const split = splitLbOz(finalOz);
 
+      // 3) Choose tier using oz bounds; tier_key is what the dropdown stores
       const tier = chooseTier(meta, finalOz, finalOz / 16);
 
       console.groupCollapsed(`[ship:live] recompute (${reason})`);
@@ -262,12 +299,12 @@ export async function init() {
       console.groupEnd();
 
       setCalculatedUI({
-        tierId: tier ? (tier.shipping_tier_id ?? tier.id) : "",
+        tierId: tier ? (tier.tier_key ?? tier.shipping_tier_id ?? tier.id) : "",
         wLb: split.lb,
         wOz: split.oz,
-        len: itemLen,
-        wid: itemWid,
-        hgt: itemHgt,
+        len: boxL,
+        wid: boxW,
+        hgt: boxH,
       });
     }
 
