@@ -313,9 +313,13 @@ export async function init() {
       }
 
       // 2) Compute billable weight using DIM WEIGHT of the BOX (not the raw item)
+      // USPS DIM applies only when package volume > 1 cubic foot (1,728 in³)
       const itemTotalOz = (itemLb * 16) + itemOz;
 
-      const dimLb = calcDimWeightLb(boxL, boxW, boxH, dimDivisor);
+      const volumeIn3  = boxL * boxW * boxH;
+      const dimApplies = (volumeIn3 > 1728);
+
+      const dimLb = dimApplies ? calcDimWeightLb(boxL, boxW, boxH, dimDivisor) : 0;
       const scaleWeightLb = itemTotalOz / 16;
 
       const billableLbRaw = Math.max(scaleWeightLb, dimLb);
@@ -340,7 +344,8 @@ export async function init() {
         oversize_height_equals_width: preset?.oversize_height_equals_width === true,
       });
       console.log("box dims", { boxL, boxW, boxH });
-      console.log("weights", { dimLb, scaleWeightLb, billableLbRaw, billableOzRaw, finalOz, finalLb: finalOz / 16, split });
+      console.log("weights", { volumeIn3, dimApplies, dimDivisor, dimLb, scaleWeightLb, billableLbRaw, billableOzRaw, finalOz, finalLb: finalOz / 16, split });
+
       console.log("tier chosen", {
         shipping_tier_id: tier?.shipping_tier_id ?? tier?.id ?? null,
         tier_name: tier?.tier_name ?? tier?.name ?? null,
