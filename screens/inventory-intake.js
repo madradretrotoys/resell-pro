@@ -10,6 +10,288 @@ export async function init() {
   // ——— Local helpers (screen-scoped) ———
   const $ = (id) => document.getElementById(id);
 
+  // ============================================================
+  // LIVE Shipping Preview (Phase 1)
+  // - When user edits ITEM weight/dims, we auto-calc the "Calculated" fields
+  // - User is still allowed to manually override calculated fields afterward
+  // - Next item change will re-run and overwrite calculated fields again
+  // - Server-side applySafeShippingCalc stays on save for final truth
+  // ============================================================
+  (function wireLiveShippingPreview() {
+    const el = {
+      // Item inputs (user types these)
+      wLb: $("iWeightLbInput"),
+      wOz: $("iWeightOzInput"),
+      len: $("iLengthInput"),
+      wid: $("iWidthInput"),
+      hgt: $("iHeightInput"),
+
+      // Calculated outputs (we auto-fill these)
+      tier: $("calcdShippingTierSelect"),
+      cLb: $("calcdWeightLbInput"),
+      cOz: $("calcdWeightOzInput"),
+      cLen: $("calcdLengthInput"),
+      cWid: $("calcdWidthInput"),
+      cHgt: $("calcdHeightInput"),
+    };
+
+    const hasAny =
+      el.wLb || el.wOz || el.len || el.wid || el.hgt || el.tier || el.cLb || el.cOz || el.cLen || el.cWid || el.cHgt;
+
+    if (!hasAny) {
+      console.warn("[ship:live] shipping inputs not found on this screen; skipping wireLiveShippingPreview()");
+      return;
+    }
+
+    // Allow manual overrides: make sure calculated fields are editable in the browser UI
+    // (If your HTML already removed readonly, this is harmless.)
+    try { if (el.cLb) el.cLb.readOnly = false; } catch {}
+    try { if (el.cOz) el.cOz.readOnly = false; } catch {}
+    try { if (el.cLen) el.cLen.readOnly = false; } catch {}
+    try { if (el.cWid) el.cWid.readOnly = false; } catch {}
+    try { if (el.cHgt) el.cHgt.readOnly = false; } catch {}
+
+    // When user manually edits calculated fields, mark as "manual" until the next item-input change
+    const manual = { on: false };
+    const markManual = () => { manual.on = true; };
+    ["input", "change"].forEach((ev) => {
+      el.tier?.addEventListener(ev, markManual);
+      el.cLb?.addEventListener(ev, markManual);
+      el.cOz?.addEventListener(ev, markManual);
+      el.cLen?.addEventListener(ev, markManual);
+      el.cWid?.addEventListener(ev, markManual);
+      el.cHgt?.addEventListener(ev, markManual);
+    });
+
+    function n(v) {
+      const x = Number(v);
+      return Number.isFinite(x) ? x : 0;
+    }
+
+    function ceilToStep(val, step) {
+      if (!step || step <= 0) return val;
+      return Math.ceil(val / step) * step;
+    }
+
+    function pickDefaultPreset(meta) {
+      const list = Array.isArray(meta?.shipping_packaging_presets) ? meta.shipping_packaging_presets : [];
+      // No category-based presets (your requirement) → pick first enabled, else first
+      const enabled = list.find((p) => p && (p.is_active === true || p.active === true));
+      return enabled || list[0] || null;
+    }
+
+    function ensureTierOptions(meta) {
+      if (!el.tier) return;
+      // Don’t rebuild if already populated
+      if (el.tier.options && el.tier.options.length > 1) return;
+
+      const tiers = Array.isArray(meta?.shipping_tiers) ? meta.shipping_tiers : [];
+      el.tier.innerHTML = "";
+      const ph = document.createElement("option");
+      ph.value = "";
+      ph.textContent = "Select…";
+      el.tier.appendChild(ph);
+
+      for (const t of tiers) {
+        const opt = document.createElement("option");
+        opt.value = String(t.shipping_tier_id ?? t.id ?? "");
+        opt.textContent =
+          t.tier_name ||
+          t.name ||
+          t.shipping_tier_nm ||
+          `Tier ${String(t.shipping_tier_id ?? t.id ?? "")}`;
+        el.tier.appendChild(opt);
+      }
+    }
+
+    function chooseTier(meta, billableOz, billableLb) {
+      const tiers = Array.isArray(meta?.shipping_tiers) ? meta.shipping_tiers : [];
+      if (!tiers.length) return null;
+
+      // Prefer OZ bounds if present; else fall back to LB bounds
+      const sorted = tiers.slice().sort((a, b) => n(a.sort_order) - n(b.sort_order));
+
+      // Try oz-based bounds
+      for (const t of sorted) {
+        const minOz = t.min_oz ?? t.min_weight_oz ?? null;
+        const maxOz = t.max_oz ?? t.max_weight_oz ?? null;
+        if (minOz != null || maxOz != null) {
+          const lo = minOz == null ? -Infinity : n(minOz);
+          const hi = maxOz == null ? Infinity : n(maxOz);
+          if (billableOz >= lo && billableOz <= hi) return t;
+        }
+      }
+
+      // Fall back to lb-based bounds
+      for (const t of sorted) {
+        const minLb = t.min_lb ?? t.min_weight_lb ?? null;
+        const maxLb = t.max_lb ?? t.max_weight_lb ?? null;
+        if (minLb != null || maxLb != null) {
+          const lo = minLb == null ? -Infinity : n(minLb);
+          const hi = maxLb == null ? Infinity : n(maxLb);
+          if (billableLb >= lo && billableLb <= hi) return t;
+        }
+      }
+
+      // If nothing matched, return the last tier
+      return sorted[sorted.length - 1] || null;
+    }
+
+    function splitLbOz(totalOz) {
+      const oz = Math.max(0, Math.round(totalOz));
+      const lb = Math.floor(oz / 16);
+      const rem = oz - lb * 16;
+      return { lb, oz: rem };
+    }
+
+    function calcDimWeightLb(len, wid, hgt, divisor = 166) {
+      const L = Math.max(0, n(len));
+      const W = Math.max(0, n(wid));
+      const H = Math.max(0, n(hgt));
+      if (!L || !W || !H) return 0;
+      return (L * W * H) / divisor;
+    }
+
+    // Pull meta cache, or lazily fetch it once if missing
+    let __metaFetchInFlight = null;
+    async function getShippingMeta() {
+      if (window.__shippingMeta && (window.__shippingMeta.shipping_tiers || window.__shippingMeta.shipping_packaging_presets)) {
+        return window.__shippingMeta;
+      }
+      if (__metaFetchInFlight) return __metaFetchInFlight;
+
+      __metaFetchInFlight = (async () => {
+        try {
+          const meta = await api("/api/inventory/meta", { method: "GET" });
+          if (meta) {
+            window.__shippingMeta = meta;
+            console.log("[ship:live] cached window.__shippingMeta from /api/inventory/meta", {
+              tiers: Array.isArray(meta.shipping_tiers) ? meta.shipping_tiers.length : null,
+              presets: Array.isArray(meta.shipping_packaging_presets) ? meta.shipping_packaging_presets.length : null,
+            });
+          }
+          return meta;
+        } catch (e) {
+          console.warn("[ship:live] failed to fetch /api/inventory/meta", e);
+          return window.__shippingMeta || null;
+        } finally {
+          __metaFetchInFlight = null;
+        }
+      })();
+
+      return __metaFetchInFlight;
+    }
+
+    function setCalculatedUI({ tierId, wLb, wOz, len, wid, hgt }) {
+      // Only overwrite calculated fields when we're in "auto" mode.
+      // If user manually edited calculated fields, we leave them alone UNTIL item inputs change again.
+      if (manual.on) return;
+
+      if (el.tier && tierId != null) el.tier.value = String(tierId);
+      if (el.cLb) el.cLb.value = String(wLb ?? "");
+      if (el.cOz) el.cOz.value = String(wOz ?? "");
+      if (el.cLen) el.cLen.value = String(len ?? "");
+      if (el.cWid) el.cWid.value = String(wid ?? "");
+      if (el.cHgt) el.cHgt.value = String(hgt ?? "");
+    }
+
+    async function recomputeAndFill(reason = "input") {
+      // Any item-input change should re-enable auto mode and overwrite calculated fields again
+      manual.on = false;
+
+      const itemLb = n(el.wLb?.value);
+      const itemOz = n(el.wOz?.value);
+      const itemLen = n(el.len?.value);
+      const itemWid = n(el.wid?.value);
+      const itemHgt = n(el.hgt?.value);
+
+      // Only compute after we have all 5 item inputs (your requirement)
+      const haveAll =
+        (el.wLb && el.wLb.value !== "") &&
+        (el.wOz && el.wOz.value !== "") &&
+        (el.len && el.len.value !== "") &&
+        (el.wid && el.wid.value !== "") &&
+        (el.hgt && el.hgt.value !== "");
+
+      if (!haveAll) {
+        // Clear tier selection only (don’t stomp manual edits in calc fields)
+        if (el.tier) el.tier.value = "";
+        return;
+      }
+
+      const meta = await getShippingMeta();
+      if (!meta) return;
+
+      ensureTierOptions(meta);
+
+      const preset = pickDefaultPreset(meta);
+
+      // Defaults if preset missing (still lets you see *something*)
+      const packAddOz = n(preset?.packaging_add_oz ?? preset?.add_oz ?? 0);
+      const minBillableOz = n(preset?.min_billable_oz ?? preset?.min_oz ?? 0);
+      const roundToOz = n(preset?.round_to_oz ?? preset?.rounding_step_oz ?? 1) || 1;
+      const dimDivisor = n(preset?.dim_divisor ?? preset?.dim_weight_divisor ?? 166) || 166;
+
+      const itemTotalOz = (itemLb * 16) + itemOz;
+      const dimLb = calcDimWeightLb(itemLen, itemWid, itemHgt, dimDivisor);
+
+      const scaleWeightLb = itemTotalOz / 16;
+      const billableLbRaw = Math.max(scaleWeightLb, dimLb);
+      const billableOzRaw = billableLbRaw * 16;
+
+      // Add packaging, apply minimums, and round up
+      let finalOz = billableOzRaw + packAddOz;
+      if (minBillableOz > 0) finalOz = Math.max(finalOz, minBillableOz);
+      finalOz = ceilToStep(finalOz, roundToOz);
+
+      const split = splitLbOz(finalOz);
+
+      const tier = chooseTier(meta, finalOz, finalOz / 16);
+
+      console.groupCollapsed(`[ship:live] recompute (${reason})`);
+      console.log("item inputs", { itemLb, itemOz, itemLen, itemWid, itemHgt, itemTotalOz });
+      console.log("preset", {
+        preset_id: preset?.packaging_preset_id ?? preset?.id ?? null,
+        packAddOz, minBillableOz, roundToOz, dimDivisor
+      });
+      console.log("weights", { dimLb, scaleWeightLb, billableLbRaw, billableOzRaw, finalOz, finalLb: finalOz / 16, split });
+      console.log("tier chosen", {
+        shipping_tier_id: tier?.shipping_tier_id ?? tier?.id ?? null,
+        tier_name: tier?.tier_name ?? tier?.name ?? null,
+      });
+      console.groupEnd();
+
+      setCalculatedUI({
+        tierId: tier ? (tier.shipping_tier_id ?? tier.id) : "",
+        wLb: split.lb,
+        wOz: split.oz,
+        len: itemLen,
+        wid: itemWid,
+        hgt: itemHgt,
+      });
+    }
+
+    // Small debounce so typing doesn’t spam
+    let t = null;
+    function kick(reason) {
+      if (t) clearTimeout(t);
+      t = setTimeout(() => recomputeAndFill(reason), 120);
+    }
+
+    // Wire item input changes
+    ["input", "change"].forEach((ev) => {
+      el.wLb?.addEventListener(ev, () => kick("wLb"));
+      el.wOz?.addEventListener(ev, () => kick("wOz"));
+      el.len?.addEventListener(ev, () => kick("len"));
+      el.wid?.addEventListener(ev, () => kick("wid"));
+      el.hgt?.addEventListener(ev, () => kick("hgt"));
+    });
+
+    // Initial compute attempt (in case a draft/load prefilled values)
+    kick("init");
+  })();
+
+
 
  // Enforce 80-character limit on Item Name / Description
   (function enforceTitleLength() {
