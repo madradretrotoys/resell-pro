@@ -26,13 +26,13 @@ export async function init() {
       wid: $("iWidthInput"),
       hgt: $("iHeightInput"),
 
-      // Calculated outputs (we auto-fill these)
-      tier: $("calcdShippingTierSelect"),
-      cLb: $("calcdWeightLbInput"),
-      cOz: $("calcdWeightOzInput"),
-      cLen: $("calcdLengthInput"),
-      cWid: $("calcdWidthInput"),
-      cHgt: $("calcdHeightInput"),
+      // Calculated outputs (we auto-fill these) — MATCH HTML IDs
+      tier: $("shippingTierSelect"),
+      cLb: $("weightLbInput"),
+      cOz: $("weightOzInput"),
+      cLen: $("lengthInput"),
+      cWid: $("widthInput"),
+      cHgt: $("heightInput"),
     };
 
     const hasAny =
