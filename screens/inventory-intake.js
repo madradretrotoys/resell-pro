@@ -264,36 +264,73 @@ export async function init() {
 
       ensureTierOptions(meta);
 
-      const preset = pickPresetForItem(meta, { itemLen, itemWid, itemHgt });
+       const preset = pickPresetForItem(meta, { itemLen, itemWid, itemHgt });
 
-      // Defaults if preset missing (still lets you see *something*)
-      const packAddOz = n(preset?.packaging_add_oz ?? preset?.add_oz ?? 0);
+      // ----------------------------
+      // Apply packaging preset rules
+      // ----------------------------
+
+      // Weight rules (oz)
+      const packAddOz     = n(preset?.add_weight_oz ?? preset?.packaging_add_oz ?? preset?.add_oz ?? 0);
+      const safeBumpOz    = n(preset?.safezone_bump_oz ?? 0);
       const minBillableOz = n(preset?.min_billable_oz ?? preset?.min_oz ?? 0);
-      const roundToOz = n(preset?.round_to_oz ?? preset?.rounding_step_oz ?? 1) || 1;
+      const roundToOz     = n(preset?.round_to_oz ?? preset?.rounding_step_oz ?? 1) || 1;
+
+      // Dim rules (inches)
+      const addL = n(preset?.add_length_in ?? 0);
+      const addW = n(preset?.add_width_in ?? 0);
+      const addH = n(preset?.add_height_in ?? 0);
+
+      // Minimum box constraints (inches) — this is your “never smaller than 7x5x4” rule
+      const minL = n(preset?.min_box_length_in ?? 0);
+      const minW = n(preset?.min_box_width_in ?? 0);
+      const minH = n(preset?.min_box_height_in ?? 0);
+
+      // Dim divisor (USPS) — use preset if present, else default 166
       const dimDivisor = n(preset?.dim_divisor ?? preset?.dim_weight_divisor ?? 166) || 166;
 
-      const itemTotalOz = (itemLb * 16) + itemOz;
-      const dimLb = calcDimWeightLb(itemLen, itemWid, itemHgt, dimDivisor);
+      // 1) Compute calculated BOX dimensions
+      const baseL = Math.ceil(itemLen);
+      const baseW = Math.ceil(itemWid);
+      const baseH = Math.ceil(itemHgt);
 
+      let boxL = Math.max(minL, baseL + addL);
+      let boxW = Math.max(minW, baseW + addW);
+      let boxH = Math.max(minH, baseH + addH);
+
+      // Optional oversize behavior: height equals width
+      if (preset?.oversize_height_equals_width === true) {
+        boxH = boxW;
+      }
+
+      // 2) Compute billable weight using DIM WEIGHT of the BOX (not the raw item)
+      const itemTotalOz = (itemLb * 16) + itemOz;
+
+      const dimLb = calcDimWeightLb(boxL, boxW, boxH, dimDivisor);
       const scaleWeightLb = itemTotalOz / 16;
+
       const billableLbRaw = Math.max(scaleWeightLb, dimLb);
       const billableOzRaw = billableLbRaw * 16;
 
-      // Add packaging, apply minimums, and round up
-      let finalOz = billableOzRaw + packAddOz;
+      // Add packaging + safe bump, apply minimums, and round up
+      let finalOz = billableOzRaw + packAddOz + safeBumpOz;
       if (minBillableOz > 0) finalOz = Math.max(finalOz, minBillableOz);
       finalOz = ceilToStep(finalOz, roundToOz);
 
       const split = splitLbOz(finalOz);
 
+      // 3) Choose tier
       const tier = chooseTier(meta, finalOz, finalOz / 16);
 
       console.groupCollapsed(`[ship:live] recompute (${reason})`);
       console.log("item inputs", { itemLb, itemOz, itemLen, itemWid, itemHgt, itemTotalOz });
       console.log("preset", {
-        preset_id: preset?.packaging_preset_id ?? preset?.id ?? null,
-        packAddOz, minBillableOz, roundToOz, dimDivisor
+        preset_key: preset?.preset_key ?? preset?.packaging_preset_id ?? preset?.id ?? null,
+        addL, addW, addH, minL, minW, minH,
+        packAddOz, safeBumpOz, minBillableOz, roundToOz, dimDivisor,
+        oversize_height_equals_width: preset?.oversize_height_equals_width === true,
       });
+      console.log("box dims", { boxL, boxW, boxH });
       console.log("weights", { dimLb, scaleWeightLb, billableLbRaw, billableOzRaw, finalOz, finalLb: finalOz / 16, split });
       console.log("tier chosen", {
         shipping_tier_id: tier?.shipping_tier_id ?? tier?.id ?? null,
@@ -305,9 +342,9 @@ export async function init() {
         tierId: tier ? (tier.shipping_tier_id ?? tier.id) : "",
         wLb: split.lb,
         wOz: split.oz,
-        len: itemLen,
-        wid: itemWid,
-        hgt: itemHgt,
+        len: boxL,
+        wid: boxW,
+        hgt: boxH,
       });
     }
 
