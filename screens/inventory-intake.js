@@ -55,12 +55,20 @@ export async function init() {
     const manual = { on: false };
     const markManual = () => { manual.on = true; };
     ["input", "change"].forEach((ev) => {
-      el.tier?.addEventListener(ev, markManual);
-      el.cLb?.addEventListener(ev, markManual);
-      el.cOz?.addEventListener(ev, markManual);
-      el.cLen?.addEventListener(ev, markManual);
-      el.cWid?.addEventListener(ev, markManual);
-      el.cHgt?.addEventListener(ev, markManual);
+      el.wLb?.addEventListener(ev, () => kick("wLb"));
+      el.wOz?.addEventListener(ev, () => kick("wOz"));
+
+      // While typing: don’t fight the user. Just recompute.
+      el.len?.addEventListener(ev, () => kick("len"));
+      el.wid?.addEventListener(ev, () => kick("wid"));
+      el.hgt?.addEventListener(ev, () => kick("hgt"));
+    });
+
+    // When the user finishes a dimension field, normalize order (force Length≥Width≥Height)
+    ["blur", "change"].forEach((ev) => {
+      el.len?.addEventListener(ev, () => { normalizeItemDimsLargestToSmallest("len:done"); kick("len"); });
+      el.wid?.addEventListener(ev, () => { normalizeItemDimsLargestToSmallest("wid:done"); kick("wid"); });
+      el.hgt?.addEventListener(ev, () => { normalizeItemDimsLargestToSmallest("hgt:done"); kick("hgt"); });
     });
 
     function n(v) {
