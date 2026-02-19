@@ -84,6 +84,54 @@ export async function init() {
     function _dimsSorted3(a, b, c) {
       return [n(a), n(b), n(c)].map((x) => Math.max(0, x)).sort((x, y) => x - y);
     }
+
+    // Force user-entered ITEM dims into Length ≥ Width ≥ Height (largest → smallest)
+    // Runs on blur/change (already wired above), so we don't fight typing.
+    function normalizeItemDimsLargestToSmallest(reason = "dims:normalize") {
+      try {
+        if (!el.len || !el.wid || !el.hgt) return;
+
+        const aRaw = String(el.len.value ?? "").trim();
+        const bRaw = String(el.wid.value ?? "").trim();
+        const cRaw = String(el.hgt.value ?? "").trim();
+
+        // Only normalize after all 3 are filled (your requirement)
+        if (aRaw === "" || bRaw === "" || cRaw === "") return;
+
+        const a = Number(aRaw);
+        const b = Number(bRaw);
+        const c = Number(cRaw);
+
+        // If any are non-numeric, don't touch anything
+        if (!Number.isFinite(a) || !Number.isFinite(b) || !Number.isFinite(c)) return;
+
+        // Sort DESC (largest → smallest)
+        const sortedDesc = [a, b, c].sort((x, y) => y - x);
+
+        const newL = sortedDesc[0];
+        const newW = sortedDesc[1];
+        const newH = sortedDesc[2];
+
+        // Only write if something actually changes
+        const curL = Number(el.len.value);
+        const curW = Number(el.wid.value);
+        const curH = Number(el.hgt.value);
+
+        if (curL === newL && curW === newW && curH === newH) return;
+
+        el.len.value = String(newL);
+        el.wid.value = String(newW);
+        el.hgt.value = String(newH);
+
+        console.log("[ship:dims] normalized item dims (L≥W≥H)", {
+          reason,
+          before: { len: a, wid: b, hgt: c },
+          after:  { len: newL, wid: newW, hgt: newH },
+        });
+      } catch (e) {
+        console.warn("[ship:dims] normalize failed", e);
+      }
+    }
     
     function _fitsInBoxAllowRotate(itemL, itemW, itemH, boxL, boxW, boxH) {
       // If the box has no constraints, treat as "fits"
