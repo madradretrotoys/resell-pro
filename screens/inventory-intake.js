@@ -119,8 +119,21 @@ export async function init() {
     
         const hasMinBox = (minL > 0 || minW > 0 || minH > 0);
         if (!hasMinBox) return p;
-    
-        if (_fitsInBoxAllowRotate(itemLen, itemWid, itemHgt, minL, minW, minH)) {
+
+        // Packing allowance: shrink the "effective fit box" so we only keep items
+        // in this preset if they'll still fit after bubble wrap + paper.
+        //
+        // NOTE: If you want "6x4x3 fits 7x5x4", use 1.0 each.
+        // If you truly want ~1.5 each, set these to 1.5 (but it will bump more items up).
+        const PACK_L = 1.0;
+        const PACK_W = 1.0;
+        const PACK_H = 1.0;
+
+        const effL = Math.max(0, minL - PACK_L);
+        const effW = Math.max(0, minW - PACK_W);
+        const effH = Math.max(0, minH - PACK_H);
+
+        if (_fitsInBoxAllowRotate(itemLen, itemWid, itemHgt, effL, effW, effH)) {
           return p;
         }
       }
