@@ -4026,9 +4026,39 @@ document.addEventListener("intake:item-changed", () => refreshInventory({ force:
       try {
         window.__shippingMeta = window.__shippingMeta || {};
         window.__shippingMeta.tiers = tiers;
-        window.__shippingMeta.packagingPresets = Array.isArray(meta?.shipping_packaging_presets)
+
+        const presetsRaw = Array.isArray(meta?.shipping_packaging_presets)
           ? meta.shipping_packaging_presets
           : [];
+
+        // Normalize types + ensure new Option B columns exist for Phase 2 calculations
+        window.__shippingMeta.packagingPresets = presetsRaw.map((row) => ({
+          // keep original fields too (so nothing breaks)
+          ...row,
+
+          preset_key:   String(row?.preset_key ?? ""),
+          preset_code:  String(row?.preset_code ?? ""),
+          preset_label: String(row?.preset_label ?? ""),
+
+          dim_profile: String(row?.dim_profile ?? "ADD"),
+
+          add_weight_oz: Number(row?.add_weight_oz ?? 0),
+          add_length_in: Number(row?.add_length_in ?? 0),
+          add_width_in:  Number(row?.add_width_in ?? 0),
+          add_height_in: Number(row?.add_height_in ?? 0),
+
+          oversize_height_equals_width: !!row?.oversize_height_equals_width,
+
+          min_box_length_in: Number(row?.min_box_length_in ?? 0),
+          min_box_width_in:  Number(row?.min_box_width_in ?? 0),
+          min_box_height_in: Number(row?.min_box_height_in ?? 0),
+
+          min_billable_oz: Number(row?.min_billable_oz ?? 0),
+          safezone_bump_oz: Number(row?.safezone_bump_oz ?? 0),
+
+          sort_order: Number(row?.sort_order ?? 0),
+          notes: row?.notes == null ? null : String(row.notes),
+        }));
       } catch {}
     })(meta);
     
