@@ -74,19 +74,33 @@ export const onRequestGet: PagesFunction = async ({ request, env }) => {
           WHERE is_active = true
           ORDER BY carrier ASC, service ASC, sort_order ASC, weight_oz_max ASC`,
     
-      // NEW: packaging presets (for later “add weight/dims” logic)
-      sql`SELECT
-            preset_key,
-            preset_code,
-            preset_label,
-            add_weight_oz,
-            add_length_in,
-            add_width_in,
-            add_height_in,
-            sort_order
-          FROM app.shipping_packaging_presets
-          WHERE is_active = true
-          ORDER BY sort_order ASC, preset_label ASC`,
+            // NEW: packaging presets (for calculated shipping logic)
+        sql`SELECT
+              preset_key,
+              preset_code,
+              preset_label,
+  
+              -- NEW Option B columns
+              dim_profile,
+              oversize_height_equals_width,
+              min_box_length_in,
+              min_box_width_in,
+              min_box_height_in,
+              min_billable_oz,
+              safezone_bump_oz,
+  
+              -- existing "wiggle room" additive knobs
+              add_weight_oz,
+              add_length_in,
+              add_width_in,
+              add_height_in,
+  
+              sort_order,
+              notes
+            FROM app.shipping_packaging_presets
+            WHERE is_active = true
+            ORDER BY sort_order ASC, preset_label ASC`,
+
       sql`SELECT instore_locations FROM app.instore_locations_1 ORDER BY instore_locations ASC`,
       sql`SELECT sales_channel FROM app.sales_channels ORDER BY sales_channel ASC`,
     ]);
