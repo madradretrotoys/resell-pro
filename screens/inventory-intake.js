@@ -94,7 +94,16 @@ export async function init() {
     
       // Only consider active presets; respect sort_order
       const sorted = list
-        .filter((p) => p && (p.is_active === true || p.active === true))
+        .filter((p) => {
+          if (!p) return false;
+
+          // If your API doesn't send is_active/active, treat preset as active by default.
+          // Still allow explicit disables if those fields are introduced later.
+          if (p.is_active === false) return false;
+          if (p.active === false) return false;
+
+          return true;
+        })
         .slice()
         .sort((a, b) => n(a.sort_order) - n(b.sort_order));
     
