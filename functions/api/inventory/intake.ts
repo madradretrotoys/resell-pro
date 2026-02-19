@@ -195,7 +195,195 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
       return upsertFooter(body, sku, instore_loc, case_bin_shelf);
     }
 
+    /* ===========================
+   SAFE SHIPPING ENGINE (NEW)
+   - Uses app.shipping_packaging_presets + app.shipping_tiers
+   - Mutates lst to populate calcd_* fields for persistence
+   =========================== */
+    
+    function _toIntOrNull(v: any) {
+      if (v === null || v === undefined || String(v).trim() === "") return null;
+      const n = Number(v);
+      return Number.isFinite(n) ? Math.trunc(n) : null;
+    }
+    
+    function _ozTotalFromLbOz(lb: any, oz: any) {
+      const lbN = _toIntOrNull(lb) ?? 0;
+      const ozN = _toIntOrNull(oz) ?? 0;
+      return (lbN * 16) + ozN;
+    }
+    
+    function _splitOzToLbOz(totalOz: number) {
+      const oz = Math.max(0, Math.ceil(Number(totalOz) || 0));
+      const lb = Math.floor(oz / 16);
+      const rem = oz % 16;
+      return { lb, oz: rem };
+    }
+    
+    function _sortedDimsDesc(L: number, W: number, H: number) {
+      const arr = [L, W, H].map(n => Number(n) || 0).sort((a,b) => b - a);
+      return { L: arr[0], W: arr[1], H: arr[2] };
+    }
+    
+    function _girthIn(W: number, H: number) {
+      return 2 * (Number(W) || 0) + 2 * (Number(H) || 0);
+    }
+    
+    async function applySafeShippingCalc(sql: any, lst: any) {
+      try {
+        // Treat existing listing_profile fields as the user-entered ITEM ACTUALS
+        const itemLb = _toIntOrNull(lst?.weight_lb);
+        const itemOz = _toIntOrNull(lst?.weight_oz);
+        const itemL  = _toIntOrNull(lst?.shipbx_length);
+        const itemW  = _toIntOrNull(lst?.shipbx_width);
+        const itemH  = _toIntOrNull(lst?.shipbx_height);
+    
+        // If item actuals aren’t present, do not compute (leave calcd_* as-is)
+        const haveItem =
+          (itemLb !== null || itemOz !== null) &&
+          (itemL  !== null || itemW  !== null || itemH !== null);
+    
+        if (!haveItem) return;
+    
+        const itemOzTotal = _ozTotalFromLbOz(itemLb, itemOz);
+    
+        // 1) Load active presets (ordered)
+        const presets = await sql/*sql*/`
+          SELECT
+            preset_key, preset_code, preset_label,
+            add_weight_oz, add_length_in, add_width_in, add_height_in,
+            oversize_height_equals_width,
+            min_box_length_in, min_box_width_in, min_box_height_in,
+            min_billable_oz, safezone_bump_oz,
+            dim_profile,
+            sort_order
+          FROM app.shipping_packaging_presets
+          WHERE is_active = true
+          ORDER BY sort_order ASC, preset_label ASC
+        `;
+    
+        // 2) Choose the first preset for now (since you said: no category-based presets later)
+        //    This is intentionally conservative + deterministic.
+        const p = presets?.[0];
+        if (!p) return;
+    
+        const dimProfile = String(p?.dim_profile ?? "ADD").toUpperCase();
+    
+        // Start from item dims
+        const baseL = itemL ?? 0;
+        const baseW = itemW ?? 0;
+        const baseH = itemH ?? 0;
+    
+        let pkgL = baseL;
+        let pkgW = baseW;
+        let pkgH = baseH;
+    
+        if (dimProfile === "ADD") {
+          pkgL = baseL + (Number(p?.add_length_in) || 0);
+          pkgW = baseW + (Number(p?.add_width_in)  || 0);
+          pkgH = baseH + (Number(p?.add_height_in) || 0);
+        } else {
+          // Future-proof: if other profiles appear, default to ADD behavior
+          pkgL = baseL + (Number(p?.add_length_in) || 0);
+          pkgW = baseW + (Number(p?.add_width_in)  || 0);
+          pkgH = baseH + (Number(p?.add_height_in) || 0);
+        }
+    
+        // Enforce minimums
+        pkgL = Math.max(pkgL, Number(p?.min_box_length_in) || 0);
+        pkgW = Math.max(pkgW, Number(p?.min_box_width_in)  || 0);
+        pkgH = Math.max(pkgH, Number(p?.min_box_height_in) || 0);
+    
+        // Optional oversize rule: force H = W (your preset flag)
+        if (Boolean(p?.oversize_height_equals_width)) {
+          pkgH = pkgW;
+        }
+    
+        // 3) Compute conservative package weight (oz)
+        let pkgOz = itemOzTotal
+          + (Number(p?.add_weight_oz) || 0)
+          + (Number(p?.safezone_bump_oz) || 0);
+    
+        pkgOz = Math.max(pkgOz, Number(p?.min_billable_oz) || 0);
+        pkgOz = Math.ceil(pkgOz);
+    
+        // 4) Load tiers
+        const tiers = await sql/*sql*/`
+          SELECT
+            tier_key, carrier, service, tier_code, tier_label,
+            weight_oz_min, weight_oz_max,
+            dim_divisor,
+            max_length_in, max_girth_in, max_length_plus_girth_in,
+            sort_order
+          FROM app.shipping_tiers
+          WHERE is_active = true
+          ORDER BY sort_order ASC, tier_label ASC
+        `;
+    
+        // Dim weight is computed using tier divisor; since divisor can vary by tier,
+        // we compute an initial dim weight using the DEFAULT 166, then validate constraints per tier.
+        // We’ll compute final tier by scanning in sort_order.
+        const dimsSorted = _sortedDimsDesc(pkgL, pkgW, pkgH);
+        const length = dimsSorted.L;
+        const width  = dimsSorted.W;
+        const height = dimsSorted.H;
+    
+        const girth = _girthIn(width, height);
+        const lengthPlusGirth = length + girth;
+    
+        // Find first tier that can hold both WEIGHT (billable) + DIM constraints.
+        // Billable weight is max(actual pkg oz, dim weight in oz).
+        let chosen: any = null;
+    
+        for (const t of (tiers || [])) {
+          const divisor = Number(t?.dim_divisor) || 166;
+          const dimLb = Math.ceil((length * width * height) / divisor);
+          const dimOz = dimLb * 16;
+    
+          const billableOz = Math.max(pkgOz, dimOz);
+    
+          const wMin = Number(t?.weight_oz_min);
+          const wMax = Number(t?.weight_oz_max);
+    
+          if (!Number.isFinite(wMin) || !Number.isFinite(wMax)) continue;
+          if (billableOz < wMin || billableOz > wMax) continue;
+    
+          const maxLen = t?.max_length_in === null ? null : Number(t?.max_length_in);
+          const maxG   = t?.max_girth_in === null ? null : Number(t?.max_girth_in);
+          const maxLPG = t?.max_length_plus_girth_in === null ? null : Number(t?.max_length_plus_girth_in);
+    
+          if (maxLen !== null && Number.isFinite(maxLen) && length > maxLen) continue;
+          if (maxG   !== null && Number.isFinite(maxG)   && girth > maxG) continue;
+          if (maxLPG !== null && Number.isFinite(maxLPG) && lengthPlusGirth > maxLPG) continue;
+    
+          chosen = { ...t, billableOz };
+          break;
+        }
+    
+        // If no tier matched, still write conservative calcd dims/weight, leave tier null.
+        const finalBillableOz = chosen?.billableOz ?? pkgOz;
+        const { lb: outLb, oz: outOz } = _splitOzToLbOz(finalBillableOz);
+    
+        // Persist into lst.calcd_* fields (these are the NEW columns in item_listing_profile)
+        // NOTE: calcd_shipping_tier is BIGINT in schema; we store tier.sort_order for now.
+        lst.calcd_shipping_tier = chosen ? (Number(chosen?.sort_order) || 0) : null;
+        lst.calcd_weight_lb     = outLb;
+        lst.calcd_weight_oz     = outOz;
+        lst.calcd_length        = length;
+    
+        // Schema currently has calcd_width/calcd_height as TEXT, so keep them as strings.
+        lst.calcd_width         = String(width);
+        lst.calcd_height        = String(height);
+    
+      } catch (e: any) {
+        // Never block saves due to calc errors; just leave calcd_* alone.
+        console.log("[shipping_calc] error:", e?.message || String(e));
+      }
+    }
+    
+    /* ===== END SAFE SHIPPING ENGINE ===== */
 
+    
         // Vendoo mapping helpers (category + condition)
     // These are intentionally generic and just return raw rows so the caller can
     // shape the payload as needed without over-coupling to schema details.
@@ -340,6 +528,8 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
       }
     }
 
+    
+    
     // ---------------------------------------------------------------------
     // Shared Vendoo Mapping Builder (used by ACTIVE CREATE + ACTIVE UPDATE)
     // ---------------------------------------------------------------------
@@ -1294,6 +1484,10 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
           const item_id = updInv[0].item_id;
         
           if (lst && Object.values(lst).some(v => v !== null && v !== undefined && String(v) !== "")) {
+
+            // NEW: compute conservative calculated shipping fields server-side
+            await applySafeShippingCalc(sql, lst);
+            
             const descDraft = composeLongDescription({
               existing: lst.product_description,
               status: "draft",
@@ -1304,7 +1498,8 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
               ( item_id, tenant_id,
                 listing_category_key, condition_key, brand_key, color_key, shipping_box_key,
                 listing_category,       item_condition,  brand_name,  primary_color,  shipping_box,
-                product_description, weight_lb, weight_oz, shipbx_length, shipbx_width, shipbx_height )
+                product_description, weight_lb, weight_oz, shipbx_length, shipbx_width, shipbx_height,
+                calcd_shipping_tier, calcd_weight_lb, calcd_weight_oz, calcd_length, calcd_width, calcd_height)
             VALUES
               ( ${item_id}, ${tenant_id},
                 ${lst.listing_category_key}, ${lst.condition_key}, ${lst.brand_key}, ${lst.color_key}, ${lst.shipping_box_key},
@@ -1314,7 +1509,9 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
                 (SELECT color_name      FROM app.marketplace_colors      WHERE color_key     = ${lst.color_key}),
                 (SELECT box_name        FROM app.shipping_boxes          WHERE box_key       = ${lst.shipping_box_key}),
                 ${descDraft}, ${lst.weight_lb}, ${lst.weight_oz},
-                ${lst.shipbx_length}, ${lst.shipbx_width}, ${lst.shipbx_height}
+                ${lst.shipbx_length}, ${lst.shipbx_width}, ${lst.shipbx_height},
+                ${lst.calcd_shipping_tier}, ${lst.calcd_weight_lb}, ${lst.calcd_weight_oz},
+                ${lst.calcd_length}, ${lst.calcd_width}, ${lst.calcd_height}
               )
             ON CONFLICT (item_id) DO UPDATE SET
               listing_category_key = EXCLUDED.listing_category_key,
@@ -1332,7 +1529,13 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
               weight_oz            = EXCLUDED.weight_oz,
               shipbx_length        = EXCLUDED.shipbx_length,
               shipbx_width         = EXCLUDED.shipbx_width,
-              shipbx_height        = EXCLUDED.shipbx_height
+              shipbx_height        = EXCLUDED.shipbx_height,
+              calcd_shipping_tier  = EXCLUDED.calcd_shipping_tier,
+              calcd_weight_lb      = EXCLUDED.calcd_weight_lb,
+              calcd_weight_oz      = EXCLUDED.calcd_weight_oz,
+              calcd_length         = EXCLUDED.calcd_length,
+              calcd_width          = EXCLUDED.calcd_width,
+              calcd_height         = EXCLUDED.calcd_height
           `;
           }
 
@@ -1993,6 +2196,10 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
     
       // If the client provided any listing fields for the draft, persist them too
       if (lst && Object.values(lst).some(v => v !== null && v !== undefined && String(v) !== "")) {
+        
+        // NEW: compute conservative calculated shipping fields server-side
+        await applySafeShippingCalc(sql, lst);
+        
         const descDraft = composeLongDescription({
               existing: lst.product_description,
               status: "draft",
@@ -2004,7 +2211,9 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
             ( item_id, tenant_id,
               listing_category_key, condition_key, brand_key, color_key, shipping_box_key,
               listing_category,       item_condition,  brand_name,  primary_color,  shipping_box,
-              product_description, weight_lb, weight_oz, shipbx_length, shipbx_width, shipbx_height )
+              product_description, weight_lb, weight_oz, shipbx_length, shipbx_width, shipbx_height,
+              calcd_shipping_tier, calcd_weight_lb, calcd_weight_oz, calcd_length, calcd_width, calcd_height
+            )
           VALUES
             ( ${item_id}, ${tenant_id},
               ${lst.listing_category_key}, ${lst.condition_key}, ${lst.brand_key}, ${lst.color_key}, ${lst.shipping_box_key},
@@ -2014,7 +2223,9 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
               (SELECT color_name      FROM app.marketplace_colors      WHERE color_key     = ${lst.color_key}),
               (SELECT box_name        FROM app.shipping_boxes          WHERE box_key       = ${lst.shipping_box_key}),
               ${descDraft}, ${lst.weight_lb}, ${lst.weight_oz},
-              ${lst.shipbx_length}, ${lst.shipbx_width}, ${lst.shipbx_height}
+              ${lst.shipbx_length}, ${lst.shipbx_width}, ${lst.shipbx_height},
+              ${lst.calcd_shipping_tier}, ${lst.calcd_weight_lb}, ${lst.calcd_weight_oz},
+              ${lst.calcd_length}, ${lst.calcd_width}, ${lst.calcd_height}
             )
         ON CONFLICT (item_id) DO UPDATE SET
             -- keys
@@ -2033,8 +2244,15 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
             weight_oz        = EXCLUDED.weight_oz,
             shipbx_length    = EXCLUDED.shipbx_length,
             shipbx_width     = EXCLUDED.shipbx_width,
-            shipbx_height    = EXCLUDED.shipbx_height
+            shipbx_height    = EXCLUDED.shipbx_height,
+            calcd_shipping_tier  = EXCLUDED.calcd_shipping_tier,
+            calcd_weight_lb      = EXCLUDED.calcd_weight_lb,
+            calcd_weight_oz      = EXCLUDED.calcd_weight_oz,
+            calcd_length         = EXCLUDED.calcd_length,
+            calcd_width          = EXCLUDED.calcd_width,
+            calcd_height         = EXCLUDED.calcd_height
         `;
+        
       }
 
       // Upsert eBay marketplace listing when present (draft create)
@@ -2159,12 +2377,17 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
         product_short_title: inv?.product_short_title ?? null
       });
       
+      // NEW: compute conservative calculated shipping fields server-side
+      await applySafeShippingCalc(sql, lst);
+      
       await sql/*sql*/`
       INSERT INTO app.item_listing_profile
         ( item_id, tenant_id,
           listing_category_key, condition_key, brand_key, color_key, shipping_box_key,
           listing_category,       item_condition,  brand_name,  primary_color,  shipping_box,
-          product_description, weight_lb, weight_oz, shipbx_length, shipbx_width, shipbx_height )
+          product_description, weight_lb, weight_oz, shipbx_length, shipbx_width, shipbx_height,
+          calcd_shipping_tier, calcd_weight_lb, calcd_weight_oz, calcd_length, calcd_width, calcd_height
+        )
       VALUES
         ( ${item_id}, ${tenant_id},
           ${lst.listing_category_key}, ${lst.condition_key}, ${lst.brand_key}, ${lst.color_key}, ${lst.shipping_box_key},
@@ -2174,7 +2397,9 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
           (SELECT color_name      FROM app.marketplace_colors      WHERE color_key     = ${lst.color_key}),
           (SELECT box_name        FROM app.shipping_boxes          WHERE box_key       = ${lst.shipping_box_key}),
           ${descActive}, ${lst.weight_lb}, ${lst.weight_oz},
-          ${lst.shipbx_length}, ${lst.shipbx_width}, ${lst.shipbx_height}
+          ${lst.shipbx_length}, ${lst.shipbx_width}, ${lst.shipbx_height},
+          ${lst.calcd_shipping_tier}, ${lst.calcd_weight_lb}, ${lst.calcd_weight_oz},
+          ${lst.calcd_length}, ${lst.calcd_width}, ${lst.calcd_height}
         )
         ON CONFLICT (item_id) DO UPDATE SET
           -- keys
@@ -2194,7 +2419,13 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
           weight_oz            = EXCLUDED.weight_oz,
           shipbx_length        = EXCLUDED.shipbx_length,
           shipbx_width         = EXCLUDED.shipbx_width,
-          shipbx_height        = EXCLUDED.shipbx_height
+          shipbx_height        = EXCLUDED.shipbx_height,
+          calcd_shipping_tier  = EXCLUDED.calcd_shipping_tier,
+          calcd_weight_lb      = EXCLUDED.calcd_weight_lb,
+          calcd_weight_oz      = EXCLUDED.calcd_weight_oz,
+          calcd_length         = EXCLUDED.calcd_length,
+          calcd_width          = EXCLUDED.calcd_width,
+          calcd_height         = EXCLUDED.calcd_height
       `;
     }
     
