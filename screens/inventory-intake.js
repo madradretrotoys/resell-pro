@@ -73,11 +73,51 @@ export async function init() {
       return Math.ceil(val / step) * step;
     }
 
-    function pickDefaultPreset(meta) {
+    function _dimsSorted3(a, b, c) {
+      return [n(a), n(b), n(c)].map((x) => Math.max(0, x)).sort((x, y) => x - y);
+    }
+    
+    function _fitsInBoxAllowRotate(itemL, itemW, itemH, boxL, boxW, boxH) {
+      // If the box has no constraints, treat as "fits"
+      if (!boxL && !boxW && !boxH) return true;
+    
+      const it = _dimsSorted3(itemL, itemW, itemH);
+      const bx = _dimsSorted3(boxL, boxW, boxH);
+    
+      // Allow rotation by comparing sorted dimensions
+      return it[0] <= bx[0] && it[1] <= bx[1] && it[2] <= bx[2];
+    }
+    
+    function pickPresetForItem(meta, { itemLen, itemWid, itemHgt }) {
       const list = Array.isArray(meta?.shipping_packaging_presets) ? meta.shipping_packaging_presets : [];
-      // No category-based presets (your requirement) → pick first enabled, else first
-      const enabled = list.find((p) => p && (p.is_active === true || p.active === true));
-      return enabled || list[0] || null;
+      if (!list.length) return null;
+    
+      // Only consider active presets; respect sort_order
+      const sorted = list
+        .filter((p) => p && (p.is_active === true || p.active === true))
+        .slice()
+        .sort((a, b) => n(a.sort_order) - n(b.sort_order));
+    
+      if (!sorted.length) return null;
+    
+      // Walk presets in priority order:
+      // - If a preset has a min_box constraint, it is ONLY eligible if the item fits in that min box (rotation allowed).
+      // - Otherwise it's eligible by default.
+      for (const p of sorted) {
+        const minL = n(p?.min_box_length_in ?? 0);
+        const minW = n(p?.min_box_width_in ?? 0);
+        const minH = n(p?.min_box_height_in ?? 0);
+    
+        const hasMinBox = (minL > 0 || minW > 0 || minH > 0);
+        if (!hasMinBox) return p;
+    
+        if (_fitsInBoxAllowRotate(itemLen, itemWid, itemHgt, minL, minW, minH)) {
+          return p;
+        }
+      }
+    
+      // If none fit their min-box constraints (rare), fall back to the last preset (largest / most permissive)
+      return sorted[sorted.length - 1] || null;
     }
 
     function ensureTierOptions(meta) {
@@ -224,7 +264,7 @@ export async function init() {
 
       ensureTierOptions(meta);
 
-      const preset = pickDefaultPreset(meta);
+      const preset = pickPresetForItem(meta, { itemLen, itemWid, itemHgt });
 
       // Defaults if preset missing (still lets you see *something*)
       const packAddOz = n(preset?.packaging_add_oz ?? preset?.add_oz ?? 0);
