@@ -1206,21 +1206,14 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
     console.log("[intake] body.raw_keys", {
       has_inventory: !!body?.inventory,
       has_listing: !!body?.listing,
-      has_listing_profile: !!body?.listing_profile,
       has_marketplace_listing: !!body?.marketplace_listing,
       status: body?.status,
       item_status: body?.inventory?.item_status,
       intent: body?.intent
     });
     const inv = body?.inventory || {};
-    
-    // ✅ Back-compat: some clients send listing_profile instead of listing
-    const lst = body?.listing || body?.listing_profile || {};
-    if (!body?.listing && body?.listing_profile) {
-      console.log("[intake] payload.note", { using: "listing_profile" });
-    }
-  
-  const ebay = body?.marketplace_listing?.ebay || null;
+    const lst = body?.listing || {};
+    const ebay = body?.marketplace_listing?.ebay || null;
     
     // Status: support Option A drafts; default to 'active' for existing flows
     const rawStatus = (body?.status || inv?.item_status || "active");
