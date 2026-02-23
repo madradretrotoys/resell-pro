@@ -538,7 +538,7 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
         SELECT
           listing_category_key, condition_key, brand_key, color_key, shipping_box_key,
           listing_category, item_condition, brand_name, primary_color, shipping_box,
-          weight_lb, weight_oz, shipbx_length, shipbx_width, shipbx_height
+          calcd_weight_lb, calcd_weight_oz, calcd_length, calcd_width, calcd_height
           
         FROM app.item_listing_profile
         WHERE item_id = ${item_id} AND tenant_id = ${tenant_id}
@@ -1485,8 +1485,7 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
         
           if (lst && Object.values(lst).some(v => v !== null && v !== undefined && String(v) !== "")) {
 
-            // NEW: compute conservative calculated shipping fields server-side
-            await applySafeShippingCalc(sql, lst);
+            
             
             const descDraft = composeLongDescription({
               existing: lst.product_description,
@@ -1698,8 +1697,7 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
               product_short_title: inv?.product_short_title ?? null
             });
             
-            // NEW: compute conservative calculated shipping fields server-side (ACTIVE UPDATE too)
-              await applySafeShippingCalc(sql, lst);
+
 
               // Upsert listing profile for this item_id
               await sql/*sql*/`
@@ -2212,8 +2210,7 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
       // If the client provided any listing fields for the draft, persist them too
       if (lst && Object.values(lst).some(v => v !== null && v !== undefined && String(v) !== "")) {
         
-        // NEW: compute conservative calculated shipping fields server-side
-        await applySafeShippingCalc(sql, lst);
+        
         
         const descDraft = composeLongDescription({
               existing: lst.product_description,
@@ -2391,8 +2388,7 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
         product_short_title: inv?.product_short_title ?? null
       });
       
-      // NEW: compute conservative calculated shipping fields server-side
-      await applySafeShippingCalc(sql, lst);
+      
       
       await sql/*sql*/`
       INSERT INTO app.item_listing_profile
