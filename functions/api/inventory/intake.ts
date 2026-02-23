@@ -1499,7 +1499,7 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
                 listing_category_key, condition_key, brand_key, color_key, shipping_box_key,
                 listing_category,       item_condition,  brand_name,  primary_color,  shipping_box,
                 product_description, weight_lb, weight_oz, shipbx_length, shipbx_width, shipbx_height,
-                calcd_shipping_tier, calcd_weight_lb, calcd_weight_oz, calcd_length, calcd_width, calcd_height)
+                calcd_weight_lb, calcd_weight_oz, calcd_length, calcd_width, calcd_height)
             VALUES
               ( ${item_id}, ${tenant_id},
                 ${lst.listing_category_key}, ${lst.condition_key}, ${lst.brand_key}, ${lst.color_key}, ${lst.shipping_box_key},
@@ -1510,7 +1510,7 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
                 (SELECT box_name        FROM app.shipping_boxes          WHERE box_key       = ${lst.shipping_box_key}),
                 ${descDraft}, ${lst.weight_lb}, ${lst.weight_oz},
                 ${lst.shipbx_length}, ${lst.shipbx_width}, ${lst.shipbx_height},
-                ${lst.calcd_shipping_tier}, ${lst.calcd_weight_lb}, ${lst.calcd_weight_oz},
+                ${lst.calcd_weight_lb}, ${lst.calcd_weight_oz},
                 ${lst.calcd_length}, ${lst.calcd_width}, ${lst.calcd_height}
               )
             ON CONFLICT (item_id) DO UPDATE SET
@@ -1530,7 +1530,6 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
               shipbx_length        = EXCLUDED.shipbx_length,
               shipbx_width         = EXCLUDED.shipbx_width,
               shipbx_height        = EXCLUDED.shipbx_height,
-              calcd_shipping_tier  = EXCLUDED.calcd_shipping_tier,
               calcd_weight_lb      = EXCLUDED.calcd_weight_lb,
               calcd_weight_oz      = EXCLUDED.calcd_weight_oz,
               calcd_length         = EXCLUDED.calcd_length,
@@ -1709,7 +1708,7 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
                     listing_category_key, condition_key, brand_key, color_key, shipping_box_key,
                     listing_category,       item_condition,  brand_name,  primary_color,  shipping_box,
                     product_description, weight_lb, weight_oz, shipbx_length, shipbx_width, shipbx_height,
-                    calcd_shipping_tier, calcd_weight_lb, calcd_weight_oz, calcd_length, calcd_width, calcd_height
+                    calcd_weight_lb, calcd_weight_oz, calcd_length, calcd_width, calcd_height
                   )
                 VALUES
                   ( ${item_id}, ${tenant_id},
@@ -1721,7 +1720,7 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
                     (SELECT box_name        FROM app.shipping_boxes          WHERE box_key       = ${lst.shipping_box_key}),
                     ${descActive}, ${lst.weight_lb}, ${lst.weight_oz},
                     ${lst.shipbx_length}, ${lst.shipbx_width}, ${lst.shipbx_height},
-                    ${lst.calcd_shipping_tier}, ${lst.calcd_weight_lb}, ${lst.calcd_weight_oz},
+                    ${lst.calcd_weight_lb}, ${lst.calcd_weight_oz},
                     ${lst.calcd_length}, ${lst.calcd_width}, ${lst.calcd_height}
                   )
 
@@ -1746,7 +1745,7 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
                   shipbx_width     = EXCLUDED.shipbx_width,
                   shipbx_height    = EXCLUDED.shipbx_height,
 
-                  calcd_shipping_tier = EXCLUDED.calcd_shipping_tier,
+                  
                   calcd_weight_lb     = EXCLUDED.calcd_weight_lb,
                   calcd_weight_oz     = EXCLUDED.calcd_weight_oz,
                   calcd_length        = EXCLUDED.calcd_length,
@@ -2228,7 +2227,7 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
               listing_category_key, condition_key, brand_key, color_key, shipping_box_key,
               listing_category,       item_condition,  brand_name,  primary_color,  shipping_box,
               product_description, weight_lb, weight_oz, shipbx_length, shipbx_width, shipbx_height,
-              calcd_shipping_tier, calcd_weight_lb, calcd_weight_oz, calcd_length, calcd_width, calcd_height
+              calcd_weight_lb, calcd_weight_oz, calcd_length, calcd_width, calcd_height
             )
           VALUES
             ( ${item_id}, ${tenant_id},
@@ -2240,7 +2239,7 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
               (SELECT box_name        FROM app.shipping_boxes          WHERE box_key       = ${lst.shipping_box_key}),
               ${descDraft}, ${lst.weight_lb}, ${lst.weight_oz},
               ${lst.shipbx_length}, ${lst.shipbx_width}, ${lst.shipbx_height},
-              ${lst.calcd_shipping_tier}, ${lst.calcd_weight_lb}, ${lst.calcd_weight_oz},
+              ${lst.calcd_weight_lb}, ${lst.calcd_weight_oz},
               ${lst.calcd_length}, ${lst.calcd_width}, ${lst.calcd_height}
             )
         ON CONFLICT (item_id) DO UPDATE SET
@@ -2261,7 +2260,6 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
             shipbx_length    = EXCLUDED.shipbx_length,
             shipbx_width     = EXCLUDED.shipbx_width,
             shipbx_height    = EXCLUDED.shipbx_height,
-            calcd_shipping_tier  = EXCLUDED.calcd_shipping_tier,
             calcd_weight_lb      = EXCLUDED.calcd_weight_lb,
             calcd_weight_oz      = EXCLUDED.calcd_weight_oz,
             calcd_length         = EXCLUDED.calcd_length,
@@ -2402,7 +2400,7 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
           listing_category_key, condition_key, brand_key, color_key, shipping_box_key,
           listing_category,       item_condition,  brand_name,  primary_color,  shipping_box,
           product_description, weight_lb, weight_oz, shipbx_length, shipbx_width, shipbx_height,
-          calcd_shipping_tier, calcd_weight_lb, calcd_weight_oz, calcd_length, calcd_width, calcd_height
+          calcd_weight_lb, calcd_weight_oz, calcd_length, calcd_width, calcd_height
         )
       VALUES
         ( ${item_id}, ${tenant_id},
@@ -2414,7 +2412,7 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
           (SELECT box_name        FROM app.shipping_boxes          WHERE box_key       = ${lst.shipping_box_key}),
           ${descActive}, ${lst.weight_lb}, ${lst.weight_oz},
           ${lst.shipbx_length}, ${lst.shipbx_width}, ${lst.shipbx_height},
-          ${lst.calcd_shipping_tier}, ${lst.calcd_weight_lb}, ${lst.calcd_weight_oz},
+          ${lst.calcd_weight_lb}, ${lst.calcd_weight_oz},
           ${lst.calcd_length}, ${lst.calcd_width}, ${lst.calcd_height}
         )
         ON CONFLICT (item_id) DO UPDATE SET
@@ -2436,7 +2434,6 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
           shipbx_length        = EXCLUDED.shipbx_length,
           shipbx_width         = EXCLUDED.shipbx_width,
           shipbx_height        = EXCLUDED.shipbx_height,
-          calcd_shipping_tier  = EXCLUDED.calcd_shipping_tier,
           calcd_weight_lb      = EXCLUDED.calcd_weight_lb,
           calcd_weight_oz      = EXCLUDED.calcd_weight_oz,
           calcd_length         = EXCLUDED.calcd_length,
