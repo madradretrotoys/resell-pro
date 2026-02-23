@@ -1791,16 +1791,28 @@ function setMarketplaceVisibility() {
           
     
 
-        const lb  = document.getElementById("weightLbInput") || findControlByLabel("Weight (lb)");
-        const oz  = document.getElementById("weightOzInput") || findControlByLabel("Weight (oz)");
-        const len = document.getElementById("lengthInput")   || findControlByLabel("Length");
-        const wid = document.getElementById("widthInput")    || findControlByLabel("Width");
-        const hei = document.getElementById("heightInput")   || findControlByLabel("Height");
-        if (lb)  lb.value  = listing.weight_lb ?? "";
-        if (oz)  oz.value  = listing.weight_oz ?? "";
-        if (len) len.value = listing.shipbx_length ?? "";
-        if (wid) wid.value = listing.shipbx_width ?? "";
-        if (hei) hei.value = listing.shipbx_height ?? "";
+        const ilb  = document.getElementById("iWeightLbInput") || findControlByLabel("Item Weight (lb)");
+        const ioz  = document.getElementById("iweightOzInput") || findControlByLabel("Item Weight (oz)");
+        const ilen = document.getElementById("ilengthInput")   || findControlByLabel("Item Length");
+        const iwid = document.getElementById("iwidthInput")    || findControlByLabel("Item Width");
+        const ihei = document.getElementById("iheightInput")   || findControlByLabel("Item Height");
+        if (ilb)  ilb.value  = listing.weight_lb ?? "";
+        if (ioz)  ioz.value  = listing.weight_oz ?? "";
+        if (ilen) ilen.value = listing.shipbx_length ?? "";
+        if (iwid) iwid.value = listing.shipbx_width ?? "";
+        if (ihei) ihei.value = listing.shipbx_height ?? "";
+
+
+        const lb  = document.getElementById("weightLbInput") || findControlByLabel("Calculated Weight (lb)");
+        const oz  = document.getElementById("weightOzInput") || findControlByLabel("Calculated Weight (oz)");
+        const len = document.getElementById("lengthInput")   || findControlByLabel("Calculated Length");
+        const wid = document.getElementById("widthInput")    || findControlByLabel("Calculated Width");
+        const hei = document.getElementById("heightInput")   || findControlByLabel("Calculated Height");
+        if (lb)  lb.value  = listing.calcd_weight_lb ?? "";
+        if (oz)  oz.value  = listing.calcd_weight_oz ?? "";
+        if (len) len.value = listing.calcd_length ?? "";
+        if (wid) wid.value = listing.calcd_width ?? "";
+        if (hei) hei.value = listing.calcd_height ?? "";
       }
     
       // Recompute validity / show or hide marketplace fields as needed
