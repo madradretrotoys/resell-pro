@@ -4017,33 +4017,64 @@ function updateRequiredLabelColors() {
                 inventory.cost_of_goods) ||
               null,
         
-            // Weight + dimensions from listing profile
+                        // Weight + dimensions from listing profile
+            // IMPORTANT:
+            // - Prefer CALCULATED package fields (calcd_*) for marketplace shipping payloads
+            // - Fall back to legacy/user-entered item fields (weight_*, shipbx_*) only if calcd_* is missing
             weightLb:
+              (listingProfile &&
+                typeof listingProfile.calcd_weight_lb !== "undefined" &&
+                listingProfile.calcd_weight_lb !== null &&
+                listingProfile.calcd_weight_lb !== "" &&
+                listingProfile.calcd_weight_lb) ||
               (listingProfile &&
                 typeof listingProfile.weight_lb !== "undefined" &&
                 listingProfile.weight_lb) ||
               null,
+
             weightOz:
+              (listingProfile &&
+                typeof listingProfile.calcd_weight_oz !== "undefined" &&
+                listingProfile.calcd_weight_oz !== null &&
+                listingProfile.calcd_weight_oz !== "" &&
+                listingProfile.calcd_weight_oz) ||
               (listingProfile &&
                 typeof listingProfile.weight_oz !== "undefined" &&
                 listingProfile.weight_oz) ||
               null,
+
             length:
+              (listingProfile &&
+                typeof listingProfile.calcd_length !== "undefined" &&
+                listingProfile.calcd_length !== null &&
+                listingProfile.calcd_length !== "" &&
+                listingProfile.calcd_length) ||
               (listingProfile &&
                 typeof listingProfile.shipbx_length !== "undefined" &&
                 listingProfile.shipbx_length) ||
               null,
+
             width:
+              (listingProfile &&
+                typeof listingProfile.calcd_width !== "undefined" &&
+                listingProfile.calcd_width !== null &&
+                listingProfile.calcd_width !== "" &&
+                listingProfile.calcd_width) ||
               (listingProfile &&
                 typeof listingProfile.shipbx_width !== "undefined" &&
                 listingProfile.shipbx_width) ||
               null,
+
             height:
+              (listingProfile &&
+                typeof listingProfile.calcd_height !== "undefined" &&
+                listingProfile.calcd_height !== null &&
+                listingProfile.calcd_height !== "" &&
+                listingProfile.calcd_height) ||
               (listingProfile &&
                 typeof listingProfile.shipbx_height !== "undefined" &&
                 listingProfile.shipbx_height) ||
               null,
-          };
         
           console.log("[vendoo] rpBuildVendooPayload: flattened fields for Vendoo script", flattened);
         
