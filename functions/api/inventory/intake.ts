@@ -365,12 +365,12 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
         const { lb: outLb, oz: outOz } = _splitOzToLbOz(finalBillableOz);
     
         // Persist into lst.calcd_* fields (these are the NEW columns in item_listing_profile)
-        // NOTE: calcd_shipping_tier is BIGINT in schema; we store tier.sort_order for now.
-        lst.calcd_shipping_tier = chosen ? (Number(chosen?.sort_order) || 0) : null;
+        // calcd_shipping_tier is a UUID FK to app.shipping_tiers.tier_key
+        lst.calcd_shipping_tier = chosen ? String(chosen?.tier_key || "") || null : null;
         lst.calcd_weight_lb     = outLb;
         lst.calcd_weight_oz     = outOz;
         lst.calcd_length        = length;
-    
+
         // Schema currently has calcd_width/calcd_height as TEXT, so keep them as strings.
         lst.calcd_width         = String(width);
         lst.calcd_height        = String(height);
@@ -1699,44 +1699,60 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
               product_short_title: inv?.product_short_title ?? null
             });
             
-            // Upsert listing profile for this item_id
-            await sql/*sql*/`
-              INSERT INTO app.item_listing_profile
-                ( item_id, tenant_id,
-                  listing_category_key, condition_key, brand_key, color_key, shipping_box_key,
-                  listing_category,       item_condition,  brand_name,  primary_color,  shipping_box,
-                  product_description, weight_lb, weight_oz, shipbx_length, shipbx_width, shipbx_height )
-              VALUES
-                ( ${item_id}, ${tenant_id},
-                  ${lst.listing_category_key}, ${lst.condition_key}, ${lst.brand_key}, ${lst.color_key}, ${lst.shipping_box_key},
-                  (SELECT display_name    FROM app.marketplace_categories  WHERE category_key  = ${lst.listing_category_key}),
-                  (SELECT condition_name  FROM app.marketplace_conditions  WHERE condition_key = ${lst.condition_key}),
-                  (SELECT brand_name      FROM app.marketplace_brands      WHERE brand_key     = ${lst.brand_key}),
-                  (SELECT color_name      FROM app.marketplace_colors      WHERE color_key     = ${lst.color_key}),
-                  (SELECT box_name        FROM app.shipping_boxes          WHERE box_key       = ${lst.shipping_box_key}),
-                  ${descActive}, ${lst.weight_lb}, ${lst.weight_oz},
-                  ${lst.shipbx_length}, ${lst.shipbx_width}, ${lst.shipbx_height}
-                )
-            
-              ON CONFLICT (item_id) DO UPDATE SET
-                -- keys
-                listing_category_key = EXCLUDED.listing_category_key,
-                condition_key        = EXCLUDED.condition_key,
-                brand_key            = EXCLUDED.brand_key,
-                color_key            = EXCLUDED.color_key,
-                shipping_box_key     = EXCLUDED.shipping_box_key,
-                listing_category = EXCLUDED.listing_category,
-                item_condition   = EXCLUDED.item_condition,
-                brand_name       = EXCLUDED.brand_name,
-                primary_color    = EXCLUDED.primary_color,
-                product_description = EXCLUDED.product_description,
-                shipping_box     = EXCLUDED.shipping_box,
-                weight_lb        = EXCLUDED.weight_lb,
-                weight_oz        = EXCLUDED.weight_oz,
-                shipbx_length    = EXCLUDED.shipbx_length,
-                shipbx_width     = EXCLUDED.shipbx_width,
-                shipbx_height    = EXCLUDED.shipbx_height
-            `;
+            // NEW: compute conservative calculated shipping fields server-side (ACTIVE UPDATE too)
+              await applySafeShippingCalc(sql, lst);
+
+              // Upsert listing profile for this item_id
+              await sql/*sql*/`
+                INSERT INTO app.item_listing_profile
+                  ( item_id, tenant_id,
+                    listing_category_key, condition_key, brand_key, color_key, shipping_box_key,
+                    listing_category,       item_condition,  brand_name,  primary_color,  shipping_box,
+                    product_description, weight_lb, weight_oz, shipbx_length, shipbx_width, shipbx_height,
+                    calcd_shipping_tier, calcd_weight_lb, calcd_weight_oz, calcd_length, calcd_width, calcd_height
+                  )
+                VALUES
+                  ( ${item_id}, ${tenant_id},
+                    ${lst.listing_category_key}, ${lst.condition_key}, ${lst.brand_key}, ${lst.color_key}, ${lst.shipping_box_key},
+                    (SELECT display_name    FROM app.marketplace_categories  WHERE category_key  = ${lst.listing_category_key}),
+                    (SELECT condition_name  FROM app.marketplace_conditions  WHERE condition_key = ${lst.condition_key}),
+                    (SELECT brand_name      FROM app.marketplace_brands      WHERE brand_key     = ${lst.brand_key}),
+                    (SELECT color_name      FROM app.marketplace_colors      WHERE color_key     = ${lst.color_key}),
+                    (SELECT box_name        FROM app.shipping_boxes          WHERE box_key       = ${lst.shipping_box_key}),
+                    ${descActive}, ${lst.weight_lb}, ${lst.weight_oz},
+                    ${lst.shipbx_length}, ${lst.shipbx_width}, ${lst.shipbx_height},
+                    ${lst.calcd_shipping_tier}, ${lst.calcd_weight_lb}, ${lst.calcd_weight_oz},
+                    ${lst.calcd_length}, ${lst.calcd_width}, ${lst.calcd_height}
+                  )
+
+                ON CONFLICT (item_id) DO UPDATE SET
+                  -- keys
+                  listing_category_key = EXCLUDED.listing_category_key,
+                  condition_key        = EXCLUDED.condition_key,
+                  brand_key            = EXCLUDED.brand_key,
+                  color_key            = EXCLUDED.color_key,
+                  shipping_box_key     = EXCLUDED.shipping_box_key,
+
+                  listing_category = EXCLUDED.listing_category,
+                  item_condition   = EXCLUDED.item_condition,
+                  brand_name       = EXCLUDED.brand_name,
+                  primary_color    = EXCLUDED.primary_color,
+                  product_description = EXCLUDED.product_description,
+                  shipping_box     = EXCLUDED.shipping_box,
+
+                  weight_lb        = EXCLUDED.weight_lb,
+                  weight_oz        = EXCLUDED.weight_oz,
+                  shipbx_length    = EXCLUDED.shipbx_length,
+                  shipbx_width     = EXCLUDED.shipbx_width,
+                  shipbx_height    = EXCLUDED.shipbx_height,
+
+                  calcd_shipping_tier = EXCLUDED.calcd_shipping_tier,
+                  calcd_weight_lb     = EXCLUDED.calcd_weight_lb,
+                  calcd_weight_oz     = EXCLUDED.calcd_weight_oz,
+                  calcd_length        = EXCLUDED.calcd_length,
+                  calcd_width         = EXCLUDED.calcd_width,
+                  calcd_height        = EXCLUDED.calcd_height
+              `;
 
               
             
