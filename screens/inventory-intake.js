@@ -5098,7 +5098,7 @@ document.addEventListener("intake:item-changed", () => refreshInventory({ force:
         brand_key: valByIdOrLabel("brandSelect", "Brand"),
         color_key: valByIdOrLabel("colorSelect", "Primary Color"),
         product_description: valByIdOrLabel(null, "Long Description"),
-                shipping_box_key: valByIdOrLabel("shippingBoxSelect", "Shipping Box"),
+        shipping_box_key: valByIdOrLabel("shippingBoxSelect", "Shipping Box"),
 
         // Shipping Input (user-entered ITEM ACTUALS)
         weight_lb: (() => {
@@ -5144,6 +5144,7 @@ document.addEventListener("intake:item-changed", () => refreshInventory({ force:
           const v = valByIdOrLabel("heightInput", "Calculated Height");
           return v !== "" ? Number(v) : undefined;
         })(),
+      };
     
       // eBay marketplace listing fields (maps to app.item_marketplace_listing)
       const ebayListing = getEbayListingFields();
