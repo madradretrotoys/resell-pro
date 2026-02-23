@@ -5098,28 +5098,52 @@ document.addEventListener("intake:item-changed", () => refreshInventory({ force:
         brand_key: valByIdOrLabel("brandSelect", "Brand"),
         color_key: valByIdOrLabel("colorSelect", "Primary Color"),
         product_description: valByIdOrLabel(null, "Long Description"),
-        shipping_box_key: valByIdOrLabel("shippingBoxSelect", "Shipping Box"),
+                shipping_box_key: valByIdOrLabel("shippingBoxSelect", "Shipping Box"),
+
+        // Shipping Input (user-entered ITEM ACTUALS)
         weight_lb: (() => {
-          const v = valByIdOrLabel("shipWeightLb", "Weight (lb)");
+          const v = valByIdOrLabel("iWeightLbInput", "Item Weight (lb)");
           return v !== "" ? Number(v) : undefined;
         })(),
         weight_oz: (() => {
-          const v = valByIdOrLabel("shipWeightOz", "Weight (oz)");
+          const v = valByIdOrLabel("iWeightOzInput", "Item Weight (oz)");
           return v !== "" ? Number(v) : undefined;
         })(),
         shipbx_length: (() => {
-          const v = valByIdOrLabel("shipLength", "Length");
+          const v = valByIdOrLabel("iLengthInput", "Item Length");
           return v !== "" ? Number(v) : undefined;
         })(),
         shipbx_width: (() => {
-          const v = valByIdOrLabel("shipWidth", "Width");
+          const v = valByIdOrLabel("iWidthInput", "Item Width");
           return v !== "" ? Number(v) : undefined;
         })(),
         shipbx_height: (() => {
-          const v = valByIdOrLabel("shipHeight", "Height");
+          const v = valByIdOrLabel("iHeightInput", "Item Height");
           return v !== "" ? Number(v) : undefined;
         })(),
-      };
+
+        // Shipping Package Estimate (calculated package outputs)
+        // NOTE: you already removed calcd_shipping_tier from the save — keep it ignored for now.
+        calcd_weight_lb: (() => {
+          const v = valByIdOrLabel("weightLbInput", "Calculated Weight (lb)");
+          return v !== "" ? Number(v) : undefined;
+        })(),
+        calcd_weight_oz: (() => {
+          const v = valByIdOrLabel("weightOzInput", "Calculated Weight (oz)");
+          return v !== "" ? Number(v) : undefined;
+        })(),
+        calcd_length: (() => {
+          const v = valByIdOrLabel("lengthInput", "Calculated Length");
+          return v !== "" ? Number(v) : undefined;
+        })(),
+        calcd_width: (() => {
+          const v = valByIdOrLabel("widthInput", "Calculated Width");
+          return v !== "" ? Number(v) : undefined;
+        })(),
+        calcd_height: (() => {
+          const v = valByIdOrLabel("heightInput", "Calculated Height");
+          return v !== "" ? Number(v) : undefined;
+        })(),
     
       // eBay marketplace listing fields (maps to app.item_marketplace_listing)
       const ebayListing = getEbayListingFields();
