@@ -1,5 +1,6 @@
 import { neon } from '@neondatabase/serverless';
 import { calcTotalHours, dayBounds, json, makeEntryId, requireTimesheetActor } from './_helpers';
+import { dayBounds, json, makeEntryId, requireTimesheetActor } from './_helpers';
 
 export const onRequestPost: PagesFunction = async ({ request, env }) => {
   try {
@@ -38,6 +39,9 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
           entry_id, user_name, login_id, clock_in, status, total_hours, updated_at, notes
         ) VALUES (
           ${entry_id}, ${actor.name}, ${actor.login_id}, ${nowIso}, ${'open'}, ${null}, ${nowIso}, ${null}
+          entry_id, user_name, login_id, clock_in, status, updated_at, notes
+        ) VALUES (
+          ${entry_id}, ${actor.name}, ${actor.login_id}, ${nowIso}, ${'open'}, ${nowIso}, ${null}
         )
       `;
     } else if (action === 'lunch_out') {
@@ -45,6 +49,7 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
       await sql/*sql*/`
         UPDATE app.time_entries
         SET lunch_out = ${nowIso}, status = ${'open'}, total_hours = ${null}, updated_at = ${nowIso}
+        SET lunch_out = ${nowIso}, status = ${'open'}, updated_at = ${nowIso}
         WHERE entry_id = ${existing.entry_id}
       `;
     } else if (action === 'lunch_in') {
@@ -53,6 +58,7 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
       await sql/*sql*/`
         UPDATE app.time_entries
         SET lunch_in = ${nowIso}, status = ${'open'}, total_hours = ${null}, updated_at = ${nowIso}
+        SET lunch_in = ${nowIso}, status = ${'open'}, updated_at = ${nowIso}
         WHERE entry_id = ${existing.entry_id}
       `;
     } else if (action === 'clock_out') {
@@ -61,6 +67,9 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
       await sql/*sql*/`
         UPDATE app.time_entries
         SET clock_out = ${nowIso}, status = ${'complete'}, total_hours = ${totalHours}, updated_at = ${nowIso}
+      await sql/*sql*/`
+        UPDATE app.time_entries
+        SET clock_out = ${nowIso}, status = ${'complete'}, updated_at = ${nowIso}
         WHERE entry_id = ${existing.entry_id}
       `;
     }

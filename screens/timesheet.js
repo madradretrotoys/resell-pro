@@ -105,6 +105,65 @@ async function punch(action) {
     log(`punch failed (${action}): ${e?.data?.error || e?.message || e}`);
   } finally {
     setBusy(false);
+
+    renderToday();
+    renderMyTable();
+
+    if (state.canEdit) {
+      els.adminCard.style.display = '';
+      await loadAdmin();
+    } else {
+      els.adminCard.style.display = 'none';
+    }
+  } catch (e) {
+    showToast('Unable to load timesheet.');
+    log(`loadMe failed: ${e?.data?.error || e?.message || e}`);
+  } finally {
+    setBusy(false);
+  }
+}
+
+async function punch(action) {
+  setBusy(true);
+  try {
+    const res = await api('/api/timesheet/punch', {
+      method: 'POST',
+      body: { action },
+    });
+    state.todayEntry = res.entry || null;
+    await loadMe();
+    showToast('Time updated.');
+  } catch (e) {
+    showToast(e?.data?.error ? `Unable: ${e.data.error}` : 'Unable to save time entry.');
+    log(`punch failed (${action}): ${e?.data?.error || e?.message || e}`);
+  } finally {
+    setBusy(false);
+  }
+}
+
+function renderToday() {
+  const e = state.todayEntry;
+  const status = e?.status || 'Not started';
+  els.todayStatus.textContent = status;
+
+  els.todayTimes.textContent = [
+    `Clock In: ${fmt(e?.clock_in)}`,
+    `Lunch Out: ${fmt(e?.lunch_out)}`,
+    `Lunch In: ${fmt(e?.lunch_in)}`,
+    `Clock Out: ${fmt(e?.clock_out)}`,
+  ].join(' • ');
+
+  els.btnClockIn.disabled = !!e?.clock_in;
+  els.btnLunchOut.disabled = !e?.clock_in || !!e?.lunch_out;
+  els.btnLunchIn.disabled = !e?.lunch_out || !!e?.lunch_in;
+  els.btnClockOut.disabled = !e?.clock_in || !!e?.clock_out;
+}
+
+function renderMyTable() {
+  const rows = state.periodEntries || [];
+  if (!rows.length) {
+    els.myTable.innerHTML = '<tbody><tr><td class="muted">No entries yet.</td></tr></tbody>';
+    return;
   }
 }
 
@@ -138,6 +197,10 @@ function renderMyTable() {
     <thead>
       <tr>
         <th>Date</th><th>Clock In</th><th>Lunch Out</th><th>Lunch In</th><th>Clock Out</th><th>Total Hours</th><th>Status</th>
+  els.myTable.innerHTML = `
+    <thead>
+      <tr>
+        <th>Date</th><th>Clock In</th><th>Lunch Out</th><th>Lunch In</th><th>Clock Out</th><th>Status</th>
       </tr>
     </thead>
     <tbody>
@@ -228,6 +291,7 @@ function renderAdminTable(entries) {
     <thead>
       <tr>
         <th>User</th><th>Login</th><th>Clock In</th><th>Lunch Out</th><th>Lunch In</th><th>Clock Out</th><th>Total Hours</th><th>Status</th><th>Action</th>
+        <th>User</th><th>Login</th><th>Clock In</th><th>Lunch Out</th><th>Lunch In</th><th>Clock Out</th><th>Status</th><th>Action</th>
       </tr>
     </thead>
     <tbody>

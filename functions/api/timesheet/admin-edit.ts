@@ -1,5 +1,6 @@
 import { neon } from '@neondatabase/serverless';
 import { calcTotalHours, json, requireTimesheetActor, toIsoOrNull } from './_helpers';
+import { json, requireTimesheetActor, toIsoOrNull } from './_helpers';
 
 export const onRequestPost: PagesFunction = async ({ request, env }) => {
   try {
@@ -40,6 +41,10 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
         lunch_in = ${lunchIn},
         clock_out = ${clockOut},
         total_hours = ${totalHours},
+        clock_in = ${toIsoOrNull(body?.clock_in)},
+        lunch_out = ${toIsoOrNull(body?.lunch_out)},
+        lunch_in = ${toIsoOrNull(body?.lunch_in)},
+        clock_out = ${toIsoOrNull(body?.clock_out)},
         notes = ${body?.notes == null ? null : String(body.notes)},
         status = ${body?.status == null ? null : String(body.status)},
         edited_by = ${actor.login_id},
