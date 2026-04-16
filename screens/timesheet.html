@@ -1,6 +1,7 @@
 <section class="rp-screen rp-timesheet">
   <style>
     .rp-timesheet{max-width:1100px}
+    .card{border:1px solid #e5e7eb;border-radius:10px;padding:12px;margin:10px 0;background:#fff;overflow:hidden}
     .card{border:1px solid #e5e7eb;border-radius:10px;padding:12px;margin:10px 0;background:#fff}
     .row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
     .btn{padding:9px 13px;border-radius:8px;border:1px solid #d1d5db;background:#fff;cursor:pointer;font-weight:600}
@@ -14,11 +15,17 @@
     table{width:100%;border-collapse:collapse}
     th,td{border:1px solid #e5e7eb;padding:8px;text-align:left}
     th{background:#f9fafb}
+    input,select{padding:8px;border:1px solid #d1d5db;border-radius:8px;max-width:100%}
     input,select{padding:8px;border:1px solid #d1d5db;border-radius:8px}
     .busy{display:none;position:fixed;inset:0;background:rgba(255,255,255,.7);z-index:9999;align-items:center;justify-content:center}
     .busy.show{display:flex}
     .busy span{padding:10px 14px;background:#fff;border:1px solid #e5e7eb;border-radius:10px}
     .log{font-size:12px;white-space:pre-wrap;background:#f9fafb;border:1px solid #e5e7eb;border-radius:8px;padding:10px}
+    .table-wrap{width:100%;overflow-x:auto;overflow-y:hidden;-webkit-overflow-scrolling:touch;margin-top:8px}
+    .table-wrap table{min-width:980px}
+    #myTable{min-width:unset}
+    #adminTable input[type="datetime-local"]{min-width:170px;width:100%}
+    #adminTable select{min-width:110px}
   </style>
 
   <div id="busy" class="busy"><span>Working…</span></div>
@@ -42,6 +49,7 @@
 
   <div class="card">
     <strong>My Recent Entries</strong>
+    <div class="table-wrap"><table id="myTable"></table></div>
     <table id="myTable" style="margin-top:8px"></table>
   </div>
 
@@ -53,6 +61,7 @@
         <button id="btnAdminLoad" class="btn">Load</button>
       </div>
     </div>
+    <div class="table-wrap"><table id="adminTable"></table></div>
     <table id="adminTable" style="margin-top:8px"></table>
   </div>
 
