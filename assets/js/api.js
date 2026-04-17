@@ -25,6 +25,7 @@ export async function api(path, opts = {}) {
 
   // Attach tenant explicitly from session
   if (ACTIVE_TENANT_ID) headers.set("x-tenant-id", ACTIVE_TENANT_ID);
+  headers.set("x-tz-offset-minutes", String(new Date().getTimezoneOffset()));
 
   // Pass FormData through; JSON-stringify plain objects; otherwise use as-is
   const requestBody = isForm

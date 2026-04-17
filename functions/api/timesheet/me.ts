@@ -1,5 +1,5 @@
 import { neon } from '@neondatabase/serverless';
-import { dayBounds, json, requireTimesheetActor } from './_helpers';
+import { json, localDayBounds, requireTimesheetActor, tzOffsetMinutesFromRequest } from './_helpers';
 
 export const onRequestGet: PagesFunction = async ({ request, env }) => {
   try {
@@ -9,7 +9,8 @@ export const onRequestGet: PagesFunction = async ({ request, env }) => {
 
     const { actor, } = auth;
     const url = new URL(request.url);
-    const today = dayBounds();
+    const tzOffsetMinutes = tzOffsetMinutesFromRequest(request);
+    const today = localDayBounds(tzOffsetMinutes);
 
     const todayRows = await sql/*sql*/`
       SELECT *
@@ -41,8 +42,8 @@ export const onRequestGet: PagesFunction = async ({ request, env }) => {
     let range_entries: any[] = [];
     let range_total_hours = 0;
     if (/^\d{4}-\d{2}-\d{2}$/.test(from) && /^\d{4}-\d{2}-\d{2}$/.test(to) && from <= to) {
-      const fromBounds = dayBounds(from);
-      const toBounds = dayBounds(to);
+      const fromBounds = localDayBounds(tzOffsetMinutes, from);
+      const toBounds = localDayBounds(tzOffsetMinutes, to);
       const rangeRows = await sql/*sql*/`
         SELECT *
         FROM app.time_entries

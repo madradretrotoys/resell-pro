@@ -1,5 +1,5 @@
 import { neon } from '@neondatabase/serverless';
-import { dayBounds, json, requireTimesheetActor } from './_helpers';
+import { json, localDayBounds, requireTimesheetActor, tzOffsetMinutesFromRequest } from './_helpers';
 
 export const onRequestGet: PagesFunction = async ({ request, env }) => {
   try {
@@ -12,7 +12,8 @@ export const onRequestGet: PagesFunction = async ({ request, env }) => {
 
     const url = new URL(request.url);
     const date = url.searchParams.get('date') || undefined;
-    const bounds = dayBounds(date);
+    const tzOffsetMinutes = tzOffsetMinutesFromRequest(request);
+    const bounds = localDayBounds(tzOffsetMinutes, date);
 
     const rows = await sql/*sql*/`
       SELECT te.*
