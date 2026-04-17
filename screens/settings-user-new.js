@@ -4,43 +4,90 @@ import { ensureSession } from '/assets/js/auth.js';
 export default { load };
 const $ = (id) => document.getElementById(id);
 
-let permissionColumns = [];
+const FALLBACK_PERMISSION_COLUMNS = [
+  'can_pos',
+  'can_cash_drawer',
+  'can_cash_payouts',
+  'can_item_research',
+  'can_inventory',
+  'can_inventory_intake',
+  'can_drop_off_form',
+  'can_estimates_buy_tickets',
+  'can_timekeeping',
+  'can_settings',
+  'notify_cash_drawer',
+  'notify_daily_sales_summary',
+  'can_cash_edit',
+  'can_edit_timesheet',
+  'clockin_required'
+];
+
+let permissionColumns = FALLBACK_PERMISSION_COLUMNS.slice();
 let loginIdTouched = false;
 
 async function load(){
-  const session = await ensureSession();
-  if (!session?.permissions?.can_settings) {
-    document.body.innerHTML = '<section class="tile"><strong>Access denied.</strong></section>';
-    return;
+  let session = null;
+  try {
+    session = await ensureSession();
+    if (!session?.permissions?.can_settings) {
+      document.body.innerHTML = '<section class="tile"><strong>Access denied.</strong></section>';
+      return;
+    }
+  } catch {
+    // Do not hard-fail rendering helpers if session bootstrap has a transient issue.
   }
 
-  const actor = (session.membership_role || 'clerk').toLowerCase();
+  const actor = (session?.membership_role || 'clerk').toLowerCase();
   const allowed =
     actor === 'owner'  ? ['owner','admin','manager','clerk'] :
     actor === 'admin'  ? ['manager','clerk'] :
-    actor === 'manager'? ['clerk'] : [];
+    actor === 'manager'? ['clerk'] : ['clerk'];
   [...$('role').options].forEach((opt) => { opt.disabled = !allowed.includes(opt.value); });
   if (allowed.length) $('role').value = allowed[0];
 
   $('userForm').onsubmit = (e) => e.preventDefault();
   $('login_id').addEventListener('input', () => { loginIdTouched = true; });
 
+  $('middle_initial').addEventListener('input', () => {
+    $('middle_initial').value = $('middle_initial').value.slice(0, 1).toUpperCase();
+  });
+
   ['first_name', 'middle_initial', 'last_name'].forEach((id) => {
     $(id).addEventListener('input', async () => {
       updateTempPassword();
-      if (!loginIdTouched) await recommendLoginId();
+      if (!loginIdTouched) {
+        const suggestion = await getSuggestedLoginId();
+        if (suggestion) {
+          $('login_id').value = suggestion;
+          loginIdTouched = false;
+        }
+      }
     });
   });
 
   $('recommend_login').onclick = async () => {
-    await recommendLoginId(true);
+    const suggestion = await getSuggestedLoginId();
+    if (!suggestion) {
+      alert('Enter first and last name first.');
+      return;
+    }
+    $('login_id').value = suggestion;
+    loginIdTouched = false;
   };
 
-  const meta = await api('/api/settings/users/meta');
-  permissionColumns = (meta.permission_columns || []).slice();
   renderPermissionGrid(permissionColumns);
-
   updateTempPassword();
+
+  try {
+    const meta = await api('/api/settings/users/meta');
+    const fetchedCols = (meta?.permission_columns || []).filter(Boolean);
+    if (fetchedCols.length) {
+      permissionColumns = fetchedCols;
+      renderPermissionGrid(permissionColumns);
+    }
+  } catch {
+    // Keep fallback columns when metadata endpoint is unavailable.
+  }
 
   $('save').onclick = async () => {
     const payload = collect();
@@ -69,6 +116,7 @@ function toLabel(name) {
 function renderPermissionGrid(columns){
   const grid = $('permissionGrid');
   grid.innerHTML = '';
+
   columns.forEach((col) => {
     const label = document.createElement('label');
     label.innerHTML = `<input type="checkbox" data-permission="${col}"> ${toLabel(col)}`;
@@ -82,28 +130,42 @@ function renderPermissionGrid(columns){
   });
 }
 
-async function recommendLoginId(force = false) {
+function sanitizeLoginPart(value) {
+  return String(value || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+}
+
+function localSuggestion() {
+  const first = sanitizeLoginPart($('first_name').value).charAt(0);
+  const middle = sanitizeLoginPart($('middle_initial').value).charAt(0);
+  const last = sanitizeLoginPart($('last_name').value);
+  if (!first || !last) return '';
+
+  const base = `${first}${middle}${last}`.replace(/[^a-z0-9]/g, '') || `${first}${last}`;
+  const oneDigit = Math.floor(Math.random() * 9) + 1;
+  return `${base}${oneDigit}`;
+}
+
+async function getSuggestedLoginId() {
   const first = $('first_name').value.trim();
   const middle = $('middle_initial').value.trim();
   const last = $('last_name').value.trim();
-  if (!first || !last) return;
+  if (!first || !last) return '';
 
-  const query = new URLSearchParams({ first_name: first, middle_initial: middle, last_name: last });
-  const data = await api(`/api/settings/users/meta?${query.toString()}`);
-  const suggested = (data?.suggested_login_id || '').trim();
+  const local = localSuggestion();
 
-  if (!suggested) return;
-  if (force || !$('login_id').value.trim() || !loginIdTouched) {
-    $('login_id').value = suggested;
-    loginIdTouched = false;
+  try {
+    const query = new URLSearchParams({ first_name: first, middle_initial: middle, last_name: last });
+    const data = await api(`/api/settings/users/meta?${query.toString()}`);
+    return (data?.suggested_login_id || local || '').trim();
+  } catch {
+    return local;
   }
 }
 
 function updateTempPassword() {
-  const first = $('first_name').value.trim().toLowerCase().replace(/[^a-z0-9]/g, '');
-  const last = $('last_name').value.trim().toLowerCase().replace(/[^a-z0-9]/g, '');
-  const val = `${(first.charAt(0) || 'u')}${last || 'ser'}001`;
-  $('temp_password').value = val;
+  const first = sanitizeLoginPart($('first_name').value);
+  const last = sanitizeLoginPart($('last_name').value);
+  $('temp_password').value = `${(first.charAt(0) || 'u')}${last || 'ser'}001`;
 }
 
 function collect(){
