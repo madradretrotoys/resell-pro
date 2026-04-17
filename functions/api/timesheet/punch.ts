@@ -1,5 +1,5 @@
 import { neon } from '@neondatabase/serverless';
-import { computeTotalHours, dayBounds, json, makeEntryId, requireTimesheetActor } from './_helpers';
+import { computeTotalHours, json, localDayBounds, makeEntryId, requireTimesheetActor, tzOffsetMinutesFromRequest } from './_helpers';
 
 export const onRequestPost: PagesFunction = async ({ request, env }) => {
   try {
@@ -15,7 +15,8 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
     }
 
     const nowIso = new Date().toISOString();
-    const today = dayBounds();
+    const tzOffsetMinutes = tzOffsetMinutesFromRequest(request);
+    const today = localDayBounds(tzOffsetMinutes);
 
     const existingRows = await sql/*sql*/`
       SELECT *

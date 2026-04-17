@@ -115,6 +115,43 @@ export function dayBounds(dateStr?: string) {
   };
 }
 
+export function tzOffsetMinutesFromRequest(request: Request): number {
+  const raw = request.headers.get('x-tz-offset-minutes');
+  const n = Number(raw);
+  if (!Number.isFinite(n)) return 0;
+  const rounded = Math.trunc(n);
+  if (rounded < -840 || rounded > 840) return 0;
+  return rounded;
+}
+
+export function localDayBounds(tzOffsetMinutes: number, dateStr?: string) {
+  const offsetMs = tzOffsetMinutes * 60_000;
+  let y: number;
+  let m: number;
+  let d: number;
+
+  if (dateStr && /^\d{4}-\d{2}-\d{2}$/.test(dateStr)) {
+    const [yy, mm, dd] = dateStr.split('-').map((v) => Number(v));
+    y = yy;
+    m = mm;
+    d = dd;
+  } else {
+    const localNow = new Date(Date.now() - offsetMs);
+    y = localNow.getUTCFullYear();
+    m = localNow.getUTCMonth() + 1;
+    d = localNow.getUTCDate();
+  }
+
+  const base = `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+  const startUtc = Date.UTC(y, m - 1, d, 0, 0, 0, 0) + offsetMs;
+  const endUtc = Date.UTC(y, m - 1, d, 23, 59, 59, 999) + offsetMs;
+  return {
+    date: base,
+    startIso: new Date(startUtc).toISOString(),
+    endIso: new Date(endUtc).toISOString(),
+  };
+}
+
 export function makeEntryId() {
   return `te_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
 }
