@@ -73,7 +73,11 @@ async function loadTeamStatus() {
 }
 
 async function onClockIn() {
-  if (state.todayEntry?.clock_in) return;
+  const status = deriveStatus(state.todayEntry);
+  if (status.key === 'clocked_in' || status.key === 'back_from_lunch') {
+    showToast('You are already clocked in.');
+    return;
+  }
   try {
     const res = await api('/api/timesheet/punch', {
       method: 'POST',
@@ -91,7 +95,7 @@ async function onClockIn() {
 function renderMyStatus() {
   const entry = state.todayEntry;
   const status = deriveStatus(entry);
-  const needsPrompt = !!state.actor?.clockin_required && !entry?.clock_in;
+  const needsPrompt = !!state.actor?.clockin_required && ['not_clocked_in', 'clocked_out', 'lunch_out'].includes(status.key);
 
   if (els.myStatusLine) els.myStatusLine.textContent = `Current status: ${status.label}`;
   if (els.dashIntro) {
@@ -101,7 +105,10 @@ function renderMyStatus() {
   }
 
   if (els.myPrompt) els.myPrompt.style.display = needsPrompt ? '' : 'none';
-  if (els.btnDashboardClockIn) els.btnDashboardClockIn.disabled = !!entry?.clock_in;
+  if (els.btnDashboardClockIn) {
+    const canQuickClockIn = ['not_clocked_in', 'clocked_out', 'lunch_out'].includes(status.key);
+    els.btnDashboardClockIn.disabled = !canQuickClockIn;
+  }
 
   const lastClockOut = getLastClockOut();
   if (els.myLastClockOut) {

@@ -60,6 +60,7 @@ export async function requireTimesheetActor(request: Request, env: any, sql: Sql
   const rows = await sql<{
     role: string;
     active: boolean;
+    user_is_active: boolean;
     can_timekeeping: boolean;
     can_edit_timesheet: boolean;
     clockin_required: boolean;
@@ -69,6 +70,7 @@ export async function requireTimesheetActor(request: Request, env: any, sql: Sql
     SELECT
       m.role,
       m.active,
+      COALESCE(u.is_active, false) AS user_is_active,
       COALESCE(p.can_timekeeping, false) AS can_timekeeping,
       COALESCE(p.can_edit_timesheet, false) AS can_edit_timesheet,
       COALESCE(p.clockin_required, false) AS clockin_required,
@@ -81,7 +83,9 @@ export async function requireTimesheetActor(request: Request, env: any, sql: Sql
     LIMIT 1
   `;
 
-  if (!rows.length || rows[0].active === false) return { error: json({ ok: false, error: 'forbidden' }, 403) };
+  if (!rows.length || rows[0].active === false || rows[0].user_is_active === false) {
+    return { error: json({ ok: false, error: 'forbidden' }, 403) };
+  }
   if (!rows[0].can_timekeeping) return { error: json({ ok: false, error: 'timesheet_denied' }, 403) };
 
   return {

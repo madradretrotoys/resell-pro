@@ -18,8 +18,11 @@ export const onRequestGet: PagesFunction = async ({ request, env }) => {
         SELECT u.user_id, u.name, u.login_id
         FROM app.memberships m
         JOIN app.users u ON u.user_id = m.user_id
+        JOIN app.permissions p ON p.user_id = m.user_id
         WHERE m.tenant_id = ${actor.tenant_id}
           AND m.active = true
+          AND u.is_active IS TRUE
+          AND COALESCE(p.clockin_required, false) = true
       ),
       latest_today AS (
         SELECT DISTINCT ON (te.login_id)
