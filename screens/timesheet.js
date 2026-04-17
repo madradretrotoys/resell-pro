@@ -7,6 +7,8 @@ let state = {
   todayEntry: null,
   periodEntries: [],
   canEdit: false,
+  reportEntries: [],
+  reportTotalHours: 0,
 };
 
 export async function init({ container }) {
@@ -26,6 +28,11 @@ function bind(container) {
     btnLunchIn: container.querySelector('#btnLunchIn'),
     btnClockOut: container.querySelector('#btnClockOut'),
     myTable: container.querySelector('#myTable'),
+    reportFrom: container.querySelector('#reportFrom'),
+    reportTo: container.querySelector('#reportTo'),
+    btnReportLoad: container.querySelector('#btnReportLoad'),
+    reportTotal: container.querySelector('#reportTotal'),
+    reportTable: container.querySelector('#reportTable'),
     adminCard: container.querySelector('#adminCard'),
     adminDate: container.querySelector('#adminDate'),
     btnAdminLoad: container.querySelector('#btnAdminLoad'),
@@ -41,6 +48,7 @@ function wire() {
   els.btnLunchIn?.addEventListener('click', () => punch('lunch_in'));
   els.btnClockOut?.addEventListener('click', () => punch('clock_out'));
   els.btnAdminLoad?.addEventListener('click', loadAdmin);
+  els.btnReportLoad?.addEventListener('click', loadReport);
 }
 
 function setBanner() {
@@ -49,6 +57,12 @@ function setBanner() {
     els.today.textContent = `Today is ${now.toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })}.`;
   }
   if (els.adminDate) els.adminDate.value = isoDate(now);
+  if (els.reportTo) els.reportTo.value = isoDate(now);
+  if (els.reportFrom) {
+    const from = new Date(now);
+    from.setDate(from.getDate() - 13);
+    els.reportFrom.value = isoDate(from);
+  }
 }
 
 async function loadMe() {
@@ -62,6 +76,7 @@ async function loadMe() {
 
     renderToday();
     renderMyTable();
+    await loadReport();
 
     if (state.canEdit) {
       els.adminCard.style.display = '';
@@ -123,7 +138,7 @@ function renderMyTable() {
   els.myTable.innerHTML = `
     <thead>
       <tr>
-        <th>Date</th><th>Clock In</th><th>Lunch Out</th><th>Lunch In</th><th>Clock Out</th><th>Status</th>
+        <th>Date</th><th>Clock In</th><th>Lunch Out</th><th>Lunch In</th><th>Clock Out</th><th>Total Hours</th><th>Status</th>
       </tr>
     </thead>
     <tbody>
@@ -134,6 +149,63 @@ function renderMyTable() {
           <td>${fmt(r.lunch_out)}</td>
           <td>${fmt(r.lunch_in)}</td>
           <td>${fmt(r.clock_out)}</td>
+          <td>${fmtHours(r.total_hours)}</td>
+          <td>${escapeHtml(r.status || '')}</td>
+        </tr>
+      `).join('')}
+    </tbody>
+  `;
+}
+
+async function loadReport() {
+  const from = String(els.reportFrom?.value || '').trim();
+  const to = String(els.reportTo?.value || '').trim();
+  if (!from || !to || from > to) {
+    state.reportEntries = [];
+    state.reportTotalHours = 0;
+    renderReportTable();
+    return;
+  }
+
+  setBusy(true);
+  try {
+    const data = await api(`/api/timesheet/me?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`);
+    state.reportEntries = data?.range_entries || [];
+    state.reportTotalHours = Number(data?.range_total_hours || 0);
+    renderReportTable();
+  } catch (e) {
+    showToast('Unable to load time report.');
+    log(`loadReport failed: ${e?.data?.error || e?.message || e}`);
+  } finally {
+    setBusy(false);
+  }
+}
+
+function renderReportTable() {
+  if (els.reportTotal) {
+    els.reportTotal.textContent = `Grand Total (${els.reportFrom?.value || '—'} to ${els.reportTo?.value || '—'}): ${fmtHours(state.reportTotalHours)} hours`;
+  }
+  const rows = state.reportEntries || [];
+  if (!rows.length) {
+    els.reportTable.innerHTML = '<tbody><tr><td class="muted">No entries in selected date range.</td></tr></tbody>';
+    return;
+  }
+
+  els.reportTable.innerHTML = `
+    <thead>
+      <tr>
+        <th>Date</th><th>Clock In</th><th>Lunch Out</th><th>Lunch In</th><th>Clock Out</th><th>Total Hours</th><th>Status</th>
+      </tr>
+    </thead>
+    <tbody>
+      ${rows.map((r) => `
+        <tr>
+          <td>${fmtDate(r.clock_in)}</td>
+          <td>${fmt(r.clock_in)}</td>
+          <td>${fmt(r.lunch_out)}</td>
+          <td>${fmt(r.lunch_in)}</td>
+          <td>${fmt(r.clock_out)}</td>
+          <td>${fmtHours(r.total_hours)}</td>
           <td>${escapeHtml(r.status || '')}</td>
         </tr>
       `).join('')}
@@ -165,7 +237,7 @@ function renderAdminTable(entries) {
   els.adminTable.innerHTML = `
     <thead>
       <tr>
-        <th>User</th><th>Login</th><th>Clock In</th><th>Lunch Out</th><th>Lunch In</th><th>Clock Out</th><th>Status</th><th>Action</th>
+        <th>User</th><th>Login</th><th>Clock In</th><th>Lunch Out</th><th>Lunch In</th><th>Clock Out</th><th>Total Hours</th><th>Status</th><th>Action</th>
       </tr>
     </thead>
     <tbody>
@@ -177,6 +249,7 @@ function renderAdminTable(entries) {
           <td><input data-f="lunch_out" type="datetime-local" value="${dtLocal(e.lunch_out)}" /></td>
           <td><input data-f="lunch_in" type="datetime-local" value="${dtLocal(e.lunch_in)}" /></td>
           <td><input data-f="clock_out" type="datetime-local" value="${dtLocal(e.clock_out)}" /></td>
+          <td>${fmtHours(e.total_hours)}</td>
           <td>
             <select data-f="status">
               ${['open', 'complete', 'needsreview', ''].map((v) => `<option value="${v}" ${String(e.status || '') === v ? 'selected' : ''}>${v || '—'}</option>`).join('')}
@@ -223,6 +296,7 @@ async function saveAdminRow(entryId) {
 function setBusy(on) { els.busy?.classList.toggle('show', !!on); }
 function fmt(v) { return v ? new Date(v).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) : '—'; }
 function fmtDate(v) { return v ? new Date(v).toLocaleDateString() : '—'; }
+function fmtHours(v) { return v == null || v === '' ? '—' : Number(v).toFixed(2); }
 function isoDate(d) { return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; }
 function dtLocal(v) { if (!v) return ''; const d = new Date(v); d.setMinutes(d.getMinutes() - d.getTimezoneOffset()); return d.toISOString().slice(0, 16); }
 function fromLocal(v) { return v ? new Date(v).toISOString() : null; }

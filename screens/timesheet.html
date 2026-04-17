@@ -50,7 +50,19 @@
   <div class="card">
     <strong>My Recent Entries</strong>
     <div class="table-wrap"><table id="myTable"></table></div>
-    <table id="myTable" style="margin-top:8px"></table>
+  </div>
+
+  <div class="card">
+    <div class="row" style="justify-content:space-between">
+      <strong>My Time Report</strong>
+      <div class="row">
+        <label>From <input id="reportFrom" type="date" /></label>
+        <label>To <input id="reportTo" type="date" /></label>
+        <button id="btnReportLoad" class="btn">Run Report</button>
+      </div>
+    </div>
+    <div id="reportTotal" class="muted" style="margin-top:8px"></div>
+    <div class="table-wrap"><table id="reportTable"></table></div>
   </div>
 
   <div class="card" id="adminCard" style="display:none">
@@ -62,7 +74,6 @@
       </div>
     </div>
     <div class="table-wrap"><table id="adminTable"></table></div>
-    <table id="adminTable" style="margin-top:8px"></table>
   </div>
 
   <div id="logs" class="log" style="margin-top:10px"></div>
