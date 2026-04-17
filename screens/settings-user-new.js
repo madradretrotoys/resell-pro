@@ -64,6 +64,7 @@ function collect(){
       can_drop_off_form: $('can_drop_off_form').checked,
       can_estimates_buy_tickets: $('can_estimates_buy_tickets').checked,
       can_timekeeping: $('can_timekeeping').checked,
+      clockin_required: $('clockin_required').checked,
       can_settings: $('can_settings').checked
     },
     notifications: {
