@@ -118,3 +118,30 @@ export function dayBounds(dateStr?: string) {
 export function makeEntryId() {
   return `te_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
 }
+
+export function computeTotalHours(input: {
+  clock_in?: string | null;
+  lunch_out?: string | null;
+  lunch_in?: string | null;
+  clock_out?: string | null;
+}): number | null {
+  const clockIn = input?.clock_in ? new Date(input.clock_in) : null;
+  const clockOut = input?.clock_out ? new Date(input.clock_out) : null;
+  const lunchOut = input?.lunch_out ? new Date(input.lunch_out) : null;
+  const lunchIn = input?.lunch_in ? new Date(input.lunch_in) : null;
+
+  if (!clockIn || !clockOut) return null;
+
+  const workedMs = clockOut.getTime() - clockIn.getTime();
+  if (workedMs <= 0) return 0;
+
+  let breakMs = 0;
+  if (lunchOut) {
+    const breakEnd = lunchIn || clockOut;
+    const rawBreak = breakEnd.getTime() - lunchOut.getTime();
+    if (rawBreak > 0) breakMs = rawBreak;
+  }
+
+  const hours = Math.max(0, (workedMs - breakMs) / (1000 * 60 * 60));
+  return Math.round(hours * 100) / 100;
+}

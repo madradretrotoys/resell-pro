@@ -1,5 +1,5 @@
 import { neon } from '@neondatabase/serverless';
-import { dayBounds, json, makeEntryId, requireTimesheetActor } from './_helpers';
+import { computeTotalHours, dayBounds, json, makeEntryId, requireTimesheetActor } from './_helpers';
 
 export const onRequestPost: PagesFunction = async ({ request, env }) => {
   try {
@@ -33,33 +33,52 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
 
     if (!existing && action === 'clock_in') {
       const entry_id = makeEntryId();
+      const totalHours = computeTotalHours({ clock_in: nowIso, clock_out: null, lunch_out: null, lunch_in: null });
       await sql/*sql*/`
         INSERT INTO app.time_entries (
-          entry_id, user_name, login_id, clock_in, status, updated_at, notes
+          entry_id, user_name, login_id, clock_in, total_hours, status, updated_at, notes
         ) VALUES (
-          ${entry_id}, ${actor.name}, ${actor.login_id}, ${nowIso}, ${'open'}, ${nowIso}, ${null}
+          ${entry_id}, ${actor.name}, ${actor.login_id}, ${nowIso}, ${totalHours}, ${'open'}, ${nowIso}, ${null}
         )
       `;
     } else if (action === 'lunch_out') {
       if (existing.lunch_out) return json({ ok: false, error: 'already_punched' }, 400);
+      const totalHours = computeTotalHours({
+        clock_in: existing.clock_in,
+        lunch_out: nowIso,
+        lunch_in: existing.lunch_in,
+        clock_out: existing.clock_out,
+      });
       await sql/*sql*/`
         UPDATE app.time_entries
-        SET lunch_out = ${nowIso}, status = ${'open'}, updated_at = ${nowIso}
+        SET lunch_out = ${nowIso}, total_hours = ${totalHours}, status = ${'open'}, updated_at = ${nowIso}
         WHERE entry_id = ${existing.entry_id}
       `;
     } else if (action === 'lunch_in') {
       if (!existing.lunch_out) return json({ ok: false, error: 'lunch_out_required' }, 400);
       if (existing.lunch_in) return json({ ok: false, error: 'already_punched' }, 400);
+      const totalHours = computeTotalHours({
+        clock_in: existing.clock_in,
+        lunch_out: existing.lunch_out,
+        lunch_in: nowIso,
+        clock_out: existing.clock_out,
+      });
       await sql/*sql*/`
         UPDATE app.time_entries
-        SET lunch_in = ${nowIso}, status = ${'open'}, updated_at = ${nowIso}
+        SET lunch_in = ${nowIso}, total_hours = ${totalHours}, status = ${'open'}, updated_at = ${nowIso}
         WHERE entry_id = ${existing.entry_id}
       `;
     } else if (action === 'clock_out') {
       if (existing.clock_out) return json({ ok: false, error: 'already_punched' }, 400);
+      const totalHours = computeTotalHours({
+        clock_in: existing.clock_in,
+        lunch_out: existing.lunch_out,
+        lunch_in: existing.lunch_in,
+        clock_out: nowIso,
+      });
       await sql/*sql*/`
         UPDATE app.time_entries
-        SET clock_out = ${nowIso}, status = ${'complete'}, updated_at = ${nowIso}
+        SET clock_out = ${nowIso}, total_hours = ${totalHours}, status = ${'complete'}, updated_at = ${nowIso}
         WHERE entry_id = ${existing.entry_id}
       `;
     }

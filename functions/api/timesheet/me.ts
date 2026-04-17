@@ -8,6 +8,7 @@ export const onRequestGet: PagesFunction = async ({ request, env }) => {
     if ('error' in auth) return auth.error;
 
     const { actor, } = auth;
+    const url = new URL(request.url);
     const today = dayBounds();
 
     const todayRows = await sql/*sql*/`
@@ -34,11 +35,33 @@ export const onRequestGet: PagesFunction = async ({ request, env }) => {
       LIMIT 30
     `;
 
+    const from = (url.searchParams.get('from') || '').trim();
+    const to = (url.searchParams.get('to') || '').trim();
+
+    let range_entries: any[] = [];
+    let range_total_hours = 0;
+    if (/^\d{4}-\d{2}-\d{2}$/.test(from) && /^\d{4}-\d{2}-\d{2}$/.test(to) && from <= to) {
+      const fromBounds = dayBounds(from);
+      const toBounds = dayBounds(to);
+      const rangeRows = await sql/*sql*/`
+        SELECT *
+        FROM app.time_entries
+        WHERE login_id = ${actor.login_id}
+          AND clock_in >= ${fromBounds.startIso}
+          AND clock_in <= ${toBounds.endIso}
+        ORDER BY clock_in DESC NULLS LAST
+      `;
+      range_entries = rangeRows;
+      range_total_hours = rangeRows.reduce((sum, row: any) => sum + Number(row.total_hours || 0), 0);
+    }
+
     return json({
       ok: true,
       actor,
       today: todayRows[0] || null,
       period_entries: periodRows,
+      range_entries,
+      range_total_hours: Math.round(range_total_hours * 100) / 100,
     });
   } catch (e: any) {
     return json({ ok: false, error: 'server_error', message: e?.message || String(e) }, 500);
