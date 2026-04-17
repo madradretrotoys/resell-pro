@@ -121,11 +121,12 @@ export const onRequestGet: PagesFunction = async ({ request, env }) => {
     const start_ts = rangeRows?.start_ts;
     const end_ts = rangeRows?.end_ts;
 
-    const [drawerRows, ledgerRows, safeRows, payoutRows, salesRows] = await Promise.all([
+    const [drawerRows, ledgerRows, safeRows, salesRows] = await Promise.all([
       sql/*sql*/`
         SELECT count_id, count_ts, drawer, period, grand_total, notes, user_name
         FROM app.cash_drawer_counts
-        WHERE count_ts >= ${start_ts}
+        WHERE tenant_id = ${tenant_id}::uuid
+          AND count_ts >= ${start_ts}
           AND count_ts < ${end_ts}
         ORDER BY count_ts DESC
       `,
@@ -144,13 +145,6 @@ export const onRequestGet: PagesFunction = async ({ request, env }) => {
           AND count_ts >= ${start_ts}
           AND count_ts < ${end_ts}
         ORDER BY count_ts DESC
-      `,
-      sql/*sql*/`
-        SELECT payout_id, payout_ts, short_description, drawer_1_amount, drawer_2_amount, safe_amount, grand_total, user_name
-        FROM app.cash_payouts
-        WHERE payout_ts >= ${start_ts}
-          AND payout_ts < ${end_ts}
-        ORDER BY payout_ts DESC
       `,
       sql/*sql*/`
         SELECT sale_id, sale_ts, total, payment_method
@@ -233,15 +227,13 @@ export const onRequestGet: PagesFunction = async ({ request, env }) => {
       if (fromDrawer) {
         ensureDrawer(fromDrawer).movement_out += amt;
         totals.movement_out_total += amt;
-      }
-    }
 
-    for (const p of payoutRows || []) {
-      const d1 = Number(p.drawer_1_amount || 0);
-      const d2 = Number(p.drawer_2_amount || 0);
-      totals.payout_total += Number(p.grand_total || d1 + d2 + Number(p.safe_amount || 0) || 0);
-      ensureDrawer("1").payout_out += d1;
-      ensureDrawer("2").payout_out += d2;
+        // Legacy "payouts" bucket is now sourced from ledger moves to Purchase.
+        if (/^purchase$/i.test(toLoc)) {
+          ensureDrawer(fromDrawer).payout_out += amt;
+          totals.payout_total += amt;
+        }
+      }
     }
 
     for (const s of salesRows || []) {
@@ -277,7 +269,6 @@ export const onRequestGet: PagesFunction = async ({ request, env }) => {
         drawer_counts: drawerRows,
         safe_counts: safeRows,
         ledger_moves: ledgerRows,
-        payouts: payoutRows,
         cash_sales: salesRows,
       },
     });
