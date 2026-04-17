@@ -96,7 +96,7 @@ export const onRequestGet: PagesFunction = async ({ request, env }) => {
         m.role, m.active,
         p.can_pos, p.can_cash_drawer, p.can_cash_payouts, p.can_item_research,
         p.can_inventory, p.can_inventory_intake, p.can_drop_off_form,
-        p.can_estimates_buy_tickets, p.can_timekeeping, p.can_settings,
+        p.can_estimates_buy_tickets, p.can_timekeeping, p.clockin_required, p.can_settings,
         p.notify_cash_drawer, p.notify_daily_sales_summary, p.discount_max
       FROM app.memberships m
       JOIN app.users u ON u.user_id = m.user_id

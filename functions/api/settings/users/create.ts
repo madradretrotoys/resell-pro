@@ -40,14 +40,14 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
     INSERT INTO app.permissions (user_id, name, email, role,
       can_pos, can_cash_drawer, can_cash_payouts, can_item_research,
       can_inventory, can_inventory_intake, can_drop_off_form,
-      can_estimates_buy_tickets, can_timekeeping, can_settings,
+      can_estimates_buy_tickets, can_timekeeping, clockin_required, can_settings,
       notify_cash_drawer, notify_daily_sales_summary, discount_max
     )
     VALUES (
       ${u.user_id}, ${name}, ${email}, ${role},
       ${!!perms.can_pos}, ${!!perms.can_cash_drawer}, ${!!perms.can_cash_payouts}, ${!!perms.can_item_research},
       ${!!perms.can_inventory}, ${!!perms.can_inventory_intake}, ${!!perms.can_drop_off_form},
-      ${!!perms.can_estimates_buy_tickets}, ${!!perms.can_timekeeping}, ${!!perms.can_settings},
+      ${!!perms.can_estimates_buy_tickets}, ${!!perms.can_timekeeping}, ${!!perms.clockin_required}, ${!!perms.can_settings},
       ${!!notes.notify_cash_drawer}, ${!!notes.notify_daily_sales_summary}, ${discount_max}
     )
     ON CONFLICT (user_id) DO UPDATE SET
@@ -56,7 +56,7 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
       can_item_research=EXCLUDED.can_item_research, can_inventory=EXCLUDED.can_inventory,
       can_inventory_intake=EXCLUDED.can_inventory_intake, can_drop_off_form=EXCLUDED.can_drop_off_form,
       can_estimates_buy_tickets=EXCLUDED.can_estimates_buy_tickets, can_timekeeping=EXCLUDED.can_timekeeping,
-      can_settings=EXCLUDED.can_settings, notify_cash_drawer=EXCLUDED.notify_cash_drawer,
+      clockin_required=EXCLUDED.clockin_required, can_settings=EXCLUDED.can_settings, notify_cash_drawer=EXCLUDED.notify_cash_drawer,
       notify_daily_sales_summary=EXCLUDED.notify_daily_sales_summary, discount_max=EXCLUDED.discount_max,
       updated_at=now()
   `;
