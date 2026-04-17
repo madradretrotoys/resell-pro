@@ -11,6 +11,8 @@ export async function init({ container, session }) {
    // ✅ Load section previews
   await refreshSafePreview();
   await refreshMovementPreview();
+  setupCashReportUI();
+  if (canCashEdit()) await loadCashReport();
   autosize(container);
 }
 
@@ -37,7 +39,8 @@ function bind(root){
 
   // ✅ modal
   'historyModal','historyBackdrop','btnCloseHistory','historyTitle','historySubtitle',
-  'historyLoading','historyEmpty','historyRows'
+  'historyLoading','historyEmpty','historyRows',
+  'cashReportSection','reportPreset','reportFrom','reportTo','btnReportLoad','reportStatus','reportTotals','reportDrawerRows','reportPathRows'
     
   ];
   ids.forEach(id => els[id] = root.querySelector('#' + id));
@@ -91,7 +94,15 @@ function wire(){
   // Modal close
   if (els.btnCloseHistory) els.btnCloseHistory.addEventListener('click', closeHistory);
   if (els.historyBackdrop) els.historyBackdrop.addEventListener('click', closeHistory);
+
+  if (els.btnReportLoad) els.btnReportLoad.addEventListener('click', loadCashReport);
+  if (els.reportPreset) {
+    els.reportPreset.addEventListener('change', () => {
+      toggleCustomDates();
+    });
+  }
 }
+
 
 
 async function saveSafeCount() {
@@ -124,6 +135,7 @@ async function saveSafeCount() {
     els.safe_notes.value = '';
 
     await refreshSafePreview();
+    if (canCashEdit()) await loadCashReport();
     
   } catch (e) {
     const status = e?.status || 500;
@@ -213,11 +225,130 @@ async function loadToday(){
   }
 }
 
+
+function canCashEdit() {
+  return !!(sessionUser?.permissions?.can_cash_edit ?? sessionUser?.can_cash_edit);
+}
+
+function setupCashReportUI() {
+  if (!els.cashReportSection) return;
+
+  if (!canCashEdit()) {
+    els.cashReportSection.classList.add('hidden');
+    return;
+  }
+
+  els.cashReportSection.classList.remove('hidden');
+  const today = new Date().toISOString().slice(0, 10);
+  if (els.reportFrom && !els.reportFrom.value) els.reportFrom.value = today;
+  if (els.reportTo && !els.reportTo.value) els.reportTo.value = today;
+  toggleCustomDates();
+}
+
+function toggleCustomDates() {
+  const isCustom = (els.reportPreset?.value || 'today') === 'custom';
+  if (els.reportFrom) els.reportFrom.disabled = !isCustom;
+  if (els.reportTo) els.reportTo.disabled = !isCustom;
+}
+
+async function loadCashReport() {
+  if (!canCashEdit() || !els.btnReportLoad) return;
+
+  const preset = (els.reportPreset?.value || 'today').toLowerCase();
+  const from = (els.reportFrom?.value || '').trim();
+  const to = (els.reportTo?.value || '').trim();
+
+  if (preset === 'custom' && (!from || !to)) {
+    showToast('Choose from and to dates for custom report');
+    return;
+  }
+
+  try {
+    els.btnReportLoad.disabled = true;
+    if (els.reportStatus) els.reportStatus.textContent = 'Loading report…';
+
+    const q = new URLSearchParams({ preset });
+    if (preset === 'custom') {
+      q.set('from', from);
+      q.set('to', to);
+    }
+
+    const data = await api(`/api/cash-report/summary?${q.toString()}`);
+    renderCashReport(data);
+  } catch (e) {
+    if (els.reportStatus) els.reportStatus.textContent = 'Report failed to load';
+    showToast('Cash report failed');
+  } finally {
+    els.btnReportLoad.disabled = false;
+  }
+}
+
+function renderCashReport(data) {
+  const totals = data?.totals || {};
+  const range = data?.range || {};
+
+  if (els.reportStatus) {
+    els.reportStatus.textContent = `${range.start_date || ''} to ${range.end_date || ''} (${(range.timezone || '').toString()})`;
+  }
+
+  if (els.reportTotals) {
+    const cards = [
+      ['Drawer Opens', fmtMoney(totals.drawer_open_total)],
+      ['Drawer Closes', fmtMoney(totals.drawer_close_total)],
+      ['Safe Opens', fmtMoney(totals.safe_open_total)],
+      ['Safe Closes', fmtMoney(totals.safe_close_total)],
+      ['Drawer Move In', fmtMoney(totals.movement_in_total)],
+      ['Drawer Move Out', fmtMoney(totals.movement_out_total)],
+      ['Cash Sales In', fmtMoney(totals.cash_sales_total)],
+      ['Payouts Out', fmtMoney(totals.payout_total)],
+    ];
+
+    els.reportTotals.innerHTML = cards.map(([k, v]) => `
+      <div class="p-2 rounded border">
+        <div class="text-xs text-gray-600">${k}</div>
+        <div class="font-semibold">${v}</div>
+      </div>
+    `).join('');
+  }
+
+  if (els.reportDrawerRows) {
+    const rows = Array.isArray(data?.drawer_summary) ? data.drawer_summary : [];
+    els.reportDrawerRows.innerHTML = rows.length ? rows.map((r) => {
+      const inAmt = Number(r.movement_in || 0);
+      const outAmt = Number(r.movement_out || 0);
+      const payout = Number(r.payout_out || 0);
+      const net = inAmt - outAmt - payout;
+      return `
+        <tr class="border-b">
+          <td class="px-3 py-2">Drawer ${r.drawer}</td>
+          <td class="px-3 py-2">${fmtMoney(r.open_total)}</td>
+          <td class="px-3 py-2">${fmtMoney(r.close_total)}</td>
+          <td class="px-3 py-2">${fmtMoney(inAmt)}</td>
+          <td class="px-3 py-2">${fmtMoney(outAmt)}</td>
+          <td class="px-3 py-2">${fmtMoney(payout)}</td>
+          <td class="px-3 py-2">${fmtMoney(net)}</td>
+        </tr>
+      `;
+    }).join('') : '<tr><td class="px-3 py-2 text-gray-600" colspan="7">No drawer activity in range.</td></tr>';
+  }
+
+  if (els.reportPathRows) {
+    const rows = Array.isArray(data?.movement_paths) ? data.movement_paths : [];
+    els.reportPathRows.innerHTML = rows.length ? rows.map((r) => `
+      <tr class="border-b">
+        <td class="px-3 py-2">${r.from_location} → ${r.to_location}</td>
+        <td class="px-3 py-2">${Number(r.moves || 0)}</td>
+        <td class="px-3 py-2">${fmtMoney(r.amount_total)}</td>
+      </tr>
+    `).join('') : '<tr><td class="px-3 py-2 text-gray-600" colspan="3">No movements in range.</td></tr>';
+  }
+}
+
 function renderBalanceBanner(data) {
   if (!els.balanceBanner) return;
 
    // can_cash_edit may be exposed either directly on the user or nested under permissions
-  const canEdit = !!(sessionUser?.permissions?.can_cash_edit ?? sessionUser?.can_cash_edit);
+  const canEdit = canCashEdit();
 
   const status = String(data?.review_status || '');
   const expected = Number(data?.expected_at_latest ?? NaN);
@@ -304,6 +435,7 @@ async function saveMovement() {
     // Refresh today payload (so expected/variance reflects new movement)
     await loadToday();
     await refreshMovementPreview();
+    if (canCashEdit()) await loadCashReport();
 
   } catch (e) {
     const status = e?.status || 500;
@@ -506,6 +638,7 @@ async function save(){
     els.status.textContent = `Saved (${resp.count_id})`;
     // Refresh banner/status after save
     await loadToday();
+    if (canCashEdit()) await loadCashReport();
   }catch(e){
     const status = e?.status || 500;
     if(status === 409){
