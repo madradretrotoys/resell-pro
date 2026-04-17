@@ -31,8 +31,9 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
     const existing = existingRows[0] || null;
 
     if (!existing && action !== 'clock_in') return json({ ok: false, error: 'clock_in_required' }, 400);
+    if (existing && action === 'clock_in' && !existing.clock_out) return json({ ok: false, error: 'already_punched' }, 400);
 
-    if (!existing && action === 'clock_in') {
+    if (action === 'clock_in' && (!existing || !!existing.clock_out)) {
       const entry_id = makeEntryId();
       const totalHours = computeTotalHours({ clock_in: nowIso, clock_out: null, lunch_out: null, lunch_in: null });
       await sql/*sql*/`
