@@ -314,22 +314,28 @@ function renderCashReport(data) {
   if (els.reportDrawerRows) {
     const rows = Array.isArray(data?.drawer_summary) ? data.drawer_summary : [];
     els.reportDrawerRows.innerHTML = rows.length ? rows.map((r) => {
+      const salesIn = Number(r.sales_in || 0);
       const inAmt = Number(r.movement_in || 0);
       const outAmt = Number(r.movement_out || 0);
       const payout = Number(r.payout_out || 0);
-      const net = inAmt - outAmt - payout;
+      const expectedClose = Number(r.expected_close || 0);
+      const variance = Number(r.variance || 0);
+      const needsReview = String(r.status || '').toLowerCase() === 'needs_review';
+      const varianceClass = needsReview ? 'text-red-700 font-semibold' : 'text-green-700';
       return `
         <tr class="border-b">
           <td class="px-3 py-2">Drawer ${r.drawer}</td>
           <td class="px-3 py-2">${fmtMoney(r.open_total)}</td>
           <td class="px-3 py-2">${fmtMoney(r.close_total)}</td>
+          <td class="px-3 py-2">${fmtMoney(salesIn)}</td>
           <td class="px-3 py-2">${fmtMoney(inAmt)}</td>
           <td class="px-3 py-2">${fmtMoney(outAmt)}</td>
           <td class="px-3 py-2">${fmtMoney(payout)}</td>
-          <td class="px-3 py-2">${fmtMoney(net)}</td>
+          <td class="px-3 py-2">${fmtMoney(expectedClose)}</td>
+          <td class="px-3 py-2 ${varianceClass}">${fmtMoney(variance)}</td>
         </tr>
       `;
-    }).join('') : '<tr><td class="px-3 py-2 text-gray-600" colspan="7">No drawer activity in range.</td></tr>';
+    }).join('') : '<tr><td class="px-3 py-2 text-gray-600" colspan="9">No drawer activity in range.</td></tr>';
   }
 
   if (els.reportPathRows) {

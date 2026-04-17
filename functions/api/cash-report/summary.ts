@@ -48,6 +48,61 @@ function isIsoDate(d: string) {
   return /^\d{4}-\d{2}-\d{2}$/.test(d);
 }
 
+function toMoney(n: any): number {
+  const x = Number(n);
+  if (!Number.isFinite(x)) return 0;
+  return Math.round(x * 100) / 100;
+}
+
+function methodLooksCash(raw: any): boolean {
+  const s = String(raw || "").trim().toLowerCase();
+  return /^cash(?:$|[:\s_-])/.test(s) || /^sales[\s:_-]*cash(?:$|[:\s_-])/.test(s);
+}
+
+function parseCashFromPaymentMethod(paymentMethod: any, saleTotal: number): number {
+  const pm = String(paymentMethod || "").trim();
+  if (!pm) return 0;
+  const lower = pm.toLowerCase();
+
+  // split:cash:10.00,card:40.00 or split:sales cash:10.00,wallet:40.00
+  if (lower.startsWith("split:")) {
+    const payload = pm.slice(6);
+    let sum = 0;
+    for (const tokenRaw of payload.split(",")) {
+      const token = tokenRaw.trim();
+      if (!token) continue;
+      const m = token.match(/^([^:]+(?:\s+[^:]+)*)\s*:\s*(-?\d+(?:\.\d{1,2})?)$/);
+      if (!m) continue;
+      const method = m[1];
+      const amt = toMoney(m[2]);
+      if (methodLooksCash(method)) sum += amt;
+    }
+    return toMoney(sum);
+  }
+
+  // cash:50.00;received=60.00;change=10.00
+  if (/^(cash|sales[\s:_-]*cash)\s*:/i.test(pm)) {
+    const m = pm.match(/^(?:cash|sales[\s:_-]*cash)\s*:\s*(-?\d+(?:\.\d{1,2})?)/i);
+    if (m) return toMoney(m[1]);
+  }
+
+  // plain "cash" or "sales cash" style: treat as full total cash
+  if (methodLooksCash(pm)) return toMoney(saleTotal);
+
+  return 0;
+}
+
+function parseCashFromParts(parts: any): number {
+  if (!Array.isArray(parts)) return 0;
+  let sum = 0;
+  for (const p of parts) {
+    const method = String(p?.method || "");
+    if (!methodLooksCash(method)) continue;
+    sum += toMoney(p?.amount);
+  }
+  return toMoney(sum);
+}
+
 export const onRequestGet: PagesFunction = async ({ request, env }) => {
   try {
     const cookieHeader = request.headers.get("cookie") || "";
@@ -147,17 +202,11 @@ export const onRequestGet: PagesFunction = async ({ request, env }) => {
         ORDER BY count_ts DESC
       `,
       sql/*sql*/`
-        SELECT sale_id, sale_ts, total, payment_method
+        SELECT sale_id, sale_ts, total, payment_method, items_json
         FROM app.sales
         WHERE tenant_id = ${tenant_id}::uuid
           AND sale_ts >= ${start_ts}
           AND sale_ts < ${end_ts}
-          AND (
-            lower(payment_method) = 'cash'
-            OR lower(payment_method) LIKE 'cash:%'
-            OR lower(payment_method) LIKE 'split:%cash:%'
-            OR lower(payment_method) LIKE '%:cash:%'
-          )
         ORDER BY sale_ts DESC
       `,
     ]);
@@ -183,6 +232,10 @@ export const onRequestGet: PagesFunction = async ({ request, env }) => {
           movement_in: 0,
           movement_out: 0,
           payout_out: 0,
+          sales_in: 0,
+          expected_close: 0,
+          variance: 0,
+          status: "balanced",
           counts: 0,
         });
       }
@@ -225,19 +278,48 @@ export const onRequestGet: PagesFunction = async ({ request, env }) => {
         totals.movement_in_total += amt;
       }
       if (fromDrawer) {
-        ensureDrawer(fromDrawer).movement_out += amt;
-        totals.movement_out_total += amt;
-
-        // Legacy "payouts" bucket is now sourced from ledger moves to Purchase.
         if (/^purchase$/i.test(toLoc)) {
           ensureDrawer(fromDrawer).payout_out += amt;
           totals.payout_total += amt;
+        } else {
+          ensureDrawer(fromDrawer).movement_out += amt;
+          totals.movement_out_total += amt;
         }
       }
     }
 
+    const drawerOne = ensureDrawer("1");
     for (const s of salesRows || []) {
-      totals.cash_sales_total += Number(s.total || 0);
+      const saleTotal = toMoney(s.total);
+      let cashAmt = 0;
+
+      const partsFromJson = (typeof s.items_json === "object" && s.items_json)
+        ? (s.items_json as any)?.payment_parts
+        : null;
+      cashAmt = parseCashFromParts(partsFromJson);
+
+      if (!(cashAmt > 0)) {
+        cashAmt = parseCashFromPaymentMethod(s.payment_method, saleTotal);
+      }
+
+      if (cashAmt > 0) {
+        totals.cash_sales_total += cashAmt;
+        // Sales cash is only expected to hit Drawer 1 / Mad Rad.
+        drawerOne.sales_in += cashAmt;
+      }
+    }
+    totals.cash_sales_total = toMoney(totals.cash_sales_total);
+
+    for (const d of drawerSummary.values()) {
+      d.open_total = toMoney(d.open_total);
+      d.close_total = toMoney(d.close_total);
+      d.movement_in = toMoney(d.movement_in);
+      d.movement_out = toMoney(d.movement_out);
+      d.payout_out = toMoney(d.payout_out);
+      d.sales_in = toMoney(d.sales_in);
+      d.expected_close = toMoney(d.open_total + d.sales_in + d.movement_in - d.movement_out - d.payout_out);
+      d.variance = toMoney(d.close_total - d.expected_close);
+      d.status = Math.abs(d.variance) <= 0.009 ? "balanced" : "needs_review";
     }
 
     const byPathMap = new Map<string, any>();
