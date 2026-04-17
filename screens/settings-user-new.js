@@ -1,7 +1,11 @@
 import { api } from '/assets/js/api.js';
 import { ensureSession } from '/assets/js/auth.js';
 
-export default { load };
+export async function init(){
+  await load();
+}
+
+export function destroy() {}
 const $ = (id) => document.getElementById(id);
 
 const FALLBACK_PERMISSION_COLUMNS = [
