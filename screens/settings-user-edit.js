@@ -27,7 +27,7 @@ async function load(){
   $('role').value = u.role || 'clerk';
 
   ['can_pos','can_cash_drawer','can_cash_payouts','can_item_research','can_inventory',
-   'can_inventory_intake','can_drop_off_form','can_estimates_buy_tickets','can_timekeeping','can_settings',
+   'can_inventory_intake','can_drop_off_form','can_estimates_buy_tickets','can_timekeeping','clockin_required','can_settings',
    'notify_cash_drawer','notify_daily_sales_summary'].forEach(k => { $(k).checked = !!u[k]; });
 
   $('discount_max').value = (u.discount_max ?? '');
@@ -51,6 +51,8 @@ async function load(){
       $('save').disabled = false; $('save').textContent = 'Save';
     }
   };
+}
+
 function collect(){
   const user_id = $('user_id').value; // from hidden input set during prefill
   const name = $('name').value.trim();
@@ -78,6 +80,7 @@ function collect(){
       can_drop_off_form: $('can_drop_off_form').checked,
       can_estimates_buy_tickets: $('can_estimates_buy_tickets').checked,
       can_timekeeping: $('can_timekeeping').checked,
+      clockin_required: $('clockin_required').checked,
       can_settings: $('can_settings').checked
     },
     notifications: {

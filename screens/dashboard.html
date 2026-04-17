@@ -1,1 +1,25 @@
-<section class="p-4"><h1>Dashboard</h1><p>Select a feature from the menu.</p></section>
+<section class="p-4" id="dashboardStatusRoot">
+  <h1>Dashboard</h1>
+  <p class="muted" id="dashIntro">Checking your timekeeping status…</p>
+
+  <section class="tile" style="margin-top:12px;">
+    <h3 style="margin-top:0;">My Status</h3>
+    <p id="myStatusLine">—</p>
+    <p id="myLastClockOut" class="muted">Last clock out: —</p>
+    <div style="display:flex; gap:8px; flex-wrap:wrap;">
+      <button id="btnDashboardClockIn" class="btn btn-primary" type="button">Clock In Now</button>
+      <a class="btn btn-ghost" href="?page=timesheet">Open Timesheet</a>
+    </div>
+    <p id="myPrompt" style="display:none; margin-top:8px; color:#b45309; font-weight:600;">
+      You are signed in but not clocked in.
+    </p>
+  </section>
+
+  <section class="tile" id="teamStatusCard" style="margin-top:12px; display:none;">
+    <h3 style="margin-top:0;">Team Status</h3>
+    <p class="muted">Visible to managers/admins with timesheet edit permissions.</p>
+    <div class="table-wrap">
+      <table id="teamStatusTable" class="table"></table>
+    </div>
+  </section>
+</section>
