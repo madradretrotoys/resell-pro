@@ -103,6 +103,16 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
     const payload = await verifyJwt(token, String(env.JWT_SECRET));
     const uid = String((payload as any).sub);
 
+    const memberRows = await sql/*sql*/`
+      SELECT tenant_id
+      FROM app.memberships
+      WHERE user_id = ${uid}
+      ORDER BY created_at ASC
+      LIMIT 1
+    `;
+    const tenant_id = memberRows?.[0]?.tenant_id;
+    if (!tenant_id) return json({ error: "no_tenant" }, 403);
+
     // Load permissions for this user
     const permRows = await sql/*sql*/`
       SELECT can_cash_edit
@@ -127,7 +137,8 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
     const existingRows = await sql/*sql*/`
       SELECT count_id
       FROM app.cash_drawer_counts
-      WHERE count_id = ${count_id}
+      WHERE tenant_id = ${tenant_id}::uuid
+        AND count_id = ${count_id}
       LIMIT 1
     `;
     const exists = !!existingRows?.[0]?.count_id;
@@ -160,6 +171,7 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
           notes = ${notes},
           updated_at = now()
         WHERE count_id = ${count_id}
+          AND tenant_id = ${tenant_id}::uuid
         RETURNING count_id, period, drawer, grand_total
       `;
 
@@ -178,12 +190,12 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
     // ✅ Otherwise this is first write: INSERT
     const rows = await sql/*sql*/`
       INSERT INTO app.cash_drawer_counts
-        (count_id, count_ts, period, drawer, user_name,
+        (tenant_id, count_id, count_ts, period, drawer, user_name,
          pennies, nickels, dimes, quarters, halfdollars,
          ones, twos, fives, tens, twenties, fifties, hundreds,
          coin_total, bill_total, grand_total, notes, updated_at)
       VALUES
-        (${count_id}, now(), ${period}, ${drawer}, ${actor_name},
+        (${tenant_id}::uuid, ${count_id}, now(), ${period}, ${drawer}, ${actor_name},
          ${pennies}, ${nickels}, ${dimes}, ${quarters}, ${halfdollars},
          ${ones}, ${twos}, ${fives}, ${tens}, ${twenties}, ${fifties}, ${hundreds},
          ${coin_total}, ${bill_total}, ${grand_total}, ${notes}, now())
