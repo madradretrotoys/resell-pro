@@ -8,6 +8,7 @@ export async function init({ container, session }) {
   sessionUser = session?.user || null;
   bind(container);
   wire();
+  wireCashReportFallback(container);
    // ✅ Load section previews
   await refreshSafePreview();
   await refreshMovementPreview();
@@ -95,12 +96,28 @@ function wire(){
   if (els.btnCloseHistory) els.btnCloseHistory.addEventListener('click', closeHistory);
   if (els.historyBackdrop) els.historyBackdrop.addEventListener('click', closeHistory);
 
-  if (els.btnReportLoad) els.btnReportLoad.addEventListener('click', loadCashReport);
+  if (els.btnReportLoad) {
+    els.btnReportLoad.addEventListener('click', loadCashReport);
+    els.__reportBound = true;
+  }
   if (els.reportPreset) {
     els.reportPreset.addEventListener('change', () => {
       toggleCustomDates();
     });
   }
+}
+
+function wireCashReportFallback(root) {
+  if (!root || els.__reportBound) return;
+  root.addEventListener('click', (ev) => {
+    const t = ev?.target;
+    if (!(t instanceof Element)) return;
+    const btn = t.closest('#btnReportLoad');
+    if (!btn) return;
+    console.log('[drawer] fallback click handler fired for Run Report');
+    ev.preventDefault();
+    loadCashReport();
+  });
 }
 
 
@@ -252,7 +269,13 @@ function toggleCustomDates() {
 }
 
 async function loadCashReport() {
-  if (!canCashEdit() || !els.btnReportLoad) return;
+  if (!canCashEdit() || !els.btnReportLoad) {
+    console.warn('[drawer] loadCashReport skipped', {
+      canCashEdit: canCashEdit(),
+      hasButton: !!els.btnReportLoad,
+    });
+    return;
+  }
 
   const preset = (els.reportPreset?.value || 'today').toLowerCase();
   const from = (els.reportFrom?.value || '').trim();
