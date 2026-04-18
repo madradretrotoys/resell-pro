@@ -276,11 +276,19 @@ function setupCashReportUI() {
   if (!canCashEdit()) {
     console.warn('[drawer] setupCashReportUI: canCashEdit is false; report section left visible for diagnostics');
   }
-  // Use local calendar date (not UTC) so evening shifts don't jump to "tomorrow".
+  // Default managers to current week (Sun-Sat), and show local dates (not UTC).
   const now = new Date();
-  const today = new Date(now.getTime() - now.getTimezoneOffset() * 60000).toISOString().slice(0, 10);
-  if (els.reportFrom && !els.reportFrom.value) els.reportFrom.value = today;
-  if (els.reportTo && !els.reportTo.value) els.reportTo.value = today;
+  const localToday = new Date(now.getTime() - now.getTimezoneOffset() * 60000);
+  const weekday = localToday.getDay(); // 0=Sun
+  const weekStart = new Date(localToday);
+  weekStart.setDate(localToday.getDate() - weekday);
+  const weekEnd = new Date(weekStart);
+  weekEnd.setDate(weekStart.getDate() + 6);
+  const ymd = (d) => new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 10);
+
+  if (els.reportPreset) els.reportPreset.value = 'week';
+  if (els.reportFrom) els.reportFrom.value = ymd(weekStart);
+  if (els.reportTo) els.reportTo.value = ymd(weekEnd);
   toggleCustomDates();
 }
 
@@ -369,23 +377,8 @@ function renderCashReport(data) {
   }
 
   if (els.reportTotals) {
-    const cards = [
-      ['Drawer Opens', fmtMoney(totals.drawer_open_total)],
-      ['Drawer Closes', fmtMoney(totals.drawer_close_total)],
-      ['Safe Opens', fmtMoney(totals.safe_open_total)],
-      ['Safe Closes', fmtMoney(totals.safe_close_total)],
-      ['Drawer Move In', fmtMoney(totals.movement_in_total)],
-      ['Drawer Move Out', fmtMoney(totals.movement_out_total)],
-      ['Cash Sales In', fmtMoney(totals.cash_sales_total)],
-      ['Payouts Out', fmtMoney(totals.payout_total)],
-    ];
-
-    els.reportTotals.innerHTML = cards.map(([k, v]) => `
-      <div class="p-2 rounded border">
-        <div class="text-xs text-gray-600">${k}</div>
-        <div class="font-semibold">${v}</div>
-      </div>
-    `).join('');
+    // Totals card strip intentionally hidden per manager request.
+    els.reportTotals.innerHTML = '';
   }
 
   if (els.reportDrawerRows) {
