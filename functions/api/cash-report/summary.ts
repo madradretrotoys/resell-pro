@@ -167,7 +167,7 @@ export const onRequestGet: PagesFunction = async ({ request, env }) => {
       if (from > to) return json({ error: "bad_custom_range" }, 400);
     }
 
-    const [rangeRows] = await Promise.all([
+    const [rangeRowsRaw] = await Promise.all([
       preset === "today"
         ? sql/*sql*/`
             SELECT
@@ -192,6 +192,7 @@ export const onRequestGet: PagesFunction = async ({ request, env }) => {
                 ${to}::text AS end_date
             `,
     ]);
+    const rangeRows = Array.isArray(rangeRowsRaw) ? (rangeRowsRaw[0] || {}) : (rangeRowsRaw || {});
 
     const start_ts = rangeRows?.start_ts;
     const end_ts = rangeRows?.end_ts;
