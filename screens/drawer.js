@@ -13,7 +13,9 @@ export async function init({ container, session }) {
   await refreshSafePreview();
   await refreshMovementPreview();
   setupCashReportUI();
-  if (canCashEdit()) await loadCashReport();
+  if (els.cashReportSection && !els.cashReportSection.classList.contains('hidden')) {
+    await loadCashReport();
+  }
   autosize(container);
 }
 
@@ -152,7 +154,7 @@ async function saveSafeCount() {
     els.safe_notes.value = '';
 
     await refreshSafePreview();
-    if (canCashEdit()) await loadCashReport();
+    if (canLoadCashReportUi()) await loadCashReport();
     
   } catch (e) {
     const status = e?.status || 500;
@@ -244,18 +246,36 @@ async function loadToday(){
 
 
 function canCashEdit() {
-  return !!(sessionUser?.permissions?.can_cash_edit ?? sessionUser?.can_cash_edit);
+  const direct = sessionUser?.can_cash_edit;
+  if (typeof direct === 'boolean') return direct;
+  if (typeof direct === 'number') return direct === 1;
+  if (typeof direct === 'string') return ['1', 'true', 'yes', 'y'].includes(direct.toLowerCase());
+
+  const perms = sessionUser?.permissions;
+  if (Array.isArray(perms)) {
+    const normalized = perms.map((x) => String(x || '').toLowerCase().trim());
+    return normalized.includes('can_cash_edit')
+      || normalized.includes('cash_edit')
+      || normalized.includes('cash:edit');
+  }
+
+  if (perms && typeof perms === 'object') {
+    const v = perms.can_cash_edit;
+    if (typeof v === 'boolean') return v;
+    if (typeof v === 'number') return v === 1;
+    if (typeof v === 'string') return ['1', 'true', 'yes', 'y'].includes(v.toLowerCase());
+  }
+
+  return false;
 }
 
 function setupCashReportUI() {
   if (!els.cashReportSection) return;
 
-  if (!canCashEdit()) {
-    els.cashReportSection.classList.add('hidden');
-    return;
-  }
-
   els.cashReportSection.classList.remove('hidden');
+  if (!canCashEdit()) {
+    console.warn('[drawer] setupCashReportUI: canCashEdit is false; report section left visible for diagnostics');
+  }
   const today = new Date().toISOString().slice(0, 10);
   if (els.reportFrom && !els.reportFrom.value) els.reportFrom.value = today;
   if (els.reportTo && !els.reportTo.value) els.reportTo.value = today;
@@ -268,8 +288,12 @@ function toggleCustomDates() {
   if (els.reportTo) els.reportTo.disabled = !isCustom;
 }
 
+function canLoadCashReportUi() {
+  return !!(els.cashReportSection && !els.cashReportSection.classList.contains('hidden'));
+}
+
 async function loadCashReport() {
-  if (!canCashEdit() || !els.btnReportLoad) {
+  if (!els.btnReportLoad) {
     console.warn('[drawer] loadCashReport skipped', {
       canCashEdit: canCashEdit(),
       hasButton: !!els.btnReportLoad,
@@ -492,7 +516,7 @@ async function saveMovement() {
     // Refresh today payload (so expected/variance reflects new movement)
     await loadToday();
     await refreshMovementPreview();
-    if (canCashEdit()) await loadCashReport();
+    if (canLoadCashReportUi()) await loadCashReport();
 
   } catch (e) {
     const status = e?.status || 500;
@@ -695,7 +719,7 @@ async function save(){
     els.status.textContent = `Saved (${resp.count_id})`;
     // Refresh banner/status after save
     await loadToday();
-    if (canCashEdit()) await loadCashReport();
+    if (canLoadCashReportUi()) await loadCashReport();
   }catch(e){
     const status = e?.status || 500;
     if(status === 409){
