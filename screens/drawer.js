@@ -257,6 +257,7 @@ async function loadCashReport() {
   const preset = (els.reportPreset?.value || 'today').toLowerCase();
   const from = (els.reportFrom?.value || '').trim();
   const to = (els.reportTo?.value || '').trim();
+  const reqId = Math.random().toString(36).slice(2, 10);
 
   if (preset === 'custom' && (!from || !to)) {
     showToast('Choose from and to dates for custom report');
@@ -272,10 +273,31 @@ async function loadCashReport() {
       q.set('from', from);
       q.set('to', to);
     }
+    console.log('[drawer] loadCashReport:start', { reqId, preset, from, to, query: q.toString() });
 
     const data = await api(`/api/cash-report/summary?${q.toString()}`);
+    console.log('[drawer] loadCashReport:success', {
+      reqId,
+      ok: !!data?.ok,
+      range: data?.range || null,
+      totals: data?.totals || null,
+      counts: {
+        drawer_summary: Array.isArray(data?.drawer_summary) ? data.drawer_summary.length : 0,
+        movement_paths: Array.isArray(data?.movement_paths) ? data.movement_paths.length : 0,
+        drawer_counts: Array.isArray(data?.activity?.drawer_counts) ? data.activity.drawer_counts.length : 0,
+        safe_counts: Array.isArray(data?.activity?.safe_counts) ? data.activity.safe_counts.length : 0,
+        ledger_moves: Array.isArray(data?.activity?.ledger_moves) ? data.activity.ledger_moves.length : 0,
+        cash_sales: Array.isArray(data?.activity?.cash_sales) ? data.activity.cash_sales.length : 0,
+      },
+    });
     renderCashReport(data);
   } catch (e) {
+    console.error('[drawer] loadCashReport:failed', {
+      reqId,
+      message: e?.message || String(e),
+      status: e?.status || null,
+      data: e?.data || null,
+    });
     if (els.reportStatus) els.reportStatus.textContent = 'Report failed to load';
     showToast('Cash report failed');
   } finally {
@@ -286,6 +308,12 @@ async function loadCashReport() {
 function renderCashReport(data) {
   const totals = data?.totals || {};
   const range = data?.range || {};
+  console.log('[drawer] renderCashReport', {
+    range,
+    totals,
+    drawerSummaryCount: Array.isArray(data?.drawer_summary) ? data.drawer_summary.length : 0,
+    movementPathCount: Array.isArray(data?.movement_paths) ? data.movement_paths.length : 0,
+  });
 
   if (els.reportStatus) {
     els.reportStatus.textContent = `${range.start_date || ''} to ${range.end_date || ''} (${(range.timezone || '').toString()})`;

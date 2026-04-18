@@ -105,6 +105,16 @@ function parseCashFromParts(parts: any): number {
 
 export const onRequestGet: PagesFunction = async ({ request, env }) => {
   try {
+    const reqUrl = new URL(request.url);
+    const reqId = crypto.randomUUID().slice(0, 8);
+    console.log("[cash-report/summary] start", {
+      reqId,
+      path: reqUrl.pathname,
+      search: reqUrl.search,
+      hasCookie: !!request.headers.get("cookie"),
+      hasTenantHeader: !!request.headers.get("x-tenant-id"),
+    });
+
     const cookieHeader = request.headers.get("cookie") || "";
     const token = readCookie(cookieHeader, "__Host-rp_session");
     if (!token || !env.JWT_SECRET) return json({ error: "unauthorized" }, 401);
@@ -128,12 +138,23 @@ export const onRequestGet: PagesFunction = async ({ request, env }) => {
       FROM app.memberships
       WHERE user_id = ${user_id}
       ORDER BY created_at ASC
-      LIMIT 1
+      LIMIT 50
     `;
-    const tenant_id = tenantRows?.[0]?.tenant_id;
+    const requestedTenantId = String(request.headers.get("x-tenant-id") || "").trim();
+    const tenantList = Array.isArray(tenantRows) ? tenantRows.map((r: any) => String(r.tenant_id || "")) : [];
+    const tenant_id = requestedTenantId && tenantList.includes(requestedTenantId)
+      ? requestedTenantId
+      : (tenantRows?.[0]?.tenant_id || null);
     if (!tenant_id) return json({ error: "no_tenant" }, 403);
+    console.log("[cash-report/summary] tenant resolved", {
+      reqId,
+      user_id,
+      requestedTenantId: requestedTenantId || null,
+      tenant_id,
+      tenantCount: tenantList.length,
+    });
 
-    const url = new URL(request.url);
+    const url = reqUrl;
     const presetRaw = String(url.searchParams.get("preset") || "today").toLowerCase();
     const preset = presetRaw === "week" || presetRaw === "custom" ? presetRaw : "today";
     const from = String(url.searchParams.get("from") || "").trim();
@@ -175,6 +196,17 @@ export const onRequestGet: PagesFunction = async ({ request, env }) => {
 
     const start_ts = rangeRows?.start_ts;
     const end_ts = rangeRows?.end_ts;
+    console.log("[cash-report/summary] range resolved", {
+      reqId,
+      preset,
+      from: from || null,
+      to: to || null,
+      tz,
+      start_ts,
+      end_ts,
+      start_date: rangeRows?.start_date || null,
+      end_date: rangeRows?.end_date || null,
+    });
 
     const [drawerRows, ledgerRows, safeRows, salesRows] = await Promise.all([
       sql/*sql*/`
@@ -322,6 +354,16 @@ export const onRequestGet: PagesFunction = async ({ request, env }) => {
       d.status = Math.abs(d.variance) <= 0.009 ? "balanced" : "needs_review";
     }
 
+    console.log("[cash-report/summary] query counts", {
+      reqId,
+      drawerRows: drawerRows?.length || 0,
+      ledgerRows: ledgerRows?.length || 0,
+      safeRows: safeRows?.length || 0,
+      salesRows: salesRows?.length || 0,
+      drawerSummaryRows: drawerSummary.size,
+      totals,
+    });
+
     const byPathMap = new Map<string, any>();
     for (const r of ledgerRows || []) {
       const key = `${r.from_location}=>${r.to_location}`;
@@ -355,6 +397,10 @@ export const onRequestGet: PagesFunction = async ({ request, env }) => {
       },
     });
   } catch (e: any) {
+    console.error("[cash-report/summary] failed", {
+      message: e?.message || "cash_report_failed",
+      stack: e?.stack || null,
+    });
     return json({ error: e?.message || "cash_report_failed" }, 500);
   }
 };
