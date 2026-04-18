@@ -142,9 +142,7 @@ export const onRequestGet: PagesFunction = async ({ request, env }) => {
     `;
     const requestedTenantId = String(request.headers.get("x-tenant-id") || "").trim();
     const tenantList = Array.isArray(tenantRows) ? tenantRows.map((r: any) => String(r.tenant_id || "")) : [];
-    const tenant_id = requestedTenantId && tenantList.includes(requestedTenantId)
-      ? requestedTenantId
-      : (tenantRows?.[0]?.tenant_id || null);
+    const tenant_id = requestedTenantId || (tenantRows?.[0]?.tenant_id || null);
     if (!tenant_id) return json({ error: "no_tenant" }, 403);
     console.log("[cash-report/summary] tenant resolved", {
       reqId,
@@ -152,6 +150,7 @@ export const onRequestGet: PagesFunction = async ({ request, env }) => {
       requestedTenantId: requestedTenantId || null,
       tenant_id,
       tenantCount: tenantList.length,
+      requestedTenantInMemberships: requestedTenantId ? tenantList.includes(requestedTenantId) : null,
     });
 
     const url = reqUrl;
@@ -385,6 +384,10 @@ export const onRequestGet: PagesFunction = async ({ request, env }) => {
         timezone: tz,
         start_date: rangeRows.start_date,
         end_date: rangeRows.end_date,
+      },
+      _debug: {
+        tenant_id,
+        requested_tenant_id: requestedTenantId || null,
       },
       totals,
       drawer_summary: Array.from(drawerSummary.values()).sort((a, b) => Number(a.drawer) - Number(b.drawer)),

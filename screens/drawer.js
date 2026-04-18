@@ -276,7 +276,9 @@ function setupCashReportUI() {
   if (!canCashEdit()) {
     console.warn('[drawer] setupCashReportUI: canCashEdit is false; report section left visible for diagnostics');
   }
-  const today = new Date().toISOString().slice(0, 10);
+  // Use local calendar date (not UTC) so evening shifts don't jump to "tomorrow".
+  const now = new Date();
+  const today = new Date(now.getTime() - now.getTimezoneOffset() * 60000).toISOString().slice(0, 10);
   if (els.reportFrom && !els.reportFrom.value) els.reportFrom.value = today;
   if (els.reportTo && !els.reportTo.value) els.reportTo.value = today;
   toggleCustomDates();
