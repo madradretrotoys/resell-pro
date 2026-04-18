@@ -241,13 +241,13 @@
      <div class="cd-controls">
        <select id="reportPreset" class="border rounded px-2 py-1">
          <option value="today">Today</option>
-         <option value="week">This Week (Sun-Sat)</option>
+         <option value="week" selected>This Week (Sun-Sat)</option>
          <option value="custom">Custom Range</option>
        </select>
 
        <label class="text-sm">From <input id="reportFrom" type="date" class="border rounded px-2 py-1"></label>
        <label class="text-sm">To <input id="reportTo" type="date" class="border rounded px-2 py-1"></label>
-       <button id="btnReportLoad" class="btn btn--primary btn--sm">Run Report</button>
+       <button id="btnReportLoad" type="button" class="btn btn--primary btn--sm">Run Report</button>
      </div>
 
      <div id="reportStatus" class="text-sm text-gray-600 mt-2"></div>
@@ -258,13 +258,15 @@
        <table class="table w-full text-sm">
          <thead>
            <tr class="border-b">
-             <th class="px-3 py-2 text-left font-medium">Drawer</th>
+             <th class="px-3 py-2 text-left font-medium">Date</th>
              <th class="px-3 py-2 text-left font-medium">Open Counts</th>
              <th class="px-3 py-2 text-left font-medium">Close Counts</th>
+             <th class="px-3 py-2 text-left font-medium">Sales In (Drawer 1)</th>
              <th class="px-3 py-2 text-left font-medium">Moves In</th>
              <th class="px-3 py-2 text-left font-medium">Moves Out</th>
              <th class="px-3 py-2 text-left font-medium">Payouts</th>
-             <th class="px-3 py-2 text-left font-medium">Net Change</th>
+             <th class="px-3 py-2 text-left font-medium">Expected Close</th>
+             <th class="px-3 py-2 text-left font-medium">Variance</th>
            </tr>
          </thead>
          <tbody id="reportDrawerRows"></tbody>
@@ -326,4 +328,3 @@
   
 
   
-
