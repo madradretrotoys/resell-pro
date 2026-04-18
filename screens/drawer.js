@@ -8,9 +8,14 @@ export async function init({ container, session }) {
   sessionUser = session?.user || null;
   bind(container);
   wire();
+  wireCashReportFallback(container);
    // ✅ Load section previews
   await refreshSafePreview();
   await refreshMovementPreview();
+  setupCashReportUI();
+  if (els.cashReportSection && !els.cashReportSection.classList.contains('hidden')) {
+    await loadCashReport();
+  }
   autosize(container);
 }
 
@@ -37,7 +42,8 @@ function bind(root){
 
   // ✅ modal
   'historyModal','historyBackdrop','btnCloseHistory','historyTitle','historySubtitle',
-  'historyLoading','historyEmpty','historyRows'
+  'historyLoading','historyEmpty','historyRows',
+  'cashReportSection','reportPreset','reportFrom','reportTo','btnReportLoad','reportStatus','reportTotals','reportDrawerRows','reportPathRows'
     
   ];
   ids.forEach(id => els[id] = root.querySelector('#' + id));
@@ -91,7 +97,31 @@ function wire(){
   // Modal close
   if (els.btnCloseHistory) els.btnCloseHistory.addEventListener('click', closeHistory);
   if (els.historyBackdrop) els.historyBackdrop.addEventListener('click', closeHistory);
+
+  if (els.btnReportLoad) {
+    els.btnReportLoad.addEventListener('click', loadCashReport);
+    els.__reportBound = true;
+  }
+  if (els.reportPreset) {
+    els.reportPreset.addEventListener('change', () => {
+      toggleCustomDates();
+    });
+  }
 }
+
+function wireCashReportFallback(root) {
+  if (!root || els.__reportBound) return;
+  root.addEventListener('click', (ev) => {
+    const t = ev?.target;
+    if (!(t instanceof Element)) return;
+    const btn = t.closest('#btnReportLoad');
+    if (!btn) return;
+    console.log('[drawer] fallback click handler fired for Run Report');
+    ev.preventDefault();
+    loadCashReport();
+  });
+}
+
 
 
 async function saveSafeCount() {
@@ -124,6 +154,7 @@ async function saveSafeCount() {
     els.safe_notes.value = '';
 
     await refreshSafePreview();
+    if (canLoadCashReportUi()) await loadCashReport();
     
   } catch (e) {
     const status = e?.status || 500;
@@ -213,11 +244,205 @@ async function loadToday(){
   }
 }
 
+
+function canCashEdit() {
+  const direct = sessionUser?.can_cash_edit;
+  if (typeof direct === 'boolean') return direct;
+  if (typeof direct === 'number') return direct === 1;
+  if (typeof direct === 'string') return ['1', 'true', 'yes', 'y'].includes(direct.toLowerCase());
+
+  const perms = sessionUser?.permissions;
+  if (Array.isArray(perms)) {
+    const normalized = perms.map((x) => String(x || '').toLowerCase().trim());
+    return normalized.includes('can_cash_edit')
+      || normalized.includes('cash_edit')
+      || normalized.includes('cash:edit');
+  }
+
+  if (perms && typeof perms === 'object') {
+    const v = perms.can_cash_edit;
+    if (typeof v === 'boolean') return v;
+    if (typeof v === 'number') return v === 1;
+    if (typeof v === 'string') return ['1', 'true', 'yes', 'y'].includes(v.toLowerCase());
+  }
+
+  return false;
+}
+
+function setupCashReportUI() {
+  if (!els.cashReportSection) return;
+
+  els.cashReportSection.classList.remove('hidden');
+  if (!canCashEdit()) {
+    console.warn('[drawer] setupCashReportUI: canCashEdit is false; report section left visible for diagnostics');
+  }
+  // Default managers to current week (Sun-Sat), and show local dates (not UTC).
+  const now = new Date();
+  const localToday = new Date(now.getTime() - now.getTimezoneOffset() * 60000);
+  const weekday = localToday.getDay(); // 0=Sun
+  const weekStart = new Date(localToday);
+  weekStart.setDate(localToday.getDate() - weekday);
+  const weekEnd = new Date(weekStart);
+  weekEnd.setDate(weekStart.getDate() + 6);
+  const ymd = (d) => new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 10);
+
+  if (els.reportPreset) els.reportPreset.value = 'week';
+  if (els.reportFrom) els.reportFrom.value = ymd(weekStart);
+  if (els.reportTo) els.reportTo.value = ymd(weekEnd);
+  toggleCustomDates();
+}
+
+function toggleCustomDates() {
+  const isCustom = (els.reportPreset?.value || 'today') === 'custom';
+  if (els.reportFrom) els.reportFrom.disabled = !isCustom;
+  if (els.reportTo) els.reportTo.disabled = !isCustom;
+}
+
+function canLoadCashReportUi() {
+  return !!(els.cashReportSection && !els.cashReportSection.classList.contains('hidden'));
+}
+
+async function loadCashReport() {
+  if (!els.btnReportLoad) {
+    console.warn('[drawer] loadCashReport skipped', {
+      canCashEdit: canCashEdit(),
+      hasButton: !!els.btnReportLoad,
+    });
+    return;
+  }
+
+  const preset = (els.reportPreset?.value || 'today').toLowerCase();
+  const from = (els.reportFrom?.value || '').trim();
+  const to = (els.reportTo?.value || '').trim();
+  const reqId = Math.random().toString(36).slice(2, 10);
+
+  if (preset === 'custom' && (!from || !to)) {
+    showToast('Choose from and to dates for custom report');
+    return;
+  }
+
+  try {
+    els.btnReportLoad.disabled = true;
+    if (els.reportStatus) els.reportStatus.textContent = 'Loading report…';
+
+    const q = new URLSearchParams({ preset });
+    if (preset === 'custom') {
+      q.set('from', from);
+      q.set('to', to);
+    }
+    console.log('[drawer] loadCashReport:start', { reqId, preset, from, to, query: q.toString() });
+
+    const data = await api(`/api/cash-report/summary?${q.toString()}`);
+    console.log('[drawer] loadCashReport:success', {
+      reqId,
+      ok: !!data?.ok,
+      range: data?.range || null,
+      totals: data?.totals || null,
+      counts: {
+        drawer_summary: Array.isArray(data?.drawer_summary) ? data.drawer_summary.length : 0,
+        movement_paths: Array.isArray(data?.movement_paths) ? data.movement_paths.length : 0,
+        drawer_counts: Array.isArray(data?.activity?.drawer_counts) ? data.activity.drawer_counts.length : 0,
+        safe_counts: Array.isArray(data?.activity?.safe_counts) ? data.activity.safe_counts.length : 0,
+        ledger_moves: Array.isArray(data?.activity?.ledger_moves) ? data.activity.ledger_moves.length : 0,
+        cash_sales: Array.isArray(data?.activity?.cash_sales) ? data.activity.cash_sales.length : 0,
+      },
+    });
+    renderCashReport(data);
+  } catch (e) {
+    console.error('[drawer] loadCashReport:failed', {
+      reqId,
+      message: e?.message || String(e),
+      status: e?.status || null,
+      data: e?.data || null,
+    });
+    if (els.reportStatus) els.reportStatus.textContent = 'Report failed to load';
+    showToast('Cash report failed');
+  } finally {
+    els.btnReportLoad.disabled = false;
+  }
+}
+
+function renderCashReport(data) {
+  const totals = data?.totals || {};
+  const range = data?.range || {};
+  console.log('[drawer] renderCashReport', {
+    range,
+    totals,
+    drawerSummaryCount: Array.isArray(data?.drawer_summary) ? data.drawer_summary.length : 0,
+    movementPathCount: Array.isArray(data?.movement_paths) ? data.movement_paths.length : 0,
+  });
+
+  if (els.reportStatus) {
+    els.reportStatus.textContent = `${range.start_date || ''} to ${range.end_date || ''} (${(range.timezone || '').toString()})`;
+  }
+
+  if (els.reportTotals) {
+    // Totals card strip intentionally hidden per manager request.
+    els.reportTotals.innerHTML = '';
+  }
+
+  if (els.reportDrawerRows) {
+    const groups = Array.isArray(data?.daily_by_drawer) ? data.daily_by_drawer : [];
+    els.reportDrawerRows.innerHTML = groups.length ? groups.map((g) => {
+      const dayRows = (Array.isArray(g.days) ? g.days : []).map((r) => {
+        const variance = Number(r.variance || 0);
+        const varianceClass = Math.abs(variance) > 0.009 ? 'text-red-700 font-semibold' : 'text-green-700';
+        return `
+          <tr class="border-b">
+            <td class="px-3 py-2">${r.date}</td>
+            <td class="px-3 py-2">${fmtMoney(r.open_total)}</td>
+            <td class="px-3 py-2">${fmtMoney(r.close_total)}</td>
+            <td class="px-3 py-2">${fmtMoney(r.sales_in)}</td>
+            <td class="px-3 py-2">${fmtMoney(r.movement_in)}</td>
+            <td class="px-3 py-2">${fmtMoney(r.movement_out)}</td>
+            <td class="px-3 py-2">${fmtMoney(r.payout_out)}</td>
+            <td class="px-3 py-2">${fmtMoney(r.expected_close)}</td>
+            <td class="px-3 py-2 ${varianceClass}">${fmtMoney(r.variance)}</td>
+          </tr>
+        `;
+      }).join('');
+
+      const t = g.totals || {};
+      const totalVar = Number(t.variance || 0);
+      const totalVarClass = Math.abs(totalVar) > 0.009 ? 'text-red-700 font-semibold' : 'text-green-700';
+
+      return `
+        <tr class="bg-gray-50 border-y">
+          <td class="px-3 py-2 font-semibold" colspan="9">Drawer ${g.drawer}</td>
+        </tr>
+        ${dayRows}
+        <tr class="border-b bg-gray-50">
+          <td class="px-3 py-2 font-semibold">Totals</td>
+          <td class="px-3 py-2 font-semibold">${fmtMoney(t.open_total)}</td>
+          <td class="px-3 py-2 font-semibold">${fmtMoney(t.close_total)}</td>
+          <td class="px-3 py-2 font-semibold">${fmtMoney(t.sales_in)}</td>
+          <td class="px-3 py-2 font-semibold">${fmtMoney(t.movement_in)}</td>
+          <td class="px-3 py-2 font-semibold">${fmtMoney(t.movement_out)}</td>
+          <td class="px-3 py-2 font-semibold">${fmtMoney(t.payout_out)}</td>
+          <td class="px-3 py-2 font-semibold">${fmtMoney(t.expected_close)}</td>
+          <td class="px-3 py-2 font-semibold ${totalVarClass}">${fmtMoney(t.variance)}</td>
+        </tr>
+      `;
+    }).join('') : '<tr><td class="px-3 py-2 text-gray-600" colspan="9">No drawer activity in range.</td></tr>';
+  }
+
+  if (els.reportPathRows) {
+    const rows = Array.isArray(data?.movement_paths) ? data.movement_paths : [];
+    els.reportPathRows.innerHTML = rows.length ? rows.map((r) => `
+      <tr class="border-b">
+        <td class="px-3 py-2">${r.from_location} → ${r.to_location}</td>
+        <td class="px-3 py-2">${Number(r.moves || 0)}</td>
+        <td class="px-3 py-2">${fmtMoney(r.amount_total)}</td>
+      </tr>
+    `).join('') : '<tr><td class="px-3 py-2 text-gray-600" colspan="3">No movements in range.</td></tr>';
+  }
+}
+
 function renderBalanceBanner(data) {
   if (!els.balanceBanner) return;
 
    // can_cash_edit may be exposed either directly on the user or nested under permissions
-  const canEdit = !!(sessionUser?.permissions?.can_cash_edit ?? sessionUser?.can_cash_edit);
+  const canEdit = canCashEdit();
 
   const status = String(data?.review_status || '');
   const expected = Number(data?.expected_at_latest ?? NaN);
@@ -304,6 +529,7 @@ async function saveMovement() {
     // Refresh today payload (so expected/variance reflects new movement)
     await loadToday();
     await refreshMovementPreview();
+    if (canLoadCashReportUi()) await loadCashReport();
 
   } catch (e) {
     const status = e?.status || 500;
@@ -506,6 +732,7 @@ async function save(){
     els.status.textContent = `Saved (${resp.count_id})`;
     // Refresh banner/status after save
     await loadToday();
+    if (canLoadCashReportUi()) await loadCashReport();
   }catch(e){
     const status = e?.status || 500;
     if(status === 409){

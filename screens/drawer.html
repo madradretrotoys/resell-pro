@@ -230,6 +230,63 @@
 
    </section>
 
+   <section id="cashReportSection" class="cd-card hidden">
+     <div class="flex items-start justify-between gap-3 mb-2">
+       <div>
+         <h3 class="font-medium">Cash Movement Reporting</h3>
+         <div class="text-xs text-gray-600 mt-0.5">Daily, weekly (Sunday-Saturday), and custom range reporting for managers.</div>
+       </div>
+     </div>
+
+     <div class="cd-controls">
+       <select id="reportPreset" class="border rounded px-2 py-1">
+         <option value="today">Today</option>
+         <option value="week" selected>This Week (Sun-Sat)</option>
+         <option value="custom">Custom Range</option>
+       </select>
+
+       <label class="text-sm">From <input id="reportFrom" type="date" class="border rounded px-2 py-1"></label>
+       <label class="text-sm">To <input id="reportTo" type="date" class="border rounded px-2 py-1"></label>
+       <button id="btnReportLoad" type="button" class="btn btn--primary btn--sm">Run Report</button>
+     </div>
+
+     <div id="reportStatus" class="text-sm text-gray-600 mt-2"></div>
+
+     <div id="reportTotals" class="mt-3 grid grid-cols-1 md:grid-cols-3 gap-2 text-sm"></div>
+
+     <div class="overflow-auto mt-3">
+       <table class="table w-full text-sm">
+         <thead>
+           <tr class="border-b">
+             <th class="px-3 py-2 text-left font-medium">Date</th>
+             <th class="px-3 py-2 text-left font-medium">Open Counts</th>
+             <th class="px-3 py-2 text-left font-medium">Close Counts</th>
+             <th class="px-3 py-2 text-left font-medium">Sales In (Drawer 1)</th>
+             <th class="px-3 py-2 text-left font-medium">Moves In</th>
+             <th class="px-3 py-2 text-left font-medium">Moves Out</th>
+             <th class="px-3 py-2 text-left font-medium">Payouts</th>
+             <th class="px-3 py-2 text-left font-medium">Expected Close</th>
+             <th class="px-3 py-2 text-left font-medium">Variance</th>
+           </tr>
+         </thead>
+         <tbody id="reportDrawerRows"></tbody>
+       </table>
+     </div>
+
+     <div class="overflow-auto mt-3">
+       <table class="table w-full text-sm">
+         <thead>
+           <tr class="border-b">
+             <th class="px-3 py-2 text-left font-medium">Movement Path</th>
+             <th class="px-3 py-2 text-left font-medium">Moves</th>
+             <th class="px-3 py-2 text-left font-medium">Total</th>
+           </tr>
+         </thead>
+         <tbody id="reportPathRows"></tbody>
+       </table>
+     </div>
+   </section>
+
    <!-- History Modal (reusable) -->
    <div id="historyModal" class="fixed inset-0 z-50 hidden">
      <div class="absolute inset-0 bg-black/40" id="historyBackdrop"></div>
@@ -271,4 +328,3 @@
   
 
   
-

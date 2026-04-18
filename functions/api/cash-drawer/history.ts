@@ -61,6 +61,15 @@ export const onRequestGet: PagesFunction = async ({ request, env }) => {
 
     const payload = await verifyJwt(token, String(env.JWT_SECRET));
     const uid = String(payload?.sub || "");
+    const tenantRows = await sql/*sql*/`
+      SELECT tenant_id
+      FROM app.memberships
+      WHERE user_id = ${uid}
+      ORDER BY created_at ASC
+      LIMIT 1
+    `;
+    const tenant_id = tenantRows?.[0]?.tenant_id;
+    if (!tenant_id) return json({ error: "no_tenant" }, 403);
 
     // ✅ Optional permission gate
     const permRows = await sql/*sql*/`
@@ -84,7 +93,8 @@ export const onRequestGet: PagesFunction = async ({ request, env }) => {
         grand_total,
         notes
       FROM app.cash_drawer_counts
-      WHERE drawer = ${drawer}
+      WHERE tenant_id = ${tenant_id}::uuid
+        AND drawer = ${drawer}
         AND count_ts >= now() - interval '30 days'
       ORDER BY count_ts DESC
       LIMIT ${limit}
