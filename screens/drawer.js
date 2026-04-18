@@ -382,27 +382,45 @@ function renderCashReport(data) {
   }
 
   if (els.reportDrawerRows) {
-    const rows = Array.isArray(data?.drawer_summary) ? data.drawer_summary : [];
-    els.reportDrawerRows.innerHTML = rows.length ? rows.map((r) => {
-      const salesIn = Number(r.sales_in || 0);
-      const inAmt = Number(r.movement_in || 0);
-      const outAmt = Number(r.movement_out || 0);
-      const payout = Number(r.payout_out || 0);
-      const expectedClose = Number(r.expected_close || 0);
-      const variance = Number(r.variance || 0);
-      const needsReview = String(r.status || '').toLowerCase() === 'needs_review';
-      const varianceClass = needsReview ? 'text-red-700 font-semibold' : 'text-green-700';
+    const groups = Array.isArray(data?.daily_by_drawer) ? data.daily_by_drawer : [];
+    els.reportDrawerRows.innerHTML = groups.length ? groups.map((g) => {
+      const dayRows = (Array.isArray(g.days) ? g.days : []).map((r) => {
+        const variance = Number(r.variance || 0);
+        const varianceClass = Math.abs(variance) > 0.009 ? 'text-red-700 font-semibold' : 'text-green-700';
+        return `
+          <tr class="border-b">
+            <td class="px-3 py-2">${r.date}</td>
+            <td class="px-3 py-2">${fmtMoney(r.open_total)}</td>
+            <td class="px-3 py-2">${fmtMoney(r.close_total)}</td>
+            <td class="px-3 py-2">${fmtMoney(r.sales_in)}</td>
+            <td class="px-3 py-2">${fmtMoney(r.movement_in)}</td>
+            <td class="px-3 py-2">${fmtMoney(r.movement_out)}</td>
+            <td class="px-3 py-2">${fmtMoney(r.payout_out)}</td>
+            <td class="px-3 py-2">${fmtMoney(r.expected_close)}</td>
+            <td class="px-3 py-2 ${varianceClass}">${fmtMoney(r.variance)}</td>
+          </tr>
+        `;
+      }).join('');
+
+      const t = g.totals || {};
+      const totalVar = Number(t.variance || 0);
+      const totalVarClass = Math.abs(totalVar) > 0.009 ? 'text-red-700 font-semibold' : 'text-green-700';
+
       return `
-        <tr class="border-b">
-          <td class="px-3 py-2">Drawer ${r.drawer}</td>
-          <td class="px-3 py-2">${fmtMoney(r.open_total)}</td>
-          <td class="px-3 py-2">${fmtMoney(r.close_total)}</td>
-          <td class="px-3 py-2">${fmtMoney(salesIn)}</td>
-          <td class="px-3 py-2">${fmtMoney(inAmt)}</td>
-          <td class="px-3 py-2">${fmtMoney(outAmt)}</td>
-          <td class="px-3 py-2">${fmtMoney(payout)}</td>
-          <td class="px-3 py-2">${fmtMoney(expectedClose)}</td>
-          <td class="px-3 py-2 ${varianceClass}">${fmtMoney(variance)}</td>
+        <tr class="bg-gray-50 border-y">
+          <td class="px-3 py-2 font-semibold" colspan="9">Drawer ${g.drawer}</td>
+        </tr>
+        ${dayRows}
+        <tr class="border-b bg-gray-50">
+          <td class="px-3 py-2 font-semibold">Totals</td>
+          <td class="px-3 py-2 font-semibold">${fmtMoney(t.open_total)}</td>
+          <td class="px-3 py-2 font-semibold">${fmtMoney(t.close_total)}</td>
+          <td class="px-3 py-2 font-semibold">${fmtMoney(t.sales_in)}</td>
+          <td class="px-3 py-2 font-semibold">${fmtMoney(t.movement_in)}</td>
+          <td class="px-3 py-2 font-semibold">${fmtMoney(t.movement_out)}</td>
+          <td class="px-3 py-2 font-semibold">${fmtMoney(t.payout_out)}</td>
+          <td class="px-3 py-2 font-semibold">${fmtMoney(t.expected_close)}</td>
+          <td class="px-3 py-2 font-semibold ${totalVarClass}">${fmtMoney(t.variance)}</td>
         </tr>
       `;
     }).join('') : '<tr><td class="px-3 py-2 text-gray-600" colspan="9">No drawer activity in range.</td></tr>';

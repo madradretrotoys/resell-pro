@@ -103,6 +103,35 @@ function parseCashFromParts(parts: any): number {
   return toMoney(sum);
 }
 
+function ymdInTz(ts: any, tz: string): string | null {
+  if (!ts) return null;
+  try {
+    const d = ts instanceof Date ? ts : new Date(ts);
+    if (!Number.isFinite(d.getTime())) return null;
+    const parts = new Intl.DateTimeFormat("en-CA", {
+      timeZone: tz,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    }).formatToParts(d).reduce((acc: any, p: any) => ((acc[p.type] = p.value), acc), {});
+    return `${parts.year}-${parts.month}-${parts.day}`;
+  } catch {
+    return null;
+  }
+}
+
+function enumerateDateKeys(startYmd: string, endYmd: string): string[] {
+  if (!startYmd || !endYmd || startYmd > endYmd) return [];
+  const out: string[] = [];
+  const cur = new Date(`${startYmd}T00:00:00Z`);
+  const end = new Date(`${endYmd}T00:00:00Z`);
+  while (cur <= end) {
+    out.push(cur.toISOString().slice(0, 10));
+    cur.setUTCDate(cur.getUTCDate() + 1);
+  }
+  return out;
+}
+
 export const onRequestGet: PagesFunction = async ({ request, env }) => {
   try {
     const reqUrl = new URL(request.url);
@@ -180,9 +209,15 @@ export const onRequestGet: PagesFunction = async ({ request, env }) => {
           ? sql/*sql*/`
               SELECT
                 ((date_trunc('week', (now() AT TIME ZONE ${tz}) + interval '1 day') - interval '1 day') AT TIME ZONE ${tz}) AS start_ts,
-                (((date_trunc('week', (now() AT TIME ZONE ${tz}) + interval '1 day') - interval '1 day') + interval '7 day') AT TIME ZONE ${tz}) AS end_ts,
+                LEAST(
+                  (((date_trunc('week', (now() AT TIME ZONE ${tz}) + interval '1 day') - interval '1 day') + interval '7 day') AT TIME ZONE ${tz}),
+                  ((date_trunc('day', now() AT TIME ZONE ${tz}) + interval '1 day') AT TIME ZONE ${tz})
+                ) AS end_ts,
                 to_char((date_trunc('week', (now() AT TIME ZONE ${tz}) + interval '1 day') - interval '1 day')::date, 'YYYY-MM-DD') AS start_date,
-                to_char(((date_trunc('week', (now() AT TIME ZONE ${tz}) + interval '1 day') - interval '1 day') + interval '6 day')::date, 'YYYY-MM-DD') AS end_date
+                to_char(LEAST(
+                  ((date_trunc('week', (now() AT TIME ZONE ${tz}) + interval '1 day') - interval '1 day') + interval '6 day')::date,
+                  (now() AT TIME ZONE ${tz})::date
+                ), 'YYYY-MM-DD') AS end_date
             `
           : sql/*sql*/`
               SELECT
@@ -354,6 +389,101 @@ export const onRequestGet: PagesFunction = async ({ request, env }) => {
       d.status = Math.abs(d.variance) <= 0.009 ? "balanced" : "needs_review";
     }
 
+    const allDateKeys = enumerateDateKeys(String(rangeRows?.start_date || ""), String(rangeRows?.end_date || ""));
+    const drawerIds = new Set<string>(Array.from(drawerSummary.keys()));
+    if (!drawerIds.size) {
+      drawerIds.add("1");
+      drawerIds.add("2");
+    }
+
+    const dailyMap = new Map<string, any>();
+    const ensureDaily = (drawer: string, date: string) => {
+      const key = `${drawer}::${date}`;
+      if (!dailyMap.has(key)) {
+        dailyMap.set(key, {
+          drawer,
+          date,
+          open_total: 0,
+          close_total: 0,
+          sales_in: 0,
+          movement_in: 0,
+          movement_out: 0,
+          payout_out: 0,
+          expected_close: 0,
+          variance: 0,
+        });
+      }
+      return dailyMap.get(key);
+    };
+
+    for (const date of allDateKeys) for (const d of drawerIds) ensureDaily(d, date);
+
+    for (const r of drawerRows || []) {
+      const d = String(r.drawer || "");
+      const date = ymdInTz(r.count_ts, tz);
+      if (!d || !date) continue;
+      const row = ensureDaily(d, date);
+      const amt = toMoney(r.grand_total);
+      if (String(r.period || "").toUpperCase() === "OPEN") row.open_total += amt;
+      if (String(r.period || "").toUpperCase() === "CLOSE") row.close_total += amt;
+    }
+
+    for (const r of ledgerRows || []) {
+      const date = ymdInTz(r.created_at, tz);
+      if (!date) continue;
+      const amt = toMoney(r.amount);
+      const fromDrawer = String(r.from_location || "").match(/^Drawer\s+(\d+)$/i)?.[1] || null;
+      const toDrawer = String(r.to_location || "").match(/^Drawer\s+(\d+)$/i)?.[1] || null;
+      if (toDrawer) ensureDaily(toDrawer, date).movement_in += amt;
+      if (fromDrawer) {
+        if (/^purchase$/i.test(String(r.to_location || ""))) ensureDaily(fromDrawer, date).payout_out += amt;
+        else ensureDaily(fromDrawer, date).movement_out += amt;
+      }
+    }
+
+    for (const s of salesRows || []) {
+      const date = ymdInTz(s.sale_ts, tz);
+      if (!date) continue;
+      const saleTotal = toMoney(s.total);
+      let cashAmt = parseCashFromParts((typeof s.items_json === "object" && s.items_json) ? (s.items_json as any)?.payment_parts : null);
+      if (!(cashAmt > 0)) cashAmt = parseCashFromPaymentMethod(s.payment_method, saleTotal);
+      if (cashAmt > 0) ensureDaily("1", date).sales_in += cashAmt;
+    }
+
+    const daily_by_drawer = Array.from(drawerIds)
+      .sort((a, b) => Number(a) - Number(b))
+      .map((drawer) => {
+        const days = allDateKeys
+          .map((date) => ensureDaily(drawer, date))
+          .map((r) => {
+            r.open_total = toMoney(r.open_total);
+            r.close_total = toMoney(r.close_total);
+            r.sales_in = toMoney(r.sales_in);
+            r.movement_in = toMoney(r.movement_in);
+            r.movement_out = toMoney(r.movement_out);
+            r.payout_out = toMoney(r.payout_out);
+            r.expected_close = toMoney(r.open_total + r.sales_in + r.movement_in - r.movement_out - r.payout_out);
+            r.variance = toMoney(r.close_total - r.expected_close);
+            return r;
+          })
+          .sort((a, b) => b.date.localeCompare(a.date)); // Today at top, Sunday bottom.
+
+        const totalsRow = days.reduce((acc, r) => ({
+          open_total: toMoney(acc.open_total + r.open_total),
+          close_total: toMoney(acc.close_total + r.close_total),
+          sales_in: toMoney(acc.sales_in + r.sales_in),
+          movement_in: toMoney(acc.movement_in + r.movement_in),
+          movement_out: toMoney(acc.movement_out + r.movement_out),
+          payout_out: toMoney(acc.payout_out + r.payout_out),
+          expected_close: toMoney(acc.expected_close + r.expected_close),
+          variance: toMoney(acc.variance + r.variance),
+        }), {
+          open_total: 0, close_total: 0, sales_in: 0, movement_in: 0, movement_out: 0, payout_out: 0, expected_close: 0, variance: 0,
+        });
+
+        return { drawer, days, totals: totalsRow };
+      });
+
     console.log("[cash-report/summary] query counts", {
       reqId,
       drawerRows: drawerRows?.length || 0,
@@ -392,6 +522,7 @@ export const onRequestGet: PagesFunction = async ({ request, env }) => {
       },
       totals,
       drawer_summary: Array.from(drawerSummary.values()).sort((a, b) => Number(a.drawer) - Number(b.drawer)),
+      daily_by_drawer,
       movement_paths: Array.from(byPathMap.values()).sort((a, b) => b.amount_total - a.amount_total),
       activity: {
         drawer_counts: drawerRows,
