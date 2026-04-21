@@ -96,6 +96,8 @@ function renderCashMovementSummary() {
   const movementOut = Number(totals.movement_out_total || 0);
   const payoutOut = Number(totals.payout_total || 0);
   const netMovement = movementIn - movementOut - payoutOut;
+  const endDate = state.cashSummary?.range?.end_date || null;
+  const byDrawer = Array.isArray(state.cashSummary?.daily_by_drawer) ? state.cashSummary.daily_by_drawer : [];
 
   if (els.cashMovementSubtitle) {
     const start = state.cashSummary?.range?.start_date;
@@ -106,6 +108,32 @@ function renderCashMovementSummary() {
         : `Summary for ${start} to ${end}.`;
     }
   }
+
+  const drawerRows = byDrawer
+    .map((group) => {
+      const days = Array.isArray(group?.days) ? group.days : [];
+      const dayRow = (endDate ? days.find((d) => String(d?.date || '') === String(endDate)) : null) || days[0] || null;
+      if (!dayRow) return '';
+
+      const variance = Number(dayRow.variance || 0);
+      const varianceColor = Math.abs(variance) <= 0.009 ? '#166534' : '#b91c1c';
+
+      return `
+        <tr>
+          <td>${escapeHtml(String(group?.drawer || '—'))}</td>
+          <td>${fmtMoney(dayRow.open_total)}</td>
+          <td>${fmtMoney(dayRow.close_total)}</td>
+          <td>${fmtMoney(dayRow.sales_in)}</td>
+          <td>${fmtMoney(dayRow.movement_in)}</td>
+          <td>${fmtMoney(dayRow.movement_out)}</td>
+          <td>${fmtMoney(dayRow.payout_out)}</td>
+          <td>${fmtMoney(dayRow.expected_close)}</td>
+          <td style="color:${varianceColor}; font-weight:700;">${fmtMoney(variance)}</td>
+        </tr>
+      `;
+    })
+    .filter(Boolean)
+    .join('');
 
   els.cashMovementSummary.innerHTML = `
     <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(170px, 1fr)); gap:10px;">
@@ -129,6 +157,27 @@ function renderCashMovementSummary() {
         <div class="muted">Ledger Entries</div>
         <div style="font-weight:700; font-size:1.05rem;">${ledgerMoves.length}</div>
       </div>
+    </div>
+
+    <div class="table-wrap" style="margin-top:12px;">
+      <table class="table">
+        <thead>
+          <tr>
+            <th>Drawer</th>
+            <th>Open</th>
+            <th>Close</th>
+            <th>Sales In</th>
+            <th>Moves In</th>
+            <th>Moves Out</th>
+            <th>Payouts</th>
+            <th>Expected Close</th>
+            <th>Variance</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${drawerRows || '<tr><td colspan="9" class="muted">No drawer data found for today.</td></tr>'}
+        </tbody>
+      </table>
     </div>
   `;
 }
