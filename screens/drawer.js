@@ -688,9 +688,9 @@ function parseCashFromPaymentMethod(paymentMethod, saleTotal) {
 function getVarianceClass(amount, isTotal) {
   const x = Number(amount || 0);
   const strong = isTotal ? 'font-bold' : 'font-semibold';
-  if (Math.abs(x) <= 0.009) return `text-green-700 ${strong}`;
-  if (x > 0) return `text-orange-600 ${strong}`;
-  return `text-red-700 ${strong}`;
+  if (Math.abs(x) <= 0.009) return `report-variance-zero ${strong}`;
+  if (x > 0) return `report-variance-over ${strong}`;
+  return `report-variance-under ${strong}`;
 }
 
 function getDrawerRowClass(drawer) {
