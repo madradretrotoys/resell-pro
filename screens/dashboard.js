@@ -217,9 +217,14 @@ function renderMyStatus() {
 
   if (els.myStatusCard) els.myStatusCard.style.display = isClockinRequired ? '' : 'none';
   if (!isClockinRequired) {
-    if (els.dashIntro) els.dashIntro.textContent = 'Your timekeeping status is up to date.';
+    if (els.dashIntro) {
+      els.dashIntro.textContent = '';
+      els.dashIntro.style.display = 'none';
+    }
     return;
   }
+
+  if (els.dashIntro) els.dashIntro.style.display = '';
 
   const entry = state.todayEntry;
   const status = deriveStatus(entry);
