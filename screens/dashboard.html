@@ -2,7 +2,7 @@
   <h1>Dashboard</h1>
   <p class="muted" id="dashIntro">Checking your timekeeping status…</p>
 
-  <section class="tile" style="margin-top:12px;">
+  <section class="tile" id="myStatusCard" style="margin-top:12px;">
     <h3 style="margin-top:0;">My Status</h3>
     <p id="myStatusLine">—</p>
     <p id="myLastClockOut" class="muted">Last clock out: —</p>
@@ -13,6 +13,19 @@
     <p id="myPrompt" style="display:none; margin-top:8px; color:#b45309; font-weight:600;">
       You are signed in but not clocked in.
     </p>
+  </section>
+
+
+  <section class="tile" id="cashMovementCard" style="margin-top:12px; display:none;">
+    <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; flex-wrap:wrap;">
+      <div>
+        <h3 style="margin:0;">Cash Movement Reporting (Today)</h3>
+        <p class="muted" id="cashMovementSubtitle" style="margin:4px 0 0;">Summary of today's cash movement activity.</p>
+      </div>
+      <a class="btn btn-ghost" href="?page=drawer">Open Cash Tracking</a>
+    </div>
+
+    <div id="cashMovementSummary" class="muted" style="margin-top:10px;">Loading cash movement summary…</div>
   </section>
 
   <section class="tile" id="teamStatusCard" style="margin-top:12px; display:none;">

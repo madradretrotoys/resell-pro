@@ -36,6 +36,12 @@
     width: 80px;
     min-width: 80px;
   }
+  .cd-amt {
+    min-width: 64px;
+    text-align: right;
+    font-size: 12px;
+    color: #475569;
+  }
 
   /* Notes */
   .cd-card textarea {
@@ -73,6 +79,111 @@
       width: 100%;
     }
   }
+
+  .report-drawer-1 {
+    background: #eff6ff;
+  }
+
+  .report-drawer-2 {
+    background: #f5f3ff;
+  }
+
+  .report-total-row {
+    font-weight: 700;
+    background: #f8fafc;
+  }
+
+  .report-detail-row {
+    background: #ffffff;
+  }
+
+  .report-detail-box {
+    border: 1px solid #e2e8f0;
+    border-radius: 10px;
+    padding: 10px;
+    margin: 8px 0;
+    display: grid;
+    gap: 10px;
+    background: #f8fafc;
+  }
+
+  .report-detail-section {
+    border: 1px solid #e2e8f0;
+    border-radius: 8px;
+    background: #ffffff;
+    overflow: hidden;
+  }
+
+  .report-detail-heading {
+    font-weight: 700;
+    font-size: 0.9rem;
+    padding: 8px 10px;
+    border-bottom: 1px solid #e2e8f0;
+    background: #f1f5f9;
+    color: #0f172a;
+  }
+
+  .report-detail-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+  }
+
+  .report-detail-item {
+    padding: 8px 10px;
+    border-bottom: 1px solid #f1f5f9;
+  }
+
+  .report-detail-item:last-child {
+    border-bottom: 0;
+  }
+
+  .report-detail-main {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 6px;
+    color: #0f172a;
+  }
+
+  .report-detail-datetime {
+    font-weight: 600;
+    color: #1e293b;
+  }
+
+  .report-detail-label {
+    color: #334155;
+  }
+
+  .report-detail-amount {
+    font-weight: 700;
+    color: #0f172a;
+    margin-left: auto;
+  }
+
+  .report-detail-note {
+    margin-top: 2px;
+    font-size: 0.78rem;
+    color: #64748b;
+  }
+
+  .report-detail-empty {
+    padding: 10px;
+    font-size: 0.82rem;
+    color: #64748b;
+  }
+
+  .report-variance-zero {
+    color: #15803d !important;
+  }
+
+  .report-variance-over {
+    color: #ca8a04 !important;
+  }
+
+  .report-variance-under {
+    color: #b91c1c !important;
+  }
 </style>
 
 <div class="p-2 space-y-3 sm:p-4">
@@ -98,30 +209,60 @@
       <div id="balanceBanner" class="hidden mb-2 p-2 rounded border text-sm"></div> 
       <div class="cd-controls">
          <select id="drawer" class="border rounded px-2 py-1">
+           <option value="">Select drawer…</option>
            <option value="1">Mad Rad</option>
            <option value="2">Nichols</option>
          </select>
-          <select id="period" class="border rounded px-2 py-1">
+         <select id="period" class="border rounded px-2 py-1 drawer-required" disabled>
            <option value="">Select period…</option>
            <option value="OPEN">Open</option>
            <option value="CLOSE">Close</option>
          </select>
-         <button id="btnLoad" class="btn btn--neutral btn--sm">Load Today</button> 
+         <button id="btnLoad" class="btn btn--neutral btn--sm drawer-required" disabled>Load Today</button> 
       </div>
+      <h4 class="text-sm font-semibold mt-2 mb-1">Commonly Used</h4>
+      <h5 class="text-xs font-semibold mt-2 mb-1 uppercase tracking-wide text-gray-600">Loose Coins</h5>
       <div class="cd-grid">
-        <label class="cd-field"><span>Pennies (1¢)</span><input type="number" id="pennies" class="border rounded px-2 py-1" min="0" step="1"></label>
-        <label class="cd-field"><span>Nickels (5¢)</span><input type="number" id="nickels" class="border rounded px-2 py-1" min="0" step="1"></label>
-        <label class="cd-field"><span>Dimes (10¢)</span><input type="number" id="dimes" class="border rounded px-2 py-1" min="0" step="1"></label>
-        <label class="cd-field"><span>Quarters (25¢)</span><input type="number" id="quarters" class="border rounded px-2 py-1" min="0" step="1"></label>
-        <label class="cd-field"><span>Half-dollars (50¢)</span><input type="number" id="halfdollars" class="border rounded px-2 py-1" min="0" step="1"></label>
+        <label class="cd-field"><span>Pennies (1¢)</span><input type="number" id="pennies" class="border rounded px-2 py-1 count-required" min="0" step="1" disabled><span class="cd-amt" id="amt_pennies">$0.00</span></label>
+        <label class="cd-field"><span>Nickels (5¢)</span><input type="number" id="nickels" class="border rounded px-2 py-1 count-required" min="0" step="1" disabled><span class="cd-amt" id="amt_nickels">$0.00</span></label>
+        <label class="cd-field"><span>Dimes (10¢)</span><input type="number" id="dimes" class="border rounded px-2 py-1 count-required" min="0" step="1" disabled><span class="cd-amt" id="amt_dimes">$0.00</span></label>
+        <label class="cd-field"><span>Quarters (25¢)</span><input type="number" id="quarters" class="border rounded px-2 py-1 count-required" min="0" step="1" disabled><span class="cd-amt" id="amt_quarters">$0.00</span></label>
+      </div>
 
-         <label class="cd-field"><span>$1s</span><input type="number" id="ones" class="border rounded px-2 py-1" min="0" step="1"></label>
-        <label class="cd-field"><span>$2s</span><input type="number" id="twos" class="border rounded px-2 py-1" min="0" step="1"></label>
-        <label class="cd-field"><span>$5s</span><input type="number" id="fives" class="border rounded px-2 py-1" min="0" step="1"></label>
-        <label class="cd-field"><span>$10s</span><input type="number" id="tens" class="border rounded px-2 py-1" min="0" step="1"></label>
-        <label class="cd-field"><span>$20s</span><input type="number" id="twenties" class="border rounded px-2 py-1" min="0" step="1"></label>
-        <label class="cd-field"><span>$50s</span><input type="number" id="fifties" class="border rounded px-2 py-1" min="0" step="1"></label>
-        <label class="cd-field"><span>$100s</span><input type="number" id="hundreds" class="border rounded px-2 py-1" min="0" step="1"></label>
+      <h5 class="text-xs font-semibold mt-2 mb-1 uppercase tracking-wide text-gray-600">Rolls</h5>
+      <div class="cd-grid">
+        <label class="cd-field"><span>Penny rolls</span><input type="number" id="penny_rolls" class="border rounded px-2 py-1 count-required" min="0" step="1" disabled><span class="cd-amt" id="amt_penny_rolls">$0.00</span></label>
+        <label class="cd-field"><span>Nickel rolls</span><input type="number" id="nickel_rolls" class="border rounded px-2 py-1 count-required" min="0" step="1" disabled><span class="cd-amt" id="amt_nickel_rolls">$0.00</span></label>
+        <label class="cd-field"><span>Dime rolls</span><input type="number" id="dime_rolls" class="border rounded px-2 py-1 count-required" min="0" step="1" disabled><span class="cd-amt" id="amt_dime_rolls">$0.00</span></label>
+        <label class="cd-field"><span>Quarter rolls</span><input type="number" id="quarter_rolls" class="border rounded px-2 py-1 count-required" min="0" step="1" disabled><span class="cd-amt" id="amt_quarter_rolls">$0.00</span></label>
+      </div>
+
+      <h5 class="text-xs font-semibold mt-2 mb-1 uppercase tracking-wide text-gray-600">Bills</h5>
+      <div class="cd-grid">
+        <label class="cd-field"><span>$1 bills</span><input type="number" id="ones" class="border rounded px-2 py-1 count-required" min="0" step="1" disabled><span class="cd-amt" id="amt_ones">$0.00</span></label>
+        <label class="cd-field"><span>$5s</span><input type="number" id="fives" class="border rounded px-2 py-1 count-required" min="0" step="1" disabled><span class="cd-amt" id="amt_fives">$0.00</span></label>
+        <label class="cd-field"><span>$10s</span><input type="number" id="tens" class="border rounded px-2 py-1 count-required" min="0" step="1" disabled><span class="cd-amt" id="amt_tens">$0.00</span></label>
+        <label class="cd-field"><span>$20s</span><input type="number" id="twenties" class="border rounded px-2 py-1 count-required" min="0" step="1" disabled><span class="cd-amt" id="amt_twenties">$0.00</span></label>
+        <label class="cd-field"><span>$50s</span><input type="number" id="fifties" class="border rounded px-2 py-1 count-required" min="0" step="1" disabled><span class="cd-amt" id="amt_fifties">$0.00</span></label>
+        <label class="cd-field"><span>$100s</span><input type="number" id="hundreds" class="border rounded px-2 py-1 count-required" min="0" step="1" disabled><span class="cd-amt" id="amt_hundreds">$0.00</span></label>
+      </div>
+
+      <h4 class="text-sm font-semibold mt-3 mb-1">Uncommon</h4>
+      <h5 class="text-xs font-semibold mt-2 mb-1 uppercase tracking-wide text-gray-600">Loose Coins</h5>
+      <div class="cd-grid">
+        <label class="cd-field"><span>Half-dollars (50¢)</span><input type="number" id="halfdollars" class="border rounded px-2 py-1 count-required" min="0" step="1" disabled><span class="cd-amt" id="amt_halfdollars">$0.00</span></label>
+        <label class="cd-field"><span>Small $1 coins</span><input type="number" id="dollarcoins" class="border rounded px-2 py-1 count-required" min="0" step="1" disabled><span class="cd-amt" id="amt_dollarcoins">$0.00</span></label>
+        <label class="cd-field"><span>Large/Silver $1 coins</span><input type="number" id="largedollarcoins" class="border rounded px-2 py-1 count-required" min="0" step="1" disabled><span class="cd-amt" id="amt_largedollarcoins">$0.00</span></label>
+      </div>
+      <h5 class="text-xs font-semibold mt-2 mb-1 uppercase tracking-wide text-gray-600">Rolls</h5>
+      <div class="cd-grid">
+        <label class="cd-field"><span>Half-dollar rolls</span><input type="number" id="halfdollar_rolls" class="border rounded px-2 py-1 count-required" min="0" step="1" disabled><span class="cd-amt" id="amt_halfdollar_rolls">$0.00</span></label>
+        <label class="cd-field"><span>Small $1 coin rolls</span><input type="number" id="smalldollar_rolls" class="border rounded px-2 py-1 count-required" min="0" step="1" disabled><span class="cd-amt" id="amt_smalldollar_rolls">$0.00</span></label>
+        <label class="cd-field"><span>Large $1 coin rolls</span><input type="number" id="largedollar_rolls" class="border rounded px-2 py-1 count-required" min="0" step="1" disabled><span class="cd-amt" id="amt_largedollar_rolls">$0.00</span></label>
+      </div>
+      <h5 class="text-xs font-semibold mt-2 mb-1 uppercase tracking-wide text-gray-600">Bills</h5>
+      <div class="cd-grid">
+        <label class="cd-field"><span>$2s</span><input type="number" id="twos" class="border rounded px-2 py-1 count-required" min="0" step="1" disabled><span class="cd-amt" id="amt_twos">$0.00</span></label>
       </div>
       <div class="mt-3 text-right">Coin total: <strong id="coin_total">$0.00</strong></div>
       <div class="mt-3 text-right">Bill total: <strong id="bill_total">$0.00</strong></div> 
@@ -131,7 +272,7 @@
       </div>
       <section class="cd-card">
        <label class="block mb-2">Notes</label>
-       <textarea id="notes" class="w-full border rounded px-2 py-1" rows="1" placeholder="Any notes…"></textarea>
+       <textarea id="notes" class="w-full border rounded px-2 py-1 count-required" rows="1" placeholder="Any notes…" disabled></textarea>
    
             
      </section>
@@ -234,7 +375,6 @@
      <div class="flex items-start justify-between gap-3 mb-2">
        <div>
          <h3 class="font-medium">Cash Movement Reporting</h3>
-         <div class="text-xs text-gray-600 mt-0.5">Daily, weekly (Sunday-Saturday), and custom range reporting for managers.</div>
        </div>
      </div>
 
