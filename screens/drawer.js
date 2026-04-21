@@ -643,18 +643,30 @@ function renderDailyDetails(detail, timezone) {
 
 function renderDetailSection(title, rows, timezone) {
   if (!rows?.length) {
-    return `<div class="mb-2"><div class="font-semibold">${title}</div><div class="text-xs text-gray-600">No transactions.</div></div>`;
+    return `
+      <section class="report-detail-section">
+        <h5 class="report-detail-heading">${esc(title)}</h5>
+        <div class="report-detail-empty">No transactions.</div>
+      </section>
+    `;
   }
   const items = rows
     .sort((a, b) => new Date(a.ts).getTime() - new Date(b.ts).getTime())
-    .map((r) => `<li class="mb-1">
-      <span class="font-medium">${esc(fmtDateInTimezone(r.ts, timezone))}</span>
-      <span> • ${esc(r.label || '')}</span>
-      <span> • ${fmtMoney(r.amount)}</span>
-      ${r.notes ? `<div class="text-xs text-gray-600">Note: ${esc(r.notes)}</div>` : ''}
+    .map((r) => `<li class="report-detail-item">
+      <div class="report-detail-main">
+        <span class="report-detail-datetime">${esc(fmtDateInTimezone(r.ts, timezone))}</span>
+        <span class="report-detail-label">• ${esc(r.label || '')}</span>
+        <span class="report-detail-amount">${fmtMoney(r.amount)}</span>
+      </div>
+      ${r.notes ? `<div class="report-detail-note">Note: ${esc(r.notes)}</div>` : ''}
     </li>`)
     .join('');
-  return `<div class="mb-2"><div class="font-semibold">${title}</div><ul class="pl-4">${items}</ul></div>`;
+  return `
+    <section class="report-detail-section">
+      <h5 class="report-detail-heading">${esc(title)}</h5>
+      <ul class="report-detail-list">${items}</ul>
+    </section>
+  `;
 }
 
 function getCashSaleAmount(saleRow) {
