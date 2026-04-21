@@ -20,6 +20,7 @@ export function destroy() {}
 function bind(container) {
   els = {
     dashIntro: container.querySelector('#dashIntro'),
+    myStatusCard: container.querySelector('#myStatusCard'),
     myStatusLine: container.querySelector('#myStatusLine'),
     myLastClockOut: container.querySelector('#myLastClockOut'),
     btnDashboardClockIn: container.querySelector('#btnDashboardClockIn'),
@@ -93,9 +94,17 @@ async function onClockIn() {
 }
 
 function renderMyStatus() {
+  const isClockinRequired = !!state.actor?.clockin_required;
+
+  if (els.myStatusCard) els.myStatusCard.style.display = isClockinRequired ? '' : 'none';
+  if (!isClockinRequired) {
+    if (els.dashIntro) els.dashIntro.textContent = 'Your timekeeping status is up to date.';
+    return;
+  }
+
   const entry = state.todayEntry;
   const status = deriveStatus(entry);
-  const needsPrompt = !!state.actor?.clockin_required && ['not_clocked_in', 'clocked_out', 'lunch_out'].includes(status.key);
+  const needsPrompt = ['not_clocked_in', 'clocked_out', 'lunch_out'].includes(status.key);
 
   if (els.myStatusLine) els.myStatusLine.textContent = `Current status: ${status.label}`;
   if (els.dashIntro) {
