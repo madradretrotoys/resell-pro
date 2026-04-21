@@ -81,17 +81,20 @@ function bind(root){
     els[el.id] = el;
   });
   els.drawerRequired = Array.from(root.querySelectorAll('.drawer-required'));
+  els.countRequired = Array.from(root.querySelectorAll('.count-required'));
 }
 
 function wire(){
   setDrawerSelectionState();
   // Enable Save only when a period is selected
   els.period.addEventListener('change', async () => {
-    els.btnSave.disabled = !els.period.value || !hasDrawerSelection();
+    setDrawerSelectionState();
 
     // If user picks a period, auto-load today's counts for the currently selected drawer
     if (els.period.value) {
       await loadToday();
+    } else {
+      clearDrawerForm();
     }
   });
 
@@ -106,6 +109,7 @@ function wire(){
       await loadToday();
     } else {
       clearDrawerForm();
+      if (els.status) els.status.textContent = 'Choose Open or Close to begin entering counts.';
     }
   });
 
@@ -146,21 +150,32 @@ function wire(){
 function hasDrawerSelection() {
   return !!String(els.drawer?.value || '').trim();
 }
+function hasPeriodSelection() {
+  return !!String(els.period?.value || '').trim();
+}
 
 function clearDrawerForm() {
   ALL_COUNT_INPUT_IDS.forEach(k => { if (els[k]) els[k].value = ''; });
   if (els.notes) els.notes.value = '';
   recalc();
-  if (els.status) els.status.textContent = hasDrawerSelection() ? '' : 'Select a drawer to start counting.';
+  if (els.status) {
+    if (!hasDrawerSelection()) els.status.textContent = 'Select a drawer to start counting.';
+    else if (!hasPeriodSelection()) els.status.textContent = 'Choose Open or Close to begin entering counts.';
+    else els.status.textContent = '';
+  }
 }
 
 function setDrawerSelectionState() {
-  const enabled = hasDrawerSelection();
+  const drawerEnabled = hasDrawerSelection();
+  const countEnabled = drawerEnabled && hasPeriodSelection();
   (els.drawerRequired || []).forEach((el) => {
-    el.disabled = !enabled;
+    el.disabled = !drawerEnabled;
   });
-  if (!enabled && els.period) els.period.value = '';
-  if (els.btnSave) els.btnSave.disabled = !enabled || !els.period?.value;
+  (els.countRequired || []).forEach((el) => {
+    el.disabled = !countEnabled;
+  });
+  if (!drawerEnabled && els.period) els.period.value = '';
+  if (els.btnSave) els.btnSave.disabled = !countEnabled;
 }
 
 function wireCashReportFallback(root) {
