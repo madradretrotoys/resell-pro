@@ -7,6 +7,7 @@ let state = {
   todayEntry: null,
   periodEntries: [],
   teamStatuses: [],
+  cashSummary: null,
 };
 
 export async function init({ container }) {
@@ -25,6 +26,9 @@ function bind(container) {
     myLastClockOut: container.querySelector('#myLastClockOut'),
     btnDashboardClockIn: container.querySelector('#btnDashboardClockIn'),
     myPrompt: container.querySelector('#myPrompt'),
+    cashMovementCard: container.querySelector('#cashMovementCard'),
+    cashMovementSummary: container.querySelector('#cashMovementSummary'),
+    cashMovementSubtitle: container.querySelector('#cashMovementSubtitle'),
     teamStatusCard: container.querySelector('#teamStatusCard'),
     teamStatusTable: container.querySelector('#teamStatusTable'),
   };
@@ -42,6 +46,7 @@ async function loadDashboard() {
     state.periodEntries = me?.period_entries || [];
 
     renderMyStatus();
+    await loadCashMovementSummary();
 
     if (state.actor?.can_edit_timesheet) {
       els.teamStatusCard.style.display = '';
@@ -61,6 +66,71 @@ async function loadDashboard() {
     if (els.dashIntro) els.dashIntro.textContent = 'Unable to load your status right now.';
     if (els.myStatusLine) els.myStatusLine.textContent = 'Status unavailable.';
   }
+}
+
+async function loadCashMovementSummary() {
+  if (!els.cashMovementCard || !els.cashMovementSummary) return;
+
+  try {
+    const data = await api('/api/cash-report/summary?preset=today');
+    state.cashSummary = data || null;
+
+    els.cashMovementCard.style.display = '';
+    renderCashMovementSummary();
+  } catch (e) {
+    const err = String(e?.data?.error || '');
+    if (err === 'forbidden' || err === 'unauthorized' || err === 'no_tenant') {
+      els.cashMovementCard.style.display = 'none';
+      return;
+    }
+
+    els.cashMovementCard.style.display = '';
+    els.cashMovementSummary.textContent = 'Unable to load cash movement summary right now.';
+  }
+}
+
+function renderCashMovementSummary() {
+  const totals = state.cashSummary?.totals || {};
+  const ledgerMoves = state.cashSummary?.activity?.ledger_moves || [];
+  const movementIn = Number(totals.movement_in_total || 0);
+  const movementOut = Number(totals.movement_out_total || 0);
+  const payoutOut = Number(totals.payout_total || 0);
+  const netMovement = movementIn - movementOut - payoutOut;
+
+  if (els.cashMovementSubtitle) {
+    const start = state.cashSummary?.range?.start_date;
+    const end = state.cashSummary?.range?.end_date;
+    if (start && end) {
+      els.cashMovementSubtitle.textContent = start === end
+        ? `Summary for ${start}.`
+        : `Summary for ${start} to ${end}.`;
+    }
+  }
+
+  els.cashMovementSummary.innerHTML = `
+    <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(170px, 1fr)); gap:10px;">
+      <div class="tile" style="padding:10px;">
+        <div class="muted">Movement In</div>
+        <div style="font-weight:700; font-size:1.05rem;">${fmtMoney(movementIn)}</div>
+      </div>
+      <div class="tile" style="padding:10px;">
+        <div class="muted">Movement Out</div>
+        <div style="font-weight:700; font-size:1.05rem;">${fmtMoney(movementOut)}</div>
+      </div>
+      <div class="tile" style="padding:10px;">
+        <div class="muted">Payouts</div>
+        <div style="font-weight:700; font-size:1.05rem;">${fmtMoney(payoutOut)}</div>
+      </div>
+      <div class="tile" style="padding:10px;">
+        <div class="muted">Net Movement</div>
+        <div style="font-weight:700; font-size:1.05rem;">${fmtMoney(netMovement)}</div>
+      </div>
+      <div class="tile" style="padding:10px;">
+        <div class="muted">Ledger Entries</div>
+        <div style="font-weight:700; font-size:1.05rem;">${ledgerMoves.length}</div>
+      </div>
+    </div>
+  `;
 }
 
 async function loadTeamStatus() {
@@ -184,6 +254,11 @@ function fmtDateTime(v) {
     hour: 'numeric',
     minute: '2-digit',
   });
+}
+
+function fmtMoney(v) {
+  const n = Number(v || 0);
+  return new Intl.NumberFormat([], { style: 'currency', currency: 'USD' }).format(n);
 }
 
 function escapeHtml(s) {
