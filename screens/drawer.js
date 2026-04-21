@@ -167,6 +167,7 @@ async function loadTenantDrawers() {
       return {
         legacyDrawer: Number.isFinite(legacyDrawer) && legacyDrawer > 0 ? String(legacyDrawer) : String(idx + 1),
         label: String(r?.drawer_name || `Drawer ${idx + 1}`),
+        drawerId: String(r?.drawer_id || ''),
       };
     });
 
@@ -180,6 +181,7 @@ async function loadTenantDrawers() {
       const opt = document.createElement('option');
       opt.value = d.legacyDrawer;
       opt.textContent = d.label;
+      if (d.drawerId) opt.dataset.drawerId = d.drawerId;
       els.drawer.appendChild(opt);
     }
   } catch {
@@ -340,7 +342,10 @@ async function loadToday(){
     }
     els.status.textContent = 'Loading…';
     const drawer = els.drawer.value;
-    const data = await api(`/api/cash-drawer/today?drawer=${encodeURIComponent(drawer)}`);
+    const drawerId = els.drawer?.selectedOptions?.[0]?.dataset?.drawerId || '';
+    const q = new URLSearchParams({ drawer });
+    if (drawerId) q.set('drawer_id', drawerId);
+    const data = await api(`/api/cash-drawer/today?${q.toString()}`);
     renderBalanceBanner(data);
     // Prefill OPEN/CLOSE buckets if present; leave current inputs alone unless the matching period is loaded
     const p = els.period.value;
@@ -998,7 +1003,10 @@ function rowHtml(date, details, amount) {
 async function loadDrawerHistory() {
   try {
     const drawer = els.drawer?.value || '1';
-    const data = await api(`/api/cash-drawer/history?drawer=${encodeURIComponent(drawer)}&limit=30`);
+    const drawerId = els.drawer?.selectedOptions?.[0]?.dataset?.drawerId || '';
+    const q = new URLSearchParams({ drawer, limit: '30' });
+    if (drawerId) q.set('drawer_id', drawerId);
+    const data = await api(`/api/cash-drawer/history?${q.toString()}`);
 
     els.historyLoading.classList.add('hidden');
 
@@ -1078,6 +1086,7 @@ async function save(){
     if(!period){ showToast('Choose a period first'); return; }
     const body = {
       drawer, period,
+      drawer_id: els.drawer?.selectedOptions?.[0]?.dataset?.drawerId || null,
       pennies: val('pennies'),
       nickels: val('nickels'),
       dimes: val('dimes'),

@@ -1,4 +1,5 @@
 import { neon } from "@neondatabase/serverless";
+import { resolveLegacyDrawer } from "../../_shared/drawers";
 
 const json = (data: any, status = 200) =>
   new Response(JSON.stringify(data), {
@@ -50,7 +51,8 @@ export const onRequestGet: PagesFunction = async ({ request, env }) => {
 
     // ✅ Read query params
     const url = new URL(request.url);
-    const drawer = String(url.searchParams.get("drawer") || "1");
+    const requestedDrawer = url.searchParams.get("drawer");
+    const requestedDrawerId = url.searchParams.get("drawer_id");
     const limit = Math.min(Number(url.searchParams.get("limit") || 30), 100);
 
 
@@ -81,6 +83,13 @@ export const onRequestGet: PagesFunction = async ({ request, env }) => {
     const can_cash_edit = !!permRows?.[0]?.can_cash_edit;
     if (!can_cash_edit) return json({ error: "forbidden" }, 403);
     
+    const resolved = await resolveLegacyDrawer(sql, {
+      tenant_id,
+      drawer: requestedDrawer,
+      drawer_id: requestedDrawerId,
+    });
+    const drawer = resolved.drawer;
+
     // ✅ History (NO tenant table)
     const rows = await sql/*sql*/`
       SELECT
