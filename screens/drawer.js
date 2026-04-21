@@ -140,6 +140,9 @@ function wire(){
     els.btnReportLoad.addEventListener('click', loadCashReport);
     els.__reportBound = true;
   }
+  if (els.reportDrawerRows) {
+    els.reportDrawerRows.addEventListener('click', onReportDetailToggle);
+  }
   if (els.reportPreset) {
     els.reportPreset.addEventListener('change', () => {
       toggleCustomDates();
@@ -476,13 +479,28 @@ function renderCashReport(data) {
 
   if (els.reportDrawerRows) {
     const groups = Array.isArray(data?.daily_by_drawer) ? data.daily_by_drawer : [];
+    const detailMap = buildDailyDetailMap(data);
     els.reportDrawerRows.innerHTML = groups.length ? groups.map((g) => {
+      const drawerRowClass = getDrawerRowClass(g.drawer);
       const dayRows = (Array.isArray(g.days) ? g.days : []).map((r) => {
         const variance = Number(r.variance || 0);
-        const varianceClass = Math.abs(variance) > 0.009 ? 'text-red-700 font-semibold' : 'text-green-700';
+        const varianceClass = getVarianceClass(variance, false);
+        const detailKey = `${String(g.drawer || '')}::${String(r.date || '')}`;
+        const detailId = `report-detail-${safeDomId(detailKey)}`;
+        const detail = detailMap.get(detailKey) || emptyDailyDetail();
+        const detailSummary = detailCountSummary(detail);
         return `
-          <tr class="border-b">
-            <td class="px-3 py-2">${r.date}</td>
+          <tr class="border-b ${drawerRowClass}">
+            <td class="px-3 py-2">
+              <button
+                type="button"
+                class="btn btn--neutral btn--sm mr-2"
+                data-detail-toggle="${detailId}"
+                aria-expanded="false"
+              >Details</button>
+              <span>${r.date}</span>
+              <div class="text-xs text-gray-600 mt-1">${detailSummary}</div>
+            </td>
             <td class="px-3 py-2">${fmtMoney(r.open_total)}</td>
             <td class="px-3 py-2">${fmtMoney(r.close_total)}</td>
             <td class="px-3 py-2">${fmtMoney(r.sales_in)}</td>
@@ -492,28 +510,31 @@ function renderCashReport(data) {
             <td class="px-3 py-2">${fmtMoney(r.expected_close)}</td>
             <td class="px-3 py-2 ${varianceClass}">${fmtMoney(r.variance)}</td>
           </tr>
+          <tr id="${detailId}" class="border-b hidden report-detail-row">
+            <td class="px-3 py-2" colspan="9">${renderDailyDetails(detail, range.timezone)}</td>
+          </tr>
         `;
       }).join('');
 
       const t = g.totals || {};
       const totalVar = Number(t.variance || 0);
-      const totalVarClass = Math.abs(totalVar) > 0.009 ? 'text-red-700 font-semibold' : 'text-green-700';
+      const totalVarClass = getVarianceClass(totalVar, true);
 
       return `
-        <tr class="bg-gray-50 border-y">
+        <tr class="${drawerRowClass} border-y">
           <td class="px-3 py-2 font-semibold" colspan="9">Drawer ${g.drawer}</td>
         </tr>
         ${dayRows}
-        <tr class="border-b bg-gray-50">
-          <td class="px-3 py-2 font-semibold">Totals</td>
-          <td class="px-3 py-2 font-semibold">${fmtMoney(t.open_total)}</td>
-          <td class="px-3 py-2 font-semibold">${fmtMoney(t.close_total)}</td>
-          <td class="px-3 py-2 font-semibold">${fmtMoney(t.sales_in)}</td>
-          <td class="px-3 py-2 font-semibold">${fmtMoney(t.movement_in)}</td>
-          <td class="px-3 py-2 font-semibold">${fmtMoney(t.movement_out)}</td>
-          <td class="px-3 py-2 font-semibold">${fmtMoney(t.payout_out)}</td>
-          <td class="px-3 py-2 font-semibold">${fmtMoney(t.expected_close)}</td>
-          <td class="px-3 py-2 font-semibold ${totalVarClass}">${fmtMoney(t.variance)}</td>
+        <tr class="border-b report-total-row">
+          <td class="px-3 py-2 font-bold">Totals</td>
+          <td class="px-3 py-2 font-bold">${fmtMoney(t.open_total)}</td>
+          <td class="px-3 py-2 font-bold">${fmtMoney(t.close_total)}</td>
+          <td class="px-3 py-2 font-bold">${fmtMoney(t.sales_in)}</td>
+          <td class="px-3 py-2 font-bold">${fmtMoney(t.movement_in)}</td>
+          <td class="px-3 py-2 font-bold">${fmtMoney(t.movement_out)}</td>
+          <td class="px-3 py-2 font-bold">${fmtMoney(t.payout_out)}</td>
+          <td class="px-3 py-2 font-bold">${fmtMoney(t.expected_close)}</td>
+          <td class="px-3 py-2 font-bold ${totalVarClass}">${fmtMoney(t.variance)}</td>
         </tr>
       `;
     }).join('') : '<tr><td class="px-3 py-2 text-gray-600" colspan="9">No drawer activity in range.</td></tr>';
@@ -528,6 +549,201 @@ function renderCashReport(data) {
         <td class="px-3 py-2">${fmtMoney(r.amount_total)}</td>
       </tr>
     `).join('') : '<tr><td class="px-3 py-2 text-gray-600" colspan="3">No movements in range.</td></tr>';
+  }
+}
+
+function onReportDetailToggle(ev) {
+  const btn = ev?.target?.closest?.('[data-detail-toggle]');
+  if (!btn) return;
+  const id = btn.getAttribute('data-detail-toggle');
+  if (!id) return;
+  const row = document.getElementById(id);
+  if (!row) return;
+  const isOpen = !row.classList.contains('hidden');
+  row.classList.toggle('hidden', isOpen);
+  btn.setAttribute('aria-expanded', isOpen ? 'false' : 'true');
+}
+
+function buildDailyDetailMap(data) {
+  const out = new Map();
+  const tz = data?.range?.timezone || undefined;
+  const activity = data?.activity || {};
+  const salesRows = Array.isArray(activity.cash_sales) ? activity.cash_sales : [];
+  const ledgerRows = Array.isArray(activity.ledger_moves) ? activity.ledger_moves : [];
+
+  const add = (drawer, date, section, record) => {
+    const key = `${String(drawer || '')}::${String(date || '')}`;
+    if (!out.has(key)) out.set(key, emptyDailyDetail());
+    out.get(key)[section].push(record);
+  };
+
+  for (const s of salesRows) {
+    const cashAmount = getCashSaleAmount(s);
+    if (!(cashAmount > 0)) continue;
+    add('1', dateKeyInTimezone(s.sale_ts, tz), 'salesIn', {
+      ts: s.sale_ts,
+      amount: cashAmount,
+      label: 'POS cash sale',
+      notes: s.payment_method || '',
+    });
+  }
+
+  for (const l of ledgerRows) {
+    const amount = Number(l.amount || 0);
+    if (!(amount > 0)) continue;
+    const dateKey = dateKeyInTimezone(l.created_at, tz);
+    const fromDrawer = String(l.from_location || '').match(/^Drawer\s+(\d+)$/i)?.[1] || null;
+    const toDrawer = String(l.to_location || '').match(/^Drawer\s+(\d+)$/i)?.[1] || null;
+
+    if (toDrawer) {
+      add(toDrawer, dateKey, 'movesIn', {
+        ts: l.created_at,
+        amount,
+        label: `From ${String(l.from_location || 'Unknown')}`,
+        notes: l.notes || '',
+      });
+    }
+    if (fromDrawer) {
+      if (/^purchase$/i.test(String(l.to_location || ''))) {
+        add(fromDrawer, dateKey, 'payouts', {
+          ts: l.created_at,
+          amount,
+          label: 'Payout',
+          notes: l.notes || '',
+        });
+      } else {
+        add(fromDrawer, dateKey, 'movesOut', {
+          ts: l.created_at,
+          amount,
+          label: `To ${String(l.to_location || 'Unknown')}`,
+          notes: l.notes || '',
+        });
+      }
+    }
+  }
+
+  return out;
+}
+
+function emptyDailyDetail() {
+  return { salesIn: [], movesIn: [], movesOut: [], payouts: [] };
+}
+
+function detailCountSummary(d) {
+  return [
+    `Sales ${d.salesIn.length}`,
+    `In ${d.movesIn.length}`,
+    `Out ${d.movesOut.length}`,
+    `Payouts ${d.payouts.length}`,
+  ].join(' • ');
+}
+
+function renderDailyDetails(detail, timezone) {
+  return `
+    <div class="report-detail-box">
+      ${renderDetailSection('Sales In', detail.salesIn, timezone)}
+      ${renderDetailSection('Moves In', detail.movesIn, timezone)}
+      ${renderDetailSection('Moves Out', detail.movesOut, timezone)}
+      ${renderDetailSection('Payouts', detail.payouts, timezone)}
+    </div>
+  `;
+}
+
+function renderDetailSection(title, rows, timezone) {
+  if (!rows?.length) {
+    return `<div class="mb-2"><div class="font-semibold">${title}</div><div class="text-xs text-gray-600">No transactions.</div></div>`;
+  }
+  const items = rows
+    .sort((a, b) => new Date(a.ts).getTime() - new Date(b.ts).getTime())
+    .map((r) => `<li class="mb-1">
+      <span class="font-medium">${esc(fmtDateInTimezone(r.ts, timezone))}</span>
+      <span> • ${esc(r.label || '')}</span>
+      <span> • ${fmtMoney(r.amount)}</span>
+      ${r.notes ? `<div class="text-xs text-gray-600">Note: ${esc(r.notes)}</div>` : ''}
+    </li>`)
+    .join('');
+  return `<div class="mb-2"><div class="font-semibold">${title}</div><ul class="pl-4">${items}</ul></div>`;
+}
+
+function getCashSaleAmount(saleRow) {
+  const saleTotal = Number(saleRow?.total || 0);
+  let cashAmt = parseCashFromParts((typeof saleRow?.items_json === 'object' && saleRow?.items_json) ? saleRow.items_json?.payment_parts : null);
+  if (!(cashAmt > 0)) cashAmt = parseCashFromPaymentMethod(saleRow?.payment_method, saleTotal);
+  return Number(cashAmt || 0);
+}
+
+function parseCashFromParts(paymentParts) {
+  if (!Array.isArray(paymentParts)) return 0;
+  let total = 0;
+  for (const part of paymentParts) {
+    const method = String(part?.method || '').toUpperCase();
+    if (method !== 'CASH') continue;
+    total += Number(part?.amount || 0);
+  }
+  return total;
+}
+
+function parseCashFromPaymentMethod(paymentMethod, saleTotal) {
+  const pm = String(paymentMethod || '').toUpperCase();
+  if (pm === 'CASH') return Number(saleTotal || 0);
+  if (pm.includes('CASH')) {
+    const m = pm.match(/CASH[:=]?\s*([\d.]+)/i);
+    if (m) return Number(m[1] || 0);
+  }
+  return 0;
+}
+
+function getVarianceClass(amount, isTotal) {
+  const x = Number(amount || 0);
+  const strong = isTotal ? 'font-bold' : 'font-semibold';
+  if (Math.abs(x) <= 0.009) return `text-green-700 ${strong}`;
+  if (x > 0) return `text-orange-600 ${strong}`;
+  return `text-red-700 ${strong}`;
+}
+
+function getDrawerRowClass(drawer) {
+  return String(drawer) === '1' ? 'report-drawer-1' : 'report-drawer-2';
+}
+
+function safeDomId(v) {
+  return String(v || '').replace(/[^a-zA-Z0-9_-]/g, '-');
+}
+
+function esc(v) {
+  return String(v || '')
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+    .replaceAll("'", '&#39;');
+}
+
+function dateKeyInTimezone(ts, timezone) {
+  try {
+    return new Intl.DateTimeFormat('en-CA', {
+      timeZone: timezone || undefined,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    }).format(new Date(ts));
+  } catch {
+    return String(ts || '').slice(0, 10);
+  }
+}
+
+function fmtDateInTimezone(ts, timezone) {
+  try {
+    return new Intl.DateTimeFormat(undefined, {
+      timeZone: timezone || undefined,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+    }).format(new Date(ts));
+  } catch {
+    return fmtDate(ts);
   }
 }
 
