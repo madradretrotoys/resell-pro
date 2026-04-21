@@ -7,6 +7,29 @@ const BASE_DENOM_IDS = ['pennies','nickels','dimes','quarters','halfdollars','on
 const ROLL_IDS = ['penny_rolls','nickel_rolls','dime_rolls','quarter_rolls','halfdollar_rolls','smalldollar_rolls','largedollar_rolls'];
 const EXTRA_COIN_IDS = ['dollarcoins','largedollarcoins'];
 const ALL_COUNT_INPUT_IDS = [...BASE_DENOM_IDS, ...ROLL_IDS, ...EXTRA_COIN_IDS];
+const FIELD_MULTIPLIERS = {
+  pennies: 0.01,
+  penny_rolls: 0.50,
+  nickels: 0.05,
+  nickel_rolls: 2.00,
+  dimes: 0.10,
+  dime_rolls: 5.00,
+  quarters: 0.25,
+  quarter_rolls: 10.00,
+  halfdollars: 0.50,
+  halfdollar_rolls: 10.00,
+  dollarcoins: 1.00,
+  smalldollar_rolls: 25.00,
+  largedollarcoins: 1.00,
+  largedollar_rolls: 20.00,
+  ones: 1.00,
+  twos: 2.00,
+  fives: 5.00,
+  tens: 10.00,
+  twenties: 20.00,
+  fifties: 50.00,
+  hundreds: 100.00,
+};
 
 export async function init({ container, session }) {
   sessionUser = session?.user || null;
@@ -20,6 +43,7 @@ export async function init({ container, session }) {
   if (els.cashReportSection && !els.cashReportSection.classList.contains('hidden')) {
     await loadCashReport();
   }
+  recalc();
   autosize(container);
 }
 
@@ -53,6 +77,9 @@ function bind(root){
     
   ];
   ids.forEach(id => els[id] = root.querySelector('#' + id));
+  root.querySelectorAll('.cd-amt[id]').forEach((el) => {
+    els[el.id] = el;
+  });
   els.drawerRequired = Array.from(root.querySelectorAll('.drawer-required'));
 }
 
@@ -221,6 +248,15 @@ function recalc(){
   els.coin_total.textContent = money(coin);
   els.bill_total.textContent = money(bill);
   els.grand_total.textContent = money(coin + bill);
+  updateFieldTotals();
+}
+
+function updateFieldTotals() {
+  for (const [id, mult] of Object.entries(FIELD_MULTIPLIERS)) {
+    const totalEl = els[`amt_${id}`];
+    if (!totalEl) continue;
+    totalEl.textContent = money(val(id) * mult);
+  }
 }
 
 async function ping(){
