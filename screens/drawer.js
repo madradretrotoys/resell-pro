@@ -34,6 +34,7 @@ const FIELD_MULTIPLIERS = {
 export async function init({ container, session }) {
   sessionUser = session?.user || null;
   bind(container);
+  await loadTenantDrawers();
   wire();
   wireCashReportFallback(container);
    // ✅ Load section previews
@@ -147,6 +148,48 @@ function wire(){
     els.reportPreset.addEventListener('change', () => {
       toggleCustomDates();
     });
+  }
+}
+
+async function loadTenantDrawers() {
+  if (!els.drawer) return;
+  const fallbackOptions = Array.from(els.drawer.querySelectorAll('option'));
+  try {
+    const resp = await api('/api/settings/drawers/list');
+    const rows = Array.isArray(resp?.drawers) ? resp.drawers : [];
+    const activeRows = rows.filter((r) => r?.is_active !== false);
+    if (!activeRows.length) return;
+
+    const normalized = activeRows.map((r, idx) => {
+      const codeNum = String(r?.drawer_code || '').match(/^D(\d+)$/i)?.[1];
+      const nameNum = String(r?.drawer_name || '').match(/drawer\s+(\d+)/i)?.[1];
+      const legacyDrawer = Number(codeNum || nameNum || (idx + 1));
+      return {
+        legacyDrawer: Number.isFinite(legacyDrawer) && legacyDrawer > 0 ? String(legacyDrawer) : String(idx + 1),
+        label: String(r?.drawer_name || `Drawer ${idx + 1}`),
+      };
+    });
+
+    els.drawer.innerHTML = '';
+    const placeholder = document.createElement('option');
+    placeholder.value = '';
+    placeholder.textContent = 'Select drawer…';
+    els.drawer.appendChild(placeholder);
+
+    for (const d of normalized) {
+      const opt = document.createElement('option');
+      opt.value = d.legacyDrawer;
+      opt.textContent = d.label;
+      els.drawer.appendChild(opt);
+    }
+  } catch {
+    // keep existing hardcoded fallback options
+    if (!fallbackOptions.length) {
+      const placeholder = document.createElement('option');
+      placeholder.value = '';
+      placeholder.textContent = 'Select drawer…';
+      els.drawer.appendChild(placeholder);
+    }
   }
 }
 
