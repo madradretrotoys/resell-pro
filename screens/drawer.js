@@ -510,7 +510,7 @@ function renderCashReport(data) {
             <td class="px-3 py-2">${fmtMoney(r.expected_close)}</td>
             <td class="px-3 py-2 ${varianceClass}">${fmtMoney(r.variance)}</td>
           </tr>
-          <tr id="${detailId}" class="border-b hidden report-detail-row">
+          <tr id="${detailId}" class="border-b report-detail-row" style="display:none;">
             <td class="px-3 py-2" colspan="9">${renderDailyDetails(detail, range.timezone)}</td>
           </tr>
         `;
@@ -559,8 +559,8 @@ function onReportDetailToggle(ev) {
   if (!id) return;
   const row = document.getElementById(id);
   if (!row) return;
-  const isOpen = !row.classList.contains('hidden');
-  row.classList.toggle('hidden', isOpen);
+  const isOpen = row.style.display !== 'none';
+  row.style.display = isOpen ? 'none' : 'table-row';
   btn.setAttribute('aria-expanded', isOpen ? 'false' : 'true');
   btn.textContent = isOpen ? 'Show Details' : 'Hide Details';
 }
