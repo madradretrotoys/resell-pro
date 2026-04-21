@@ -42,6 +42,11 @@ export async function init(ctx) {
       if (e.key === "Enter" || e.key === " ") routeToMarketplaces();
     });
 
+    $("#goto-business-hours-settings")?.addEventListener("click", routeToBusinessHours);
+    $("#goto-business-hours-settings")?.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" || e.key === " ") routeToBusinessHours();
+    });
+
   } catch (err) {
     console.error(err);
     hide(loading);
@@ -67,6 +72,10 @@ export async function init(ctx) {
 
   function routeToMarketplaces() {
     window.router?.go?.("?page=settings-marketplaces") || (window.location.href = "?page=settings-marketplaces");
+  }
+
+  function routeToBusinessHours() {
+    window.router?.go?.("?page=settings-business-hours") || (window.location.href = "?page=settings-business-hours");
   }
 }
 // end landing.js 
