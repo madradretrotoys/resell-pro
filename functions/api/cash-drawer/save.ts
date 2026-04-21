@@ -80,10 +80,33 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
     const twenties    = asInt(body.twenties);
     const fifties     = asInt(body.fifties);
     const hundreds    = asInt(body.hundreds);
+    const penny_rolls = asInt(body.penny_rolls);
+    const nickel_rolls = asInt(body.nickel_rolls);
+    const dime_rolls = asInt(body.dime_rolls);
+    const quarter_rolls = asInt(body.quarter_rolls);
+    const halfdollar_rolls = asInt(body.halfdollar_rolls);
+    const dollarcoins = asInt(body.dollarcoins);
+    const largedollarcoins = asInt(body.largedollarcoins);
+    const smalldollar_rolls = asInt(body.smalldollar_rolls);
+    const largedollar_rolls = asInt(body.largedollar_rolls);
     const notes       = body.notes ? String(body.notes).slice(0, 2000) : null;
 
     // Totals (authoritative on server)
-    const coin_total = pennies*0.01 + nickels*0.05 + dimes*0.10 + quarters*0.25 + halfdollars*0.50;
+    const penniesTotal = pennies + (penny_rolls * 50);
+    const nickelsTotal = nickels + (nickel_rolls * 40);
+    const dimesTotal = dimes + (dime_rolls * 50);
+    const quartersTotal = quarters + (quarter_rolls * 40);
+    const halfdollarsTotal = halfdollars + (halfdollar_rolls * 20);
+    const smallDollarCoinTotal = dollarcoins + (smalldollar_rolls * 25);
+    const largeDollarCoinTotal = largedollarcoins + (largedollar_rolls * 20);
+    const coin_total =
+      penniesTotal*0.01 +
+      nickelsTotal*0.05 +
+      dimesTotal*0.10 +
+      quartersTotal*0.25 +
+      halfdollarsTotal*0.50 +
+      smallDollarCoinTotal +
+      largeDollarCoinTotal;
     const bill_total = ones*1 + twos*2 + fives*5 + tens*10 + twenties*20 + fifties*50 + hundreds*100;
     const grand_total = coin_total + bill_total;
 
@@ -158,6 +181,15 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
           dimes = ${dimes},
           quarters = ${quarters},
           halfdollars = ${halfdollars},
+          penny_rolls = ${penny_rolls},
+          nickel_rolls = ${nickel_rolls},
+          dime_rolls = ${dime_rolls},
+          quarter_rolls = ${quarter_rolls},
+          halfdollar_rolls = ${halfdollar_rolls},
+          dollarcoins = ${dollarcoins},
+          largedollarcoins = ${largedollarcoins},
+          smalldollar_rolls = ${smalldollar_rolls},
+          largedollar_rolls = ${largedollar_rolls},
           ones = ${ones},
           twos = ${twos},
           fives = ${fives},
@@ -192,11 +224,15 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
       INSERT INTO app.cash_drawer_counts
         (tenant_id, count_id, count_ts, period, drawer, user_name,
          pennies, nickels, dimes, quarters, halfdollars,
+         penny_rolls, nickel_rolls, dime_rolls, quarter_rolls, halfdollar_rolls,
+         dollarcoins, largedollarcoins, smalldollar_rolls, largedollar_rolls,
          ones, twos, fives, tens, twenties, fifties, hundreds,
          coin_total, bill_total, grand_total, notes, updated_at)
       VALUES
         (${tenant_id}::uuid, ${count_id}, now(), ${period}, ${drawer}, ${actor_name},
          ${pennies}, ${nickels}, ${dimes}, ${quarters}, ${halfdollars},
+         ${penny_rolls}, ${nickel_rolls}, ${dime_rolls}, ${quarter_rolls}, ${halfdollar_rolls},
+         ${dollarcoins}, ${largedollarcoins}, ${smalldollar_rolls}, ${largedollar_rolls},
          ${ones}, ${twos}, ${fives}, ${tens}, ${twenties}, ${fifties}, ${hundreds},
          ${coin_total}, ${bill_total}, ${grand_total}, ${notes}, now())
       RETURNING count_id, period, drawer, grand_total

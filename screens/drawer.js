@@ -249,10 +249,15 @@ async function loadToday(){
     const p = els.period.value;
     const row = p === 'OPEN' ? data.open : p === 'CLOSE' ? data.close : null;
     if(row){
-      for(const k of BASE_DENOM_IDS){
-        els[k].value = Number(row[k] ?? 0);
+      for (const k of BASE_DENOM_IDS) {
+        if (els[k]) els[k].value = Number(row[k] ?? 0);
       }
-      [...ROLL_IDS, ...EXTRA_COIN_IDS].forEach((k) => { if (els[k]) els[k].value = ''; });
+      for (const k of ROLL_IDS) {
+        if (els[k]) els[k].value = Number(row[k] ?? 0);
+      }
+      for (const k of EXTRA_COIN_IDS) {
+        if (els[k]) els[k].value = Number(row[k] ?? 0);
+      }
       els.notes.value = row.notes ?? '';
       recalc();
       els.status.textContent = `Loaded ${p.toLowerCase()} for today`;
@@ -757,16 +762,29 @@ async function save(){
     const period = els.period.value;
     if(!drawer){ showToast('Choose a drawer first'); return; }
     if(!period){ showToast('Choose a period first'); return; }
-    const pennies = val('pennies') + (val('penny_rolls') * 50);
-    const nickels = val('nickels') + (val('nickel_rolls') * 40);
-    const dimes = val('dimes') + (val('dime_rolls') * 50);
-    const quarters = val('quarters') + (val('quarter_rolls') * 40);
-    const halfdollars = val('halfdollars') + (val('halfdollar_rolls') * 20);
-    const ones = val('ones') + val('dollarcoins') + val('largedollarcoins') + (val('smalldollar_rolls') * 25) + (val('largedollar_rolls') * 20);
     const body = {
       drawer, period,
-      pennies, nickels, dimes, quarters, halfdollars,
-      ones, twos: val('twos'), fives: val('fives'), tens: val('tens'), twenties: val('twenties'), fifties: val('fifties'), hundreds: val('hundreds'),
+      pennies: val('pennies'),
+      nickels: val('nickels'),
+      dimes: val('dimes'),
+      quarters: val('quarters'),
+      halfdollars: val('halfdollars'),
+      penny_rolls: val('penny_rolls'),
+      nickel_rolls: val('nickel_rolls'),
+      dime_rolls: val('dime_rolls'),
+      quarter_rolls: val('quarter_rolls'),
+      halfdollar_rolls: val('halfdollar_rolls'),
+      dollarcoins: val('dollarcoins'),
+      largedollarcoins: val('largedollarcoins'),
+      smalldollar_rolls: val('smalldollar_rolls'),
+      largedollar_rolls: val('largedollar_rolls'),
+      ones: val('ones'),
+      twos: val('twos'),
+      fives: val('fives'),
+      tens: val('tens'),
+      twenties: val('twenties'),
+      fifties: val('fifties'),
+      hundreds: val('hundreds'),
       notes: els.notes.value || null
     };
     els.btnSave.disabled = true;
