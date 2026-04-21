@@ -102,6 +102,75 @@
     border-radius: 10px;
     padding: 10px;
     margin: 8px 0;
+    display: grid;
+    gap: 10px;
+    background: #f8fafc;
+  }
+
+  .report-detail-section {
+    border: 1px solid #e2e8f0;
+    border-radius: 8px;
+    background: #ffffff;
+    overflow: hidden;
+  }
+
+  .report-detail-heading {
+    font-weight: 700;
+    font-size: 0.9rem;
+    padding: 8px 10px;
+    border-bottom: 1px solid #e2e8f0;
+    background: #f1f5f9;
+    color: #0f172a;
+  }
+
+  .report-detail-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+  }
+
+  .report-detail-item {
+    padding: 8px 10px;
+    border-bottom: 1px solid #f1f5f9;
+  }
+
+  .report-detail-item:last-child {
+    border-bottom: 0;
+  }
+
+  .report-detail-main {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 6px;
+    color: #0f172a;
+  }
+
+  .report-detail-datetime {
+    font-weight: 600;
+    color: #1e293b;
+  }
+
+  .report-detail-label {
+    color: #334155;
+  }
+
+  .report-detail-amount {
+    font-weight: 700;
+    color: #0f172a;
+    margin-left: auto;
+  }
+
+  .report-detail-note {
+    margin-top: 2px;
+    font-size: 0.78rem;
+    color: #64748b;
+  }
+
+  .report-detail-empty {
+    padding: 10px;
+    font-size: 0.82rem;
+    color: #64748b;
   }
 
   .report-variance-zero {
@@ -151,8 +220,6 @@
          </select>
          <button id="btnLoad" class="btn btn--neutral btn--sm drawer-required" disabled>Load Today</button> 
       </div>
-      <div class="text-xs text-gray-600 mt-2 mb-2">Select a drawer to begin counting. Common denominations are shown first for faster entry.</div>
-
       <h4 class="text-sm font-semibold mt-2 mb-1">Commonly Used</h4>
       <h5 class="text-xs font-semibold mt-2 mb-1 uppercase tracking-wide text-gray-600">Loose Coins</h5>
       <div class="cd-grid">
@@ -308,7 +375,6 @@
      <div class="flex items-start justify-between gap-3 mb-2">
        <div>
          <h3 class="font-medium">Cash Movement Reporting</h3>
-         <div class="text-xs text-gray-600 mt-0.5">Daily, weekly (Sunday-Saturday), and custom range reporting for managers.</div>
        </div>
      </div>
 
