@@ -7,6 +7,7 @@ let state = {
   todayEntry: null,
   periodEntries: [],
   teamStatuses: [],
+  cashSummary: null,
 };
 
 export async function init({ container }) {
@@ -20,10 +21,14 @@ export function destroy() {}
 function bind(container) {
   els = {
     dashIntro: container.querySelector('#dashIntro'),
+    myStatusCard: container.querySelector('#myStatusCard'),
     myStatusLine: container.querySelector('#myStatusLine'),
     myLastClockOut: container.querySelector('#myLastClockOut'),
     btnDashboardClockIn: container.querySelector('#btnDashboardClockIn'),
     myPrompt: container.querySelector('#myPrompt'),
+    cashMovementCard: container.querySelector('#cashMovementCard'),
+    cashMovementSummary: container.querySelector('#cashMovementSummary'),
+    cashMovementSubtitle: container.querySelector('#cashMovementSubtitle'),
     teamStatusCard: container.querySelector('#teamStatusCard'),
     teamStatusTable: container.querySelector('#teamStatusTable'),
   };
@@ -41,6 +46,7 @@ async function loadDashboard() {
     state.periodEntries = me?.period_entries || [];
 
     renderMyStatus();
+    await loadCashMovementSummary();
 
     if (state.actor?.can_edit_timesheet) {
       els.teamStatusCard.style.display = '';
@@ -60,6 +66,120 @@ async function loadDashboard() {
     if (els.dashIntro) els.dashIntro.textContent = 'Unable to load your status right now.';
     if (els.myStatusLine) els.myStatusLine.textContent = 'Status unavailable.';
   }
+}
+
+async function loadCashMovementSummary() {
+  if (!els.cashMovementCard || !els.cashMovementSummary) return;
+
+  try {
+    const data = await api('/api/cash-report/summary?preset=today');
+    state.cashSummary = data || null;
+
+    els.cashMovementCard.style.display = '';
+    renderCashMovementSummary();
+  } catch (e) {
+    const err = String(e?.data?.error || '');
+    if (err === 'forbidden' || err === 'unauthorized' || err === 'no_tenant') {
+      els.cashMovementCard.style.display = 'none';
+      return;
+    }
+
+    els.cashMovementCard.style.display = '';
+    els.cashMovementSummary.textContent = 'Unable to load cash movement summary right now.';
+  }
+}
+
+function renderCashMovementSummary() {
+  const totals = state.cashSummary?.totals || {};
+  const ledgerMoves = state.cashSummary?.activity?.ledger_moves || [];
+  const movementIn = Number(totals.movement_in_total || 0);
+  const movementOut = Number(totals.movement_out_total || 0);
+  const payoutOut = Number(totals.payout_total || 0);
+  const netMovement = movementIn - movementOut - payoutOut;
+  const endDate = state.cashSummary?.range?.end_date || null;
+  const byDrawer = Array.isArray(state.cashSummary?.daily_by_drawer) ? state.cashSummary.daily_by_drawer : [];
+
+  if (els.cashMovementSubtitle) {
+    const start = state.cashSummary?.range?.start_date;
+    const end = state.cashSummary?.range?.end_date;
+    if (start && end) {
+      els.cashMovementSubtitle.textContent = start === end
+        ? `Summary for ${start}.`
+        : `Summary for ${start} to ${end}.`;
+    }
+  }
+
+  const drawerRows = byDrawer
+    .map((group) => {
+      const days = Array.isArray(group?.days) ? group.days : [];
+      const dayRow = (endDate ? days.find((d) => String(d?.date || '') === String(endDate)) : null) || days[0] || null;
+      if (!dayRow) return '';
+
+      const variance = Number(dayRow.variance || 0);
+      const varianceColor = Math.abs(variance) <= 0.009 ? '#166534' : '#b91c1c';
+
+      return `
+        <tr>
+          <td>${escapeHtml(String(group?.drawer || '—'))}</td>
+          <td>${fmtMoney(dayRow.open_total)}</td>
+          <td>${fmtMoney(dayRow.close_total)}</td>
+          <td>${fmtMoney(dayRow.sales_in)}</td>
+          <td>${fmtMoney(dayRow.movement_in)}</td>
+          <td>${fmtMoney(dayRow.movement_out)}</td>
+          <td>${fmtMoney(dayRow.payout_out)}</td>
+          <td>${fmtMoney(dayRow.expected_close)}</td>
+          <td style="color:${varianceColor}; font-weight:700;">${fmtMoney(variance)}</td>
+        </tr>
+      `;
+    })
+    .filter(Boolean)
+    .join('');
+
+  els.cashMovementSummary.innerHTML = `
+    <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(170px, 1fr)); gap:10px;">
+      <div class="tile" style="padding:10px;">
+        <div class="muted">Movement In</div>
+        <div style="font-weight:700; font-size:1.05rem;">${fmtMoney(movementIn)}</div>
+      </div>
+      <div class="tile" style="padding:10px;">
+        <div class="muted">Movement Out</div>
+        <div style="font-weight:700; font-size:1.05rem;">${fmtMoney(movementOut)}</div>
+      </div>
+      <div class="tile" style="padding:10px;">
+        <div class="muted">Payouts</div>
+        <div style="font-weight:700; font-size:1.05rem;">${fmtMoney(payoutOut)}</div>
+      </div>
+      <div class="tile" style="padding:10px;">
+        <div class="muted">Net Movement</div>
+        <div style="font-weight:700; font-size:1.05rem;">${fmtMoney(netMovement)}</div>
+      </div>
+      <div class="tile" style="padding:10px;">
+        <div class="muted">Ledger Entries</div>
+        <div style="font-weight:700; font-size:1.05rem;">${ledgerMoves.length}</div>
+      </div>
+    </div>
+
+    <div class="table-wrap" style="margin-top:12px;">
+      <table class="table">
+        <thead>
+          <tr>
+            <th>Drawer</th>
+            <th>Open</th>
+            <th>Close</th>
+            <th>Sales In</th>
+            <th>Moves In</th>
+            <th>Moves Out</th>
+            <th>Payouts</th>
+            <th>Expected Close</th>
+            <th>Variance</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${drawerRows || '<tr><td colspan="9" class="muted">No drawer data found for today.</td></tr>'}
+        </tbody>
+      </table>
+    </div>
+  `;
 }
 
 async function loadTeamStatus() {
@@ -93,9 +213,22 @@ async function onClockIn() {
 }
 
 function renderMyStatus() {
+  const isClockinRequired = !!state.actor?.clockin_required;
+
+  if (els.myStatusCard) els.myStatusCard.style.display = isClockinRequired ? '' : 'none';
+  if (!isClockinRequired) {
+    if (els.dashIntro) {
+      els.dashIntro.textContent = '';
+      els.dashIntro.style.display = 'none';
+    }
+    return;
+  }
+
+  if (els.dashIntro) els.dashIntro.style.display = '';
+
   const entry = state.todayEntry;
   const status = deriveStatus(entry);
-  const needsPrompt = !!state.actor?.clockin_required && ['not_clocked_in', 'clocked_out', 'lunch_out'].includes(status.key);
+  const needsPrompt = ['not_clocked_in', 'clocked_out', 'lunch_out'].includes(status.key);
 
   if (els.myStatusLine) els.myStatusLine.textContent = `Current status: ${status.label}`;
   if (els.dashIntro) {
@@ -175,6 +308,11 @@ function fmtDateTime(v) {
     hour: 'numeric',
     minute: '2-digit',
   });
+}
+
+function fmtMoney(v) {
+  const n = Number(v || 0);
+  return new Intl.NumberFormat([], { style: 'currency', currency: 'USD' }).format(n);
 }
 
 function escapeHtml(s) {
