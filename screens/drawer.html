@@ -98,30 +98,46 @@
       <div id="balanceBanner" class="hidden mb-2 p-2 rounded border text-sm"></div> 
       <div class="cd-controls">
          <select id="drawer" class="border rounded px-2 py-1">
+           <option value="">Select drawer…</option>
            <option value="1">Mad Rad</option>
            <option value="2">Nichols</option>
          </select>
-          <select id="period" class="border rounded px-2 py-1">
+          <select id="period" class="border rounded px-2 py-1 drawer-required" disabled>
            <option value="">Select period…</option>
            <option value="OPEN">Open</option>
            <option value="CLOSE">Close</option>
          </select>
-         <button id="btnLoad" class="btn btn--neutral btn--sm">Load Today</button> 
+         <button id="btnLoad" class="btn btn--neutral btn--sm drawer-required" disabled>Load Today</button> 
       </div>
-      <div class="cd-grid">
-        <label class="cd-field"><span>Pennies (1¢)</span><input type="number" id="pennies" class="border rounded px-2 py-1" min="0" step="1"></label>
-        <label class="cd-field"><span>Nickels (5¢)</span><input type="number" id="nickels" class="border rounded px-2 py-1" min="0" step="1"></label>
-        <label class="cd-field"><span>Dimes (10¢)</span><input type="number" id="dimes" class="border rounded px-2 py-1" min="0" step="1"></label>
-        <label class="cd-field"><span>Quarters (25¢)</span><input type="number" id="quarters" class="border rounded px-2 py-1" min="0" step="1"></label>
-        <label class="cd-field"><span>Half-dollars (50¢)</span><input type="number" id="halfdollars" class="border rounded px-2 py-1" min="0" step="1"></label>
+      <div class="text-xs text-gray-600 mt-2 mb-2">Select a drawer to begin counting. Common denominations are shown first for faster entry.</div>
 
-         <label class="cd-field"><span>$1s</span><input type="number" id="ones" class="border rounded px-2 py-1" min="0" step="1"></label>
-        <label class="cd-field"><span>$2s</span><input type="number" id="twos" class="border rounded px-2 py-1" min="0" step="1"></label>
-        <label class="cd-field"><span>$5s</span><input type="number" id="fives" class="border rounded px-2 py-1" min="0" step="1"></label>
-        <label class="cd-field"><span>$10s</span><input type="number" id="tens" class="border rounded px-2 py-1" min="0" step="1"></label>
-        <label class="cd-field"><span>$20s</span><input type="number" id="twenties" class="border rounded px-2 py-1" min="0" step="1"></label>
-        <label class="cd-field"><span>$50s</span><input type="number" id="fifties" class="border rounded px-2 py-1" min="0" step="1"></label>
-        <label class="cd-field"><span>$100s</span><input type="number" id="hundreds" class="border rounded px-2 py-1" min="0" step="1"></label>
+      <h4 class="text-sm font-semibold mt-2 mb-1">Commonly Used</h4>
+      <div class="cd-grid">
+        <label class="cd-field"><span>Pennies (1¢)</span><input type="number" id="pennies" class="border rounded px-2 py-1 drawer-required" min="0" step="1" disabled></label>
+        <label class="cd-field"><span>Penny rolls</span><input type="number" id="penny_rolls" class="border rounded px-2 py-1 drawer-required" min="0" step="1" disabled></label>
+        <label class="cd-field"><span>Nickels (5¢)</span><input type="number" id="nickels" class="border rounded px-2 py-1 drawer-required" min="0" step="1" disabled></label>
+        <label class="cd-field"><span>Nickel rolls</span><input type="number" id="nickel_rolls" class="border rounded px-2 py-1 drawer-required" min="0" step="1" disabled></label>
+        <label class="cd-field"><span>Dimes (10¢)</span><input type="number" id="dimes" class="border rounded px-2 py-1 drawer-required" min="0" step="1" disabled></label>
+        <label class="cd-field"><span>Dime rolls</span><input type="number" id="dime_rolls" class="border rounded px-2 py-1 drawer-required" min="0" step="1" disabled></label>
+        <label class="cd-field"><span>Quarters (25¢)</span><input type="number" id="quarters" class="border rounded px-2 py-1 drawer-required" min="0" step="1" disabled></label>
+        <label class="cd-field"><span>Quarter rolls</span><input type="number" id="quarter_rolls" class="border rounded px-2 py-1 drawer-required" min="0" step="1" disabled></label>
+        <label class="cd-field"><span>$1 bills</span><input type="number" id="ones" class="border rounded px-2 py-1 drawer-required" min="0" step="1" disabled></label>
+        <label class="cd-field"><span>$5s</span><input type="number" id="fives" class="border rounded px-2 py-1 drawer-required" min="0" step="1" disabled></label>
+        <label class="cd-field"><span>$10s</span><input type="number" id="tens" class="border rounded px-2 py-1 drawer-required" min="0" step="1" disabled></label>
+        <label class="cd-field"><span>$20s</span><input type="number" id="twenties" class="border rounded px-2 py-1 drawer-required" min="0" step="1" disabled></label>
+      </div>
+
+      <h4 class="text-sm font-semibold mt-3 mb-1">Uncommon</h4>
+      <div class="cd-grid">
+        <label class="cd-field"><span>Half-dollars (50¢)</span><input type="number" id="halfdollars" class="border rounded px-2 py-1 drawer-required" min="0" step="1" disabled></label>
+        <label class="cd-field"><span>Half-dollar rolls</span><input type="number" id="halfdollar_rolls" class="border rounded px-2 py-1 drawer-required" min="0" step="1" disabled></label>
+        <label class="cd-field"><span>Small $1 coins</span><input type="number" id="dollarcoins" class="border rounded px-2 py-1 drawer-required" min="0" step="1" disabled></label>
+        <label class="cd-field"><span>Small $1 coin rolls</span><input type="number" id="smalldollar_rolls" class="border rounded px-2 py-1 drawer-required" min="0" step="1" disabled></label>
+        <label class="cd-field"><span>Large/Silver $1 coins</span><input type="number" id="largedollarcoins" class="border rounded px-2 py-1 drawer-required" min="0" step="1" disabled></label>
+        <label class="cd-field"><span>Large $1 coin rolls</span><input type="number" id="largedollar_rolls" class="border rounded px-2 py-1 drawer-required" min="0" step="1" disabled></label>
+        <label class="cd-field"><span>$2s</span><input type="number" id="twos" class="border rounded px-2 py-1 drawer-required" min="0" step="1" disabled></label>
+        <label class="cd-field"><span>$50s</span><input type="number" id="fifties" class="border rounded px-2 py-1 drawer-required" min="0" step="1" disabled></label>
+        <label class="cd-field"><span>$100s</span><input type="number" id="hundreds" class="border rounded px-2 py-1 drawer-required" min="0" step="1" disabled></label>
       </div>
       <div class="mt-3 text-right">Coin total: <strong id="coin_total">$0.00</strong></div>
       <div class="mt-3 text-right">Bill total: <strong id="bill_total">$0.00</strong></div> 
@@ -131,7 +147,7 @@
       </div>
       <section class="cd-card">
        <label class="block mb-2">Notes</label>
-       <textarea id="notes" class="w-full border rounded px-2 py-1" rows="1" placeholder="Any notes…"></textarea>
+       <textarea id="notes" class="w-full border rounded px-2 py-1 drawer-required" rows="1" placeholder="Any notes…" disabled></textarea>
    
             
      </section>

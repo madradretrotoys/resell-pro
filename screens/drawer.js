@@ -3,6 +3,10 @@ import { showToast } from '/assets/js/ui.js';
 
 let els = {};
 let sessionUser = null;
+const BASE_DENOM_IDS = ['pennies','nickels','dimes','quarters','halfdollars','ones','twos','fives','tens','twenties','fifties','hundreds'];
+const ROLL_IDS = ['penny_rolls','nickel_rolls','dime_rolls','quarter_rolls','halfdollar_rolls','smalldollar_rolls','largedollar_rolls'];
+const EXTRA_COIN_IDS = ['dollarcoins','largedollarcoins'];
+const ALL_COUNT_INPUT_IDS = [...BASE_DENOM_IDS, ...ROLL_IDS, ...EXTRA_COIN_IDS];
 
 export async function init({ container, session }) {
   sessionUser = session?.user || null;
@@ -27,6 +31,8 @@ function bind(root){
   const ids = [
     'drawer','period','btnLoad','btnSave','btnPing',
     'pennies','nickels','dimes','quarters','halfdollars',
+    'penny_rolls','nickel_rolls','dime_rolls','quarter_rolls','halfdollar_rolls',
+    'dollarcoins','largedollarcoins','smalldollar_rolls','largedollar_rolls',
     'ones','twos','fives','tens','twenties','fifties','hundreds',
     'coin_total','bill_total','grand_total','notes','status',
     // Phase 1: balance + movement
@@ -47,12 +53,14 @@ function bind(root){
     
   ];
   ids.forEach(id => els[id] = root.querySelector('#' + id));
+  els.drawerRequired = Array.from(root.querySelectorAll('.drawer-required'));
 }
 
 function wire(){
+  setDrawerSelectionState();
   // Enable Save only when a period is selected
   els.period.addEventListener('change', async () => {
-    els.btnSave.disabled = !els.period.value;
+    els.btnSave.disabled = !els.period.value || !hasDrawerSelection();
 
     // If user picks a period, auto-load today's counts for the currently selected drawer
     if (els.period.value) {
@@ -62,21 +70,20 @@ function wire(){
 
   // If user switches drawers, auto-load today's counts for that drawer (only if period selected)
   els.drawer.addEventListener('change', async () => {
+    setDrawerSelectionState();
+    if (!hasDrawerSelection()) {
+      clearDrawerForm();
+      return;
+    }
     if (els.period.value) {
       await loadToday();
     } else {
-      // If no period selected yet, clear fields to avoid stale data confusion
-      ['pennies','nickels','dimes','quarters','halfdollars','ones','twos','fives','tens','twenties','fifties','hundreds']
-        .forEach(k => els[k].value = '');
-      els.notes.value = '';
-      recalc();
-      els.status.textContent = '';
+      clearDrawerForm();
     }
   });
 
   // Recalculate on every input
-  ['pennies','nickels','dimes','quarters','halfdollars',
-   'ones','twos','fives','tens','twenties','fifties','hundreds']
+  ALL_COUNT_INPUT_IDS
     .forEach(id => els[id].addEventListener('input', recalc));
 
   els.btnLoad.addEventListener('click', loadToday);
@@ -107,6 +114,26 @@ function wire(){
       toggleCustomDates();
     });
   }
+}
+
+function hasDrawerSelection() {
+  return !!String(els.drawer?.value || '').trim();
+}
+
+function clearDrawerForm() {
+  ALL_COUNT_INPUT_IDS.forEach(k => { if (els[k]) els[k].value = ''; });
+  if (els.notes) els.notes.value = '';
+  recalc();
+  if (els.status) els.status.textContent = hasDrawerSelection() ? '' : 'Select a drawer to start counting.';
+}
+
+function setDrawerSelectionState() {
+  const enabled = hasDrawerSelection();
+  (els.drawerRequired || []).forEach((el) => {
+    el.disabled = !enabled;
+  });
+  if (!enabled && els.period) els.period.value = '';
+  if (els.btnSave) els.btnSave.disabled = !enabled || !els.period?.value;
 }
 
 function wireCashReportFallback(root) {
@@ -182,7 +209,14 @@ function val(id){ return Number(els[id].value || 0); }
 function money(n){ return `$${n.toFixed(2)}`; }
 
 function recalc(){
-  const coin = (val('pennies')*0.01) + (val('nickels')*0.05) + (val('dimes')*0.10) + (val('quarters')*0.25) + (val('halfdollars')*0.50);
+  const penniesTotal = val('pennies') + (val('penny_rolls') * 50);
+  const nickelsTotal = val('nickels') + (val('nickel_rolls') * 40);
+  const dimesTotal = val('dimes') + (val('dime_rolls') * 50);
+  const quartersTotal = val('quarters') + (val('quarter_rolls') * 40);
+  const halfDollarTotal = val('halfdollars') + (val('halfdollar_rolls') * 20);
+  const smallDollarCoinTotal = val('dollarcoins') + (val('smalldollar_rolls') * 25);
+  const largeDollarCoinTotal = val('largedollarcoins') + (val('largedollar_rolls') * 20);
+  const coin = (penniesTotal*0.01) + (nickelsTotal*0.05) + (dimesTotal*0.10) + (quartersTotal*0.25) + (halfDollarTotal*0.50) + smallDollarCoinTotal + largeDollarCoinTotal;
   const bill = (val('ones')*1) + (val('twos')*2) + (val('fives')*5) + (val('tens')*10) + (val('twenties')*20) + (val('fifties')*50) + (val('hundreds')*100);
   els.coin_total.textContent = money(coin);
   els.bill_total.textContent = money(bill);
@@ -203,25 +237,28 @@ async function ping(){
 
 async function loadToday(){
   try{
+    if (!hasDrawerSelection()) {
+      clearDrawerForm();
+      return;
+    }
     els.status.textContent = 'Loading…';
-    const drawer = els.drawer.value || '1';
+    const drawer = els.drawer.value;
     const data = await api(`/api/cash-drawer/today?drawer=${encodeURIComponent(drawer)}`);
     renderBalanceBanner(data);
     // Prefill OPEN/CLOSE buckets if present; leave current inputs alone unless the matching period is loaded
     const p = els.period.value;
     const row = p === 'OPEN' ? data.open : p === 'CLOSE' ? data.close : null;
     if(row){
-      for(const k of ['pennies','nickels','dimes','quarters','halfdollars','ones','twos','fives','tens','twenties','fifties','hundreds']){
+      for(const k of BASE_DENOM_IDS){
         els[k].value = Number(row[k] ?? 0);
       }
+      [...ROLL_IDS, ...EXTRA_COIN_IDS].forEach((k) => { if (els[k]) els[k].value = ''; });
       els.notes.value = row.notes ?? '';
       recalc();
       els.status.textContent = `Loaded ${p.toLowerCase()} for today`;
     }else{
       // clear inputs for a fresh entry
-      ['pennies','nickels','dimes','quarters','halfdollars','ones','twos','fives','tens','twenties','fifties','hundreds'].forEach(k => els[k].value = '');
-      els.notes.value = '';
-      recalc();
+      clearDrawerForm();
       els.status.textContent = `No ${p ? p.toLowerCase() : ''} record yet`;
     }
 
@@ -716,13 +753,20 @@ async function loadMovementHistory() {
 
 async function save(){
   try{
-    const drawer = els.drawer.value || '1';
+    const drawer = els.drawer.value;
     const period = els.period.value;
+    if(!drawer){ showToast('Choose a drawer first'); return; }
     if(!period){ showToast('Choose a period first'); return; }
+    const pennies = val('pennies') + (val('penny_rolls') * 50);
+    const nickels = val('nickels') + (val('nickel_rolls') * 40);
+    const dimes = val('dimes') + (val('dime_rolls') * 50);
+    const quarters = val('quarters') + (val('quarter_rolls') * 40);
+    const halfdollars = val('halfdollars') + (val('halfdollar_rolls') * 20);
+    const ones = val('ones') + val('dollarcoins') + val('largedollarcoins') + (val('smalldollar_rolls') * 25) + (val('largedollar_rolls') * 20);
     const body = {
       drawer, period,
-      pennies: val('pennies'), nickels: val('nickels'), dimes: val('dimes'), quarters: val('quarters'), halfdollars: val('halfdollars'),
-      ones: val('ones'), twos: val('twos'), fives: val('fives'), tens: val('tens'), twenties: val('twenties'), fifties: val('fifties'), hundreds: val('hundreds'),
+      pennies, nickels, dimes, quarters, halfdollars,
+      ones, twos: val('twos'), fives: val('fives'), tens: val('tens'), twenties: val('twenties'), fifties: val('fifties'), hundreds: val('hundreds'),
       notes: els.notes.value || null
     };
     els.btnSave.disabled = true;
@@ -743,6 +787,6 @@ async function save(){
       els.status.textContent = 'Save failed';
     }
   }finally{
-    els.btnSave.disabled = false;
+    els.btnSave.disabled = !hasDrawerSelection() || !els.period.value;
   }
 }
