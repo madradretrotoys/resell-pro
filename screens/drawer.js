@@ -488,18 +488,18 @@ function renderCashReport(data) {
         const detailKey = `${String(g.drawer || '')}::${String(r.date || '')}`;
         const detailId = `report-detail-${safeDomId(detailKey)}`;
         const detail = detailMap.get(detailKey) || emptyDailyDetail();
-        const detailSummary = detailCountSummary(detail);
         return `
           <tr class="border-b ${drawerRowClass}">
             <td class="px-3 py-2">
-              <button
-                type="button"
-                class="btn btn--neutral btn--sm mr-2"
-                data-detail-toggle="${detailId}"
-                aria-expanded="false"
-              >Details</button>
               <span>${r.date}</span>
-              <div class="text-xs text-gray-600 mt-1">${detailSummary}</div>
+              <div class="mt-2">
+                <button
+                  type="button"
+                  class="btn btn--neutral btn--sm"
+                  data-detail-toggle="${detailId}"
+                  aria-expanded="false"
+                >Show Details</button>
+              </div>
             </td>
             <td class="px-3 py-2">${fmtMoney(r.open_total)}</td>
             <td class="px-3 py-2">${fmtMoney(r.close_total)}</td>
@@ -562,6 +562,7 @@ function onReportDetailToggle(ev) {
   const isOpen = !row.classList.contains('hidden');
   row.classList.toggle('hidden', isOpen);
   btn.setAttribute('aria-expanded', isOpen ? 'false' : 'true');
+  btn.textContent = isOpen ? 'Show Details' : 'Hide Details';
 }
 
 function buildDailyDetailMap(data) {
@@ -627,15 +628,6 @@ function buildDailyDetailMap(data) {
 
 function emptyDailyDetail() {
   return { salesIn: [], movesIn: [], movesOut: [], payouts: [] };
-}
-
-function detailCountSummary(d) {
-  return [
-    `Sales ${d.salesIn.length}`,
-    `In ${d.movesIn.length}`,
-    `Out ${d.movesOut.length}`,
-    `Payouts ${d.payouts.length}`,
-  ].join(' • ');
 }
 
 function renderDailyDetails(detail, timezone) {
