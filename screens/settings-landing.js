@@ -42,6 +42,21 @@ export async function init(ctx) {
       if (e.key === "Enter" || e.key === " ") routeToMarketplaces();
     });
 
+    $("#goto-business-hours-settings")?.addEventListener("click", routeToBusinessHours);
+    $("#goto-business-hours-settings")?.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" || e.key === " ") routeToBusinessHours();
+    });
+
+    $("#goto-drawer-settings")?.addEventListener("click", routeToDrawers);
+    $("#goto-drawer-settings")?.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" || e.key === " ") routeToDrawers();
+    });
+
+    $("#goto-employee-schedules-settings")?.addEventListener("click", routeToEmployeeSchedules);
+    $("#goto-employee-schedules-settings")?.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" || e.key === " ") routeToEmployeeSchedules();
+    });
+
   } catch (err) {
     console.error(err);
     hide(loading);
@@ -67,6 +82,18 @@ export async function init(ctx) {
 
   function routeToMarketplaces() {
     window.router?.go?.("?page=settings-marketplaces") || (window.location.href = "?page=settings-marketplaces");
+  }
+
+  function routeToBusinessHours() {
+    window.router?.go?.("?page=settings-business-hours") || (window.location.href = "?page=settings-business-hours");
+  }
+
+  function routeToDrawers() {
+    window.router?.go?.("?page=settings-drawers") || (window.location.href = "?page=settings-drawers");
+  }
+
+  function routeToEmployeeSchedules() {
+    window.router?.go?.("?page=settings-employee-schedules") || (window.location.href = "?page=settings-employee-schedules");
   }
 }
 // end landing.js 

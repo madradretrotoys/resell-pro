@@ -1,0 +1,87 @@
+<section class="screen" data-screen="settings-employee-schedules">
+  <header class="screen-header">
+    <h1>Settings · Employee Schedules</h1>
+    <p class="subtitle">Build one employee week at a time with daily hours.</p>
+  </header>
+
+  <div id="sch-banner" class="banner" hidden></div>
+
+  <div class="card">
+    <h3>Week Builder</h3>
+    <div class="grid grid-4" style="gap:10px; align-items:end;">
+      <label>
+        <span>Employee</span>
+        <select id="sch-user" class="input"></select>
+      </label>
+      <label>
+        <span>Week Starts On</span>
+        <select id="sch-week-start-day" class="input">
+          <option value="0">Sunday</option>
+          <option value="1">Monday</option>
+          <option value="2">Tuesday</option>
+          <option value="3">Wednesday</option>
+          <option value="4">Thursday</option>
+          <option value="5">Friday</option>
+          <option value="6">Saturday</option>
+        </select>
+      </label>
+      <label>
+        <span>Week Start Date</span>
+        <input id="sch-week-start-date" type="date" class="input" />
+      </label>
+      <div class="actions">
+        <button id="sch-load-week" class="btn btn--neutral">Load Week</button>
+        <button id="sch-save-week" class="btn btn--primary">Save Week</button>
+      </div>
+      <label>
+        <span>Clone From Employee</span>
+        <select id="sch-clone-user" class="input"></select>
+      </label>
+      <div class="actions">
+        <button id="sch-clear-week" class="btn btn--neutral">Clear Week</button>
+        <button id="sch-clone-week" class="btn btn--neutral">Clone Week</button>
+      </div>
+      <label>
+        <span>Status</span>
+        <select id="sch-status" class="input">
+          <option value="draft">Draft</option>
+          <option value="published">Published</option>
+          <option value="confirmed">Confirmed</option>
+          <option value="completed">Completed</option>
+          <option value="cancelled">Cancelled</option>
+        </select>
+      </label>
+      <label>
+        <span>Preferred Drawer</span>
+        <select id="sch-drawer" class="input"><option value="">None</option></select>
+      </label>
+      <label style="grid-column: span 2;">
+        <span>Notes (applies to saved rows)</span>
+        <input id="sch-notes" class="input" maxlength="2000" />
+      </label>
+    </div>
+
+    <div style="overflow:auto; margin-top:12px;">
+      <table class="table" style="width:100%; min-width:860px;">
+        <thead>
+          <tr>
+            <th>Day</th>
+            <th>Working</th>
+            <th>Start</th>
+            <th>End</th>
+            <th>Lunch (min)</th>
+            <th>Paid Hours</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody id="sch-week-body"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="card" style="margin-top:12px;">
+    <h3>Week Totals</h3>
+    <div id="sch-week-total" class="text-sm">Total Paid Hours: 0.00</div>
+    <div id="sch-week-ot" class="text-sm">Overtime Risk (40+): No</div>
+  </div>
+</section>

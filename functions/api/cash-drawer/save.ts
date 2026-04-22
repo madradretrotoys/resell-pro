@@ -2,6 +2,7 @@
 // Body: { drawer, period, pennies..hundreds, notes }
 // Rules (Phase 1): first-write wins; 409 if already exists
 import { neon } from "@neondatabase/serverless";
+import { resolveLegacyDrawer } from "../../_shared/drawers";
 
 const json = (data: any, status = 200) =>
   new Response(JSON.stringify(data), { status, headers: { "content-type": "application/json", "cache-control": "no-store" } });
@@ -63,7 +64,8 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
   try {
     const body = await request.json();
 
-    const drawer = String(body.drawer || "1");
+    const requestedDrawer = String(body.drawer || "");
+    const requestedDrawerId = body.drawer_id ? String(body.drawer_id) : null;
     const period = String(body.period || "").toUpperCase();
     if (period !== "OPEN" && period !== "CLOSE") return json({ error: "bad_period" }, 400);
 
@@ -110,10 +112,6 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
     const bill_total = ones*1 + twos*2 + fives*5 + tens*10 + twenties*20 + fifties*50 + hundreds*100;
     const grand_total = coin_total + bill_total;
 
-    // Build key in store timezone
-    const ymd = todayKeyTZ("America/Denver");
-    const count_id = `${ymd}#${drawer}#${period}`;
-
     const sql = neon(env.DATABASE_URL);
 
     
@@ -135,6 +133,17 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
     `;
     const tenant_id = memberRows?.[0]?.tenant_id;
     if (!tenant_id) return json({ error: "no_tenant" }, 403);
+
+    const resolved = await resolveLegacyDrawer(sql, {
+      tenant_id,
+      drawer: requestedDrawer,
+      drawer_id: requestedDrawerId,
+    });
+    const drawer = resolved.drawer;
+
+    // Build key in store timezone
+    const ymd = todayKeyTZ("America/Denver");
+    const count_id = `${ymd}#${drawer}#${period}`;
 
     // Load permissions for this user
     const permRows = await sql/*sql*/`
