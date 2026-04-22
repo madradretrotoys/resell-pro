@@ -1,0 +1,54 @@
+<section class="screen" data-screen="settings-drawers">
+  <header class="screen-header">
+    <h1>Settings · Drawers</h1>
+    <p class="subtitle">Manage tenant drawers used for cash tracking and assignments.</p>
+  </header>
+
+  <div id="drw-banner" class="banner" hidden></div>
+
+  <div class="card">
+    <h3 id="drw-form-title">Create Drawer</h3>
+    <div class="grid grid-4" style="gap:10px; align-items:end;">
+      <label>
+        <span>Name</span>
+        <input id="drw-name" class="input" maxlength="100" placeholder="Drawer 1" />
+      </label>
+      <label>
+        <span>Code</span>
+        <input id="drw-code" class="input" maxlength="30" placeholder="D1" />
+      </label>
+      <label>
+        <span>Location</span>
+        <input id="drw-location" class="input" maxlength="100" placeholder="Front counter" />
+      </label>
+      <label>
+        <span>Starting Float</span>
+        <input id="drw-float" type="number" class="input" min="0" step="0.01" value="0" />
+      </label>
+    </div>
+
+    <div class="actions" style="margin-top:12px;">
+      <button id="drw-save" class="btn btn--primary">Create Drawer</button>
+      <button id="drw-cancel" class="btn btn--neutral" hidden>Cancel Edit</button>
+    </div>
+  </div>
+
+  <div class="card" style="margin-top:12px;">
+    <h3>Current Drawers</h3>
+    <div style="overflow:auto;">
+      <table class="table" style="width:100%; min-width:760px;">
+        <thead>
+          <tr>
+            <th>Name</th>
+            <th>Code</th>
+            <th>Location</th>
+            <th>Float</th>
+            <th>Status</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody id="drw-body"></tbody>
+      </table>
+    </div>
+  </div>
+</section>

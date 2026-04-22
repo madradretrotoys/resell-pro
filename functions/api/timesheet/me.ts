@@ -1,6 +1,30 @@
 import { neon } from '@neondatabase/serverless';
 import { json, localDayBounds, requireTimesheetActor, tzOffsetMinutesFromRequest } from './_helpers';
 
+function addDaysYmd(ymd: string, days: number) {
+  const d = new Date(`${ymd}T00:00:00.000Z`);
+  d.setUTCDate(d.getUTCDate() + days);
+  const y = d.getUTCFullYear();
+  const m = String(d.getUTCMonth() + 1).padStart(2, '0');
+  const day = String(d.getUTCDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
+function weekStartForDateYmd(dateYmd: string, weekStartsOn: number) {
+  const d = new Date(`${dateYmd}T00:00:00.000Z`);
+  const dow = d.getUTCDay();
+  const delta = (dow - weekStartsOn + 7) % 7;
+  return addDaysYmd(dateYmd, -delta);
+}
+
+function parseLegacyDrawerFromMeta(row: any): number | null {
+  const codeNum = String(row?.preferred_drawer_code || '').match(/^D(\d+)$/i)?.[1];
+  const nameNum = String(row?.preferred_drawer_name || '').match(/drawer\s+(\d+)/i)?.[1];
+  const n = Number(codeNum || nameNum || 0);
+  if (!Number.isFinite(n) || n <= 0) return null;
+  return Math.trunc(n);
+}
+
 export const onRequestGet: PagesFunction = async ({ request, env }) => {
   try {
     const sql = neon(String(env.DATABASE_URL));
@@ -11,6 +35,25 @@ export const onRequestGet: PagesFunction = async ({ request, env }) => {
     const url = new URL(request.url);
     const tzOffsetMinutes = tzOffsetMinutesFromRequest(request);
     const today = localDayBounds(tzOffsetMinutes);
+    const weekStartColumnRows = await sql/*sql*/`
+      SELECT 1
+      FROM information_schema.columns
+      WHERE table_schema = 'app'
+        AND table_name = 'tenant_settings'
+        AND column_name = 'week_starts_on'
+      LIMIT 1
+    `;
+
+    let weekStartsOn = 0;
+    if (weekStartColumnRows.length) {
+      const weekSettingRows = await sql/*sql*/`
+        SELECT week_starts_on
+        FROM app.tenant_settings
+        WHERE tenant_id = ${actor.tenant_id}::uuid
+        LIMIT 1
+      `;
+      weekStartsOn = Number(weekSettingRows?.[0]?.week_starts_on ?? 0);
+    }
 
     const todayRows = await sql/*sql*/`
       SELECT *
@@ -56,6 +99,124 @@ export const onRequestGet: PagesFunction = async ({ request, env }) => {
       range_total_hours = rangeRows.reduce((sum, row: any) => sum + Number(row.total_hours || 0), 0);
     }
 
+    const currentWeekStart = weekStartForDateYmd(today.date, weekStartsOn);
+    const currentWeekEnd = addDaysYmd(currentWeekStart, 6);
+    const currentWeekBounds = {
+      startIso: localDayBounds(tzOffsetMinutes, currentWeekStart).startIso,
+      endIso: localDayBounds(tzOffsetMinutes, currentWeekEnd).endIso,
+    };
+
+    let scheduleRows = await sql/*sql*/`
+      SELECT
+        es.business_date,
+        es.shift_start_at,
+        es.shift_end_at,
+        es.break_minutes,
+        es.static_schedule,
+        es.preferred_drawer_id,
+        td.drawer_name AS preferred_drawer_name,
+        td.drawer_code AS preferred_drawer_code
+      FROM app.employee_schedules es
+      LEFT JOIN app.tenant_drawers td ON td.drawer_id = es.preferred_drawer_id
+      WHERE es.tenant_id = ${actor.tenant_id}::uuid
+        AND es.user_id = ${actor.actor_user_id}::uuid
+        AND es.shift_start_at >= ${currentWeekBounds.startIso}::timestamptz
+        AND es.shift_start_at <= ${currentWeekBounds.endIso}::timestamptz
+      ORDER BY es.shift_start_at ASC
+    `;
+
+    let effectiveWeekStart = currentWeekStart;
+    if (!scheduleRows.length) {
+      const latestStaticRows = await sql/*sql*/`
+        SELECT business_date
+        FROM app.employee_schedules
+        WHERE tenant_id = ${actor.tenant_id}::uuid
+          AND user_id = ${actor.actor_user_id}::uuid
+          AND static_schedule = true
+        ORDER BY business_date DESC NULLS LAST, shift_start_at DESC
+        LIMIT 1
+      `;
+      const latestStaticDate = String(latestStaticRows?.[0]?.business_date || '').slice(0, 10);
+      if (latestStaticDate) {
+        effectiveWeekStart = weekStartForDateYmd(latestStaticDate, weekStartsOn);
+        const staticWeekEnd = addDaysYmd(effectiveWeekStart, 6);
+        const staticWeekBounds = {
+          startIso: localDayBounds(tzOffsetMinutes, effectiveWeekStart).startIso,
+          endIso: localDayBounds(tzOffsetMinutes, staticWeekEnd).endIso,
+        };
+        scheduleRows = await sql/*sql*/`
+          SELECT
+            es.business_date,
+            es.shift_start_at,
+            es.shift_end_at,
+            es.break_minutes,
+            es.static_schedule,
+            es.preferred_drawer_id,
+            td.drawer_name AS preferred_drawer_name,
+            td.drawer_code AS preferred_drawer_code
+          FROM app.employee_schedules es
+          LEFT JOIN app.tenant_drawers td ON td.drawer_id = es.preferred_drawer_id
+          WHERE es.tenant_id = ${actor.tenant_id}::uuid
+            AND es.user_id = ${actor.actor_user_id}::uuid
+            AND es.static_schedule = true
+            AND es.shift_start_at >= ${staticWeekBounds.startIso}::timestamptz
+            AND es.shift_start_at <= ${staticWeekBounds.endIso}::timestamptz
+          ORDER BY es.shift_start_at ASC
+        `;
+      }
+    }
+
+    const hasSchedule = scheduleRows.length > 0;
+    const isStaticSchedule = hasSchedule && scheduleRows.some((r: any) => !!r.static_schedule);
+    const week_schedule = hasSchedule ? {
+      title: isStaticSchedule ? 'Permanent Work Schedule' : `Week of ${effectiveWeekStart}`,
+      week_start: effectiveWeekStart,
+      static_schedule: isStaticSchedule,
+      rows: scheduleRows,
+    } : null;
+
+    let drawer_prompt: any = null;
+    if (hasSchedule) {
+      const todayDow = new Date(`${today.date}T00:00:00.000Z`).getUTCDay();
+      const todayScheduleRow = isStaticSchedule
+        ? scheduleRows.find((r: any) => new Date(`${String(r.business_date).slice(0, 10)}T00:00:00.000Z`).getUTCDay() === todayDow)
+        : scheduleRows.find((r: any) => String(r.business_date || '').slice(0, 10) === today.date);
+
+      const drawerLegacy = parseLegacyDrawerFromMeta(todayScheduleRow);
+      if (todayScheduleRow?.preferred_drawer_id && drawerLegacy) {
+        const rowsToday = await sql/*sql*/`
+          SELECT period
+          FROM app.cash_drawer_counts
+          WHERE tenant_id = ${actor.tenant_id}::uuid
+            AND count_id IN (${today.date + "#" + drawerLegacy + "#OPEN"}, ${today.date + "#" + drawerLegacy + "#CLOSE"})
+        `;
+        const hasOpen = rowsToday.some((r: any) => String(r.period || '').toUpperCase() === 'OPEN');
+        const hasClose = rowsToday.some((r: any) => String(r.period || '').toUpperCase() === 'CLOSE');
+
+        const shiftEnd = todayScheduleRow?.shift_end_at ? new Date(todayScheduleRow.shift_end_at) : null;
+        const now = new Date();
+        const withinCloseReminderWindow = !!shiftEnd && now.getTime() >= (shiftEnd.getTime() - 60 * 60 * 1000) && now.getTime() <= (shiftEnd.getTime() + 60 * 60 * 1000);
+
+        if (!hasOpen) {
+          drawer_prompt = {
+            action: 'open',
+            drawer_id: todayScheduleRow.preferred_drawer_id,
+            drawer_name: todayScheduleRow.preferred_drawer_name || `Drawer ${drawerLegacy}`,
+            message: 'Your scheduled drawer opening count is missing.',
+            cta_label: 'Complete Open Drawer Count',
+          };
+        } else if (!hasClose && withinCloseReminderWindow) {
+          drawer_prompt = {
+            action: 'close',
+            drawer_id: todayScheduleRow.preferred_drawer_id,
+            drawer_name: todayScheduleRow.preferred_drawer_name || `Drawer ${drawerLegacy}`,
+            message: 'Your shift is ending soon. Don’t forget to complete your close drawer count.',
+            cta_label: 'Complete Close Drawer Count',
+          };
+        }
+      }
+    }
+
     return json({
       ok: true,
       actor,
@@ -63,6 +224,8 @@ export const onRequestGet: PagesFunction = async ({ request, env }) => {
       period_entries: periodRows,
       range_entries,
       range_total_hours: Math.round(range_total_hours * 100) / 100,
+      week_schedule,
+      drawer_prompt,
     });
   } catch (e: any) {
     return json({ ok: false, error: 'server_error', message: e?.message || String(e) }, 500);

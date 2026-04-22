@@ -1,6 +1,7 @@
 // GET /api/cash-drawer/today?drawer=1
 // Returns { open, close, expected_now_total, variance_now_total } (America/Denver)
 import { neon } from "@neondatabase/serverless";
+import { resolveLegacyDrawer } from "../../_shared/drawers";
 
 const json = (data: any, status = 200) =>
   new Response(JSON.stringify(data), {
@@ -34,15 +35,21 @@ function toMoney(n: any) {
 export const onRequestGet: PagesFunction = async ({ request, env }) => {
   try {
     const url = new URL(request.url);
-    const drawer = String(url.searchParams.get("drawer") || "1");
+    const requestedDrawer = url.searchParams.get("drawer");
+    const requestedDrawerId = url.searchParams.get("drawer_id");
     const tz = "America/Denver";
     const tenant_id = request.headers.get("x-tenant-id");
     if (!tenant_id) return json({ error: "missing_tenant" }, 400);
 
+    const sql = neon(env.DATABASE_URL);
+    const resolved = await resolveLegacyDrawer(sql, {
+      tenant_id,
+      drawer: requestedDrawer,
+      drawer_id: requestedDrawerId,
+    });
+    const drawer = resolved.drawer;
     const ymd = todayKeyTZ(tz);
     const drawerLocation = `Drawer ${drawer}`;
-
-    const sql = neon(env.DATABASE_URL);
 
     // 1) Load today's OPEN and CLOSE (count_id based)
     const rowsToday = await sql/*sql*/`
