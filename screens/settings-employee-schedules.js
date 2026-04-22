@@ -19,7 +19,7 @@ export function destroy() {}
 
 function bind() {
   const ids = [
-    'sch-banner','sch-user','sch-week-start-day','sch-week-start-date','sch-load-week','sch-save-week','sch-status','sch-drawer','sch-notes','sch-week-body','sch-week-total','sch-week-ot'
+    'sch-banner','sch-user','sch-clone-user','sch-week-start-day','sch-week-start-date','sch-load-week','sch-save-week','sch-clear-week','sch-clone-week','sch-status','sch-drawer','sch-notes','sch-week-body','sch-week-total','sch-week-ot'
   ];
   for (const id of ids) els[id] = document.getElementById(id);
 }
@@ -27,10 +27,21 @@ function bind() {
 function wire() {
   els['sch-load-week']?.addEventListener('click', loadWeek);
   els['sch-save-week']?.addEventListener('click', saveWeek);
+  els['sch-clear-week']?.addEventListener('click', () => {
+    clearWeekInputs();
+    banner('Cleared week builder.', 'info');
+  });
+  els['sch-clone-week']?.addEventListener('click', cloneWeekFromEmployee);
+  els['sch-user']?.addEventListener('change', () => {
+    clearWeekInputs();
+    refreshCloneUserOptions();
+    banner('Switched employee. Builder cleared for a fresh schedule.', 'info');
+  });
   els['sch-week-start-day']?.addEventListener('change', async () => {
     await saveWeekConfig();
     setWeekStartDateToTodayWeek();
     buildWeekRows();
+    refreshCloneUserOptions();
     await loadWeek();
   });
 }
@@ -66,6 +77,7 @@ async function loadUsers() {
   const sel = els['sch-user'];
   if (!sel) return;
   sel.innerHTML = users.map((u) => `<option value="${u.user_id}">${esc(u.name || u.login_id || u.email || u.user_id)}</option>`).join('');
+  refreshCloneUserOptions();
 }
 
 async function loadDrawers() {
@@ -141,28 +153,9 @@ async function loadWeek() {
     const week_start = els['sch-week-start-date']?.value || '';
     if (!user_id || !week_start) return;
 
-    const q = new URLSearchParams({ week_start });
-    const resp = await api(`/api/settings/employee-schedules/list?${q.toString()}`);
-    const rows = Array.isArray(resp?.rows) ? resp.rows.filter((r) => r.user_id === user_id) : [];
+    const rows = await fetchRowsForUser(user_id, week_start);
 
-    loadedRowsByDate = new Map();
-    rows.forEach((r) => {
-      const ymd = String(r.business_date || '').slice(0, 10);
-      if (ymd) loadedRowsByDate.set(ymd, r);
-    });
-
-    const trs = els['sch-week-body']?.querySelectorAll('tr') || [];
-    trs.forEach((tr) => {
-      const dow = Number(tr.getAttribute('data-dow'));
-      const ymd = weekDateForDow(dow);
-      const row = loadedRowsByDate.get(ymd);
-      tr.querySelector('.sch-work').checked = !!row;
-      tr.querySelector('.sch-start').value = row ? isoToLocalTime(row.shift_start_at) : '';
-      tr.querySelector('.sch-end').value = row ? isoToLocalTime(row.shift_end_at) : '';
-      tr.querySelector('.sch-lunch').value = row ? String(Number(row.break_minutes || 0)) : '0';
-    });
-
-    recalcTotals();
+    applyRowsToWeek(rows);
   } catch {
     banner('Failed to load week.', 'error');
   }
@@ -177,6 +170,14 @@ async function saveWeek() {
     const preferred_drawer_id = els['sch-drawer']?.value || null;
     const notes = (els['sch-notes']?.value || '').trim() || null;
 
+    const week_start = els['sch-week-start-date']?.value || '';
+    const existingRows = await fetchRowsForUser(user_id, week_start);
+    const existingByDate = new Map();
+    existingRows.forEach((r) => {
+      const ymd = String(r.business_date || '').slice(0, 10);
+      if (ymd) existingByDate.set(ymd, r);
+    });
+
     const trs = Array.from(els['sch-week-body']?.querySelectorAll('tr') || []);
     let saved = 0;
     let deleted = 0;
@@ -184,7 +185,7 @@ async function saveWeek() {
     for (const tr of trs) {
       const dow = Number(tr.getAttribute('data-dow'));
       const ymd = weekDateForDow(dow);
-      const existing = loadedRowsByDate.get(ymd);
+      const existing = existingByDate.get(ymd);
       const work = !!tr.querySelector('.sch-work')?.checked;
       const startTime = tr.querySelector('.sch-start')?.value || '';
       const endTime = tr.querySelector('.sch-end')?.value || '';
@@ -223,6 +224,85 @@ async function saveWeek() {
   } catch (e) {
     banner(`Failed to save week (${e?.message || 'error'}).`, 'error');
   }
+}
+
+async function cloneWeekFromEmployee() {
+  try {
+    const sourceUserId = els['sch-clone-user']?.value || '';
+    const week_start = els['sch-week-start-date']?.value || '';
+    if (!sourceUserId) return banner('Select an employee to clone from.', 'error');
+    if (!week_start) return banner('Pick a week start date first.', 'error');
+
+    const rows = await fetchRowsForUser(sourceUserId, week_start);
+    applyRowsToWeek(rows, { preserveLoadedRows: true });
+    banner('Week cloned into builder. Click Save Week to apply.', 'success');
+  } catch {
+    banner('Failed to clone week.', 'error');
+  }
+}
+
+function clearWeekInputs() {
+  loadedRowsByDate = new Map();
+  const trs = els['sch-week-body']?.querySelectorAll('tr') || [];
+  trs.forEach((tr) => {
+    tr.querySelector('.sch-work').checked = false;
+    tr.querySelector('.sch-start').value = '';
+    tr.querySelector('.sch-end').value = '';
+    tr.querySelector('.sch-lunch').value = '0';
+  });
+  if (els['sch-status']) els['sch-status'].value = 'draft';
+  if (els['sch-drawer']) els['sch-drawer'].value = '';
+  if (els['sch-notes']) els['sch-notes'].value = '';
+  recalcTotals();
+}
+
+function refreshCloneUserOptions() {
+  const sel = els['sch-clone-user'];
+  if (!sel) return;
+  const selectedUserId = els['sch-user']?.value || '';
+  const cloneCandidates = users.filter((u) => u.user_id !== selectedUserId);
+  sel.innerHTML = `<option value="">Choose employee…</option>` + cloneCandidates
+    .map((u) => `<option value="${u.user_id}">${esc(u.name || u.login_id || u.email || u.user_id)}</option>`)
+    .join('');
+  const disabled = cloneCandidates.length === 0;
+  sel.disabled = disabled;
+  if (els['sch-clone-week']) els['sch-clone-week'].disabled = disabled;
+}
+
+async function fetchRowsForUser(userId, weekStart) {
+  const q = new URLSearchParams({ week_start: weekStart });
+  const resp = await api(`/api/settings/employee-schedules/list?${q.toString()}`);
+  return Array.isArray(resp?.rows) ? resp.rows.filter((r) => r.user_id === userId) : [];
+}
+
+function applyRowsToWeek(rows, options = {}) {
+  const { preserveLoadedRows = false } = options;
+  if (!preserveLoadedRows) {
+    loadedRowsByDate = new Map();
+    rows.forEach((r) => {
+      const ymd = String(r.business_date || '').slice(0, 10);
+      if (ymd) loadedRowsByDate.set(ymd, r);
+    });
+  }
+
+  const rowsByDate = new Map();
+  rows.forEach((r) => {
+    const ymd = String(r.business_date || '').slice(0, 10);
+    if (ymd) rowsByDate.set(ymd, r);
+  });
+
+  const trs = els['sch-week-body']?.querySelectorAll('tr') || [];
+  trs.forEach((tr) => {
+    const dow = Number(tr.getAttribute('data-dow'));
+    const ymd = weekDateForDow(dow);
+    const row = rowsByDate.get(ymd);
+    tr.querySelector('.sch-work').checked = !!row;
+    tr.querySelector('.sch-start').value = row ? isoToLocalTime(row.shift_start_at) : '';
+    tr.querySelector('.sch-end').value = row ? isoToLocalTime(row.shift_end_at) : '';
+    tr.querySelector('.sch-lunch').value = row ? String(Number(row.break_minutes || 0)) : '0';
+  });
+
+  recalcTotals();
 }
 
 function recalcTotals() {
