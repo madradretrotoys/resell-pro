@@ -37,6 +37,7 @@ function wire() {
   els['sch-static-toggle']?.addEventListener('click', () => {
     staticScheduleSet = !staticScheduleSet;
     syncStaticScheduleToggle();
+    banner(staticScheduleSet ? 'Schedule marked as set.' : 'Schedule marked as not set.', 'info');
   });
   els['sch-user']?.addEventListener('change', () => {
     clearWeekInputs();
@@ -366,7 +367,7 @@ function applyRowsToWeek(rows, options = {}) {
     tr.querySelector('.sch-lunch').disabled = !row;
   });
 
-  staticScheduleSet = rows.length > 0 && rows.every((r) => !!r.static_schedule);
+  staticScheduleSet = rows.some((r) => !!r.static_schedule);
   syncStaticScheduleToggle();
   recalcTotals();
 }
@@ -415,7 +416,8 @@ function syncStaticScheduleToggle() {
   const btn = els['sch-static-toggle'];
   if (!btn) return;
   btn.setAttribute('aria-pressed', staticScheduleSet ? 'true' : 'false');
-  btn.textContent = staticScheduleSet ? 'Yes' : 'No';
+  btn.textContent = staticScheduleSet ? 'Set ✓' : 'Set Schedule';
+  btn.title = staticScheduleSet ? 'Click to unset schedule' : 'Click to mark this schedule as set';
   btn.classList.toggle('btn--primary', staticScheduleSet);
 }
 
