@@ -9,6 +9,7 @@ let schedules = [];
 export async function init() {
   bind();
   wire();
+  initPatternDefaults();
   await Promise.all([loadUsers(), loadDrawers(), loadSchedules()]);
 }
 
@@ -16,7 +17,8 @@ export function destroy() {}
 
 function bind() {
   const ids = [
-    'sch-banner','sch-form-title','sch-user','sch-start','sch-end','sch-break','sch-status','sch-drawer','sch-notes','sch-save','sch-cancel','sch-body','sch-summary-body'
+    'sch-banner','sch-form-title','sch-user','sch-start','sch-end','sch-break','sch-status','sch-drawer','sch-notes','sch-save','sch-cancel','sch-body','sch-summary-body',
+    'sch-pattern-week-start','sch-pattern-start-time','sch-pattern-end-time','sch-generate-pattern','sch-pattern-days'
   ];
   for (const id of ids) els[id] = document.getElementById(id);
 }
@@ -24,6 +26,7 @@ function bind() {
 function wire() {
   els['sch-save']?.addEventListener('click', onSave);
   els['sch-cancel']?.addEventListener('click', clearForm);
+  els['sch-generate-pattern']?.addEventListener('click', onGeneratePattern);
 }
 
 function banner(message, tone = 'info') {
@@ -33,6 +36,21 @@ function banner(message, tone = 'info') {
   el.className = `banner ${tone}`;
   el.hidden = false;
   setTimeout(() => { el.hidden = true; }, 3500);
+}
+
+function initPatternDefaults() {
+  const now = new Date();
+  const day = now.getDay();
+  const sunday = new Date(now);
+  sunday.setDate(now.getDate() - day);
+  const pad = (n) => String(n).padStart(2, '0');
+  const ymd = `${sunday.getFullYear()}-${pad(sunday.getMonth() + 1)}-${pad(sunday.getDate())}`;
+  if (els['sch-pattern-week-start']) els['sch-pattern-week-start'].value = ymd;
+  const checks = els['sch-pattern-days']?.querySelectorAll('input[type="checkbox"]') || [];
+  checks.forEach((c) => {
+    const v = Number(c.value);
+    c.checked = v >= 1 && v <= 5;
+  });
 }
 
 function clearForm() {
@@ -218,6 +236,66 @@ async function onSave() {
       return;
     }
     banner(`Failed to save shift (${msg}).`, 'error');
+  }
+}
+
+async function onGeneratePattern() {
+  const user_id = els['sch-user']?.value || '';
+  const weekStart = String(els['sch-pattern-week-start']?.value || '');
+  const startTime = String(els['sch-pattern-start-time']?.value || '');
+  const endTime = String(els['sch-pattern-end-time']?.value || '');
+  const lunch = Number(els['sch-break']?.value || 0);
+  const status = els['sch-status']?.value || 'draft';
+  const preferred_drawer_id = els['sch-drawer']?.value || null;
+  const notes = (els['sch-notes']?.value || '').trim() || null;
+  const checkedDays = Array.from(els['sch-pattern-days']?.querySelectorAll('input[type=\"checkbox\"]:checked') || [])
+    .map((el) => Number(el.value))
+    .filter((n) => Number.isFinite(n) && n >= 0 && n <= 6);
+
+  if (!user_id) return banner('Select an employee.', 'error');
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(weekStart)) return banner('Choose a valid week start date.', 'error');
+  if (!startTime || !endTime) return banner('Pattern start and end time are required.', 'error');
+  if (!checkedDays.length) return banner('Select at least one weekday.', 'error');
+
+  const [sh, sm] = startTime.split(':').map((x) => Number(x));
+  const [eh, em] = endTime.split(':').map((x) => Number(x));
+  if ([sh, sm, eh, em].some((n) => !Number.isFinite(n))) return banner('Invalid pattern time.', 'error');
+  if (eh * 60 + em <= sh * 60 + sm) return banner('Pattern end must be after start.', 'error');
+
+  let created = 0;
+  let failed = 0;
+  for (const day of checkedDays) {
+    const base = new Date(`${weekStart}T00:00:00`);
+    base.setDate(base.getDate() + day);
+    const start = new Date(base);
+    start.setHours(sh, sm, 0, 0);
+    const end = new Date(base);
+    end.setHours(eh, em, 0, 0);
+
+    try {
+      await api('/api/settings/employee-schedules/save', {
+        method: 'POST',
+        body: {
+          user_id,
+          shift_start_at: start.toISOString(),
+          shift_end_at: end.toISOString(),
+          break_minutes: lunch,
+          status,
+          preferred_drawer_id,
+          notes,
+        },
+      });
+      created += 1;
+    } catch {
+      failed += 1;
+    }
+  }
+
+  if (created) {
+    banner(`Generated ${created} shift(s).${failed ? ` ${failed} failed (likely overlap).` : ''}`, failed ? 'info' : 'success');
+    await loadSchedules();
+  } else {
+    banner('No shifts were generated.', 'error');
   }
 }
 

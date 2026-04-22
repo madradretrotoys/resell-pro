@@ -50,6 +50,36 @@
       <button id="sch-save" class="btn btn--primary">Save Shift</button>
       <button id="sch-cancel" class="btn btn--neutral" hidden>Cancel Edit</button>
     </div>
+
+    <hr style="margin:14px 0;" />
+    <h4>Weekly Pattern Helper</h4>
+    <p class="subtitle">Quickly create one shift per selected weekday.</p>
+    <div class="grid grid-4" style="gap:10px; align-items:end;">
+      <label>
+        <span>Week Start (Sunday)</span>
+        <input id="sch-pattern-week-start" type="date" class="input" />
+      </label>
+      <label>
+        <span>Start Time</span>
+        <input id="sch-pattern-start-time" type="time" class="input" />
+      </label>
+      <label>
+        <span>End Time</span>
+        <input id="sch-pattern-end-time" type="time" class="input" />
+      </label>
+      <div class="actions">
+        <button id="sch-generate-pattern" class="btn btn--neutral">Generate Week Shifts</button>
+      </div>
+    </div>
+    <div id="sch-pattern-days" style="display:flex; gap:12px; flex-wrap:wrap; margin-top:10px;">
+      <label><input type="checkbox" value="0" /> Sun</label>
+      <label><input type="checkbox" value="1" /> Mon</label>
+      <label><input type="checkbox" value="2" /> Tue</label>
+      <label><input type="checkbox" value="3" /> Wed</label>
+      <label><input type="checkbox" value="4" /> Thu</label>
+      <label><input type="checkbox" value="5" /> Fri</label>
+      <label><input type="checkbox" value="6" /> Sat</label>
+    </div>
   </div>
 
   <div class="card" style="margin-top:12px;">
