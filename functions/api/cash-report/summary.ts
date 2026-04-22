@@ -155,14 +155,12 @@ export const onRequestGet: PagesFunction = async ({ request, env }) => {
     const sql = neon(env.DATABASE_URL);
 
     const permRows = await sql/*sql*/`
-      SELECT can_cash_edit, can_edit_timesheet
+      SELECT can_cash_edit
       FROM app.permissions
       WHERE user_id = ${user_id}
       LIMIT 1
     `;
-    const canCashEdit = !!permRows?.[0]?.can_cash_edit;
-    const canEditTimesheet = !!permRows?.[0]?.can_edit_timesheet;
-    if (!canCashEdit && !canEditTimesheet) return json({ error: "forbidden" }, 403);
+    if (!permRows?.[0]?.can_cash_edit) return json({ error: "forbidden" }, 403);
 
     const tenantRows = await sql/*sql*/`
       SELECT tenant_id

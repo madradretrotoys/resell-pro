@@ -176,6 +176,7 @@ export const onRequestGet: PagesFunction = async ({ request, env }) => {
     } : null;
 
     let drawer_prompt: any = null;
+    let drawer_status: any = null;
     if (hasSchedule) {
       const todayDow = new Date(`${today.date}T00:00:00.000Z`).getUTCDay();
       const todayScheduleRow = isStaticSchedule
@@ -192,6 +193,14 @@ export const onRequestGet: PagesFunction = async ({ request, env }) => {
         `;
         const hasOpen = rowsToday.some((r: any) => String(r.period || '').toUpperCase() === 'OPEN');
         const hasClose = rowsToday.some((r: any) => String(r.period || '').toUpperCase() === 'CLOSE');
+        const drawerName = todayScheduleRow.preferred_drawer_name || `Drawer ${drawerLegacy}`;
+
+        drawer_status = {
+          drawer_id: todayScheduleRow.preferred_drawer_id,
+          drawer_name: drawerName,
+          has_open: hasOpen,
+          has_close: hasClose,
+        };
 
         const shiftEnd = todayScheduleRow?.shift_end_at ? new Date(todayScheduleRow.shift_end_at) : null;
         const now = new Date();
@@ -201,7 +210,7 @@ export const onRequestGet: PagesFunction = async ({ request, env }) => {
           drawer_prompt = {
             action: 'open',
             drawer_id: todayScheduleRow.preferred_drawer_id,
-            drawer_name: todayScheduleRow.preferred_drawer_name || `Drawer ${drawerLegacy}`,
+            drawer_name: drawerName,
             message: 'Your scheduled drawer opening count is missing.',
             cta_label: 'Complete Open Drawer Count',
           };
@@ -209,7 +218,7 @@ export const onRequestGet: PagesFunction = async ({ request, env }) => {
           drawer_prompt = {
             action: 'close',
             drawer_id: todayScheduleRow.preferred_drawer_id,
-            drawer_name: todayScheduleRow.preferred_drawer_name || `Drawer ${drawerLegacy}`,
+            drawer_name: drawerName,
             message: 'Your shift is ending soon. Don’t forget to complete your close drawer count.',
             cta_label: 'Complete Close Drawer Count',
           };
@@ -225,6 +234,7 @@ export const onRequestGet: PagesFunction = async ({ request, env }) => {
       range_entries,
       range_total_hours: Math.round(range_total_hours * 100) / 100,
       week_schedule,
+      drawer_status,
       drawer_prompt,
     });
   } catch (e: any) {
