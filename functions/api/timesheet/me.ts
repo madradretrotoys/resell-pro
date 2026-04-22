@@ -1,5 +1,6 @@
 import { neon } from '@neondatabase/serverless';
 import { json, localDayBounds, requireTimesheetActor, tzOffsetMinutesFromRequest } from './_helpers';
+import { resolveLegacyDrawer } from '../../_shared/drawers';
 
 function addDaysYmd(ymd: string, days: number) {
   const d = new Date(`${ymd}T00:00:00.000Z`);
@@ -176,41 +177,69 @@ export const onRequestGet: PagesFunction = async ({ request, env }) => {
     } : null;
 
     let drawer_prompt: any = null;
+    let drawer_status: any = null;
     if (hasSchedule) {
+      const hasDrawerAssigned = (row: any) =>
+        !!row?.preferred_drawer_id || !!String(row?.preferred_drawer_code || '').trim() || !!String(row?.preferred_drawer_name || '').trim();
       const todayDow = new Date(`${today.date}T00:00:00.000Z`).getUTCDay();
-      const todayScheduleRow = isStaticSchedule
-        ? scheduleRows.find((r: any) => new Date(`${String(r.business_date).slice(0, 10)}T00:00:00.000Z`).getUTCDay() === todayDow)
-        : scheduleRows.find((r: any) => String(r.business_date || '').slice(0, 10) === today.date);
+      const todayCandidates = isStaticSchedule
+        ? scheduleRows.filter((r: any) => new Date(`${String(r.business_date).slice(0, 10)}T00:00:00.000Z`).getUTCDay() === todayDow)
+        : scheduleRows.filter((r: any) => String(r.business_date || '').slice(0, 10) === today.date);
+      const todayScheduleRow = todayCandidates.find(hasDrawerAssigned) || todayCandidates[0] || null;
 
       const drawerLegacy = parseLegacyDrawerFromMeta(todayScheduleRow);
-      if (todayScheduleRow?.preferred_drawer_id && drawerLegacy) {
+      const drawerCode = String(todayScheduleRow?.preferred_drawer_code || '').trim();
+      let drawerKey = '';
+      if (todayScheduleRow?.preferred_drawer_id) {
+        try {
+          const resolved = await resolveLegacyDrawer(sql, {
+            tenant_id: actor.tenant_id,
+            drawer_id: String(todayScheduleRow.preferred_drawer_id),
+          });
+          drawerKey = String(resolved?.drawer || '').trim();
+        } catch {}
+      }
+      if (!drawerKey) {
+        const codeMatch = drawerCode.match(/^D?(\d+)$/i)?.[1];
+        const codeNum = Number(codeMatch || 0);
+        drawerKey = Number.isFinite(codeNum) && codeNum > 0
+          ? String(Math.trunc(codeNum))
+          : (drawerLegacy ? String(drawerLegacy) : '');
+      }
+      if (drawerKey) {
         const rowsToday = await sql/*sql*/`
           SELECT period
           FROM app.cash_drawer_counts
           WHERE tenant_id = ${actor.tenant_id}::uuid
-            AND count_id IN (${today.date + "#" + drawerLegacy + "#OPEN"}, ${today.date + "#" + drawerLegacy + "#CLOSE"})
+            AND drawer = ${drawerKey}
+            AND count_ts >= ${today.startIso}
+            AND count_ts <= ${today.endIso}
         `;
         const hasOpen = rowsToday.some((r: any) => String(r.period || '').toUpperCase() === 'OPEN');
         const hasClose = rowsToday.some((r: any) => String(r.period || '').toUpperCase() === 'CLOSE');
+        const drawerName = todayScheduleRow.preferred_drawer_name || drawerCode || (drawerLegacy ? `Drawer ${drawerLegacy}` : 'Scheduled drawer');
 
-        const shiftEnd = todayScheduleRow?.shift_end_at ? new Date(todayScheduleRow.shift_end_at) : null;
-        const now = new Date();
-        const withinCloseReminderWindow = !!shiftEnd && now.getTime() >= (shiftEnd.getTime() - 60 * 60 * 1000) && now.getTime() <= (shiftEnd.getTime() + 60 * 60 * 1000);
+        drawer_status = {
+          drawer_id: todayScheduleRow.preferred_drawer_id || null,
+          drawer_name: drawerName,
+          has_open: hasOpen,
+          has_close: hasClose,
+        };
 
         if (!hasOpen) {
           drawer_prompt = {
             action: 'open',
-            drawer_id: todayScheduleRow.preferred_drawer_id,
-            drawer_name: todayScheduleRow.preferred_drawer_name || `Drawer ${drawerLegacy}`,
+            drawer_id: todayScheduleRow.preferred_drawer_id || null,
+            drawer_name: drawerName,
             message: 'Your scheduled drawer opening count is missing.',
             cta_label: 'Complete Open Drawer Count',
           };
-        } else if (!hasClose && withinCloseReminderWindow) {
+        } else if (!hasClose) {
           drawer_prompt = {
             action: 'close',
-            drawer_id: todayScheduleRow.preferred_drawer_id,
-            drawer_name: todayScheduleRow.preferred_drawer_name || `Drawer ${drawerLegacy}`,
-            message: 'Your shift is ending soon. Don’t forget to complete your close drawer count.',
+            drawer_id: todayScheduleRow.preferred_drawer_id || null,
+            drawer_name: drawerName,
+            message: 'Your scheduled drawer close count is still pending.',
             cta_label: 'Complete Close Drawer Count',
           };
         }
@@ -225,6 +254,7 @@ export const onRequestGet: PagesFunction = async ({ request, env }) => {
       range_entries,
       range_total_hours: Math.round(range_total_hours * 100) / 100,
       week_schedule,
+      drawer_status,
       drawer_prompt,
     });
   } catch (e: any) {
