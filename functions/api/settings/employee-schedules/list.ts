@@ -38,13 +38,25 @@ export const onRequestGet: PagesFunction = async ({ request, env }) => {
       return json({ ok: false, error: "forbidden" }, 403);
     }
 
-    const weekRows = await sql/*sql*/`
-      SELECT week_starts_on
-      FROM app.tenants
-      WHERE tenant_id = ${tenant_id}::uuid
+    const weekStartColumnRows = await sql/*sql*/`
+      SELECT 1
+      FROM information_schema.columns
+      WHERE table_schema = 'app'
+        AND table_name = 'tenant_settings'
+        AND column_name = 'week_starts_on'
       LIMIT 1
     `;
-    const week_starts_on = Number(weekRows?.[0]?.week_starts_on ?? 0);
+
+    let week_starts_on = 0;
+    if (weekStartColumnRows.length) {
+      const weekRows = await sql/*sql*/`
+        SELECT week_starts_on
+        FROM app.tenant_settings
+        WHERE tenant_id = ${tenant_id}::uuid
+        LIMIT 1
+      `;
+      week_starts_on = Number(weekRows?.[0]?.week_starts_on ?? 0);
+    }
 
     const url = new URL(request.url);
     const week_start = url.searchParams.get("week_start");
@@ -62,6 +74,7 @@ export const onRequestGet: PagesFunction = async ({ request, env }) => {
         es.shift_start_at,
         es.shift_end_at,
         es.break_minutes,
+        es.static_schedule,
         es.status,
         es.preferred_drawer_id,
         td.drawer_name AS preferred_drawer_name,

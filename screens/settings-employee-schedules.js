@@ -5,6 +5,8 @@ let els = {};
 let users = [];
 let drawers = [];
 let loadedRowsByDate = new Map();
+let tenantLunchRules = { consecutiveHoursRequired: 0, defaultLunchMinutes: 0 };
+let staticScheduleSet = false;
 
 export async function init() {
   bind();
@@ -19,7 +21,7 @@ export function destroy() {}
 
 function bind() {
   const ids = [
-    'sch-banner','sch-user','sch-clone-user','sch-week-start-day','sch-week-start-date','sch-load-week','sch-save-week','sch-clear-week','sch-clone-week','sch-status','sch-drawer','sch-notes','sch-week-body','sch-week-total','sch-week-ot'
+    'sch-banner', 'sch-user', 'sch-clone-user', 'sch-week-start-day', 'sch-week-start-date', 'sch-load-week', 'sch-save-week', 'sch-clear-week', 'sch-clone-week', 'sch-static-toggle', 'sch-status', 'sch-drawer', 'sch-notes', 'sch-week-body', 'sch-week-total', 'sch-week-ot'
   ];
   for (const id of ids) els[id] = document.getElementById(id);
 }
@@ -32,6 +34,11 @@ function wire() {
     banner('Cleared week builder.', 'info');
   });
   els['sch-clone-week']?.addEventListener('click', cloneWeekFromEmployee);
+  els['sch-static-toggle']?.addEventListener('click', () => {
+    staticScheduleSet = !staticScheduleSet;
+    syncStaticScheduleToggle();
+    banner(staticScheduleSet ? 'Static schedule set to Yes.' : 'Static schedule set to No.', 'info');
+  });
   els['sch-user']?.addEventListener('change', () => {
     clearWeekInputs();
     refreshCloneUserOptions();
@@ -68,7 +75,7 @@ function setWeekStartDateToTodayWeek() {
 
 function localDateToYmd(d) {
   const pad = (n) => String(n).padStart(2, '0');
-  return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 }
 
 async function loadUsers() {
@@ -93,6 +100,10 @@ async function loadWeekConfig() {
     const resp = await api('/api/settings/employee-schedules/week-config');
     const weekStartsOn = Number(resp?.week_starts_on ?? 0);
     if (els['sch-week-start-day']) els['sch-week-start-day'].value = String(weekStartsOn);
+    tenantLunchRules = {
+      consecutiveHoursRequired: Math.max(0, Number(resp?.consecutive_lunch_hours_required ?? 0) || 0),
+      defaultLunchMinutes: Math.max(0, Number(resp?.default_lunch_minutes ?? 0) || 0),
+    };
   } catch {
     // keep defaults
   }
@@ -114,9 +125,9 @@ function buildWeekRows() {
       <tr data-dow="${dow}">
         <td>${DAY_NAMES[dow]}</td>
         <td><input type="checkbox" class="sch-work" /></td>
-        <td><input type="time" class="input sch-start" /></td>
-        <td><input type="time" class="input sch-end" /></td>
-        <td><input type="number" min="0" step="1" class="input sch-lunch" value="0" /></td>
+        <td><input type="time" class="input sch-start" disabled /></td>
+        <td><input type="time" class="input sch-end" disabled /></td>
+        <td><input type="number" min="0" step="1" class="input sch-lunch" value="0" disabled /></td>
         <td class="sch-paid">0.00</td>
         <td><button class="btn btn--neutral btn--sm sch-copy-prev">Copy Prev</button></td>
       </tr>
@@ -124,15 +135,59 @@ function buildWeekRows() {
   }).join('');
 
   body.querySelectorAll('tr').forEach((tr, idx) => {
-    tr.querySelectorAll('input').forEach((inp) => inp.addEventListener('input', recalcTotals));
+    const work = tr.querySelector('.sch-work');
+    const start = tr.querySelector('.sch-start');
+    const end = tr.querySelector('.sch-end');
+    const lunch = tr.querySelector('.sch-lunch');
+
+    work?.addEventListener('change', () => {
+      const isWorking = !!work.checked;
+      start.disabled = !isWorking;
+      end.disabled = !isWorking;
+      lunch.disabled = !isWorking;
+      if (!isWorking) {
+        start.value = '';
+        end.value = '';
+        lunch.value = '0';
+      } else {
+        maybeApplyDefaultLunch(tr);
+      }
+      recalcTotals();
+    });
+
+    start?.addEventListener('input', () => {
+      maybeApplyDefaultLunch(tr);
+      recalcTotals();
+    });
+
+    end?.addEventListener('input', () => {
+      maybeApplyDefaultLunch(tr);
+      recalcTotals();
+    });
+
+    lunch?.addEventListener('input', recalcTotals);
+
     tr.querySelector('.sch-copy-prev')?.addEventListener('click', () => {
       if (idx === 0) return;
-      const prev = body.querySelectorAll('tr')[idx - 1];
+      const rows = Array.from(body.querySelectorAll('tr'));
+      let prev = null;
+      for (let i = idx - 1; i >= 0; i -= 1) {
+        const candidate = rows[i];
+        const isWorking = !!candidate.querySelector('.sch-work')?.checked;
+        const hasTimes = !!candidate.querySelector('.sch-start')?.value && !!candidate.querySelector('.sch-end')?.value;
+        if (isWorking && hasTimes) {
+          prev = candidate;
+          break;
+        }
+      }
       if (!prev) return;
-      tr.querySelector('.sch-work').checked = prev.querySelector('.sch-work').checked;
+      tr.querySelector('.sch-work').checked = true;
       tr.querySelector('.sch-start').value = prev.querySelector('.sch-start').value;
       tr.querySelector('.sch-end').value = prev.querySelector('.sch-end').value;
       tr.querySelector('.sch-lunch').value = prev.querySelector('.sch-lunch').value;
+      tr.querySelector('.sch-start').disabled = false;
+      tr.querySelector('.sch-end').disabled = false;
+      tr.querySelector('.sch-lunch').disabled = false;
       recalcTotals();
     });
   });
@@ -169,6 +224,7 @@ async function saveWeek() {
     const status = els['sch-status']?.value || 'draft';
     const preferred_drawer_id = els['sch-drawer']?.value || null;
     const notes = (els['sch-notes']?.value || '').trim() || null;
+    const static_schedule = !!staticScheduleSet;
 
     const week_start = els['sch-week-start-date']?.value || '';
     const existingRows = await fetchRowsForUser(user_id, week_start);
@@ -211,6 +267,7 @@ async function saveWeek() {
           shift_start_at: startIso,
           shift_end_at: endIso,
           break_minutes: lunch,
+          static_schedule,
           status,
           preferred_drawer_id,
           notes,
@@ -243,12 +300,17 @@ async function cloneWeekFromEmployee() {
 
 function clearWeekInputs() {
   loadedRowsByDate = new Map();
+  staticScheduleSet = false;
+  syncStaticScheduleToggle();
   const trs = els['sch-week-body']?.querySelectorAll('tr') || [];
   trs.forEach((tr) => {
     tr.querySelector('.sch-work').checked = false;
     tr.querySelector('.sch-start').value = '';
     tr.querySelector('.sch-end').value = '';
     tr.querySelector('.sch-lunch').value = '0';
+    tr.querySelector('.sch-start').disabled = true;
+    tr.querySelector('.sch-end').disabled = true;
+    tr.querySelector('.sch-lunch').disabled = true;
   });
   if (els['sch-status']) els['sch-status'].value = 'draft';
   if (els['sch-drawer']) els['sch-drawer'].value = '';
@@ -291,6 +353,11 @@ function applyRowsToWeek(rows, options = {}) {
     if (ymd) rowsByDate.set(ymd, r);
   });
 
+  const firstRow = rows[0] || null;
+  if (els['sch-status']) els['sch-status'].value = firstRow?.status || 'draft';
+  if (els['sch-drawer']) els['sch-drawer'].value = firstRow?.preferred_drawer_id || '';
+  if (els['sch-notes']) els['sch-notes'].value = firstRow?.notes || '';
+
   const trs = els['sch-week-body']?.querySelectorAll('tr') || [];
   trs.forEach((tr) => {
     const dow = Number(tr.getAttribute('data-dow'));
@@ -300,8 +367,13 @@ function applyRowsToWeek(rows, options = {}) {
     tr.querySelector('.sch-start').value = row ? isoToLocalTime(row.shift_start_at) : '';
     tr.querySelector('.sch-end').value = row ? isoToLocalTime(row.shift_end_at) : '';
     tr.querySelector('.sch-lunch').value = row ? String(Number(row.break_minutes || 0)) : '0';
+    tr.querySelector('.sch-start').disabled = !row;
+    tr.querySelector('.sch-end').disabled = !row;
+    tr.querySelector('.sch-lunch').disabled = !row;
   });
 
+  staticScheduleSet = rows.some((r) => !!r.static_schedule);
+  syncStaticScheduleToggle();
   recalcTotals();
 }
 
@@ -318,7 +390,7 @@ function recalcTotals() {
       const startM = timeToMinutes(s);
       const endM = timeToMinutes(e);
       if (endM > startM) {
-        paid = Math.max(0, (endM - startM - lunch) / 60);
+        paid = Math.max(0, (endM - startM - Math.max(0, lunch)) / 60);
       }
     }
     tr.querySelector('.sch-paid').textContent = paid.toFixed(2);
@@ -327,6 +399,31 @@ function recalcTotals() {
 
   if (els['sch-week-total']) els['sch-week-total'].textContent = `Total Paid Hours: ${total.toFixed(2)}`;
   if (els['sch-week-ot']) els['sch-week-ot'].textContent = `Overtime Risk (40+): ${total > 40 ? 'Yes' : 'No'}`;
+}
+
+function maybeApplyDefaultLunch(tr) {
+  const work = !!tr.querySelector('.sch-work')?.checked;
+  const s = tr.querySelector('.sch-start')?.value || '';
+  const e = tr.querySelector('.sch-end')?.value || '';
+  if (!work || !s || !e) return;
+
+  const startM = timeToMinutes(s);
+  const endM = timeToMinutes(e);
+  if (endM <= startM) return;
+
+  const durationHours = (endM - startM) / 60;
+  if (durationHours >= tenantLunchRules.consecutiveHoursRequired) {
+    tr.querySelector('.sch-lunch').value = String(tenantLunchRules.defaultLunchMinutes);
+  }
+}
+
+function syncStaticScheduleToggle() {
+  const btn = els['sch-static-toggle'];
+  if (!btn) return;
+  btn.setAttribute('aria-pressed', staticScheduleSet ? 'true' : 'false');
+  btn.textContent = staticScheduleSet ? 'Yes' : 'No';
+  btn.title = staticScheduleSet ? 'Click to switch static schedule to No' : 'Click to switch static schedule to Yes';
+  btn.classList.toggle('btn--primary', staticScheduleSet);
 }
 
 function isoToLocalTime(iso) {

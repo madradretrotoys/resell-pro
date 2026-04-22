@@ -29,18 +29,24 @@
         <span>Week Start Date</span>
         <input id="sch-week-start-date" type="date" class="input" />
       </label>
+      <label>
+        <span>Static Schedule?</span>
+        <button id="sch-static-toggle" type="button" class="btn btn--neutral" aria-pressed="false">No</button>
+      </label>
       <div class="actions">
+        <button id="sch-clear-week" class="btn btn--neutral">Clear Week</button>
         <button id="sch-load-week" class="btn btn--neutral">Load Week</button>
-        <button id="sch-save-week" class="btn btn--primary">Save Week</button>
       </div>
+      <div style="grid-column: 1 / -1; height:8px;"></div>
       <label>
         <span>Clone From Employee</span>
         <select id="sch-clone-user" class="input"></select>
       </label>
-      <div class="actions">
-        <button id="sch-clear-week" class="btn btn--neutral">Clear Week</button>
+      <div class="actions" style="justify-content:flex-start;">
         <button id="sch-clone-week" class="btn btn--neutral">Clone Week</button>
       </div>
+      <div style="grid-column: span 2;"></div>
+      <div style="grid-column: 1 / -1; height:8px;"></div>
       <label>
         <span>Status</span>
         <select id="sch-status" class="input">
@@ -76,6 +82,9 @@
         </thead>
         <tbody id="sch-week-body"></tbody>
       </table>
+    </div>
+    <div class="actions" style="margin-top:12px; justify-content:flex-end;">
+      <button id="sch-save-week" class="btn btn--primary">Save Week</button>
     </div>
   </div>
 
