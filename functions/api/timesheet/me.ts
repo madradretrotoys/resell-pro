@@ -1,6 +1,6 @@
 import { neon } from '@neondatabase/serverless';
 import { json, localDayBounds, requireTimesheetActor, tzOffsetMinutesFromRequest } from './_helpers';
-import { resolveLegacyDrawer } from '../_shared/drawers';
+import { resolveLegacyDrawer } from '../../_shared/drawers';
 
 function addDaysYmd(ymd: string, days: number) {
   const d = new Date(`${ymd}T00:00:00.000Z`);
