@@ -42,6 +42,21 @@ const SCREENS = {
     js:   '/screens/settings-marketplaces.js',
     title: 'Settings · Marketplaces',
   },
+  'settings-business-hours': {
+    html: '/screens/settings-business-hours.html',
+    js: '/screens/settings-business-hours.js',
+    title: 'Settings · Business Hours',
+  },
+  'settings-drawers': {
+    html: '/screens/settings-drawers.html',
+    js: '/screens/settings-drawers.js',
+    title: 'Settings · Drawers',
+  },
+  'settings-employee-schedules': {
+    html: '/screens/settings-employee-schedules.html',
+    js: '/screens/settings-employee-schedules.js',
+    title: 'Settings · Employee Schedules',
+  },
 };
 
 let current = { name: null, mod: null };
