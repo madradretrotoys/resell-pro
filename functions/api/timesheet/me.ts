@@ -1,5 +1,6 @@
 import { neon } from '@neondatabase/serverless';
 import { json, localDayBounds, requireTimesheetActor, tzOffsetMinutesFromRequest } from './_helpers';
+import { resolveLegacyDrawer } from '../_shared/drawers';
 
 function addDaysYmd(ymd: string, days: number) {
   const d = new Date(`${ymd}T00:00:00.000Z`);
@@ -188,7 +189,23 @@ export const onRequestGet: PagesFunction = async ({ request, env }) => {
 
       const drawerLegacy = parseLegacyDrawerFromMeta(todayScheduleRow);
       const drawerCode = String(todayScheduleRow?.preferred_drawer_code || '').trim();
-      const drawerKey = drawerCode || (drawerLegacy ? `D${drawerLegacy}` : '');
+      let drawerKey = '';
+      if (todayScheduleRow?.preferred_drawer_id) {
+        try {
+          const resolved = await resolveLegacyDrawer(sql, {
+            tenant_id: actor.tenant_id,
+            drawer_id: String(todayScheduleRow.preferred_drawer_id),
+          });
+          drawerKey = String(resolved?.drawer || '').trim();
+        } catch {}
+      }
+      if (!drawerKey) {
+        const codeMatch = drawerCode.match(/^D?(\d+)$/i)?.[1];
+        const codeNum = Number(codeMatch || 0);
+        drawerKey = Number.isFinite(codeNum) && codeNum > 0
+          ? String(Math.trunc(codeNum))
+          : (drawerLegacy ? String(drawerLegacy) : '');
+      }
       if (drawerKey) {
         const rowsToday = await sql/*sql*/`
           SELECT period
