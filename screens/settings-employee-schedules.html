@@ -1,0 +1,75 @@
+<section class="screen" data-screen="settings-employee-schedules">
+  <header class="screen-header">
+    <h1>Settings · Employee Schedules</h1>
+    <p class="subtitle">Create and manage employee shifts.</p>
+  </header>
+
+  <div id="sch-banner" class="banner" hidden></div>
+
+  <div class="card">
+    <h3 id="sch-form-title">Create Shift</h3>
+    <div class="grid grid-4" style="gap:10px; align-items:end;">
+      <label>
+        <span>Employee</span>
+        <select id="sch-user" class="input"></select>
+      </label>
+      <label>
+        <span>Start</span>
+        <input id="sch-start" type="datetime-local" class="input" />
+      </label>
+      <label>
+        <span>End</span>
+        <input id="sch-end" type="datetime-local" class="input" />
+      </label>
+      <label>
+        <span>Break Minutes</span>
+        <input id="sch-break" type="number" min="0" step="1" class="input" value="0" />
+      </label>
+      <label>
+        <span>Status</span>
+        <select id="sch-status" class="input">
+          <option value="draft">Draft</option>
+          <option value="published">Published</option>
+          <option value="confirmed">Confirmed</option>
+          <option value="completed">Completed</option>
+          <option value="cancelled">Cancelled</option>
+        </select>
+      </label>
+      <label>
+        <span>Preferred Drawer</span>
+        <select id="sch-drawer" class="input">
+          <option value="">None</option>
+        </select>
+      </label>
+      <label style="grid-column: span 2;">
+        <span>Notes</span>
+        <input id="sch-notes" class="input" maxlength="2000" />
+      </label>
+    </div>
+    <div class="actions" style="margin-top:12px;">
+      <button id="sch-save" class="btn btn--primary">Save Shift</button>
+      <button id="sch-cancel" class="btn btn--neutral" hidden>Cancel Edit</button>
+    </div>
+  </div>
+
+  <div class="card" style="margin-top:12px;">
+    <h3>Current Week</h3>
+    <div style="overflow:auto;">
+      <table class="table" style="width:100%; min-width:920px;">
+        <thead>
+          <tr>
+            <th>Employee</th>
+            <th>Start</th>
+            <th>End</th>
+            <th>Break</th>
+            <th>Status</th>
+            <th>Drawer</th>
+            <th>Notes</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody id="sch-body"></tbody>
+      </table>
+    </div>
+  </div>
+</section>

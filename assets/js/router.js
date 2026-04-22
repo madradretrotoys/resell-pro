@@ -52,6 +52,11 @@ const SCREENS = {
     js: '/screens/settings-drawers.js',
     title: 'Settings · Drawers',
   },
+  'settings-employee-schedules': {
+    html: '/screens/settings-employee-schedules.html',
+    js: '/screens/settings-employee-schedules.js',
+    title: 'Settings · Employee Schedules',
+  },
 };
 
 let current = { name: null, mod: null };

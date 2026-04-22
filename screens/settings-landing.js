@@ -52,6 +52,11 @@ export async function init(ctx) {
       if (e.key === "Enter" || e.key === " ") routeToDrawers();
     });
 
+    $("#goto-employee-schedules-settings")?.addEventListener("click", routeToEmployeeSchedules);
+    $("#goto-employee-schedules-settings")?.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" || e.key === " ") routeToEmployeeSchedules();
+    });
+
   } catch (err) {
     console.error(err);
     hide(loading);
@@ -85,6 +90,10 @@ export async function init(ctx) {
 
   function routeToDrawers() {
     window.router?.go?.("?page=settings-drawers") || (window.location.href = "?page=settings-drawers");
+  }
+
+  function routeToEmployeeSchedules() {
+    window.router?.go?.("?page=settings-employee-schedules") || (window.location.href = "?page=settings-employee-schedules");
   }
 }
 // end landing.js 
