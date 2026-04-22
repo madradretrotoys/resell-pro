@@ -184,42 +184,42 @@ export const onRequestGet: PagesFunction = async ({ request, env }) => {
         : scheduleRows.find((r: any) => String(r.business_date || '').slice(0, 10) === today.date);
 
       const drawerLegacy = parseLegacyDrawerFromMeta(todayScheduleRow);
-      if (todayScheduleRow?.preferred_drawer_id && drawerLegacy) {
+      const drawerCode = String(todayScheduleRow?.preferred_drawer_code || '').trim();
+      const drawerKey = drawerCode || (drawerLegacy ? `D${drawerLegacy}` : '');
+      if (drawerKey) {
         const rowsToday = await sql/*sql*/`
           SELECT period
           FROM app.cash_drawer_counts
           WHERE tenant_id = ${actor.tenant_id}::uuid
-            AND count_id IN (${today.date + "#" + drawerLegacy + "#OPEN"}, ${today.date + "#" + drawerLegacy + "#CLOSE"})
+            AND drawer = ${drawerKey}
+            AND count_ts >= ${today.startIso}
+            AND count_ts <= ${today.endIso}
         `;
         const hasOpen = rowsToday.some((r: any) => String(r.period || '').toUpperCase() === 'OPEN');
         const hasClose = rowsToday.some((r: any) => String(r.period || '').toUpperCase() === 'CLOSE');
-        const drawerName = todayScheduleRow.preferred_drawer_name || `Drawer ${drawerLegacy}`;
+        const drawerName = todayScheduleRow.preferred_drawer_name || drawerCode || (drawerLegacy ? `Drawer ${drawerLegacy}` : 'Scheduled drawer');
 
         drawer_status = {
-          drawer_id: todayScheduleRow.preferred_drawer_id,
+          drawer_id: todayScheduleRow.preferred_drawer_id || null,
           drawer_name: drawerName,
           has_open: hasOpen,
           has_close: hasClose,
         };
 
-        const shiftEnd = todayScheduleRow?.shift_end_at ? new Date(todayScheduleRow.shift_end_at) : null;
-        const now = new Date();
-        const withinCloseReminderWindow = !!shiftEnd && now.getTime() >= (shiftEnd.getTime() - 60 * 60 * 1000) && now.getTime() <= (shiftEnd.getTime() + 60 * 60 * 1000);
-
         if (!hasOpen) {
           drawer_prompt = {
             action: 'open',
-            drawer_id: todayScheduleRow.preferred_drawer_id,
+            drawer_id: todayScheduleRow.preferred_drawer_id || null,
             drawer_name: drawerName,
             message: 'Your scheduled drawer opening count is missing.',
             cta_label: 'Complete Open Drawer Count',
           };
-        } else if (!hasClose && withinCloseReminderWindow) {
+        } else if (!hasClose) {
           drawer_prompt = {
             action: 'close',
-            drawer_id: todayScheduleRow.preferred_drawer_id,
+            drawer_id: todayScheduleRow.preferred_drawer_id || null,
             drawer_name: drawerName,
-            message: 'Your shift is ending soon. Don’t forget to complete your close drawer count.',
+            message: 'Your scheduled drawer close count is still pending.',
             cta_label: 'Complete Close Drawer Count',
           };
         }
