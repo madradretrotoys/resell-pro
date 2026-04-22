@@ -116,7 +116,7 @@ export const onRequestGet: PagesFunction = async ({ request, env }) => {
         es.preferred_drawer_id,
         td.drawer_name AS preferred_drawer_name,
         td.drawer_code AS preferred_drawer_code
-      FROM app.employee_schedules
+      FROM app.employee_schedules es
       LEFT JOIN app.tenant_drawers td ON td.drawer_id = es.preferred_drawer_id
       WHERE tenant_id = ${actor.tenant_id}::uuid
         AND user_id = ${actor.actor_user_id}::uuid
@@ -154,7 +154,7 @@ export const onRequestGet: PagesFunction = async ({ request, env }) => {
             es.preferred_drawer_id,
             td.drawer_name AS preferred_drawer_name,
             td.drawer_code AS preferred_drawer_code
-          FROM app.employee_schedules
+          FROM app.employee_schedules es
           LEFT JOIN app.tenant_drawers td ON td.drawer_id = es.preferred_drawer_id
           WHERE tenant_id = ${actor.tenant_id}::uuid
             AND user_id = ${actor.actor_user_id}::uuid
