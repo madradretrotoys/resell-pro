@@ -1,32 +1,38 @@
 import { api } from '/assets/js/api.js';
 
+const DAY_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 let els = {};
-let editing = null;
 let users = [];
 let drawers = [];
-let schedules = [];
+let loadedRowsByDate = new Map();
 
 export async function init() {
   bind();
   wire();
-  initPatternDefaults();
-  await Promise.all([loadUsers(), loadDrawers(), loadSchedules()]);
+  setWeekStartDateToTodayWeek();
+  await Promise.all([loadUsers(), loadDrawers(), loadWeekConfig()]);
+  buildWeekRows();
+  await loadWeek();
 }
 
 export function destroy() {}
 
 function bind() {
   const ids = [
-    'sch-banner','sch-form-title','sch-user','sch-start','sch-end','sch-break','sch-status','sch-drawer','sch-notes','sch-save','sch-cancel','sch-body','sch-summary-body',
-    'sch-pattern-week-start','sch-pattern-start-time','sch-pattern-end-time','sch-generate-pattern','sch-pattern-days'
+    'sch-banner','sch-user','sch-week-start-day','sch-week-start-date','sch-load-week','sch-save-week','sch-status','sch-drawer','sch-notes','sch-week-body','sch-week-total','sch-week-ot'
   ];
   for (const id of ids) els[id] = document.getElementById(id);
 }
 
 function wire() {
-  els['sch-save']?.addEventListener('click', onSave);
-  els['sch-cancel']?.addEventListener('click', clearForm);
-  els['sch-generate-pattern']?.addEventListener('click', onGeneratePattern);
+  els['sch-load-week']?.addEventListener('click', loadWeek);
+  els['sch-save-week']?.addEventListener('click', saveWeek);
+  els['sch-week-start-day']?.addEventListener('change', async () => {
+    await saveWeekConfig();
+    setWeekStartDateToTodayWeek();
+    buildWeekRows();
+    await loadWeek();
+  });
 }
 
 function banner(message, tone = 'info') {
@@ -38,32 +44,20 @@ function banner(message, tone = 'info') {
   setTimeout(() => { el.hidden = true; }, 3500);
 }
 
-function initPatternDefaults() {
+function setWeekStartDateToTodayWeek() {
+  const weekStartsOn = Number(els['sch-week-start-day']?.value || 0);
   const now = new Date();
   const day = now.getDay();
-  const sunday = new Date(now);
-  sunday.setDate(now.getDate() - day);
-  const pad = (n) => String(n).padStart(2, '0');
-  const ymd = `${sunday.getFullYear()}-${pad(sunday.getMonth() + 1)}-${pad(sunday.getDate())}`;
-  if (els['sch-pattern-week-start']) els['sch-pattern-week-start'].value = ymd;
-  const checks = els['sch-pattern-days']?.querySelectorAll('input[type="checkbox"]') || [];
-  checks.forEach((c) => {
-    const v = Number(c.value);
-    c.checked = v >= 1 && v <= 5;
-  });
+  const delta = (day - weekStartsOn + 7) % 7;
+  const start = new Date(now);
+  start.setDate(now.getDate() - delta);
+  const ymd = localDateToYmd(start);
+  if (els['sch-week-start-date']) els['sch-week-start-date'].value = ymd;
 }
 
-function clearForm() {
-  editing = null;
-  if (els['sch-form-title']) els['sch-form-title'].textContent = 'Create Shift';
-  if (els['sch-cancel']) els['sch-cancel'].hidden = true;
-  if (els['sch-user']) els['sch-user'].value = users[0]?.user_id || '';
-  if (els['sch-start']) els['sch-start'].value = '';
-  if (els['sch-end']) els['sch-end'].value = '';
-  if (els['sch-break']) els['sch-break'].value = '0';
-  if (els['sch-status']) els['sch-status'].value = 'draft';
-  if (els['sch-drawer']) els['sch-drawer'].value = '';
-  if (els['sch-notes']) els['sch-notes'].value = '';
+function localDateToYmd(d) {
+  const pad = (n) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
 }
 
 async function loadUsers() {
@@ -82,259 +76,190 @@ async function loadDrawers() {
   sel.innerHTML = `<option value="">None</option>` + drawers.map((d) => `<option value="${d.drawer_id}">${esc(d.drawer_name)}</option>`).join('');
 }
 
-async function loadSchedules() {
+async function loadWeekConfig() {
   try {
-    const resp = await api('/api/settings/employee-schedules/list');
-    schedules = Array.isArray(resp?.rows) ? resp.rows : [];
-    renderRows();
+    const resp = await api('/api/settings/employee-schedules/week-config');
+    const weekStartsOn = Number(resp?.week_starts_on ?? 0);
+    if (els['sch-week-start-day']) els['sch-week-start-day'].value = String(weekStartsOn);
   } catch {
-    banner('Failed to load schedules.', 'error');
+    // keep defaults
   }
 }
 
-function renderRows() {
-  const body = els['sch-body'];
-  if (!body) return;
-  body.innerHTML = schedules.map((r) => `
-    <tr>
-      <td>${esc(r.user_name || r.user_login_id || r.user_id)}</td>
-      <td>${fmtDate(r.shift_start_at)}</td>
-      <td>${fmtDate(r.shift_end_at)}</td>
-      <td>${Number(r.break_minutes || 0)}</td>
-      <td>${fmtHours(rowPaidHours(r))}</td>
-      <td>${esc(r.status || '')}</td>
-      <td>${esc(r.preferred_drawer_name || '')}</td>
-      <td>${esc(r.notes || '')}</td>
-      <td>
-        <div style="display:flex; gap:6px;">
-          <button class="btn btn--neutral btn--sm" data-edit="${r.schedule_id}">Edit</button>
-          <button class="btn btn--neutral btn--sm" data-del="${r.schedule_id}">Delete</button>
-        </div>
-      </td>
-    </tr>
-  `).join('');
-
-  body.querySelectorAll('[data-edit]').forEach((btn) => {
-    btn.addEventListener('click', () => {
-      const row = schedules.find((x) => x.schedule_id === btn.getAttribute('data-edit'));
-      if (!row) return;
-      editing = row.schedule_id;
-      if (els['sch-form-title']) els['sch-form-title'].textContent = 'Edit Shift';
-      if (els['sch-cancel']) els['sch-cancel'].hidden = false;
-      if (els['sch-user']) els['sch-user'].value = row.user_id || '';
-      if (els['sch-start']) els['sch-start'].value = isoToLocalInput(row.shift_start_at);
-      if (els['sch-end']) els['sch-end'].value = isoToLocalInput(row.shift_end_at);
-      if (els['sch-break']) els['sch-break'].value = String(Number(row.break_minutes || 0));
-      if (els['sch-status']) els['sch-status'].value = row.status || 'draft';
-      if (els['sch-drawer']) els['sch-drawer'].value = row.preferred_drawer_id || '';
-      if (els['sch-notes']) els['sch-notes'].value = row.notes || '';
-    });
-  });
-
-  body.querySelectorAll('[data-del]').forEach((btn) => {
-    btn.addEventListener('click', async () => {
-      try {
-        await api('/api/settings/employee-schedules/delete', {
-          method: 'POST',
-          body: { schedule_id: btn.getAttribute('data-del') },
-        });
-        banner('Shift deleted.', 'success');
-        await loadSchedules();
-      } catch {
-        banner('Failed to delete shift.', 'error');
-      }
-    });
-  });
-
-  renderSummary();
+async function saveWeekConfig() {
+  const week_starts_on = Number(els['sch-week-start-day']?.value || 0);
+  await api('/api/settings/employee-schedules/week-config', { method: 'POST', body: { week_starts_on } });
 }
 
-function renderSummary() {
-  const body = els['sch-summary-body'];
+function buildWeekRows() {
+  const weekStartsOn = Number(els['sch-week-start-day']?.value || 0);
+  const body = els['sch-week-body'];
   if (!body) return;
 
-  const totals = new Map();
-  for (const r of schedules) {
-    const key = String(r.user_id || '');
-    const name = String(r.user_name || r.user_login_id || r.user_id || 'Unknown');
-    const paid = rowPaidHours(r);
-    if (!totals.has(key)) totals.set(key, { name, hours: 0 });
-    totals.get(key).hours += paid;
-  }
-
-  const rows = Array.from(totals.values()).sort((a, b) => a.name.localeCompare(b.name));
-  body.innerHTML = rows.length ? rows.map((r) => {
-    const overtime = r.hours > 40;
+  body.innerHTML = Array.from({ length: 7 }).map((_, offset) => {
+    const dow = (weekStartsOn + offset) % 7;
     return `
-      <tr>
-        <td>${esc(r.name)}</td>
-        <td>${fmtHours(r.hours)}</td>
-        <td>${overtime ? 'Yes' : 'No'}</td>
+      <tr data-dow="${dow}">
+        <td>${DAY_NAMES[dow]}</td>
+        <td><input type="checkbox" class="sch-work" /></td>
+        <td><input type="time" class="input sch-start" /></td>
+        <td><input type="time" class="input sch-end" /></td>
+        <td><input type="number" min="0" step="1" class="input sch-lunch" value="0" /></td>
+        <td class="sch-paid">0.00</td>
+        <td><button class="btn btn--neutral btn--sm sch-copy-prev">Copy Prev</button></td>
       </tr>
     `;
-  }).join('') : `<tr><td colspan="3">No shifts in selected range.</td></tr>`;
+  }).join('');
+
+  body.querySelectorAll('tr').forEach((tr, idx) => {
+    tr.querySelectorAll('input').forEach((inp) => inp.addEventListener('input', recalcTotals));
+    tr.querySelector('.sch-copy-prev')?.addEventListener('click', () => {
+      if (idx === 0) return;
+      const prev = body.querySelectorAll('tr')[idx - 1];
+      if (!prev) return;
+      tr.querySelector('.sch-work').checked = prev.querySelector('.sch-work').checked;
+      tr.querySelector('.sch-start').value = prev.querySelector('.sch-start').value;
+      tr.querySelector('.sch-end').value = prev.querySelector('.sch-end').value;
+      tr.querySelector('.sch-lunch').value = prev.querySelector('.sch-lunch').value;
+      recalcTotals();
+    });
+  });
 }
 
-async function onSave() {
-  const body = {
-    schedule_id: editing,
-    user_id: els['sch-user']?.value || '',
-    shift_start_at: localInputToIso(els['sch-start']?.value || ''),
-    shift_end_at: localInputToIso(els['sch-end']?.value || ''),
-    break_minutes: Number(els['sch-break']?.value || 0),
-    status: els['sch-status']?.value || 'draft',
-    preferred_drawer_id: els['sch-drawer']?.value || null,
-    notes: (els['sch-notes']?.value || '').trim() || null,
-  };
+function weekDateForDow(targetDow) {
+  const startYmd = els['sch-week-start-date']?.value;
+  const base = new Date(`${startYmd}T00:00:00`);
+  const weekStartsOn = Number(els['sch-week-start-day']?.value || 0);
+  const offset = (targetDow - weekStartsOn + 7) % 7;
+  base.setDate(base.getDate() + offset);
+  return localDateToYmd(base);
+}
 
-  if (!body.shift_start_at || !body.shift_end_at) {
-    banner('Start and end time are required.', 'error');
-    return;
-  }
-
-  const start = new Date(body.shift_start_at);
-  const end = new Date(body.shift_end_at);
-  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) {
-    banner('Start and end must be valid date/time values.', 'error');
-    return;
-  }
-  if (end.getTime() <= start.getTime()) {
-    banner('End must be after start.', 'error');
-    return;
-  }
-  const durationMinutes = (end.getTime() - start.getTime()) / 60000;
-  if (durationMinutes > 24 * 60) {
-    banner('For now, each schedule row must be a single-day shift (24h max).', 'error');
-    return;
-  }
-  if (Number(body.break_minutes || 0) > durationMinutes) {
-    banner('Lunch minutes cannot exceed shift length.', 'error');
-    return;
-  }
-
+async function loadWeek() {
   try {
-    await api('/api/settings/employee-schedules/save', { method: 'POST', body });
-    banner(editing ? 'Shift updated.' : 'Shift created.', 'success');
-    clearForm();
-    await loadSchedules();
-  } catch (e) {
-    const msg = e?.data?.error || 'save_failed';
-    if (msg === 'overlap') {
-      banner('Shift overlaps an existing shift for this employee.', 'error');
-      return;
-    }
-    if (msg === 'shift_too_long_single_day_only') {
-      banner('Shift is too long. Please create one row per day.', 'error');
-      return;
-    }
-    if (msg === 'end_must_be_after_start') {
-      banner('End must be after start.', 'error');
-      return;
-    }
-    if (msg === 'lunch_exceeds_shift') {
-      banner('Lunch minutes cannot exceed shift length.', 'error');
-      return;
-    }
-    banner(`Failed to save shift (${msg}).`, 'error');
+    const user_id = els['sch-user']?.value || '';
+    const week_start = els['sch-week-start-date']?.value || '';
+    if (!user_id || !week_start) return;
+
+    const q = new URLSearchParams({ week_start });
+    const resp = await api(`/api/settings/employee-schedules/list?${q.toString()}`);
+    const rows = Array.isArray(resp?.rows) ? resp.rows.filter((r) => r.user_id === user_id) : [];
+
+    loadedRowsByDate = new Map();
+    rows.forEach((r) => {
+      const ymd = String(r.business_date || '').slice(0, 10);
+      if (ymd) loadedRowsByDate.set(ymd, r);
+    });
+
+    const trs = els['sch-week-body']?.querySelectorAll('tr') || [];
+    trs.forEach((tr) => {
+      const dow = Number(tr.getAttribute('data-dow'));
+      const ymd = weekDateForDow(dow);
+      const row = loadedRowsByDate.get(ymd);
+      tr.querySelector('.sch-work').checked = !!row;
+      tr.querySelector('.sch-start').value = row ? isoToLocalTime(row.shift_start_at) : '';
+      tr.querySelector('.sch-end').value = row ? isoToLocalTime(row.shift_end_at) : '';
+      tr.querySelector('.sch-lunch').value = row ? String(Number(row.break_minutes || 0)) : '0';
+    });
+
+    recalcTotals();
+  } catch {
+    banner('Failed to load week.', 'error');
   }
 }
 
-async function onGeneratePattern() {
-  const user_id = els['sch-user']?.value || '';
-  const weekStart = String(els['sch-pattern-week-start']?.value || '');
-  const startTime = String(els['sch-pattern-start-time']?.value || '');
-  const endTime = String(els['sch-pattern-end-time']?.value || '');
-  const lunch = Number(els['sch-break']?.value || 0);
-  const status = els['sch-status']?.value || 'draft';
-  const preferred_drawer_id = els['sch-drawer']?.value || null;
-  const notes = (els['sch-notes']?.value || '').trim() || null;
-  const checkedDays = Array.from(els['sch-pattern-days']?.querySelectorAll('input[type=\"checkbox\"]:checked') || [])
-    .map((el) => Number(el.value))
-    .filter((n) => Number.isFinite(n) && n >= 0 && n <= 6);
+async function saveWeek() {
+  try {
+    const user_id = els['sch-user']?.value || '';
+    if (!user_id) return banner('Select an employee.', 'error');
 
-  if (!user_id) return banner('Select an employee.', 'error');
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(weekStart)) return banner('Choose a valid week start date.', 'error');
-  if (!startTime || !endTime) return banner('Pattern start and end time are required.', 'error');
-  if (!checkedDays.length) return banner('Select at least one weekday.', 'error');
+    const status = els['sch-status']?.value || 'draft';
+    const preferred_drawer_id = els['sch-drawer']?.value || null;
+    const notes = (els['sch-notes']?.value || '').trim() || null;
 
-  const [sh, sm] = startTime.split(':').map((x) => Number(x));
-  const [eh, em] = endTime.split(':').map((x) => Number(x));
-  if ([sh, sm, eh, em].some((n) => !Number.isFinite(n))) return banner('Invalid pattern time.', 'error');
-  if (eh * 60 + em <= sh * 60 + sm) return banner('Pattern end must be after start.', 'error');
+    const trs = Array.from(els['sch-week-body']?.querySelectorAll('tr') || []);
+    let saved = 0;
+    let deleted = 0;
 
-  let created = 0;
-  let failed = 0;
-  for (const day of checkedDays) {
-    const base = new Date(`${weekStart}T00:00:00`);
-    base.setDate(base.getDate() + day);
-    const start = new Date(base);
-    start.setHours(sh, sm, 0, 0);
-    const end = new Date(base);
-    end.setHours(eh, em, 0, 0);
+    for (const tr of trs) {
+      const dow = Number(tr.getAttribute('data-dow'));
+      const ymd = weekDateForDow(dow);
+      const existing = loadedRowsByDate.get(ymd);
+      const work = !!tr.querySelector('.sch-work')?.checked;
+      const startTime = tr.querySelector('.sch-start')?.value || '';
+      const endTime = tr.querySelector('.sch-end')?.value || '';
+      const lunch = Number(tr.querySelector('.sch-lunch')?.value || 0);
 
-    try {
+      if (!work) {
+        if (existing?.schedule_id) {
+          await api('/api/settings/employee-schedules/delete', { method: 'POST', body: { schedule_id: existing.schedule_id } });
+          deleted += 1;
+        }
+        continue;
+      }
+
+      if (!startTime || !endTime) throw new Error(`Missing start/end for ${DAY_NAMES[dow]}`);
+      const startIso = new Date(`${ymd}T${startTime}:00`).toISOString();
+      const endIso = new Date(`${ymd}T${endTime}:00`).toISOString();
+
       await api('/api/settings/employee-schedules/save', {
         method: 'POST',
         body: {
+          schedule_id: existing?.schedule_id || null,
           user_id,
-          shift_start_at: start.toISOString(),
-          shift_end_at: end.toISOString(),
+          shift_start_at: startIso,
+          shift_end_at: endIso,
           break_minutes: lunch,
           status,
           preferred_drawer_id,
           notes,
         },
       });
-      created += 1;
-    } catch {
-      failed += 1;
+      saved += 1;
     }
-  }
 
-  if (created) {
-    banner(`Generated ${created} shift(s).${failed ? ` ${failed} failed (likely overlap).` : ''}`, failed ? 'info' : 'success');
-    await loadSchedules();
-  } else {
-    banner('No shifts were generated.', 'error');
+    banner(`Saved week: ${saved} shift(s), ${deleted} removed.`, 'success');
+    await loadWeek();
+  } catch (e) {
+    banner(`Failed to save week (${e?.message || 'error'}).`, 'error');
   }
 }
 
-function isoToLocalInput(iso) {
-  if (!iso) return '';
+function recalcTotals() {
+  const trs = Array.from(els['sch-week-body']?.querySelectorAll('tr') || []);
+  let total = 0;
+  trs.forEach((tr) => {
+    const work = !!tr.querySelector('.sch-work')?.checked;
+    const s = tr.querySelector('.sch-start')?.value || '';
+    const e = tr.querySelector('.sch-end')?.value || '';
+    const lunch = Number(tr.querySelector('.sch-lunch')?.value || 0);
+    let paid = 0;
+    if (work && s && e) {
+      const startM = timeToMinutes(s);
+      const endM = timeToMinutes(e);
+      if (endM > startM) {
+        paid = Math.max(0, (endM - startM - lunch) / 60);
+      }
+    }
+    tr.querySelector('.sch-paid').textContent = paid.toFixed(2);
+    total += paid;
+  });
+
+  if (els['sch-week-total']) els['sch-week-total'].textContent = `Total Paid Hours: ${total.toFixed(2)}`;
+  if (els['sch-week-ot']) els['sch-week-ot'].textContent = `Overtime Risk (40+): ${total > 40 ? 'Yes' : 'No'}`;
+}
+
+function isoToLocalTime(iso) {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return '';
   const pad = (n) => String(n).padStart(2, '0');
-  return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  return `${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
-function localInputToIso(v) {
-  if (!v) return '';
-  const d = new Date(v);
-  if (Number.isNaN(d.getTime())) return '';
-  return d.toISOString();
-}
-
-function fmtDate(v) {
-  const d = new Date(v);
-  if (Number.isNaN(d.getTime())) return '';
-  return d.toLocaleString();
-}
-
-function rowPaidHours(row) {
-  const start = new Date(row?.shift_start_at || '');
-  const end = new Date(row?.shift_end_at || '');
-  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) return 0;
-  const totalMs = end.getTime() - start.getTime();
-  if (totalMs <= 0) return 0;
-  const lunchMinutes = Math.max(0, Number(row?.break_minutes || 0));
-  const paidMs = Math.max(0, totalMs - lunchMinutes * 60_000);
-  return paidMs / 3_600_000;
-}
-
-function fmtHours(v) {
-  const n = Number(v || 0);
-  if (!Number.isFinite(n)) return '0.00';
-  return n.toFixed(2);
+function timeToMinutes(v) {
+  const [h, m] = String(v || '').split(':').map((x) => Number(x));
+  if (!Number.isFinite(h) || !Number.isFinite(m)) return 0;
+  return h * 60 + m;
 }
 
 function esc(v) {

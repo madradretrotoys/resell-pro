@@ -7,10 +7,19 @@ const json = (data: any, status = 200) =>
     headers: { "content-type": "application/json", "cache-control": "no-store" },
   });
 
-function weekRangeUtc() {
-  const now = new Date();
-  const day = now.getUTCDay();
-  const start = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - day, 0, 0, 0, 0));
+function weekRangeUtc(weekStartsOn: number, weekStartDate?: string | null) {
+  let start: Date;
+  if (weekStartDate && /^\d{4}-\d{2}-\d{2}$/.test(weekStartDate)) {
+    const [y, m, d] = weekStartDate.split('-').map((x) => Number(x));
+    start = new Date(Date.UTC(y, m - 1, d, 0, 0, 0, 0));
+  } else {
+    const now = new Date();
+    const todayUtc = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 0, 0, 0, 0));
+    const day = todayUtc.getUTCDay();
+    const delta = (day - weekStartsOn + 7) % 7;
+    start = new Date(todayUtc);
+    start.setUTCDate(todayUtc.getUTCDate() - delta);
+  }
   const end = new Date(Date.UTC(start.getUTCFullYear(), start.getUTCMonth(), start.getUTCDate() + 6, 23, 59, 59, 999));
   return { from: start.toISOString(), to: end.toISOString() };
 }
@@ -29,8 +38,17 @@ export const onRequestGet: PagesFunction = async ({ request, env }) => {
       return json({ ok: false, error: "forbidden" }, 403);
     }
 
+    const weekRows = await sql/*sql*/`
+      SELECT week_starts_on
+      FROM app.tenants
+      WHERE tenant_id = ${tenant_id}::uuid
+      LIMIT 1
+    `;
+    const week_starts_on = Number(weekRows?.[0]?.week_starts_on ?? 0);
+
     const url = new URL(request.url);
-    const defaults = weekRangeUtc();
+    const week_start = url.searchParams.get("week_start");
+    const defaults = weekRangeUtc(week_starts_on, week_start);
     const from = String(url.searchParams.get("from") || defaults.from);
     const to = String(url.searchParams.get("to") || defaults.to);
 
@@ -58,7 +76,7 @@ export const onRequestGet: PagesFunction = async ({ request, env }) => {
       ORDER BY es.shift_start_at, u.name
     `;
 
-    return json({ ok: true, from, to, rows });
+    return json({ ok: true, from, to, week_starts_on, rows });
   } catch (e: any) {
     return json({ ok: false, error: "server_error", message: e?.message || String(e) }, 500);
   }
