@@ -62,6 +62,7 @@ export const onRequestGet: PagesFunction = async ({ request, env }) => {
         es.shift_start_at,
         es.shift_end_at,
         es.break_minutes,
+        es.static_schedule,
         es.status,
         es.preferred_drawer_id,
         td.drawer_name AS preferred_drawer_name,

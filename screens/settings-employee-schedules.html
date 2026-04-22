@@ -30,7 +30,10 @@
         <input id="sch-week-start-date" type="date" class="input" />
       </label>
       <div class="actions">
+        <button id="sch-clear-week" class="btn btn--neutral">Clear Week</button>
         <button id="sch-load-week" class="btn btn--neutral">Load Week</button>
+      </div>
+      <div class="actions">
         <button id="sch-save-week" class="btn btn--primary">Save Week</button>
       </div>
       <label>
@@ -38,7 +41,6 @@
         <select id="sch-clone-user" class="input"></select>
       </label>
       <div class="actions">
-        <button id="sch-clear-week" class="btn btn--neutral">Clear Week</button>
         <button id="sch-clone-week" class="btn btn--neutral">Clone Week</button>
       </div>
       <label>
@@ -58,6 +60,10 @@
       <label style="grid-column: span 2;">
         <span>Notes (applies to saved rows)</span>
         <input id="sch-notes" class="input" maxlength="2000" />
+      </label>
+      <label>
+        <span>Schedule Set</span>
+        <button id="sch-static-toggle" type="button" class="btn btn--neutral" aria-pressed="false">No</button>
       </label>
     </div>
 

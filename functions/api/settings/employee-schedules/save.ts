@@ -27,6 +27,7 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
     const shift_start_at = String((body as any).shift_start_at || "").trim();
     const shift_end_at = String((body as any).shift_end_at || "").trim();
     const break_minutes = Number((body as any).break_minutes ?? 0);
+    const static_schedule = !!(body as any).static_schedule;
     const status = String((body as any).status || "draft").trim().toLowerCase();
     const preferred_drawer_id = String((body as any).preferred_drawer_id || "").trim() || null;
     const notes = (body as any).notes ? String((body as any).notes).slice(0, 2000) : null;
@@ -74,6 +75,7 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
           shift_end_at = ${shift_end_at}::timestamptz,
           business_date = (${shift_start_at}::timestamptz AT TIME ZONE 'UTC')::date,
           break_minutes = ${break_minutes},
+          static_schedule = ${static_schedule},
           status = ${status},
           preferred_drawer_id = ${preferred_drawer_id}::uuid,
           notes = ${notes},
@@ -95,6 +97,7 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
         shift_start_at,
         shift_end_at,
         break_minutes,
+        static_schedule,
         status,
         preferred_drawer_id,
         notes,
@@ -108,6 +111,7 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
         ${shift_start_at}::timestamptz,
         ${shift_end_at}::timestamptz,
         ${break_minutes},
+        ${static_schedule},
         ${status},
         ${preferred_drawer_id}::uuid,
         ${notes},

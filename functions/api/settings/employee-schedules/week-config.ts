@@ -25,7 +25,19 @@ export const onRequestGet: PagesFunction = async ({ request, env }) => {
       LIMIT 1
     `;
 
-    return json({ ok: true, week_starts_on: Number(rows?.[0]?.week_starts_on ?? 0) });
+    const lunchRows = await sql/*sql*/`
+      SELECT consecutive_lunch_hours_required, default_lunch_minutes
+      FROM app.tenant_settings
+      WHERE tenant_id = ${tenant_id}::uuid
+      LIMIT 1
+    `;
+
+    return json({
+      ok: true,
+      week_starts_on: Number(rows?.[0]?.week_starts_on ?? 0),
+      consecutive_lunch_hours_required: Number(lunchRows?.[0]?.consecutive_lunch_hours_required ?? 0),
+      default_lunch_minutes: Number(lunchRows?.[0]?.default_lunch_minutes ?? 0),
+    });
   } catch (e: any) {
     return json({ ok: false, error: "server_error", message: e?.message || String(e) }, 500);
   }
