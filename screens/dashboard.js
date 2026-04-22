@@ -58,7 +58,11 @@ async function loadDashboard() {
     renderMyStatus();
     renderDrawerPrompt();
     renderWeekSchedule();
-    await loadCashMovementSummary();
+    if (state.actor?.can_edit_timesheet) {
+      await loadCashMovementSummary();
+    } else if (els.cashMovementCard) {
+      els.cashMovementCard.style.display = 'none';
+    }
 
     if (state.actor?.can_edit_timesheet) {
       els.teamStatusCard.style.display = '';
