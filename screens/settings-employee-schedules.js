@@ -353,6 +353,11 @@ function applyRowsToWeek(rows, options = {}) {
     if (ymd) rowsByDate.set(ymd, r);
   });
 
+  const firstRow = rows[0] || null;
+  if (els['sch-status']) els['sch-status'].value = firstRow?.status || 'draft';
+  if (els['sch-drawer']) els['sch-drawer'].value = firstRow?.preferred_drawer_id || '';
+  if (els['sch-notes']) els['sch-notes'].value = firstRow?.notes || '';
+
   const trs = els['sch-week-body']?.querySelectorAll('tr') || [];
   trs.forEach((tr) => {
     const dow = Number(tr.getAttribute('data-dow'));
