@@ -35,6 +35,21 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
     if (!shift_start_at || !shift_end_at) return json({ ok: false, error: "shift_times_required" }, 400);
     if (!Number.isFinite(break_minutes) || break_minutes < 0) return json({ ok: false, error: "bad_break_minutes" }, 400);
 
+    const startMs = Date.parse(shift_start_at);
+    const endMs = Date.parse(shift_end_at);
+    if (!Number.isFinite(startMs) || !Number.isFinite(endMs)) {
+      return json({ ok: false, error: "bad_shift_times" }, 400);
+    }
+    if (endMs <= startMs) return json({ ok: false, error: "end_must_be_after_start" }, 400);
+
+    const durationMinutes = (endMs - startMs) / 60000;
+    if (durationMinutes > 24 * 60) {
+      return json({ ok: false, error: "shift_too_long_single_day_only" }, 400);
+    }
+    if (break_minutes > durationMinutes) {
+      return json({ ok: false, error: "lunch_exceeds_shift" }, 400);
+    }
+
     const overlap = await sql/*sql*/`
       SELECT schedule_id
       FROM app.employee_schedules

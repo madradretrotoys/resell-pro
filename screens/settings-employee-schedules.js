@@ -174,6 +174,26 @@ async function onSave() {
     return;
   }
 
+  const start = new Date(body.shift_start_at);
+  const end = new Date(body.shift_end_at);
+  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) {
+    banner('Start and end must be valid date/time values.', 'error');
+    return;
+  }
+  if (end.getTime() <= start.getTime()) {
+    banner('End must be after start.', 'error');
+    return;
+  }
+  const durationMinutes = (end.getTime() - start.getTime()) / 60000;
+  if (durationMinutes > 24 * 60) {
+    banner('For now, each schedule row must be a single-day shift (24h max).', 'error');
+    return;
+  }
+  if (Number(body.break_minutes || 0) > durationMinutes) {
+    banner('Lunch minutes cannot exceed shift length.', 'error');
+    return;
+  }
+
   try {
     await api('/api/settings/employee-schedules/save', { method: 'POST', body });
     banner(editing ? 'Shift updated.' : 'Shift created.', 'success');
@@ -183,6 +203,18 @@ async function onSave() {
     const msg = e?.data?.error || 'save_failed';
     if (msg === 'overlap') {
       banner('Shift overlaps an existing shift for this employee.', 'error');
+      return;
+    }
+    if (msg === 'shift_too_long_single_day_only') {
+      banner('Shift is too long. Please create one row per day.', 'error');
+      return;
+    }
+    if (msg === 'end_must_be_after_start') {
+      banner('End must be after start.', 'error');
+      return;
+    }
+    if (msg === 'lunch_exceeds_shift') {
+      banner('Lunch minutes cannot exceed shift length.', 'error');
       return;
     }
     banner(`Failed to save shift (${msg}).`, 'error');
