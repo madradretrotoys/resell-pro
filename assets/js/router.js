@@ -2,6 +2,12 @@
 import { ensureSession, waitForSession } from '/assets/js/auth.js';
 import { showToast } from '/assets/js/ui.js';
 import '/assets/js/api.js'; // ensure window.api is available to screens
+
+const IDLE_TIMEOUT_MS = 30 * 60 * 1000;
+const IDLE_ACTIVITY_EVENTS = ['pointerdown', 'keydown', 'scroll', 'touchstart'];
+let idleTimer = null;
+let idleHandlerWired = false;
+let logoutInProgress = false;
 const SCREENS = {
   dashboard: { html: '/screens/dashboard.html', js: '/screens/dashboard.js', title: 'Dashboard' },
   pos:       { html: '/screens/pos.html',       js: '/screens/pos.js',       title: 'POS' },
@@ -62,6 +68,57 @@ const SCREENS = {
 let current = { name: null, mod: null };
 const qs = (k) => new URLSearchParams(location.search).get(k);
 function log(...args){ try{ console.log('[router]', ...args); }catch{} }
+
+function getDisplayFirstName(user = {}) {
+  const candidates = [
+    user.first_name,
+    user.firstName,
+    (typeof user.name === 'string' ? user.name.split(/\s+/)[0] : ''),
+    (typeof user.user_name === 'string' ? user.user_name.split(/\s+/)[0] : ''),
+  ];
+  const first = candidates.find((v) => typeof v === 'string' && v.trim());
+  return first ? first.trim() : 'there';
+}
+
+function updateHeaderUserName(user) {
+  const node = document.getElementById('who');
+  if (!node) return;
+  const firstName = getDisplayFirstName(user);
+  node.textContent = `Hi, ${firstName}`;
+}
+
+async function logout(reason = 'manual') {
+  if (logoutInProgress) return;
+  logoutInProgress = true;
+  clearTimeout(idleTimer);
+  try {
+    await fetch('/api/auth/logout', { method: 'POST', credentials: 'include' });
+  } catch (e) {
+    log('logout:request:error', e);
+  } finally {
+    if (reason === 'idle') showToast('Signed out after 30 minutes of inactivity.');
+    location.href = '/index.html';
+  }
+}
+
+function resetIdleTimer() {
+  clearTimeout(idleTimer);
+  idleTimer = setTimeout(() => logout('idle'), IDLE_TIMEOUT_MS);
+}
+
+function wireIdleTimeout() {
+  if (idleHandlerWired) return;
+  idleHandlerWired = true;
+  const onActivity = () => resetIdleTimer();
+  IDLE_ACTIVITY_EVENTS.forEach((eventName) => {
+    window.addEventListener(eventName, onActivity, { passive: true });
+  });
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') resetIdleTimer();
+  });
+  resetIdleTimer();
+}
+
 function setActiveLink(name){
   document.querySelectorAll('[data-page]').forEach(a => {
     a.classList.toggle('active', a.getAttribute('data-page') === name);
@@ -100,6 +157,8 @@ export async function loadScreen(name){
     return;
   }
   log('auth:ok', { user: session.user });
+  updateHeaderUserName(session.user);
+  wireIdleTimeout();
 
   // 2) Swap screen
   if(current.mod?.destroy) { try { current.mod.destroy(); } catch(e){ log('destroy:error', e); } }
@@ -193,5 +252,7 @@ window.addEventListener('popstate', () => {
 
 log('boot');
 safeLoadScreen(qs('page') || 'dashboard');
+
+window.logout = () => logout('manual');
 
 //end router.ts copy
