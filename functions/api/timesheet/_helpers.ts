@@ -63,6 +63,7 @@ export async function requireTimesheetActor(request: Request, env: any, sql: Sql
     user_is_active: boolean;
     can_timekeeping: boolean;
     can_edit_timesheet: boolean;
+    can_cash_edit: boolean;
     clockin_required: boolean;
     login_id: string;
     name: string;
@@ -73,6 +74,7 @@ export async function requireTimesheetActor(request: Request, env: any, sql: Sql
       COALESCE(u.is_active, false) AS user_is_active,
       COALESCE(p.can_timekeeping, false) AS can_timekeeping,
       COALESCE(p.can_edit_timesheet, false) AS can_edit_timesheet,
+      COALESCE(p.can_cash_edit, false) AS can_cash_edit,
       COALESCE(p.clockin_required, false) AS clockin_required,
       u.login_id,
       u.name
@@ -95,6 +97,7 @@ export async function requireTimesheetActor(request: Request, env: any, sql: Sql
       role: rows[0].role,
       can_timekeeping: rows[0].can_timekeeping,
       can_edit_timesheet: rows[0].can_edit_timesheet,
+      can_cash_edit: rows[0].can_cash_edit,
       clockin_required: rows[0].clockin_required,
       login_id: rows[0].login_id,
       name: rows[0].name,
