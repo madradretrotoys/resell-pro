@@ -178,10 +178,13 @@ export const onRequestGet: PagesFunction = async ({ request, env }) => {
     let drawer_prompt: any = null;
     let drawer_status: any = null;
     if (hasSchedule) {
+      const hasDrawerAssigned = (row: any) =>
+        !!row?.preferred_drawer_id || !!String(row?.preferred_drawer_code || '').trim() || !!String(row?.preferred_drawer_name || '').trim();
       const todayDow = new Date(`${today.date}T00:00:00.000Z`).getUTCDay();
-      const todayScheduleRow = isStaticSchedule
-        ? scheduleRows.find((r: any) => new Date(`${String(r.business_date).slice(0, 10)}T00:00:00.000Z`).getUTCDay() === todayDow)
-        : scheduleRows.find((r: any) => String(r.business_date || '').slice(0, 10) === today.date);
+      const todayCandidates = isStaticSchedule
+        ? scheduleRows.filter((r: any) => new Date(`${String(r.business_date).slice(0, 10)}T00:00:00.000Z`).getUTCDay() === todayDow)
+        : scheduleRows.filter((r: any) => String(r.business_date || '').slice(0, 10) === today.date);
+      const todayScheduleRow = todayCandidates.find(hasDrawerAssigned) || todayCandidates[0] || null;
 
       const drawerLegacy = parseLegacyDrawerFromMeta(todayScheduleRow);
       const drawerCode = String(todayScheduleRow?.preferred_drawer_code || '').trim();
