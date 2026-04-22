@@ -16,7 +16,7 @@ export function destroy() {}
 
 function bind() {
   const ids = [
-    'sch-banner','sch-form-title','sch-user','sch-start','sch-end','sch-break','sch-status','sch-drawer','sch-notes','sch-save','sch-cancel','sch-body'
+    'sch-banner','sch-form-title','sch-user','sch-start','sch-end','sch-break','sch-status','sch-drawer','sch-notes','sch-save','sch-cancel','sch-body','sch-summary-body'
   ];
   for (const id of ids) els[id] = document.getElementById(id);
 }
@@ -83,6 +83,7 @@ function renderRows() {
       <td>${fmtDate(r.shift_start_at)}</td>
       <td>${fmtDate(r.shift_end_at)}</td>
       <td>${Number(r.break_minutes || 0)}</td>
+      <td>${fmtHours(rowPaidHours(r))}</td>
       <td>${esc(r.status || '')}</td>
       <td>${esc(r.preferred_drawer_name || '')}</td>
       <td>${esc(r.notes || '')}</td>
@@ -126,6 +127,34 @@ function renderRows() {
       }
     });
   });
+
+  renderSummary();
+}
+
+function renderSummary() {
+  const body = els['sch-summary-body'];
+  if (!body) return;
+
+  const totals = new Map();
+  for (const r of schedules) {
+    const key = String(r.user_id || '');
+    const name = String(r.user_name || r.user_login_id || r.user_id || 'Unknown');
+    const paid = rowPaidHours(r);
+    if (!totals.has(key)) totals.set(key, { name, hours: 0 });
+    totals.get(key).hours += paid;
+  }
+
+  const rows = Array.from(totals.values()).sort((a, b) => a.name.localeCompare(b.name));
+  body.innerHTML = rows.length ? rows.map((r) => {
+    const overtime = r.hours > 40;
+    return `
+      <tr>
+        <td>${esc(r.name)}</td>
+        <td>${fmtHours(r.hours)}</td>
+        <td>${overtime ? 'Yes' : 'No'}</td>
+      </tr>
+    `;
+  }).join('') : `<tr><td colspan="3">No shifts in selected range.</td></tr>`;
 }
 
 async function onSave() {
@@ -179,6 +208,23 @@ function fmtDate(v) {
   const d = new Date(v);
   if (Number.isNaN(d.getTime())) return '';
   return d.toLocaleString();
+}
+
+function rowPaidHours(row) {
+  const start = new Date(row?.shift_start_at || '');
+  const end = new Date(row?.shift_end_at || '');
+  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) return 0;
+  const totalMs = end.getTime() - start.getTime();
+  if (totalMs <= 0) return 0;
+  const lunchMinutes = Math.max(0, Number(row?.break_minutes || 0));
+  const paidMs = Math.max(0, totalMs - lunchMinutes * 60_000);
+  return paidMs / 3_600_000;
+}
+
+function fmtHours(v) {
+  const n = Number(v || 0);
+  if (!Number.isFinite(n)) return '0.00';
+  return n.toFixed(2);
 }
 
 function esc(v) {
