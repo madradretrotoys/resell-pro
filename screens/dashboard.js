@@ -9,6 +9,7 @@ let state = {
   teamStatuses: [],
   cashSummary: null,
   weekSchedule: null,
+  drawerPrompt: null,
 };
 
 export async function init({ container }) {
@@ -30,6 +31,9 @@ function bind(container) {
     weeklyScheduleCard: container.querySelector('#weeklyScheduleCard'),
     weeklyScheduleTitle: container.querySelector('#weeklyScheduleTitle'),
     weeklyScheduleTable: container.querySelector('#weeklyScheduleTable'),
+    drawerPromptCard: container.querySelector('#drawerPromptCard'),
+    drawerPromptLine: container.querySelector('#drawerPromptLine'),
+    drawerPromptCta: container.querySelector('#drawerPromptCta'),
     cashMovementCard: container.querySelector('#cashMovementCard'),
     cashMovementSummary: container.querySelector('#cashMovementSummary'),
     cashMovementSubtitle: container.querySelector('#cashMovementSubtitle'),
@@ -49,8 +53,10 @@ async function loadDashboard() {
     state.todayEntry = me?.today || null;
     state.periodEntries = me?.period_entries || [];
     state.weekSchedule = me?.week_schedule || null;
+    state.drawerPrompt = me?.drawer_prompt || null;
 
     renderMyStatus();
+    renderDrawerPrompt();
     renderWeekSchedule();
     await loadCashMovementSummary();
 
@@ -321,6 +327,20 @@ function renderWeekSchedule() {
       }).join('')}
     </tbody>
   `;
+}
+
+function renderDrawerPrompt() {
+  if (!els.drawerPromptCard || !els.drawerPromptLine || !els.drawerPromptCta) return;
+  const prompt = state.drawerPrompt;
+  if (!prompt) {
+    els.drawerPromptCard.style.display = 'none';
+    return;
+  }
+
+  els.drawerPromptCard.style.display = '';
+  const drawerName = prompt.drawer_name ? `${prompt.drawer_name}: ` : '';
+  els.drawerPromptLine.textContent = `${drawerName}${prompt.message || 'Drawer count reminder.'}`;
+  els.drawerPromptCta.textContent = prompt.cta_label || 'Open Cash Tracking';
 }
 
 function getLastClockOut() {

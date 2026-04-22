@@ -17,6 +17,14 @@ function weekStartForDateYmd(dateYmd: string, weekStartsOn: number) {
   return addDaysYmd(dateYmd, -delta);
 }
 
+function parseLegacyDrawerFromMeta(row: any): number | null {
+  const codeNum = String(row?.preferred_drawer_code || '').match(/^D(\d+)$/i)?.[1];
+  const nameNum = String(row?.preferred_drawer_name || '').match(/drawer\s+(\d+)/i)?.[1];
+  const n = Number(codeNum || nameNum || 0);
+  if (!Number.isFinite(n) || n <= 0) return null;
+  return Math.trunc(n);
+}
+
 export const onRequestGet: PagesFunction = async ({ request, env }) => {
   try {
     const sql = neon(String(env.DATABASE_URL));
@@ -99,8 +107,17 @@ export const onRequestGet: PagesFunction = async ({ request, env }) => {
     };
 
     let scheduleRows = await sql/*sql*/`
-      SELECT business_date, shift_start_at, shift_end_at, break_minutes, static_schedule
+      SELECT
+        es.business_date,
+        es.shift_start_at,
+        es.shift_end_at,
+        es.break_minutes,
+        es.static_schedule,
+        es.preferred_drawer_id,
+        td.drawer_name AS preferred_drawer_name,
+        td.drawer_code AS preferred_drawer_code
       FROM app.employee_schedules
+      LEFT JOIN app.tenant_drawers td ON td.drawer_id = es.preferred_drawer_id
       WHERE tenant_id = ${actor.tenant_id}::uuid
         AND user_id = ${actor.actor_user_id}::uuid
         AND shift_start_at >= ${currentWeekBounds.startIso}::timestamptz
@@ -128,8 +145,17 @@ export const onRequestGet: PagesFunction = async ({ request, env }) => {
           endIso: localDayBounds(tzOffsetMinutes, staticWeekEnd).endIso,
         };
         scheduleRows = await sql/*sql*/`
-          SELECT business_date, shift_start_at, shift_end_at, break_minutes, static_schedule
+          SELECT
+            es.business_date,
+            es.shift_start_at,
+            es.shift_end_at,
+            es.break_minutes,
+            es.static_schedule,
+            es.preferred_drawer_id,
+            td.drawer_name AS preferred_drawer_name,
+            td.drawer_code AS preferred_drawer_code
           FROM app.employee_schedules
+          LEFT JOIN app.tenant_drawers td ON td.drawer_id = es.preferred_drawer_id
           WHERE tenant_id = ${actor.tenant_id}::uuid
             AND user_id = ${actor.actor_user_id}::uuid
             AND static_schedule = true
@@ -149,6 +175,48 @@ export const onRequestGet: PagesFunction = async ({ request, env }) => {
       rows: scheduleRows,
     } : null;
 
+    let drawer_prompt: any = null;
+    if (hasSchedule) {
+      const todayDow = new Date(`${today.date}T00:00:00.000Z`).getUTCDay();
+      const todayScheduleRow = isStaticSchedule
+        ? scheduleRows.find((r: any) => new Date(`${String(r.business_date).slice(0, 10)}T00:00:00.000Z`).getUTCDay() === todayDow)
+        : scheduleRows.find((r: any) => String(r.business_date || '').slice(0, 10) === today.date);
+
+      const drawerLegacy = parseLegacyDrawerFromMeta(todayScheduleRow);
+      if (todayScheduleRow?.preferred_drawer_id && drawerLegacy) {
+        const rowsToday = await sql/*sql*/`
+          SELECT period
+          FROM app.cash_drawer_counts
+          WHERE tenant_id = ${actor.tenant_id}::uuid
+            AND count_id IN (${today.date + "#" + drawerLegacy + "#OPEN"}, ${today.date + "#" + drawerLegacy + "#CLOSE"})
+        `;
+        const hasOpen = rowsToday.some((r: any) => String(r.period || '').toUpperCase() === 'OPEN');
+        const hasClose = rowsToday.some((r: any) => String(r.period || '').toUpperCase() === 'CLOSE');
+
+        const shiftEnd = todayScheduleRow?.shift_end_at ? new Date(todayScheduleRow.shift_end_at) : null;
+        const now = new Date();
+        const withinCloseReminderWindow = !!shiftEnd && now.getTime() >= (shiftEnd.getTime() - 60 * 60 * 1000) && now.getTime() <= (shiftEnd.getTime() + 60 * 60 * 1000);
+
+        if (!hasOpen) {
+          drawer_prompt = {
+            action: 'open',
+            drawer_id: todayScheduleRow.preferred_drawer_id,
+            drawer_name: todayScheduleRow.preferred_drawer_name || `Drawer ${drawerLegacy}`,
+            message: 'Your scheduled drawer opening count is missing.',
+            cta_label: 'Complete Open Drawer Count',
+          };
+        } else if (!hasClose && withinCloseReminderWindow) {
+          drawer_prompt = {
+            action: 'close',
+            drawer_id: todayScheduleRow.preferred_drawer_id,
+            drawer_name: todayScheduleRow.preferred_drawer_name || `Drawer ${drawerLegacy}`,
+            message: 'Your shift is ending soon. Don’t forget to complete your close drawer count.',
+            cta_label: 'Complete Close Drawer Count',
+          };
+        }
+      }
+    }
+
     return json({
       ok: true,
       actor,
@@ -157,6 +225,7 @@ export const onRequestGet: PagesFunction = async ({ request, env }) => {
       range_entries,
       range_total_hours: Math.round(range_total_hours * 100) / 100,
       week_schedule,
+      drawer_prompt,
     });
   } catch (e: any) {
     return json({ ok: false, error: 'server_error', message: e?.message || String(e) }, 500);
