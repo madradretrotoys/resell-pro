@@ -47,6 +47,11 @@ export async function init(ctx) {
       if (e.key === "Enter" || e.key === " ") routeToBusinessHours();
     });
 
+    $("#goto-drawer-settings")?.addEventListener("click", routeToDrawers);
+    $("#goto-drawer-settings")?.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" || e.key === " ") routeToDrawers();
+    });
+
   } catch (err) {
     console.error(err);
     hide(loading);
@@ -76,6 +81,10 @@ export async function init(ctx) {
 
   function routeToBusinessHours() {
     window.router?.go?.("?page=settings-business-hours") || (window.location.href = "?page=settings-business-hours");
+  }
+
+  function routeToDrawers() {
+    window.router?.go?.("?page=settings-drawers") || (window.location.href = "?page=settings-drawers");
   }
 }
 // end landing.js 

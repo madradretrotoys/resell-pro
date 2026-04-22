@@ -47,6 +47,11 @@ const SCREENS = {
     js: '/screens/settings-business-hours.js',
     title: 'Settings · Business Hours',
   },
+  'settings-drawers': {
+    html: '/screens/settings-drawers.html',
+    js: '/screens/settings-drawers.js',
+    title: 'Settings · Drawers',
+  },
 };
 
 let current = { name: null, mod: null };
