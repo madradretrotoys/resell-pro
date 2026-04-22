@@ -155,12 +155,19 @@ export const onRequestGet: PagesFunction = async ({ request, env }) => {
     const sql = neon(env.DATABASE_URL);
 
     const permRows = await sql/*sql*/`
-      SELECT can_cash_edit
+      SELECT
+        COALESCE(can_cash_edit, false) AS can_cash_edit,
+        COALESCE(can_cash_drawer, false) AS can_cash_drawer,
+        COALESCE(can_cash_payouts, false) AS can_cash_payouts
       FROM app.permissions
       WHERE user_id = ${user_id}
       LIMIT 1
     `;
-    if (!permRows?.[0]?.can_cash_edit) return json({ error: "forbidden" }, 403);
+    const canCashAccess =
+      !!permRows?.[0]?.can_cash_edit ||
+      !!permRows?.[0]?.can_cash_drawer ||
+      !!permRows?.[0]?.can_cash_payouts;
+    if (!canCashAccess) return json({ error: "forbidden" }, 403);
 
     const tenantRows = await sql/*sql*/`
       SELECT tenant_id
