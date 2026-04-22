@@ -8,6 +8,7 @@ let state = {
   periodEntries: [],
   teamStatuses: [],
   cashSummary: null,
+  weekSchedule: null,
 };
 
 export async function init({ container }) {
@@ -26,6 +27,9 @@ function bind(container) {
     myLastClockOut: container.querySelector('#myLastClockOut'),
     btnDashboardClockIn: container.querySelector('#btnDashboardClockIn'),
     myPrompt: container.querySelector('#myPrompt'),
+    weeklyScheduleCard: container.querySelector('#weeklyScheduleCard'),
+    weeklyScheduleTitle: container.querySelector('#weeklyScheduleTitle'),
+    weeklyScheduleTable: container.querySelector('#weeklyScheduleTable'),
     cashMovementCard: container.querySelector('#cashMovementCard'),
     cashMovementSummary: container.querySelector('#cashMovementSummary'),
     cashMovementSubtitle: container.querySelector('#cashMovementSubtitle'),
@@ -44,8 +48,10 @@ async function loadDashboard() {
     state.actor = me?.actor || null;
     state.todayEntry = me?.today || null;
     state.periodEntries = me?.period_entries || [];
+    state.weekSchedule = me?.week_schedule || null;
 
     renderMyStatus();
+    renderWeekSchedule();
     await loadCashMovementSummary();
 
     if (state.actor?.can_edit_timesheet) {
@@ -276,6 +282,43 @@ function renderTeamStatus() {
           </tr>
         `)
         .join('')}
+    </tbody>
+  `;
+}
+
+function renderWeekSchedule() {
+  if (!els.weeklyScheduleCard || !els.weeklyScheduleTable || !els.weeklyScheduleTitle) return;
+  const schedule = state.weekSchedule;
+  if (!schedule || !Array.isArray(schedule.rows) || !schedule.rows.length) {
+    els.weeklyScheduleCard.style.display = 'none';
+    return;
+  }
+
+  els.weeklyScheduleCard.style.display = '';
+  els.weeklyScheduleTitle.textContent = schedule.title || 'Weekly Schedule';
+
+  els.weeklyScheduleTable.innerHTML = `
+    <thead>
+      <tr>
+        <th>Day</th>
+        <th>Start</th>
+        <th>End</th>
+        <th>Lunch (min)</th>
+      </tr>
+    </thead>
+    <tbody>
+      ${schedule.rows.map((row) => {
+        const day = row?.business_date ? new Date(`${String(row.business_date).slice(0, 10)}T00:00:00`) : null;
+        const dayLabel = day ? day.toLocaleDateString([], { weekday: 'long' }) : '—';
+        return `
+          <tr>
+            <td>${escapeHtml(dayLabel)}</td>
+            <td>${escapeHtml(fmtTime(row?.shift_start_at))}</td>
+            <td>${escapeHtml(fmtTime(row?.shift_end_at))}</td>
+            <td>${escapeHtml(String(Number(row?.break_minutes || 0)))}</td>
+          </tr>
+        `;
+      }).join('')}
     </tbody>
   `;
 }
