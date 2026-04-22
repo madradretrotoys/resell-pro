@@ -37,7 +37,7 @@ function wire() {
   els['sch-static-toggle']?.addEventListener('click', () => {
     staticScheduleSet = !staticScheduleSet;
     syncStaticScheduleToggle();
-    banner(staticScheduleSet ? 'Schedule marked as set.' : 'Schedule marked as not set.', 'info');
+    banner(staticScheduleSet ? 'Static schedule set to Yes.' : 'Static schedule set to No.', 'info');
   });
   els['sch-user']?.addEventListener('change', () => {
     clearWeekInputs();
@@ -421,8 +421,8 @@ function syncStaticScheduleToggle() {
   const btn = els['sch-static-toggle'];
   if (!btn) return;
   btn.setAttribute('aria-pressed', staticScheduleSet ? 'true' : 'false');
-  btn.textContent = staticScheduleSet ? 'Set ✓' : 'Set Schedule';
-  btn.title = staticScheduleSet ? 'Click to unset schedule' : 'Click to mark this schedule as set';
+  btn.textContent = staticScheduleSet ? 'Yes' : 'No';
+  btn.title = staticScheduleSet ? 'Click to switch static schedule to No' : 'Click to switch static schedule to Yes';
   btn.classList.toggle('btn--primary', staticScheduleSet);
 }
 
