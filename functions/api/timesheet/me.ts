@@ -118,11 +118,11 @@ export const onRequestGet: PagesFunction = async ({ request, env }) => {
         td.drawer_code AS preferred_drawer_code
       FROM app.employee_schedules es
       LEFT JOIN app.tenant_drawers td ON td.drawer_id = es.preferred_drawer_id
-      WHERE tenant_id = ${actor.tenant_id}::uuid
-        AND user_id = ${actor.actor_user_id}::uuid
-        AND shift_start_at >= ${currentWeekBounds.startIso}::timestamptz
-        AND shift_start_at <= ${currentWeekBounds.endIso}::timestamptz
-      ORDER BY shift_start_at ASC
+      WHERE es.tenant_id = ${actor.tenant_id}::uuid
+        AND es.user_id = ${actor.actor_user_id}::uuid
+        AND es.shift_start_at >= ${currentWeekBounds.startIso}::timestamptz
+        AND es.shift_start_at <= ${currentWeekBounds.endIso}::timestamptz
+      ORDER BY es.shift_start_at ASC
     `;
 
     let effectiveWeekStart = currentWeekStart;
@@ -156,12 +156,12 @@ export const onRequestGet: PagesFunction = async ({ request, env }) => {
             td.drawer_code AS preferred_drawer_code
           FROM app.employee_schedules es
           LEFT JOIN app.tenant_drawers td ON td.drawer_id = es.preferred_drawer_id
-          WHERE tenant_id = ${actor.tenant_id}::uuid
-            AND user_id = ${actor.actor_user_id}::uuid
-            AND static_schedule = true
-            AND shift_start_at >= ${staticWeekBounds.startIso}::timestamptz
-            AND shift_start_at <= ${staticWeekBounds.endIso}::timestamptz
-          ORDER BY shift_start_at ASC
+          WHERE es.tenant_id = ${actor.tenant_id}::uuid
+            AND es.user_id = ${actor.actor_user_id}::uuid
+            AND es.static_schedule = true
+            AND es.shift_start_at >= ${staticWeekBounds.startIso}::timestamptz
+            AND es.shift_start_at <= ${staticWeekBounds.endIso}::timestamptz
+          ORDER BY es.shift_start_at ASC
         `;
       }
     }
