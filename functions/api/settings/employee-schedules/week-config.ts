@@ -44,6 +44,13 @@ export const onRequestGet: PagesFunction = async ({ request, env }) => {
       consecutive_lunch_hours_required: Number(row.consecutive_lunch_hours_required ?? DEFAULT_CONSECUTIVE_LUNCH_HOURS_REQUIRED),
       default_lunch_minutes: Number(row.default_lunch_minutes ?? DEFAULT_LUNCH_MINUTES),
     });
+      SELECT week_starts_on
+      FROM app.tenants
+      WHERE tenant_id = ${tenant_id}::uuid
+      LIMIT 1
+    `;
+
+    return json({ ok: true, week_starts_on: Number(rows?.[0]?.week_starts_on ?? 0) });
   } catch (e: any) {
     return json({ ok: false, error: "server_error", message: e?.message || String(e) }, 500);
   }
@@ -138,6 +145,18 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
       consecutive_lunch_hours_required: Number(row.consecutive_lunch_hours_required ?? DEFAULT_CONSECUTIVE_LUNCH_HOURS_REQUIRED),
       default_lunch_minutes: Number(row.default_lunch_minutes ?? DEFAULT_LUNCH_MINUTES),
     });
+    const week_starts_on = Number((body as any).week_starts_on);
+    if (!Number.isFinite(week_starts_on) || week_starts_on < 0 || week_starts_on > 6) {
+      return json({ ok: false, error: "bad_week_starts_on" }, 400);
+    }
+
+    await sql/*sql*/`
+      UPDATE app.tenants
+      SET week_starts_on = ${week_starts_on}
+      WHERE tenant_id = ${tenant_id}::uuid
+    `;
+
+    return json({ ok: true, week_starts_on });
   } catch (e: any) {
     return json({ ok: false, error: "server_error", message: e?.message || String(e) }, 500);
   }

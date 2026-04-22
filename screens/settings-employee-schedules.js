@@ -5,9 +5,6 @@ let els = {};
 let users = [];
 let drawers = [];
 let loadedRowsByDate = new Map();
-let consecutiveLunchHoursRequired = 0;
-let defaultLunchMinutes = 30;
-let lunchPolicyState = '';
 
 export async function init() {
   bind();
@@ -22,7 +19,7 @@ export function destroy() {}
 
 function bind() {
   const ids = [
-    'sch-banner','sch-user','sch-clone-user','sch-week-start-day','sch-week-start-date','sch-load-week','sch-save-week','sch-clear-week','sch-clone-week','sch-status','sch-drawer','sch-notes','sch-week-body','sch-week-total','sch-week-ot','sch-lunch-policy'
+    'sch-banner','sch-user','sch-clone-user','sch-week-start-day','sch-week-start-date','sch-load-week','sch-save-week','sch-clear-week','sch-clone-week','sch-status','sch-drawer','sch-notes','sch-week-body','sch-week-total','sch-week-ot'
   ];
   for (const id of ids) els[id] = document.getElementById(id);
 }
@@ -56,38 +53,6 @@ function banner(message, tone = 'info') {
   el.className = `banner ${tone}`;
   el.hidden = false;
   setTimeout(() => { el.hidden = true; }, 3500);
-}
-
-function refreshLunchPolicyText() {
-  const el = els['sch-lunch-policy'];
-  if (!el) return;
-  if (consecutiveLunchHoursRequired > 0) {
-    const statePart = lunchPolicyState ? ` (${lunchPolicyState})` : '';
-    el.textContent = `Lunch Rule${statePart}: Lunch is required when a shift exceeds ${consecutiveLunchHoursRequired.toFixed(2)} consecutive hours.`;
-  } else {
-    el.textContent = 'Lunch Rule: No tenant lunch threshold configured.';
-  }
-}
-
-function rowNeedsLunch(tr) {
-  if (consecutiveLunchHoursRequired <= 0) return false;
-  const work = !!tr.querySelector('.sch-work')?.checked;
-  if (!work) return false;
-  const s = tr.querySelector('.sch-start')?.value || '';
-  const e = tr.querySelector('.sch-end')?.value || '';
-  if (!s || !e) return false;
-  const startM = timeToMinutes(s);
-  const endM = timeToMinutes(e);
-  if (endM <= startM) return false;
-  const hours = (endM - startM) / 60;
-  const lunch = Number(tr.querySelector('.sch-lunch')?.value || 0);
-  return hours > consecutiveLunchHoursRequired && lunch <= 0;
-}
-
-function maybePromptLunchRule(tr) {
-  if (!rowNeedsLunch(tr)) return;
-  const day = tr.querySelector('td')?.textContent || 'Selected day';
-  banner(`${day}: lunch is required for shifts over ${consecutiveLunchHoursRequired.toFixed(2)} hours.`, 'error');
 }
 
 function setWeekStartDateToTodayWeek() {
@@ -128,10 +93,6 @@ async function loadWeekConfig() {
     const resp = await api('/api/settings/employee-schedules/week-config');
     const weekStartsOn = Number(resp?.week_starts_on ?? 0);
     if (els['sch-week-start-day']) els['sch-week-start-day'].value = String(weekStartsOn);
-    consecutiveLunchHoursRequired = Number(resp?.consecutive_lunch_hours_required ?? 0);
-    defaultLunchMinutes = Number(resp?.default_lunch_minutes ?? 30);
-    lunchPolicyState = String(resp?.state_code || '').toUpperCase();
-    refreshLunchPolicyText();
   } catch {
     // keep defaults
   }
@@ -163,16 +124,7 @@ function buildWeekRows() {
   }).join('');
 
   body.querySelectorAll('tr').forEach((tr, idx) => {
-    tr.querySelectorAll('input').forEach((inp) => {
-      inp.addEventListener('input', recalcTotals);
-      inp.addEventListener('change', () => {
-        recalcTotals();
-        maybePromptLunchRule(tr);
-      });
-      inp.addEventListener('blur', () => {
-        maybePromptLunchRule(tr);
-      });
-    });
+    tr.querySelectorAll('input').forEach((inp) => inp.addEventListener('input', recalcTotals));
     tr.querySelector('.sch-copy-prev')?.addEventListener('click', () => {
       if (idx === 0) return;
       const prev = body.querySelectorAll('tr')[idx - 1];
@@ -181,11 +133,7 @@ function buildWeekRows() {
       tr.querySelector('.sch-start').value = prev.querySelector('.sch-start').value;
       tr.querySelector('.sch-end').value = prev.querySelector('.sch-end').value;
       tr.querySelector('.sch-lunch').value = prev.querySelector('.sch-lunch').value;
-      if (rowNeedsLunch(tr)) {
-        tr.querySelector('.sch-lunch').value = String(defaultLunchMinutes);
-      }
       recalcTotals();
-      maybePromptLunchRule(tr);
     });
   });
 }
@@ -252,9 +200,6 @@ async function saveWeek() {
       }
 
       if (!startTime || !endTime) throw new Error(`Missing start/end for ${DAY_NAMES[dow]}`);
-      if (rowNeedsLunch(tr)) {
-        throw new Error(`${DAY_NAMES[dow]} requires lunch for shifts over ${consecutiveLunchHoursRequired.toFixed(2)} hours.`);
-      }
       const startIso = new Date(`${ymd}T${startTime}:00`).toISOString();
       const endIso = new Date(`${ymd}T${endTime}:00`).toISOString();
 
@@ -377,7 +322,6 @@ function recalcTotals() {
       }
     }
     tr.querySelector('.sch-paid').textContent = paid.toFixed(2);
-    tr.classList.toggle('row-warning', rowNeedsLunch(tr));
     total += paid;
   });
 
