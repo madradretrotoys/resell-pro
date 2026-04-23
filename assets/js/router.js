@@ -69,21 +69,44 @@ let current = { name: null, mod: null };
 const qs = (k) => new URLSearchParams(location.search).get(k);
 function log(...args){ try{ console.log('[router]', ...args); }catch{} }
 
-function getDisplayFirstName(user = {}) {
+function firstToken(value) {
+  if (typeof value !== 'string') return '';
+  const cleaned = value.trim();
+  if (!cleaned) return '';
+  if (cleaned.includes('@')) return cleaned.split('@')[0].trim();
+  return cleaned.split(/\s+/)[0].trim();
+}
+
+function getDisplayFirstName(session = {}) {
+  const user = session?.user || {};
   const candidates = [
     user.first_name,
     user.firstName,
-    (typeof user.name === 'string' ? user.name.split(/\s+/)[0] : ''),
-    (typeof user.user_name === 'string' ? user.user_name.split(/\s+/)[0] : ''),
+    user.given_name,
+    user.name_first,
+    user.name,
+    user.display_name,
+    user.user_name,
+    user.login_id,
+    user.email,
+    session.first_name,
+    session.name,
+    session.display_name,
+    session.user_name,
+    session.login_id,
+    session.email,
+    session.membership_name,
+    session.actor_name,
+    session.memberships?.[0]?.name,
   ];
-  const first = candidates.find((v) => typeof v === 'string' && v.trim());
-  return first ? first.trim() : 'there';
+  const first = candidates.map(firstToken).find(Boolean);
+  return first || 'User';
 }
 
-function updateHeaderUserName(user) {
+function updateHeaderUserName(session) {
   const node = document.getElementById('who');
   if (!node) return;
-  const firstName = getDisplayFirstName(user);
+  const firstName = getDisplayFirstName(session);
   node.textContent = `Hi, ${firstName}`;
 }
 
@@ -157,7 +180,7 @@ export async function loadScreen(name){
     return;
   }
   log('auth:ok', { user: session.user });
-  updateHeaderUserName(session.user);
+  updateHeaderUserName(session);
   wireIdleTimeout();
 
   // 2) Swap screen
