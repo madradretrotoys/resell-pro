@@ -36,6 +36,12 @@ function bind(container) {
     adminCard: container.querySelector('#adminCard'),
     adminDate: container.querySelector('#adminDate'),
     btnAdminLoad: container.querySelector('#btnAdminLoad'),
+    adminReportFrom: container.querySelector('#adminReportFrom'),
+    adminReportTo: container.querySelector('#adminReportTo'),
+    adminReportUser: container.querySelector('#adminReportUser'),
+    btnAdminReportLoad: container.querySelector('#btnAdminReportLoad'),
+    adminReportTotal: container.querySelector('#adminReportTotal'),
+    adminReportTable: container.querySelector('#adminReportTable'),
     adminTable: container.querySelector('#adminTable'),
     busy: container.querySelector('#busy'),
     logs: container.querySelector('#logs'),
@@ -48,6 +54,7 @@ function wire() {
   els.btnLunchIn?.addEventListener('click', () => punch('lunch_in'));
   els.btnClockOut?.addEventListener('click', () => punch('clock_out'));
   els.btnAdminLoad?.addEventListener('click', loadAdmin);
+  els.btnAdminReportLoad?.addEventListener('click', loadAdminReport);
   els.btnReportLoad?.addEventListener('click', loadReport);
 }
 
@@ -79,8 +86,11 @@ async function loadMe() {
     await loadReport();
 
     if (state.canEdit) {
+      if (els.adminReportTo) els.adminReportTo.value = isoDate(new Date());
+      if (els.adminReportFrom) { const d = new Date(); d.setDate(d.getDate() - 13); els.adminReportFrom.value = isoDate(d); }
       els.adminCard.style.display = '';
       await loadAdmin();
+      await loadAdminReport();
     } else {
       els.adminCard.style.display = 'none';
     }
@@ -211,6 +221,63 @@ function renderReportTable() {
       `).join('')}
     </tbody>
   `;
+}
+
+
+
+async function loadAdminReport() {
+  if (!state.canEdit) return;
+  const from = String(els.adminReportFrom?.value || '').trim();
+  const to = String(els.adminReportTo?.value || '').trim();
+  const loginId = String(els.adminReportUser?.value || '').trim();
+  if (!from || !to || from > to) return;
+
+  setBusy(true);
+  try {
+    const q = `?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}&login_id=${encodeURIComponent(loginId)}`;
+    const data = await api(`/api/timesheet/admin-report${q}`);
+    if (els.adminReportUser && els.adminReportUser.options.length <= 1) {
+      const opts = ['<option value="">All Employees</option>'].concat((data.users || []).map((u) => `<option value="${escapeHtml(u.login_id)}">${escapeHtml(u.name || u.login_id)} (${escapeHtml(u.login_id)})</option>`));
+      els.adminReportUser.innerHTML = opts.join('');
+      if (loginId) els.adminReportUser.value = loginId;
+    }
+    renderAdminReportTable(data.entries || [], Number(data.total_hours || 0));
+  } catch (e) {
+    showToast('Unable to load timesheet report.');
+    log(`loadAdminReport failed: ${e?.data?.error || e?.message || e}`);
+  } finally {
+    setBusy(false);
+  }
+}
+
+function renderAdminReportTable(entries, totalHours) {
+  if (els.adminReportTotal) els.adminReportTotal.textContent = `Grand Total (${els.adminReportFrom?.value} to ${els.adminReportTo?.value}): ${fmtHours(totalHours)} hours`;
+  if (!entries.length) {
+    els.adminReportTable.innerHTML = '<tbody><tr><td class="muted">No entries in selected date range.</td></tr></tbody>';
+    return;
+  }
+
+  const groups = new Map();
+  for (const row of entries) {
+    const key = String(row.login_id || '').trim() || String(row.user_name || '').trim() || 'unknown';
+    if (!groups.has(key)) groups.set(key, { user_name: row.user_name || row.login_id || 'Unknown', login_id: row.login_id || '—', rows: [], total_hours: 0 });
+    const g = groups.get(key);
+    g.rows.push(row);
+    g.total_hours += Number(row.total_hours || 0);
+  }
+
+  const sections = [];
+  for (const [, g] of groups) {
+    sections.push(`<tr style="background:#f9fafb;font-weight:700"><td colspan="9">${escapeHtml(g.user_name)} (${escapeHtml(g.login_id)})</td></tr>`);
+    sections.push(...g.rows.map((r) => `<tr><td>${escapeHtml(r.user_name || '')}</td><td>${escapeHtml(r.login_id || '')}</td><td>${fmtDate(r.clock_in)}</td><td>${fmt(r.clock_in)}</td><td>${fmt(r.lunch_out)}</td><td>${fmt(r.lunch_in)}</td><td>${fmt(r.clock_out)}</td><td>${fmtHours(r.total_hours)}</td><td>${escapeHtml(r.status || '')}</td></tr>`));
+    sections.push(`<tr style="background:#f3f4f6;font-weight:600"><td colspan="7" style="text-align:right">${escapeHtml(g.user_name)} Total Hours</td><td>${fmtHours(g.total_hours)}</td><td></td></tr>`);
+  }
+
+  sections.push(`<tr style="background:#e5e7eb;font-weight:700"><td colspan="7" style="text-align:right">Grand Total Hours</td><td>${fmtHours(totalHours)}</td><td></td></tr>`);
+
+  els.adminReportTable.innerHTML = `
+    <thead><tr><th>User</th><th>Login</th><th>Date</th><th>Clock In</th><th>Lunch Out</th><th>Lunch In</th><th>Clock Out</th><th>Total Hours</th><th>Status</th></tr></thead>
+    <tbody>${sections.join('')}</tbody>`;
 }
 
 async function loadAdmin() {
