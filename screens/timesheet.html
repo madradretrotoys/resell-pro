@@ -73,7 +73,17 @@
         <button id="btnAdminLoad" class="btn">Load</button>
       </div>
     </div>
-    <div class="table-wrap"><table id="adminTable"></table></div>
+    <div class="row" style="margin-top:8px">
+        <label>From <input id="adminReportFrom" type="date" /></label>
+        <label>To <input id="adminReportTo" type="date" /></label>
+        <label>Employee
+          <select id="adminReportUser"><option value="">All Employees</option></select>
+        </label>
+        <button id="btnAdminReportLoad" class="btn">Run Timesheet Report</button>
+      </div>
+      <div id="adminReportTotal" class="muted" style="margin-top:8px"></div>
+      <div class="table-wrap"><table id="adminReportTable"></table></div>
+      <div class="table-wrap"><table id="adminTable"></table></div>
   </div>
 
   <div id="logs" class="log" style="margin-top:10px"></div>
