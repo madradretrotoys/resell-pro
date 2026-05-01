@@ -1,0 +1,1617 @@
+// ==UserScript==
+// @name         MadRad → Temporary Vendoo Autofill Backlist items
+// @namespace    mrad.vendoo
+// @version      1.0.0
+// @description  Fill Vendoo once; native setter; ACK/guard; Condition stable; Category with multi-trigger & multi-surface detection
+// @match        https://web.vendoo.co/app/item/*
+// @run-at       document-idle
+//@grant GM_xmlhttpRequest
+//@connect img.resellpros.com
+// ==/UserScript==
+
+(function () {
+  'use strict';
+
+  console.log("[Vendoo userscript] Loaded userscript 1.6.5 with enhanced logging");
+
+  const TOKEN = 'MRAD_VENDOO_V1';
+  const TYPE_DELAY = [80, 140];
+  const BETWEEN_FIELD = [280, 520];
+  const COOLDOWN_MS = 30000;
+
+  let BUSY = false;
+  let DONE_UNTIL = 0;
+  const ELS = {};
+
+  const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+  const rand  = (a,b) => Math.floor(Math.random()*(b-a+1))+a;
+  // -------------------------------------------------------------
+  // TEMP Backlist Controls
+  // -------------------------------------------------------------
+  let DRY_RUN = false;
+  let TARGETS = ["shopify","whatnot","facebook","etsy","poshmark","mercari","ebay","depop"]; // edit as needed
+
+  function isVendooItemPage(){
+    return /^\/app\/item\/[A-Za-z0-9_-]+$/.test(location.pathname);
+  }
+
+  function isVendooFormVisible(){
+    // loose check: big title "Vendoo Form"
+    const h = Array.from(document.querySelectorAll("h1,h2")).find(x =>
+      (x.textContent || "").trim().toLowerCase() === "vendoo form"
+    );
+    return !!h;
+  }
+
+  function mountBacklistPanel(){
+    if (document.getElementById("mrad-backlist-panel")) return;
+
+    const panel = document.createElement("div");
+    panel.id = "mrad-backlist-panel";
+    panel.style.position = "fixed";
+    panel.style.right = "14px";
+    panel.style.bottom = "14px";
+    panel.style.zIndex = "999999";
+    panel.style.background = "rgba(20,20,20,0.92)";
+    panel.style.color = "#fff";
+    panel.style.padding = "10px";
+    panel.style.borderRadius = "10px";
+    panel.style.fontFamily = "system-ui, -apple-system, Segoe UI, Roboto, Arial";
+    panel.style.boxShadow = "0 8px 28px rgba(0,0,0,0.28)";
+    panel.style.width = "230px";
+
+    panel.innerHTML = `
+      <div style="font-weight:700; margin-bottom:8px;">MRAD Backlist</div>
+
+      <button id="mrad-start" style="
+        width:100%; padding:10px; border-radius:10px;
+        border:0; cursor:pointer; font-weight:700;
+      ">Start Backlist</button>
+
+      <label style="display:flex; gap:8px; align-items:center; margin-top:10px; font-size:13px;">
+        <input id="mrad-dryrun" type="checkbox" />
+        Dry run (no List clicks)
+      </label>
+
+      <button id="mrad-targets" style="
+        width:100%; margin-top:10px; padding:8px; border-radius:10px;
+        border:1px solid rgba(255,255,255,0.18); background:transparent; color:#fff;
+        cursor:pointer; font-weight:600;
+      ">Edit targets</button>
+
+      <div id="mrad-status" style="margin-top:10px; font-size:12px; opacity:0.9;">Idle</div>
+    `;
+
+    document.body.appendChild(panel);
+
+    const statusEl = panel.querySelector("#mrad-status");
+
+    panel.querySelector("#mrad-dryrun").addEventListener("change", (e) => {
+      DRY_RUN = !!e.target.checked;
+      statusEl.textContent = `Dry run: ${DRY_RUN ? "ON" : "OFF"}`;
+    });
+
+    panel.querySelector("#mrad-targets").addEventListener("click", () => {
+      const cur = TARGETS.join(",");
+      const next = prompt("Comma-separated targets (example: ebay,etsy,shopify)", cur);
+      if (next == null) return;
+      TARGETS = next.split(",").map(s => s.trim().toLowerCase()).filter(Boolean);
+      statusEl.textContent = `Targets: ${TARGETS.join(", ") || "(none)"}`;
+    });
+
+    panel.querySelector("#mrad-start").addEventListener("click", async () => {
+      statusEl.textContent = "Starting…";
+      const result = await runBacklistNow({ dryRun: DRY_RUN, targets: TARGETS });
+      statusEl.textContent = result ? "Done ✅ (see console)" : "Failed ❌ (see console)";
+    });
+
+    // set initial UI state
+    statusEl.textContent = `Targets: ${TARGETS.join(", ")}`;
+  }
+
+  async function runBacklistNow({ dryRun, targets }){
+    if (!isVendooItemPage()){
+      console.warn("[Vendoo userscript] Not on /app/item/* page, refusing to run.");
+      return null;
+    }
+
+    const now = Date.now();
+    if (BUSY){
+      console.warn("[Vendoo userscript] Already running; BUSY=true");
+      return null;
+    }
+    if (now < DONE_UNTIL){
+      console.warn("[Vendoo userscript] Cooldown active until:", new Date(DONE_UNTIL).toISOString());
+      return null;
+    }
+
+    BUSY = true;
+    try{
+      // Wait for the marketplace tiles to exist & stabilize before we start clicking
+      await waitForPostSaveStabilization(20000);
+
+      // payload-free run (temporary)
+      const p = {};
+      const out = await fillVendoo(p, { dryRun: !!dryRun, targets: Array.isArray(targets) ? targets : [] });
+
+      console.log("[Vendoo userscript] Backlist run complete:", out);
+      window.__MRAD_BACKLIST_LAST__ = out;
+      DONE_UNTIL = Date.now() + COOLDOWN_MS;
+      return out;
+    } finally {
+      BUSY = false;
+    }
+  }
+
+  async function initBacklistUI(){
+    // We only mount UI when the Vendoo Form is visible.
+    // Vendoo can re-render; we retry a few times.
+    for (let i = 0; i < 40; i++){
+      if (isVendooFormVisible()){
+        mountBacklistPanel();
+        return;
+      }
+      await sleep(500);
+    }
+    console.warn("[Vendoo userscript] Vendoo Form not detected; panel not mounted.");
+  }
+
+
+
+  /* --------- small helpers --------- */
+  function visible(node){
+    const ok = node && getComputedStyle(node).display !== 'none' && getComputedStyle(node).visibility !== 'hidden';
+    if (!ok) console.debug("[Vendoo userscript] not visible:", node);
+    return ok;
+  }
+
+  async function safeClick(el){
+    console.log("[Vendoo userscript] safeClick:", el);
+    if (!el) return;
+    el.scrollIntoView({behavior:'smooth', block:'center'});
+    await sleep(rand(110, 220));
+    el.click();
+    await sleep(rand(180, 360));
+  }
+
+  async function blurCommit(el){
+    console.log("[Vendoo userscript] blurCommit:", el);
+    el?.blur?.();
+    await sleep(rand(160, 300));
+  }
+
+  const inputSetter    = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set;
+  const textareaSetter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set;
+
+  function setNativeValue(el, value){
+    console.log("[Vendoo userscript] setNativeValue:", {el, value});
+    const setter = el instanceof HTMLTextAreaElement ? textareaSetter : inputSetter;
+    if (setter) setter.call(el, value); else el.value = value;
+    el.dispatchEvent(new InputEvent('input', {bubbles:true}));
+  }
+
+  async function typeHuman(el, text){
+    console.log("[Vendoo userscript] typeHuman:", {el, text});
+    if (!el) return;
+    el.scrollIntoView({behavior:'smooth', block:'center'});
+    await sleep(rand(110, 220));
+    el.focus();
+    const target = String(text ?? '');
+    let buf = '';
+    for (const ch of target){
+      buf += ch;
+      setNativeValue(el, buf);
+      await sleep(rand(...TYPE_DELAY));
+    }
+    el.dispatchEvent(new Event('change', {bubbles:true}));
+    await blurCommit(el);
+    await sleep(rand(...BETWEEN_FIELD));
+  }
+
+
+    // -------------------------------------------------------------
+    // Wait for Vendoo to finish image processing before SAVE
+    // Vendoo shows loader elements while images are processing.
+    // -------------------------------------------------------------
+    async function waitForVendooImagesToFinish(timeoutMs = 60000){
+        console.log("[Vendoo userscript] Waiting for images to finish processing…");
+
+        const start = Date.now();
+        let lastCount = null;
+
+        while (Date.now() - start < timeoutMs){
+            // Vendoo uses many loader formats; cover all known variants
+            const loaders = document.querySelectorAll(
+                '.loading-indicator, .spinner, [data-testid*="loading"], [class*="Loading"], [class*="loading"], [aria-busy="true"]'
+            );
+
+            const count = loaders.length;
+            if (count !== lastCount){
+                console.log("[Vendoo userscript] Image loader count:", count);
+                lastCount = count;
+            }
+
+            // No loaders = images processed
+            if (count === 0){
+                console.log("[Vendoo userscript] All images finished processing.");
+                return true;
+            }
+
+            await sleep(500);
+        }
+
+        console.warn("[Vendoo userscript] Timeout waiting for images to finish.");
+        return false;
+    }
+
+    async function waitForListingStatusComplete(timeoutMs = 20000){
+        console.log("[Vendoo] Waiting for Listing Status = COMPLETE…");
+
+        const start = Date.now();
+        while (Date.now() - start < timeoutMs){
+            const badge = document.querySelector('[data-testid="listing-status-container"] .badges__BadgeStyled-tiu9w6-0');
+
+           if (badge){
+               const txt = (badge.textContent || "").trim().toLowerCase();
+               console.log("[Vendoo] Listing status badge:", txt);
+
+               // Success conditions
+               if (txt.includes("complete") || txt.includes("in progress")){
+                   console.log("[Vendoo] Listing status is acceptable:", txt);
+                   return true;
+               }
+           }
+        }
+
+        console.warn("[Vendoo] Timeout waiting for listing status COMPLETE.");
+        return false;
+    }
+
+    //--------------------------------------------------------------
+// Wait for Vendoo to fully re-render the page after Save.
+// We DO NOT rely on Listing Status alone.
+// We wait until marketplace sidebar tiles are present AND stable.
+//--------------------------------------------------------------
+async function waitForPostSaveStabilization(timeoutMs = 15000){
+    console.log("[Vendoo] Waiting for post-save UI stabilization…");
+
+    const start = Date.now();
+    let lastTileCount = 0;
+
+    while (Date.now() - start < timeoutMs){
+        const tiles = document.querySelectorAll('[role^="side-control-"], [role^="sidebar-option-"]');
+
+        if (tiles.length >= 3){  // Vendoo always shows at least 3 marketplaces
+            if (tiles.length === lastTileCount){
+                console.log("[Vendoo] UI stabilized with", tiles.length, "marketplace tiles");
+                return true;
+            }
+            lastTileCount = tiles.length;
+        }
+
+        await sleep(300);
+    }
+
+    console.warn("[Vendoo] Timeout waiting for UI stabilization.");
+    return false;
+}
+
+      // --- Save & capture Vendoo Item ID from URL (final) ---
+    async function clickSaveAndWaitForId(timeoutMs = 120000) {
+        // Vendoo's primary Save button (confirmed via data-testid)
+        // Fallbacks included for safety across minor DOM changes.
+        // Ref: HTML shows <button data-testid="save-item-button" role="save">Save</button>
+        const findBtn = () =>
+        document.querySelector(
+            '[data-testid="save-item-button"],' +                 // primary (confirmed)
+            'button[data-testid="save-btn"],' +                  // possible alt
+            'button[type="submit"][class*="save"],' +            // generic fallback
+            '[aria-label="Save"]'                                // ARIA fallback
+        );
+
+        // Utility: strong matcher for post-save item URL
+        // Require a long token so "/app/item/new" cannot match.
+        const matchItem = () => {
+            const m = location.pathname.match(/\/app\/item\/([A-Za-z0-9_-]{12,})$/);
+            // explicitly reject "new" just in case
+            return (m && m[1] && m[1] !== 'new') ? m[1] : null;
+        };
+
+        // 1) Click Save (if/when present)
+        const start = Date.now();
+        let btn = findBtn();
+        while (!btn && Date.now() - start < 5000) { // allow a short render delay
+            await sleep(250);
+            btn = findBtn();
+        }
+        if (btn && !btn.disabled) {
+            await safeClick(btn);                    // gentle scroll + click + small waits
+        }
+
+        // 2) Poll for the new canonical URL with real Item ID
+        // We also watch the "Not Saved" badge to disappear as a secondary signal,
+        // but the URL match is authoritative.
+        let id = null, url = null;
+        const metaBadgeGone = () => {
+            const badge = document.querySelector('[data-testid="listing-status-container"] .badges__BadgeStyled-tiu9w6-0');
+            const txt = (badge && badge.textContent || '').trim().toLowerCase();
+            return !!badge && txt !== 'not saved' && txt !== '';
+        };
+
+  while (Date.now() - start < timeoutMs) {
+    const got = matchItem();
+    if (got) {
+      id  = got;
+      url = location.origin + '/app/item/' + id; // canonicalize; ignore transient qs/hash
+      break;
+    }
+    // If status badge flips away from "Not Saved", give the router a couple beats
+    if (metaBadgeGone()) await sleep(600);
+    await sleep(400);
+  }
+
+  return { id, url };
+}
+
+  async function overwriteInput(el, text){
+    console.log("[Vendoo userscript] overwriteInput:", {el, text});
+    if (!el) return;
+    el.scrollIntoView({behavior:'smooth', block:'center'});
+    await sleep(rand(110, 220));
+    el.focus();
+    try { el.select?.(); el.setSelectionRange?.(0, (el.value||'').length); } catch(_){}
+    setNativeValue(el, String(text ?? ''));
+    el.dispatchEvent(new Event('change', {bubbles:true}));
+    await blurCommit(el);
+    await sleep(rand(...BETWEEN_FIELD));
+  }
+
+  async function fillEditable(el, text){
+    console.log("[Vendoo userscript] fillEditable:", {el, text});
+    if (!el) return;
+    el.scrollIntoView({behavior:'smooth', block:'center'});
+    await sleep(rand(110, 220));
+    el.focus();
+    el.textContent = '';
+    el.dispatchEvent(new InputEvent('input', {bubbles:true, inputType:'deleteContentBackward'}));
+    el.textContent = String(text ?? '');
+    el.dispatchEvent(new InputEvent('input', {bubbles:true, inputType:'insertFromPaste'}));
+    el.dispatchEvent(new Event('change', {bubbles:true}));
+    await blurCommit(el);
+    await sleep(rand(...BETWEEN_FIELD));
+  }
+
+  /* --------- finders --------- */
+  function $xOne(xp, root=document){
+    const node = document.evaluate(xp, root, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue || null;
+    console.debug("[Vendoo userscript] $xOne:", {xp, root, node});
+    return node;
+  }
+
+  function byLabelInput(label){
+    return $xOne(`//label[contains(normalize-space(.),"${label}")]/following::*[self::input or self::textarea][1]`);
+  }
+
+  function byLabelEditable(label){
+    return $xOne(`//label[contains(normalize-space(.),"${label}")]/following::*[@contenteditable="true"][1]`);
+  }
+
+  function byPlaceholder(ph){
+    const node = document.querySelector(`input[placeholder="${ph}"], textarea[placeholder="${ph}"]`);
+    console.debug("[Vendoo userscript] byPlaceholder:", {ph, node});
+    return node;
+  }
+
+
+
+
+
+    /* --------- marketplace helpers (status, tile, list, capture URL) --------- */
+
+function getMarketplaceStatus(marketplace){
+    // Sidebar example from your uploaded HTML:
+    // <div role="sidebar-option-shopify">
+    //    <button data-testid="dropdown-menu-listed">Listed</button>
+    // OR <button data-testid="dropdown-menu-notListed">Not Listed</button>
+    // </div>
+
+    const root = document.querySelector(`[role="sidebar-option-${marketplace}"]`);
+
+    if (!root){
+        console.warn(`[Vendoo] getMarketplaceStatus: sidebar container NOT FOUND for ${marketplace}`);
+        return "unknown";
+    }
+
+    // Direct, authoritative selectors:
+    const listedBtn    = root.querySelector('button[data-testid="dropdown-menu-listed"]');
+    const notListedBtn = root.querySelector('button[data-testid="dropdown-menu-notListed"]');
+
+    if (listedBtn){
+        console.log(`[Vendoo] ${marketplace} STATUS = listed (via data-testid)`);
+        return "listed";
+    }
+
+    if (notListedBtn){
+        console.log(`[Vendoo] ${marketplace} STATUS = notListed (via data-testid)`);
+        return "notListed";
+    }
+
+    // Fallback to text-content search (in case Vendoo changes data-testid)
+    const txt = (root.textContent || "").trim().toLowerCase();
+
+    if (txt.includes("listed") && !txt.includes("not listed")){
+        console.log(`[Vendoo] ${marketplace} STATUS = listed (via fallback text)`);
+        return "listed";
+    }
+
+    if (txt.includes("not listed") || txt.includes("not saved")){
+        console.log(`[Vendoo] ${marketplace} STATUS = notListed (via fallback text)`);
+        return "notListed";
+    }
+
+    console.warn(`[Vendoo] ${marketplace} STATUS = unknown (no match found)`, { txt });
+    return "unknown";
+}
+
+async function openMarketplaceTile(marketplace){
+    const tile =
+        document.querySelector(`button[role="side-control-${marketplace}"]`) ||
+        document.querySelector(`#${marketplace}`);
+
+    console.log("[Vendoo userscript] openMarketplaceTile:", { marketplace, tile });
+
+    if (!tile){
+        console.warn(`[Vendoo userscript] Tile not found for marketplace ${marketplace}`);
+        return false;
+    }
+
+    await safeClick(tile);
+    await sleep(rand(500, 900));
+    return true;
+}
+
+
+async function waitForMarketplaceForm(detectorFn, marketplace, timeoutMs = 8000){
+    console.log("[Vendoo userscript] waitForMarketplaceForm start:", { marketplace, timeoutMs });
+
+    const t0 = Date.now();
+    let node = null;
+
+    while (Date.now() - t0 < timeoutMs){
+        try{
+            node = detectorFn();
+        } catch(e){
+            console.warn("[Vendoo userscript] waitForMarketplaceForm detector error:", { marketplace, error: e });
+        }
+
+        if (node){
+            console.log("[Vendoo userscript] waitForMarketplaceForm: form detected", { marketplace, node });
+            return node;
+        }
+
+        await sleep(250);
+    }
+
+    console.warn("[Vendoo userscript] waitForMarketplaceForm: timed out", { marketplace, timeoutMs });
+    return null;
+}
+
+async function clickShopifyListButton() {
+    // Vendoo Shopify buttons are just <button> with visible text
+    const btn = Array.from(document.querySelectorAll("button"))
+        .find(b => (b.textContent || "").trim().toLowerCase().includes("list on shopify"));
+
+    console.log("[Vendoo userscript] Shopify list button found:", btn);
+
+    if (!btn) return false;
+
+    await safeClick(btn);
+    return true;
+}
+
+
+async function clickListButton(marketplace, labels){
+    // labels: array of lowercase substrings, e.g. ["list on shopify"]
+    const allButtons = Array.from(document.querySelectorAll('button, div[role="button"]'));
+    const btn = allButtons.find(b => {
+        const txt = (b.textContent || "").trim().toLowerCase();
+        return labels.some(label => txt.includes(label));
+    });
+
+    console.log("[Vendoo userscript] clickListButton candidate:", { marketplace, btn, labels });
+
+    if (!btn){
+        console.warn("[Vendoo userscript] clickListButton: no matching button", { marketplace, labels });
+        return false;
+    }
+
+    await safeClick(btn);
+    return true;
+}
+
+async function waitForListingUrl(listingUrlSelector, marketplace, timeoutMs = 60000){
+    console.log("[Vendoo userscript] waitForListingUrl start:", {
+        marketplace,
+        listingUrlSelector,
+        timeoutMs
+    });
+
+    const start = Date.now();
+    let lastInputVal = null;
+    let lastAnchorHref = null;
+
+    while (Date.now() - start < timeoutMs){
+        const input = listingUrlSelector
+            ? document.querySelector(listingUrlSelector)
+            : null;
+
+        const val = input && input.value ? input.value.trim() : null;
+
+        const viewAnchor =
+            document.querySelector('#listed-status-container a[role="view-listing-btn"]') ||
+            document.querySelector('#listed-status-container a[href^="http"]');
+
+        const href = viewAnchor && viewAnchor.href ? viewAnchor.href : null;
+
+        lastInputVal = val;
+        lastAnchorHref = href;
+
+        if (val || href){
+            const listing_url = val || href;
+            console.log("[Vendoo userscript] waitForListingUrl: got listing URL", {
+                marketplace,
+                listing_url,
+                from: val ? "input" : "anchor",
+                input,
+                viewAnchor
+            });
+            return {
+                listing_url,
+                from: val ? "input" : "anchor"
+            };
+        }
+
+        await sleep(500);
+    }
+
+    console.warn("[Vendoo userscript] waitForListingUrl: timeout without URL", {
+        marketplace,
+        lastInputVal,
+        lastAnchorHref
+    });
+
+    return {
+        listing_url: null,
+        from: "timeout"
+    };
+}
+
+/* -----------------------------------------------------------
+   eBay Required Specifics Injector
+   Runs after the eBay form loads and BEFORE clicking "List on eBay"
+------------------------------------------------------------ */
+    /* --- NEW: Wait for eBay Specifics Container --- */
+    async function waitForEbaySpecifics(timeoutMs = 8000){
+        console.log("[eBay] Waiting for required-specifics-container…");
+        const start = Date.now();
+
+        while (Date.now() - start < timeoutMs){
+            const cont = document.querySelector('[data-testid="required-specifics-container"]');
+            if (cont && cont.offsetParent !== null){
+                console.log("[eBay] Specifics container READY");
+                return cont;
+            }
+            await sleep(250);
+        }
+
+        console.warn("[eBay] Timeout waiting for specifics container.");
+        return null;
+    }
+
+    // -----------------------------------------------------------
+    // Depop Required Specifics Injector
+    // Selects the FIRST brand option
+    // -----------------------------------------------------------
+
+    async function depopInjectRequiredSpecifics(vm){
+        console.log("[Vendoo][Depop] Injecting REQUIRED specifics (Brand)…");
+
+        // 1. Locate the Depop brand field container
+        const root = document.querySelector('[data-testid="listings.depop.overrides.brand-multi-selector-container"]')
+        || document.querySelector('#listings\\.depop\\.overrides\\.brand')
+        || document.querySelector('input[name="listings.depop.overrides.brand"]');
+
+        if (!root){
+            console.warn("[Depop] Brand container NOT FOUND.");
+            return;
+        }
+
+        // The actual Downshift <input>
+        const input = (
+            root.tagName === 'INPUT'
+            ? root
+            : root.querySelector('input')
+        );
+
+        if (!input){
+            console.warn("[Depop] Brand input NOT FOUND.");
+            return;
+        }
+
+        // Step 1: open the dropdown
+        input.scrollIntoView({behavior:"smooth", block:"center"});
+        await sleep(rand(120,200));
+        input.focus();
+        await sleep(rand(120,200));
+
+        // Step 2: Type a char to trigger Downshift search
+        setNativeValue(input, "a");
+        input.dispatchEvent(new InputEvent("input", {bubbles:true}));
+        await sleep(rand(140,220));
+
+        // Step 3: ArrowDown to force menu open
+        input.dispatchEvent(new KeyboardEvent("keydown", {
+            key: "ArrowDown",
+            code: "ArrowDown",
+            keyCode: 40,
+            which: 40,
+            bubbles: true
+        }));
+        await sleep(rand(150,300));
+
+        // Step 4: find the Downshift menu
+        const menuId = input.getAttribute("aria-controls");
+        let listbox = null;
+
+        for (let i = 0; i < 12; i++){
+            listbox = menuId
+                ? document.getElementById(menuId)
+            : document.querySelector('[role="listbox"]');
+
+            if (listbox && listbox.offsetParent !== null) break;
+            await sleep(120);
+        }
+
+        if (!listbox){
+            console.warn("[Depop] listbox NOT FOUND.");
+            return;
+        }
+
+        // Step 5: find visible options
+        const options = Array.from(listbox.querySelectorAll('[role="option"]'))
+        .filter(el => el.offsetParent !== null);
+
+        if (!options.length){
+            console.warn("[Depop] No visible brand options.");
+            return;
+        }
+
+        const first = options[0];
+
+        console.log("[Depop] Selecting FIRST brand option:", first.textContent.trim());
+        await safeClick(first);
+
+        await blurCommit(input);
+
+        console.log("[Vendoo][Depop] Brand injection COMPLETE.");
+    }
+
+    // -----------------------------------------------------------
+    // Poshmark Required Specifics Injector
+    // Auto-fills required "Size" with "NA" when missing
+    // -----------------------------------------------------------
+    async function waitForPoshmarkSpecifics(timeoutMs = 8000){
+        console.log("[Poshmark] Waiting for required-specifics-container…");
+        const start = Date.now();
+
+        while (Date.now() - start < timeoutMs){
+            const cont = document.querySelector('[data-testid="required-specifics-container"]');
+            if (cont && cont.offsetParent !== null){
+                return cont;
+            }
+            await sleep(250);
+        }
+
+        console.warn("[Poshmark] Timeout waiting for specifics container.");
+        return null;
+    }
+
+    async function poshmarkInjectRequiredSpecifics(){
+        console.log('[Vendoo][Poshmark] Injecting REQUIRED specifics (Size="NA")…');
+
+        const cont = await waitForPoshmarkSpecifics(10000);
+        if (!cont){
+            console.warn("[Poshmark] Specifics container never appeared.");
+            return;
+        }
+
+        // This is the key: use the label's "for" to get the exact base field id.
+        // In your HTML, label for="..._size" and the REAL required textbox is:
+        // input[type="text"][name="..._size"] (NOT the "..._size_scale" combobox input). :contentReference[oaicite:2]{index=2}
+        const sizeLabel = cont.querySelector('label[for*="listings.poshmark.categorySpecifics"][for$="_size"]');
+
+        if (!sizeLabel){
+            console.warn("[Poshmark] Size label not found (maybe category doesn't require Size).");
+            return;
+        }
+
+        const fieldFor = sizeLabel.getAttribute("for"); // e.g. listings.poshmark.categorySpecifics.<hash>_size
+        if (!fieldFor){
+            console.warn("[Poshmark] Size label had no 'for' attribute.");
+            return;
+        }
+
+        // Select the REAL input (the empty required one)
+        const sizeInput = cont.querySelector(`input[type="text"][name="${CSS.escape(fieldFor)}"]`)
+                      || cont.querySelector(`input[type="text"][data-testid="${CSS.escape(fieldFor)}"]`);
+
+        if (!sizeInput){
+            console.warn("[Poshmark] Real Size textbox not found for:", fieldFor);
+            return;
+        }
+
+        const cur = (sizeInput.value || "").trim();
+        if (cur){
+            console.log("[Poshmark] Size already set, skipping:", cur);
+            return;
+        }
+
+        console.log('[Poshmark] Setting REAL Size textbox → "NA"', { fieldFor, sizeInput });
+        await overwriteInput(sizeInput, "NA");
+
+        // extra nudge for React-controlled inputs
+        sizeInput.dispatchEvent(new Event("input", { bubbles: true }));
+        sizeInput.dispatchEvent(new Event("change", { bubbles: true }));
+        await blurCommit(sizeInput);
+
+        await sleep(350);
+        console.log('[Vendoo][Poshmark] Size injection COMPLETE.');
+    }
+
+    // -----------------------------------------------------------
+    // Mercari Injector
+    // 1) Listing Price = old * 1.25 (round down)
+    // 2) Minimum Price = newPrice * 0.94 (round down)
+    // 3) Shipping Label = first option in dropdown
+    // 4) If Brand empty => check "No Brand/Not Sure"
+    // -----------------------------------------------------------
+    async function mercariInjectRequiredSpecifics(){
+        console.log("[Vendoo][Mercari] Injector starting…");
+
+        // ---- helpers
+        const q = (sel) => document.querySelector(sel);
+
+        const parseMoney = (v) => {
+            const n = parseFloat(String(v || "").replace(/[^\d.]/g, ""));
+            return Number.isFinite(n) ? n : null;
+        };
+
+        // ---- 1) Listing Price + 2) Minimum Price
+        const priceEl = q('#listings\\.mercari\\.overrides\\.price')
+          || q('input[name="listings.mercari.overrides.price"]')
+          || q('input[data-testid="listings.mercari.overrides.price"]');
+
+        if (!priceEl){
+            console.warn("[Mercari] Listing Price input NOT FOUND");
+        } else {
+            const oldPrice = parseMoney(priceEl.value);
+
+            if (oldPrice == null){
+                console.warn("[Mercari] Listing Price not parseable:", priceEl.value);
+            } else {
+                const newPrice = Math.floor(oldPrice * 1.25);
+                const minPrice = Math.floor(newPrice * 0.94);
+
+                console.log("[Mercari] Pricing calc:", { oldPrice, newPrice, minPrice });
+
+                // set Listing Price
+                await overwriteInput(priceEl, String(newPrice));
+
+                // set Minimum Price
+                const minEl = q('#listings\\.mercari\\.marketplaceSpecifics\\.offerFloorPrice')
+                  || q('input[name="listings.mercari.marketplaceSpecifics.offerFloorPrice"]')
+                  || q('input[data-testid="listings.mercari.marketplaceSpecifics.offerFloorPrice"]');
+
+                if (!minEl){
+                    console.warn("[Mercari] Minimum Price input NOT FOUND");
+                } else {
+                    await overwriteInput(minEl, String(minPrice));
+                }
+            }
+        }
+
+        // ---- 3) Shipping Label: select FIRST option
+        const shipInput = q('#listings\\.mercari\\.marketplaceSpecifics\\.shipping\\.carrierId')
+          || q('input[name="listings.mercari.marketplaceSpecifics.shipping.carrierId"]')
+          || q('input[aria-label="Shipping Label"]');
+
+        if (!shipInput){
+            console.warn("[Mercari] Shipping Label input NOT FOUND");
+        } else {
+            const existing = (shipInput.value || "").trim();
+            console.log("[Mercari] Shipping Label existing value:", existing || "(empty)");
+
+            if (!existing){
+                shipInput.scrollIntoView({behavior:"smooth", block:"center"});
+                await sleep(rand(140, 240));
+                shipInput.focus();
+                await sleep(rand(140, 240));
+
+                // open downshift menu
+                // (toggle button exists, but ArrowDown works reliably on Downshift)
+                shipInput.dispatchEvent(new KeyboardEvent("keydown", {
+                    key: "ArrowDown",
+                    code: "ArrowDown",
+                    keyCode: 40,
+                    which: 40,
+                    bubbles: true
+                }));
+                await sleep(rand(180, 320));
+
+                const menuId = shipInput.getAttribute("aria-controls");
+                let listbox = null;
+
+                for (let i = 0; i < 14; i++){
+                    listbox = menuId ? document.getElementById(menuId) : null;
+                    if (!listbox){
+                        // fallback search
+                        listbox = document.querySelector('[role="listbox"][id^="downshift-"][id$="-menu"]');
+                    }
+                    if (listbox && listbox.offsetParent !== null) break;
+                    await sleep(120);
+                }
+
+                if (!listbox){
+                    console.warn("[Mercari] Shipping Label listbox NOT FOUND");
+                } else {
+                    const options = Array.from(listbox.querySelectorAll('[role="option"]'))
+                      .filter(el => el.offsetParent !== null);
+
+                    if (!options.length){
+                        console.warn("[Mercari] Shipping Label options NOT FOUND");
+                    } else {
+                        const first = options[0];
+                        console.log("[Mercari] Selecting FIRST shipping option:", (first.textContent || "").trim());
+                        await safeClick(first);
+                        await blurCommit(shipInput);
+                    }
+                }
+            } else {
+                console.log("[Mercari] Shipping Label already set → skipping");
+            }
+        }
+
+        // ---- 4) Brand empty => check No Brand/Not Sure
+        const brandInput = q('#listings\\.mercari\\.overrides\\.brand')
+          || q('input[name="listings.mercari.overrides.brand"]')
+          || q('input[aria-label="Brand"]');
+
+        const noBrand = q('#listings\\.mercari\\.overrides\\.noBrand')
+          || q('input[name="listings.mercari.overrides.noBrand"][type="checkbox"]');
+
+        const brandVal = (brandInput && brandInput.value || "").trim();
+        console.log("[Mercari] Brand value:", brandVal || "(empty)");
+
+        if (!noBrand){
+            console.warn('[Mercari] "No Brand/Not Sure" checkbox NOT FOUND');
+        } else if (!brandVal){
+            console.log('[Mercari] Brand empty → ensuring "No Brand/Not Sure" is checked');
+            if (!noBrand.checked){
+                await safeClick(noBrand);
+            } else {
+                console.log('[Mercari] No Brand already checked');
+            }
+        } else {
+            console.log('[Mercari] Brand populated → leaving checkbox unchanged');
+        }
+
+        console.log("[Vendoo][Mercari] Injector complete.");
+    }
+
+     // -----------------------------------------------------------
+  // Facebook Injector
+  // If Condition is missing, set it to "Used - Good"
+  // (react-select combobox, similar to eBay)
+  // -----------------------------------------------------------
+  async function facebookInjectRequiredSpecifics(){
+    console.log("[Vendoo][Facebook] Injector starting…");
+
+    // The real react-select input is the combobox input:
+    // <input id="listings.facebook.overrides.condition" role="combobox" ...>
+    const input =
+      document.querySelector('#listings\\.facebook\\.overrides\\.condition') ||
+      document.querySelector('input[name="listings.facebook.overrides.condition"][role="combobox"]') ||
+      document.querySelector('input[role="combobox"]#listings\\.facebook\\.overrides\\.condition');
+
+    if (!input){
+      console.warn('[Facebook] Condition combobox input NOT FOUND');
+      return;
+    }
+
+    // If Vendoo already set it, skip.
+    // (React-select also mirrors into a hidden input right after, but checking visible input is enough.)
+    const cur = (input.value || "").trim();
+    console.log("[Facebook] Current Condition value:", cur || "(empty)");
+
+    if (cur){
+      console.log("[Facebook] Condition already set → skipping");
+      return;
+    }
+
+    // Ensure we’re inside the required specifics area (helps stability)
+    const cont = document.querySelector('[data-testid="required-specifics-container"]');
+    if (!cont){
+      console.warn('[Facebook] required-specifics-container not found (might not be loaded yet)');
+      // still attempt, but log it.
+    }
+
+    // Open the dropdown (react-select reliably opens on ArrowDown)
+    input.scrollIntoView({behavior:"smooth", block:"center"});
+    await sleep(rand(120, 220));
+    input.focus();
+    await sleep(rand(120, 220));
+
+    input.dispatchEvent(new KeyboardEvent("keydown", {
+      key: "ArrowDown",
+      code: "ArrowDown",
+      keyCode: 40,
+      which: 40,
+      bubbles: true
+    }));
+    await sleep(rand(180, 320));
+
+    // Find listbox: via aria-controls OR generic [id$="-listbox"]
+    const listboxId = input.getAttribute("aria-controls"); // e.g. react-select-45-listbox (number varies)
+    let listbox = null;
+
+    for (let i = 0; i < 12; i++){
+      listbox =
+        (listboxId ? document.getElementById(listboxId) : null) ||
+        document.querySelector('[id^="react-select-"][id$="-listbox"]');
+
+      if (listbox && listbox.offsetParent !== null) break;
+      await sleep(120);
+    }
+
+    if (!listbox){
+      console.warn("[Facebook] Condition listbox NOT FOUND", { listboxId });
+      return;
+    }
+
+    const options = Array.from(listbox.querySelectorAll('[role="option"]'))
+      .filter(el => el.offsetParent !== null);
+
+    console.log("[Facebook] Condition options found:", options.map(o => (o.textContent||"").trim()));
+
+    const want = "used - good";
+    const match = options.find(o => ((o.textContent || "").trim().toLowerCase() === want));
+
+    if (!match){
+      console.warn('[Facebook] Could not find option "Used - Good" in listbox');
+      return;
+    }
+
+    console.log('[Facebook] Selecting Condition → "Used - Good"');
+    await safeClick(match);
+    await blurCommit(input);
+
+    console.log("[Vendoo][Facebook] Injector complete.");
+  }
+
+    async function ebayInjectRequiredSpecifics(payload){
+        const vm = payload?.vendoo_mapping || {};
+        console.log("[Vendoo][eBay] Injecting REQUIRED specifics…", {
+            hasPayload: !!payload,
+            hasVendooMapping: !!vm,
+            hasEbaySnapshot: !!payload?.ebay_payload_snapshot
+        });
+
+        // NEW: Wait for specifics container to fully render
+        const container = await waitForEbaySpecifics();
+        if (!container){
+            console.warn("[eBay] Specifics container never appeared");
+            return;
+        }
+
+        // Helper: open a react-select and choose first option,
+        // OR match desired label when provided
+        async function selectReactSelectFirst(containerSelector, desiredText){
+            console.log("[eBay] Starting selectReactSelectFirst for:", containerSelector, "desired:", desiredText);
+
+            const root = document.querySelector(containerSelector);
+            if (!root){
+                console.log("[eBay] Selector NOT FOUND →", containerSelector);
+                return;
+            }
+
+            // React-Select uses .react-select__input as the true interactive element
+            const input = root.querySelector('.react-select__input');
+            if (!input){
+                console.log("[eBay] No .react-select__input found →", containerSelector);
+                return;
+            }
+
+            // Scroll & focus input (required to open React-Select dropdown)
+            input.scrollIntoView({behavior:"smooth", block:"center"});
+            await sleep(rand(120,200));
+            input.focus();
+            await sleep(rand(120,200));
+
+            // ArrowDown is REQUIRED to open menu in React-Select v5+
+            input.dispatchEvent(new KeyboardEvent("keydown", {
+                key: "ArrowDown",
+                code: "ArrowDown",
+                keyCode: 40,
+                which: 40,
+                bubbles: true
+            }));
+            await sleep(rand(150,300));
+
+            // Try to locate visible listbox
+           // NEW: retry loop to ensure listbox is mounted
+            let listbox = null;
+            for (let i = 0; i < 10; i++){
+                listbox =
+                    root.querySelector('[id$="-listbox"]') ||
+                    document.querySelector('[id$="-listbox"]');
+
+                if (listbox && listbox.offsetParent !== null) break;
+                await sleep(120);
+            }
+
+            if (!listbox){
+                console.log("[eBay] Listbox NOT FOUND →", containerSelector);
+                return;
+            }
+            const options = Array.from(listbox.querySelectorAll('[role="option"]'));
+            if (options.length === 0){
+                console.log("[eBay] No <option> nodes found →", containerSelector);
+                return;
+            }
+
+            // Choose specific option if provided (Condition, Franchise, etc.)
+            if (desiredText){
+                const lower = desiredText.toLowerCase();
+                const match = options.find(o =>
+                                           (o.textContent || "").trim().toLowerCase() === lower
+                                          );
+
+                if (match){
+                    console.log("[eBay] Selecting desired:", desiredText);
+                    await safeClick(match);
+                    return;
+                }
+            }
+
+            // Default to selecting the FIRST option
+            const first = options[0];
+            if (first){
+                console.log("[eBay] Selecting FIRST option:", first.textContent.trim());
+                await safeClick(first);
+            } else {
+                console.warn("[eBay] No options available for selector:", containerSelector);
+            }
+        }
+
+    // -----------------------------
+    // 1. TYPE (always first option)
+    // data-testid="listings.ebay.categorySpecifics.*_Type-multi-selector-container"
+    // -----------------------------
+    await selectReactSelectFirst(
+        '[data-testid*="Type-multi-selector-container"]',
+        null
+    );
+
+    // -----------------------------
+    // 2. CONDITION (vendoo_condition_ebay)
+    // data-testid="listings.ebay.overrides.condition-multi-selector-container"
+    // -----------------------------
+    const ebayCondition = (vm?.vendoo_condition_ebay || "").trim();
+    await selectReactSelectFirst(
+        '[data-testid="listings.ebay.overrides.condition-multi-selector-container"]',
+        ebayCondition
+    );
+
+    // -----------------------------
+    // 3. SPORT (first option)
+    // data-testid="listings.ebay.categorySpecifics.*_Sport-multi-selector-container"
+    // -----------------------------
+    await selectReactSelectFirst(
+        '[data-testid*="Sport-multi-selector-container"]',
+        null
+    );
+
+    // -----------------------------
+    // 4. MODEL (first option)
+    // data-testid="listings.ebay.categorySpecifics.*_Model-multi-selector-container"
+    // -----------------------------
+    await selectReactSelectFirst(
+        '[data-testid*="Model-multi-selector-container"]',
+        null
+    );
+
+    // -----------------------------
+    // 5. FRANCHISE (always Pokémon)
+    // data-testid="listings.ebay.categorySpecifics.*_Franchise-multi-selector-container"
+    // -----------------------------
+    await selectReactSelectFirst(
+        '[data-testid*="Franchise-multi-selector-container"]',
+        "pokemon"
+    );
+
+        // -----------------------------
+        // 🔥 NEW: eBay Pricing Injection
+        // -----------------------------
+        try {
+
+
+            // -----------------------------
+            // FIXED HELPERS: stable price + checkbox
+            // -----------------------------
+            async function setStablePrice(el, value){
+                if (!el) return;
+                const current = (el.value || "").trim();
+                const target = String(value || "").trim();
+
+                // If same, do nothing (prevents React hydration blanking)
+                if (current === target){
+                    console.log("[eBay] BIN price already correct:", current);
+                    return;
+                }
+
+                // Allow hydration to stop mutating the field
+                await sleep(120);
+
+                console.log("[eBay] Overwriting BIN price →", target);
+                await overwriteInput(el, target);
+            }
+
+            // 🔥 UPDATED: More robust hydration-safe checkbox setter
+            async function setStableCheckbox(el, want){
+                if (!el) return;
+
+                // Wait longer for Vendoo hydration to stop mutating checkbox state
+                let stable = el.checked;
+                for (let i = 0; i < 12; i++){      // was 6 → doubled
+                    await sleep(100);
+                    if (el.checked === stable) break;
+                    stable = el.checked;
+                }
+
+                console.log("[eBay] Checkbox stabilized. Current =", stable, "Desired =", want);
+
+                if (stable === want){
+                    console.log("[eBay] Checkbox already correct.");
+                    return;
+                }
+
+                console.log("[eBay] Toggling Allow Best Offer →", want);
+                await safeClick(el);
+            }
+
+             console.log("[eBay] Starting pricing injection from ebay_payload_snapshot…");
+
+            const ml = payload?.ebay_payload_snapshot?.marketplace_listing || {};
+
+            console.log("[eBay] Snapshot marketplace_listing:", {
+                pricingFormat: ml.pricing_format,
+                binPrice: ml.buy_it_now_price,
+                allowBest: ml.allow_best_offer,
+                autoAccept: ml.auto_accept_amount,
+                minOffer: ml.minimum_offer_amount
+            });
+
+            const pricingFormat = ml.pricing_format || "fixed";
+            const binPrice      = ml.buy_it_now_price || "";
+            const allowBest     = !!ml.allow_best_offer;
+            const autoAccept    = ml.auto_accept_amount || "";
+            const minOffer      = ml.minimum_offer_amount || "";
+
+            // --- 1. Pricing Format (React downshift) ---
+            async function setPricingFormat(format){
+                const map = {
+                    fixed: "Fixed Price",
+                    auction: "Auction"
+                };
+                const want = map[String(format).toLowerCase()] || "Fixed Price";
+
+                const root = document.querySelector('#listings\\.ebay\\.marketplaceSpecifics\\.pricingFormat');
+                if (!root){
+                    console.warn("[eBay] Pricing format input not found");
+                    return;
+                }
+
+                await safeClick(root);
+                await sleep(150);
+
+                const menuId = root.getAttribute("aria-controls");
+                const menu = menuId ? document.getElementById(menuId) : null;
+                if (!menu){
+                    console.warn("[eBay] Pricing format menu not found");
+                    return;
+                }
+
+                const opts = [...menu.querySelectorAll('[role="option"]')];
+                const match = opts.find(o => o.textContent.trim() === want);
+
+                if (match){
+                    console.log("[eBay] Selecting pricing format:", want);
+                    await safeClick(match);
+                } else {
+                    console.warn("[eBay] Pricing format option not found:", want);
+                }
+            }
+
+            await setPricingFormat(pricingFormat);
+
+            // 🔥 NEW: Wait for BIN field hydration to fully stabilize
+            async function waitForBinPriceStable(timeout = 3000) {
+                const el = document.querySelector(
+                    '#listings\\.ebay\\.marketplaceSpecifics\\.pricingFormatDetails\\.fixedPrice\\.buyItNowPrice'
+                );
+                if (!el) return null;
+
+                let last = el.value;
+                const start = Date.now();
+
+                while (Date.now() - start < timeout) {
+                    await sleep(120);
+                    if (el.value === last) return el; // stable
+                    last = el.value;
+                }
+                return el;
+            }
+
+            // --- FIXED: 2. Buy It Now Price ---
+            const elBin = document.querySelector(
+                '#listings\\.ebay\\.marketplaceSpecifics\\.pricingFormatDetails\\.fixedPrice\\.buyItNowPrice'
+            );
+            await setStablePrice(elBin, binPrice);
+
+            // --- FIXED: 3. Allow Best Offer ---
+            const elAllow = document.querySelector(
+                '#listings\\.ebay\\.marketplaceSpecifics\\.pricingFormatDetails\\.fixedPrice\\.allowBestOffer'
+            );
+            await setStableCheckbox(elAllow, allowBest);
+
+            // --- 4 + 5. Auto-Accept / Minimum Offer ---
+            if (allowBest){
+                console.log("[eBay] Payload Auto-Accept amount →", autoAccept);   // 👈 NEW
+                console.log("[eBay] Payload Minimum Offer amount →", minOffer);   // 👈 NEW
+                const elAccept = document.querySelector(
+                    '#listings\\.ebay\\.marketplaceSpecifics\\.pricingFormatDetails\\.fixedPrice\\.acceptOffersOfAtLeast'
+                );
+                if (elAccept){
+                    console.log("[eBay] Injecting Auto-Accept →", autoAccept);    // 👈 NEW
+                    await overwriteInput(elAccept, autoAccept);
+                }
+
+                const elMin = document.querySelector(
+                    '#listings\\.ebay\\.marketplaceSpecifics\\.pricingFormatDetails\\.fixedPrice\\.declineOffersLowerThan'
+                );
+                if (elMin){
+                    console.log("[eBay] Injecting Minimum Offer →", minOffer);    // 👈 NEW
+                    await overwriteInput(elMin, minOffer);
+                }
+            }
+
+            console.log("[eBay] Pricing injection complete.");
+        } catch (err){
+            console.error("[eBay] Pricing injection failed:", err);
+        }
+
+
+
+    console.log("[Vendoo][eBay] Required specifics injection COMPLETE.");
+}
+
+async function processMarketplace(cfg, p, opts){
+    const {
+        marketplace,
+        listLabels,
+        formDetector,
+        listingUrlSelector
+    } = cfg || {};
+
+    console.log("[Vendoo userscript] processMarketplace() begin:", cfg);
+
+    if (!marketplace){
+        console.warn("[Vendoo userscript] processMarketplace: missing marketplace name");
+        return { status: "error", error: "missing_marketplace" };
+    }
+
+    const status = getMarketplaceStatus(marketplace);
+
+    if (status === "listed"){
+        console.log("[Vendoo userscript] processMarketplace: already listed → skipping", { marketplace });
+        return {
+            status: "listed",
+            action: "skipped_existing_listing"
+        };
+    }
+
+    if (status !== "notListed"){
+        console.warn("[Vendoo userscript] processMarketplace: status is not explicitly notListed, skipping auto-list", {
+            marketplace,
+            status
+        });
+        return {
+            status,
+            action: "skipped_unknown_status"
+        };
+    }
+
+    console.log("[Vendoo userscript] processMarketplace: proceeding to auto-list", { marketplace });
+
+    // 1) Open the tile
+    const opened = await openMarketplaceTile(marketplace);
+    if (!opened){
+        return {
+            status: "error",
+            error: "tile_not_found"
+        };
+    }
+
+    // 2) Wait for the marketplace form
+    const formNode = await waitForMarketplaceForm(
+        formDetector,
+        marketplace,
+        cfg.formTimeoutMs || 8000
+    );
+    if (!formNode){
+        return {
+            status: "error",
+            error: "form_not_loaded"
+        };
+    }
+
+    console.log("[Vendoo userscript] Marketplace form loaded for:", marketplace);
+
+
+    // 2B) SPECIAL CASE: eBay required-specifics injection BEFORE listing
+    if (marketplace === "ebay"){
+        console.log("[Vendoo userscript] Running eBay specific field injector…");
+
+        try {
+            await ebayInjectRequiredSpecifics(p);
+        } catch(err){
+            console.error("[Vendoo userscript] eBay injector failed:", err);
+        }
+    }
+
+    // 2C) SPECIAL CASE: depop required-specifics injection BEFORE listing
+    if (marketplace === "depop"){
+        console.log("[Vendoo userscript] Running depop specific field injector…");
+
+        try {
+            await depopInjectRequiredSpecifics(p?.vendoo_mapping || {});
+        } catch(err){
+            console.error("[Vendoo userscript] depop injector failed:", err);
+        }
+    }
+
+    // 2D) SPECIAL CASE: poshmark required-specifics injection BEFORE listing
+    if (marketplace === "poshmark"){
+        console.log('[Vendoo userscript] Running poshmark Size="NA" injector…');
+
+        try {
+            await poshmarkInjectRequiredSpecifics();
+        } catch(err){
+            console.error("[Vendoo userscript] poshmark injector failed:", err);
+        }
+    }
+
+    // 2E) SPECIAL CASE: mercari injection BEFORE listing
+    if (marketplace === "mercari"){
+        console.log("[Vendoo userscript] Running mercari injector…");
+
+        try {
+            await mercariInjectRequiredSpecifics();
+        } catch(err){
+            console.error("[Vendoo userscript] mercari injector failed:", err);
+        }
+    }
+
+     // 2F) SPECIAL CASE: facebook condition injection BEFORE listing
+    if (marketplace === "facebook"){
+        console.log('[Vendoo userscript] Running facebook Condition="Used - Good" injector…');
+
+        try {
+            await facebookInjectRequiredSpecifics();
+        } catch(err){
+            console.error("[Vendoo userscript] facebook injector failed:", err);
+        }
+    }
+
+
+    // 3) Click the "List on ____" button
+    let clicked = false;
+
+    if (marketplace === "shopify") {
+        console.log("[Vendoo userscript] Shopify detected → using special listButton handler");
+        clicked = await clickShopifyListButton();
+    } else {
+        clicked = await clickListButton(marketplace, listLabels);
+    }
+    if (!clicked){
+        return {
+            status: "error",
+            error: "list_button_not_found"
+        };
+    }
+
+    // 4) Wait for Vendoo to show "Your item is listed" & URL to appear
+    const listingMeta = await waitForListingUrl(listingUrlSelector, marketplace);
+
+    const vendoo_marketplace_url = (() => {
+        const base = location.origin + location.pathname;
+        return `${base}?marketplace=${encodeURIComponent(marketplace)}`;
+    })();
+
+    const out = {
+        status: listingMeta.listing_url ? "listed" : "pending_or_unknown",
+        vendoo_marketplace_url,
+        listing_url: listingMeta.listing_url,
+        listing_meta: listingMeta
+    };
+
+    console.log("[Vendoo userscript] processMarketplace() result:", { marketplace, out });
+
+    return out;
+}
+
+  /* --------- main fill --------- */
+  // Mount the manual UI button (keep it simple + safe)
+  initBacklistUI();
+
+  async function fillVendoo(p, opts){
+
+      const marketplacesResult = {};
+
+      // Shared configs for each marketplace (Shopify / Whatnot / eBay)
+      const marketplaceConfigs = [
+          {
+              marketplace: "shopify",
+              listLabels: [
+                  "list on shopify",
+                  "publish on shopify",
+                  "post on shopify",
+                  "shopify"       // fallback catch-all
+              ],
+              formDetector: () => {
+                  return (
+                      // Vendoo Form Title
+                      Array.from(document.querySelectorAll("h1, h2"))
+                      .find(h => h.textContent.trim().toLowerCase().includes("shopify")) ||
+
+                      // Shopify photos block
+                      document.querySelector('[data-testid="listings.shopify.photos"]') ||
+
+                      // Any Shopify field prefix
+                      document.querySelector('[id^="listings.shopify"], [name^="listings.shopify"]') ||
+
+                      null
+                  );
+              },
+
+              formTimeoutMs: 15000,  // Shopify hydrates slower; allow more time
+
+              
+          },
+
+          {
+              marketplace: "whatnot",
+              listLabels: ["list on whatnot"],
+              formDetector: () => {
+                  // Whatnot: detect via the unique heading <h1>Whatnot Form</h1>
+                  return Array.from(document.querySelectorAll("h1, h2"))
+                      .find(h => h.textContent.trim().toLowerCase() === "whatnot form");
+              },
+              
+          },
+
+
+          {
+              marketplace: "facebook",
+              listLabels: ["list on facebook"],
+              formDetector: () => {
+                  // facebook: detect via the unique heading <h1>Facebook Form</h1>
+                  return Array.from(document.querySelectorAll("h1, h2"))
+                      .find(h => h.textContent.trim().toLowerCase() === "facebook form");
+              },
+              
+          },
+
+          {
+              marketplace: "etsy",
+              listLabels: ["list on etsy"],
+              formDetector: () => {
+                  return Array.from(document.querySelectorAll("h1, h2"))
+                      .find(h => h.textContent.trim().toLowerCase() === "etsy form");
+              },
+              
+          },
+
+          {
+              marketplace: "poshmark",
+              listLabels: ["list on poshmark"],
+              formDetector: () => {
+                  return Array.from(document.querySelectorAll("h1, h2"))
+                      .find(h => h.textContent.trim().toLowerCase() === "poshmark form");
+              },
+              
+          },
+
+          {
+              marketplace: "mercari",
+              listLabels: ["list on mercari"],
+              formDetector: () => {
+                  return Array.from(document.querySelectorAll("h1, h2"))
+                      .find(h => h.textContent.trim().toLowerCase() === "mercari form");
+              },
+              
+          },
+
+
+          {
+              marketplace: "ebay",
+              listLabels: ["list on ebay"],
+              formDetector: () => {
+                  // eBay: detect via the unique heading <h1>eBay Form</h1>
+                  return Array.from(document.querySelectorAll("h1, h2"))
+                      .find(h => h.textContent.trim().toLowerCase() === "ebay form");
+              },
+              
+          },
+
+          {
+              marketplace: "depop",
+              listLabels: ["list on depop"],
+              formDetector: () => {
+                  // depop: detect via the unique heading <h1>Depop Form</h1>
+                  return Array.from(document.querySelectorAll("h1, h2"))
+                      .find(h => h.textContent.trim().toLowerCase() === "depop form");
+              },
+              
+          }
+
+
+      ];
+      const targets = Array.isArray(opts?.targets) && opts.targets.length
+        ? opts.targets.map(s => String(s).toLowerCase())
+        : null;
+
+      for (const cfg of marketplaceConfigs){
+          if (targets && !targets.includes(cfg.marketplace)){
+              console.log("[Vendoo userscript] Skipping (not in targets):", cfg.marketplace);
+              continue;
+          }
+
+          try {
+              console.log("[Vendoo userscript] Processing marketplace with config:", cfg);
+              const result = await processMarketplace(cfg, p, opts);
+              marketplacesResult[cfg.marketplace] = result;
+          } catch (e){
+              console.error("[Vendoo userscript] Marketplace processing error:", {
+                  marketplace: cfg && cfg.marketplace,
+                  error: e
+              });
+              marketplacesResult[cfg.marketplace] = {
+                  status: "error",
+                  error: String(e)
+              };
+          }
+      }
+
+       const finalResult = {
+          // temp/payload-free: we don't have inventory_meta on this script
+          vendoo_item_path: location.pathname,
+          marketplaces: marketplacesResult
+      };
+
+      console.log("[Vendoo userscript] FINAL Vendoo marketplace result payload:", finalResult);
+      return finalResult;
+  }
+
+})();
+
