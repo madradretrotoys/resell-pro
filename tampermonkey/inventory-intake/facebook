@@ -4,7 +4,7 @@
 // @version      1.0.0
 // @description  Injects "Add to Facebook" on Intake, waits for safe gates, then opens Facebook and autofills at a human pace.
 // @author       Melissa + AI
-//
+// @match        https://resellpros.com/*
 // @match        https://resellpros.com/app*
 // @match        https://resellpros.com/main/*
 // @match        https://*.resellpros.com/app*
