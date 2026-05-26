@@ -16,6 +16,20 @@ export const onRequestGet: PagesFunction = async ({ request, env }) => {
 
     const reviewAccess = canManageTenantSettings(actor);
     const limit = reviewAccess ? 200 : 25;
+    const url = new URL(request.url);
+    const job_application_id = String(url.searchParams.get('job_application_id') || '').trim();
+
+    if (job_application_id) {
+      const detail = await sql/*sql*/`
+        SELECT *
+        FROM app.job_applications
+        WHERE tenant_id = ${tenant_id}::uuid
+          AND job_application_id = ${job_application_id}::uuid
+        LIMIT 1
+      `;
+      if (!detail.length) return json({ ok: false, error: 'not_found' }, 404);
+      return json({ ok: true, can_review: reviewAccess, item: detail[0] });
+    }
 
     const rows = await sql/*sql*/`
       SELECT job_application_id, application_date, first_name, last_name, email, mobile_phone, position_sought, status, created_at

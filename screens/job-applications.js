@@ -10,12 +10,14 @@ export async function init({ container }) {
     panelNew: container.querySelector('#panelNew'), panelReview: container.querySelector('#panelReview'),
     form: container.querySelector('#applicationForm'),
     appsTable: container.querySelector('#appsTable'), search: container.querySelector('#search'), btnLoad: container.querySelector('#btnLoad'),
+    detailDialog: container.querySelector('#applicationDetailDialog'), detailBody: container.querySelector('#applicationDetailBody'),
   };
   els.tabNew?.addEventListener('click', () => setTab('new'));
   els.tabReview?.addEventListener('click', () => setTab('review'));
   els.form?.addEventListener('submit', onSave);
   els.btnLoad?.addEventListener('click', loadRows);
   els.search?.addEventListener('input', renderRows);
+  els.appsTable?.addEventListener('click', onTableClick);
   await loadRows();
 }
 
@@ -67,6 +69,46 @@ function renderRows() {
     els.appsTable.innerHTML = '<tbody><tr><td class="muted">No applications.</td></tr></tbody>';
     return;
   }
-  els.appsTable.innerHTML = `<thead><tr><th>Name</th><th>Applied</th><th>Position</th><th>Status</th><th>Contact</th></tr></thead><tbody>${filtered.map((r)=>`<tr><td>${esc(r.last_name)}, ${esc(r.first_name)}</td><td>${esc(String(r.application_date || '').slice(0,10))}</td><td>${esc(r.position_sought || '')}</td><td>${esc(r.status || '')}</td><td>${esc(r.email || r.mobile_phone || '')}</td></tr>`).join('')}</tbody>`;
+  els.appsTable.innerHTML = `<thead><tr><th>Name</th><th>Applied</th><th>Position</th><th>Status</th><th>Contact</th></tr></thead><tbody>${filtered.map((r)=>`<tr data-id="${esc(r.job_application_id)}" style="cursor:pointer;"><td>${esc(r.last_name)}, ${esc(r.first_name)}</td><td>${esc(String(r.application_date || '').slice(0,10))}</td><td>${esc(r.position_sought || '')}</td><td>${esc(r.status || '')}</td><td>${esc(r.email || r.mobile_phone || '')}</td></tr>`).join('')}</tbody>`;
+}
+
+async function onTableClick(e) {
+  const tr = e.target?.closest?.('tr[data-id]');
+  if (!tr) return;
+  const id = tr.getAttribute('data-id');
+  if (!id) return;
+  try {
+    const res = await api(`/api/job-applications/list?job_application_id=${encodeURIComponent(id)}`);
+    renderDetail(res?.item || null);
+    els.detailDialog?.showModal?.();
+  } catch (err) {
+    showToast(err?.data?.error || 'Unable to load application detail.');
+  }
+}
+
+function renderDetail(item) {
+  if (!els.detailBody) return;
+  if (!item) {
+    els.detailBody.innerHTML = '<p class="muted">Application not found.</p>';
+    return;
+  }
+  const fields = [
+    ['Applicant', `${item.last_name || ''}, ${item.first_name || ''} ${item.middle_name || ''}`.trim()],
+    ['Applied Date', String(item.application_date || '').slice(0, 10)],
+    ['Status', item.status],
+    ['Position Sought', item.position_sought],
+    ['Available Start', String(item.available_start_date || '').slice(0, 10)],
+    ['Email', item.email],
+    ['Mobile Phone', item.mobile_phone],
+    ['Home Phone', item.home_phone],
+    ['Address', [item.address_line1, item.address_line2, item.city, item.state_province, item.postal_code].filter(Boolean).join(', ')],
+    ['Referral Source', item.referral_source],
+    ['Desired Pay', item.desired_pay_amount ? `${item.desired_pay_amount} ${item.desired_pay_period || ''}`.trim() : ''],
+    ['Currently Employed', item.currently_employed === null ? '' : (item.currently_employed ? 'Yes' : 'No')],
+    ['Skills/Notes', item.proficiency_skills_notes],
+    ['Internal Notes', item.internal_notes],
+  ];
+
+  els.detailBody.innerHTML = `<div style="display:grid;grid-template-columns:220px 1fr;gap:8px 12px;">${fields.map(([k,v])=>`<div class="muted"><strong>${esc(k)}</strong></div><div>${esc(v || '—')}</div>`).join('')}</div>`;
 }
 const esc = (s) => String(s || '').replace(/[&<>"']/g, (c) => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
