@@ -20,12 +20,14 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
       INSERT INTO app.job_applications (
         tenant_id, first_name, middle_name, last_name, email, mobile_phone, home_phone,
         position_sought, available_start_date, desired_pay_amount, desired_pay_period,
-        address_line1, proficiency_skills_notes, currently_employed, status
+        address_line1, city, state_province, postal_code,
+        proficiency_skills_notes, currently_employed, status
       ) VALUES (
         ${tenant_id}::uuid, ${first_name}, ${String(body?.middle_name || '').trim() || null}, ${last_name},
         ${String(body?.email || '').trim() || null}, ${String(body?.mobile_phone || '').trim() || null}, ${String(body?.home_phone || '').trim() || null},
         ${String(body?.position_sought || '').trim() || null}, ${body?.available_start_date || null}, ${body?.desired_pay_amount || null}, ${String(body?.desired_pay_period || '').trim() || null},
-        ${String(body?.address_line1 || '').trim() || null}, ${String(body?.proficiency_skills_notes || '').trim() || null}, ${typeof body?.currently_employed === 'boolean' ? body.currently_employed : null},
+        ${String(body?.address_line1 || '').trim() || null}, ${String(body?.city || '').trim() || null}, ${String(body?.state_province || '').trim() || null}, ${String(body?.postal_code || '').trim() || null},
+        ${String(body?.proficiency_skills_notes || '').trim() || null}, ${typeof body?.currently_employed === 'boolean' ? body.currently_employed : null},
         ${['draft', 'submitted', 'reviewing', 'hired', 'rejected'].includes(String(body?.status || '')) ? String(body.status) : 'draft'}
       )
       RETURNING job_application_id

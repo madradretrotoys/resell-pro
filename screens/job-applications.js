@@ -18,6 +18,7 @@ export async function init({ container }) {
   els.btnLoad?.addEventListener('click', loadRows);
   els.search?.addEventListener('input', renderRows);
   els.appsTable?.addEventListener('click', onTableClick);
+  setStartDateMinimum();
   await loadRows();
 }
 
@@ -37,18 +38,38 @@ async function onSave(e) {
   }
   if (body.currently_employed === '') delete body.currently_employed;
   else body.currently_employed = body.currently_employed === 'true';
+  body.status = e?.submitter?.dataset?.saveMode === 'submitted' ? 'submitted' : 'draft';
   if (!body.available_start_date) delete body.available_start_date;
+  else if (body.available_start_date < todayYmd()) {
+    showToast('Available start date cannot be in the past.');
+    return;
+  }
   if (!body.desired_pay_amount) delete body.desired_pay_amount;
 
   try {
     await api('/api/job-applications/save', { method: 'POST', body });
     showToast('Application saved.');
     els.form.reset();
+    setStartDateMinimum();
     await loadRows();
     setTab('review');
   } catch (err) {
     showToast(err?.data?.error || 'Failed to save application.');
   }
+}
+
+function setStartDateMinimum() {
+  const node = els.form?.querySelector('input[name="available_start_date"]');
+  if (!node) return;
+  node.min = todayYmd();
+}
+
+function todayYmd() {
+  const d = new Date();
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
 }
 
 async function loadRows() {
