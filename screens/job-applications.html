@@ -1,0 +1,46 @@
+<section class="tile">
+  <h2>Job Applications</h2>
+  <p class="muted">Create and save a job application, then review submitted applications.</p>
+
+  <div style="display:flex;gap:8px;flex-wrap:wrap;margin:12px 0;">
+    <button id="tabNew" class="btn btn--primary btn--sm">New Application</button>
+    <button id="tabReview" class="btn btn--ghost btn--sm">Review Applications</button>
+  </div>
+
+  <div id="panelNew">
+    <form id="applicationForm" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:10px;">
+      <input name="first_name" class="in" placeholder="First name *" required>
+      <input name="middle_name" class="in" placeholder="Middle name">
+      <input name="last_name" class="in" placeholder="Last name *" required>
+      <input name="email" type="email" class="in" placeholder="Email">
+      <input name="mobile_phone" class="in" placeholder="Mobile phone">
+      <input name="home_phone" class="in" placeholder="Home phone">
+      <input name="position_sought" class="in" placeholder="Position sought">
+      <input name="available_start_date" type="date" class="in" placeholder="Available start date">
+      <input name="desired_pay_amount" type="number" step="0.01" class="in" placeholder="Desired pay amount">
+      <input name="desired_pay_period" class="in" placeholder="Pay period (hourly/salary)">
+      <input name="address_line1" class="in" placeholder="Address line 1" style="grid-column:1/-1;">
+      <textarea name="proficiency_skills_notes" class="in" placeholder="Skills, proficiencies, and notes" rows="4" style="grid-column:1/-1;"></textarea>
+      <select name="currently_employed" class="in">
+        <option value="">Currently employed?</option>
+        <option value="true">Yes</option>
+        <option value="false">No</option>
+      </select>
+      <select name="status" class="in">
+        <option value="draft">Save as Draft</option>
+        <option value="submitted">Submit Application</option>
+      </select>
+      <div style="grid-column:1/-1;display:flex;gap:8px;">
+        <button class="btn btn--success" type="submit">Save Application</button>
+      </div>
+    </form>
+  </div>
+
+  <div id="panelReview" style="display:none;">
+    <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px;">
+      <input id="search" class="in" placeholder="Search by name/email" style="max-width:320px;">
+      <button id="btnLoad" class="btn btn--neutral btn--sm">Reload</button>
+    </div>
+    <table id="appsTable" style="width:100%;border-collapse:collapse;"></table>
+  </div>
+</section>
