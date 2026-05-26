@@ -17,6 +17,7 @@ const SCREENS = {
   intake: { html: '/screens/inventory-intake.html', js: '/screens/inventory-intake.js', title: 'Inventory Intake' },
   research:  { html: '/screens/research.html',  js: '/screens/research.js',  title: 'Research' },
    timesheet:  { html: '/screens/timesheet.html',  js: '/screens/timesheet.js',  title: 'Timesheet' },
+  'job-applications': { html: '/screens/job-applications.html', js: '/screens/job-applications.js', title: 'Job Applications' },
 
   // Settings landing (chooser)
   settings: {
