@@ -53,6 +53,7 @@ function renderTable(users){
       <td>
         <div class="btn-group">
           <button class="btn btn-sm btn-ghost" data-edit="${u.user_id || ''}">Edit</button>
+          <button class="btn btn-sm btn-danger" data-delete="${u.user_id || ''}">Delete</button>
           ${u.active
             ? `<button class="btn btn-sm btn-danger" data-toggle="${u.user_id || ''}">Deactivate</button>`
             : `<button class="btn btn-sm btn-primary" data-toggle="${u.user_id || ''}">Activate</button>`
@@ -78,6 +79,9 @@ function renderTable(users){
     document.querySelectorAll('#usersTable [data-toggle]').forEach(b => {
       b.onclick = () => toggleActive(b.dataset.toggle);
     });
+    document.querySelectorAll('#usersTable [data-delete]').forEach(b => {
+      b.onclick = () => deleteUser(b.dataset.delete);
+    });
     // Optional: Edit click hook (placeholder)
     document.querySelectorAll('#usersTable [data-edit]').forEach(b => {
       b.onclick = () => alert('Edit user will be added in a later phase.');
@@ -97,6 +101,17 @@ async function toggleActive(user_id) {
     refresh();
   } catch (e) {
     alert(`Update failed${e?.data?.error ? `: ${e.data.error}` : ''}.`);
+  }
+}
+
+async function deleteUser(user_id) {
+  const sure = confirm('Delete this user? This removes their membership and may permanently delete the user record.');
+  if (!sure) return;
+  try {
+    await api('/api/settings/users/delete', { method: 'POST', body: { user_id } });
+    refresh();
+  } catch (e) {
+    alert(`Delete failed${e?.data?.error ? `: ${e.data.error}` : ''}.`);
   }
 }
 
