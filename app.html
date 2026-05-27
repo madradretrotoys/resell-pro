@@ -173,6 +173,32 @@
       transform: none;
       box-shadow: none;
     }
+
+
+    /* Users pages: keep these two screens light for readability without affecting global tiles */
+    .users-light{
+      background:#fff;
+      color:#111827;
+      border-color:#e5e7eb;
+      box-shadow:0 1px 2px rgba(16,24,40,.06);
+    }
+    .users-light h1, .users-light h2, .users-light h3, .users-light p, .users-light label, .users-light legend{
+      color:#111827;
+    }
+    .users-light .text-muted{ color:#6b7280; }
+    .users-light input[type="text"],
+    .users-light input[type="number"],
+    .users-light input[type="email"],
+    .users-light select,
+    .users-light textarea{
+      background:#fff;
+      color:#111827;
+      border-color:#d1d5db;
+    }
+    .users-light--inner{
+      margin:0;
+    }
+
   </style>
 </head>
 <body>
