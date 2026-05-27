@@ -4,6 +4,7 @@ import { showToast } from '/assets/js/ui.js';
 
 export default { load };
 const $ = (id) => document.getElementById(id);
+let saving = false;
 
 async function load(){
   const session = await ensureSession();
@@ -21,33 +22,10 @@ async function load(){
   [...$('role').options].forEach(opt => opt.disabled = !allowed.includes(opt.value));
   if (allowed.length) $('role').value = allowed[0];
 
-  const form = $('userForm');
-  const saveBtn = $('save');
-  if (!form || !saveBtn) {
-    notify('Unable to initialize Add User form controls.');
-    return;
-  }
-
-  const onSave = async (e) => {
-    if (e) e.preventDefault();
-    try {
-      const payload = collect();
-      if (!payload) return;
-
-      saveBtn.disabled = true; saveBtn.textContent = 'Saving…';
-      await api('/api/settings/users/create', { method:'POST', body: payload });
-      location.href = '?page=settings';
-    } catch (e2) {
-      const errorCode = e2?.data?.error ? ` (${e2.data.error})` : '';
-      const detail = e2?.data?.message ? ` ${e2.data.message}` : '';
-      notify(`Save failed${errorCode}.${detail}`);
-    } finally {
-      saveBtn.disabled = false; saveBtn.textContent = 'Save';
-    }
-  };
-
-  form.addEventListener('submit', onSave);
-  saveBtn.addEventListener('click', onSave);
+  document.removeEventListener('click', onDocClick, true);
+  document.removeEventListener('submit', onDocSubmit, true);
+  document.addEventListener('click', onDocClick, true);
+  document.addEventListener('submit', onDocSubmit, true);
 }
 
 function collect(){
@@ -100,4 +78,38 @@ function notify(message){
     document.body.appendChild(el);
     setTimeout(() => el.remove(), 5000);
   }
+}
+
+async function submitNewUser(e){
+  if (e) e.preventDefault();
+  if (saving) return;
+  const saveBtn = $('save');
+  try {
+    const payload = collect();
+    if (!payload) return;
+    saving = true;
+    if (saveBtn) { saveBtn.disabled = true; saveBtn.textContent = 'Saving…'; }
+    await api('/api/settings/users/create', { method:'POST', body: payload });
+    location.href = '?page=settings';
+  } catch (e2) {
+    const errorCode = e2?.data?.error ? ` (${e2.data.error})` : '';
+    const detail = e2?.data?.message ? ` ${e2.data.message}` : '';
+    notify(`Save failed${errorCode}.${detail}`);
+  } finally {
+    if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = 'Save'; }
+    saving = false;
+  }
+}
+
+function onDocClick(e){
+  const btn = e.target?.closest?.('#save');
+  if (!btn) return;
+  const form = $('userForm');
+  if (!form || !form.contains(btn)) return;
+  submitNewUser(e);
+}
+
+function onDocSubmit(e){
+  if (e.target?.id !== 'userForm') return;
+  submitNewUser(e);
 }
