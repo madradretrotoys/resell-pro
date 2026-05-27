@@ -3,22 +3,28 @@ import { ensureSession } from '/assets/js/auth.js';
 
 // Router calls mod.init({ container, session }) for each screen module.
 // Keep load() as the internal implementation and expose init() to wire events.
-export async function init() {
-  await load();
+export async function init(ctx = {}) {
+  await load(ctx);
 }
 
 export default { init };
 const $ = (id) => document.getElementById(id);
 
-async function load(){
-  const session = await ensureSession();
-  if (!session?.permissions?.can_settings) {
+async function load(ctx = {}){
+  // Prefer router-provided session to avoid false negatives from session shape differences.
+  const session = ctx?.session || await ensureSession();
+
+  // Keep client-side guard lightweight: role-based check used elsewhere in Settings flows.
+  const role = String(
+    session?.membership_role || session?.user?.role || session?.role || 'clerk'
+  ).toLowerCase();
+  if (!['owner', 'admin', 'manager'].includes(role)) {
     document.body.innerHTML = '<section class="tile"><strong>Access denied.</strong></section>';
     return;
   }
 
   // Role gate for creator
-  const actor = (session.membership_role || 'clerk').toLowerCase();
+  const actor = role;
   const allowed =
     actor === 'owner'  ? ['owner','admin','manager','clerk'] :
     actor === 'admin'  ? ['manager','clerk'] :
