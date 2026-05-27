@@ -15,6 +15,14 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
     const last_name = String(body?.last_name || '').trim();
     if (!first_name || !last_name) return json({ ok: false, error: 'first_name_and_last_name_required' }, 400);
 
+    const rawPayPeriod = String(body?.desired_pay_period || '').trim().toLowerCase();
+    const normalizedPayPeriod = rawPayPeriod
+      ? ({ hr: 'hourly', hour: 'hourly', hourly: 'hourly', yr: 'salary', year: 'salary', yearly: 'salary', annual: 'salary', salary: 'salary' } as Record<string, string>)[rawPayPeriod] || rawPayPeriod
+      : null;
+    if (normalizedPayPeriod && !['hourly', 'salary'].includes(normalizedPayPeriod)) {
+      return json({ ok: false, error: 'invalid_desired_pay_period', message: 'Pay period must be hourly or salary.' }, 400);
+    }
+
     const sql = neon(String(env.DATABASE_URL));
     const inserted = await sql/*sql*/`
       INSERT INTO app.job_applications (
@@ -25,7 +33,7 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
       ) VALUES (
         ${tenant_id}::uuid, ${first_name}, ${String(body?.middle_name || '').trim() || null}, ${last_name},
         ${String(body?.email || '').trim() || null}, ${String(body?.mobile_phone || '').trim() || null}, ${String(body?.home_phone || '').trim() || null},
-        ${String(body?.position_sought || '').trim() || null}, ${body?.available_start_date || null}, ${body?.desired_pay_amount || null}, ${String(body?.desired_pay_period || '').trim() || null},
+        ${String(body?.position_sought || '').trim() || null}, ${body?.available_start_date || null}, ${body?.desired_pay_amount || null}, ${normalizedPayPeriod},
         ${String(body?.address_line1 || '').trim() || null}, ${String(body?.city || '').trim() || null}, ${String(body?.state_province || '').trim() || null}, ${String(body?.postal_code || '').trim() || null},
         ${String(body?.proficiency_skills_notes || '').trim() || null}, ${typeof body?.currently_employed === 'boolean' ? body.currently_employed : null},
         ${['draft', 'submitted', 'reviewing', 'hired', 'rejected'].includes(String(body?.status || '')) ? String(body.status) : 'draft'}
