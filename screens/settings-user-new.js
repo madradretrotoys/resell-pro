@@ -7,10 +7,11 @@ function $(id){ return document.getElementById(id); }
 
 // Router expects an `init` entrypoint: mod.init({ container, session })
 export async function init({ container, session }){
-  const session = await ensureSession();
-  if (!session?.permissions?.can_settings) {
-    document.body.innerHTML = '<section class="tile"><strong>Access denied.</strong></section>';
-    return;
+ // Ensure we have session (router already does, but safe to double-check)
+  if (!session?.user){ session = await ensureSession(); }
+
+  // Bind elements (IDs must exist in settings-users.html)
+  els.table = $('usersTable');
 }
 
 function collect(){
