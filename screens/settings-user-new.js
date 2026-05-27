@@ -7,23 +7,10 @@ function $(id){ return document.getElementById(id); }
 
 // Router expects an `init` entrypoint: mod.init({ container, session })
 export async function init({ container, session }){
-  // Ensure we have session (router already does, but safe to double-check)
-  if (!session?.user){ session = await ensureSession(); }
-
-  // Bind elements (IDs must exist in settings-users.html)
-  els.table = $('usersTable');
-  const btnInvite = $('btnInvite');
-  const btnRefresh = $('btnRefresh');
-
-  if (btnInvite){ btnInvite.onclick = () => alert('Email invite will be added in a later phase.'); }
-
-  // Permission gate handled server-side by /api/settings/users/list.
-  // Proceed and show a friendly message only if the API returns 403.
-
-  if (btnRefresh) btnRefresh.onclick = refresh;
-
-  // Initial load
-  await refresh();
+  const session = await ensureSession();
+  if (!session?.permissions?.can_settings) {
+    document.body.innerHTML = '<section class="tile"><strong>Access denied.</strong></section>';
+    return;
 }
 
 function collect(){
