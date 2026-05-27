@@ -8,11 +8,6 @@ export async function init({ container, session }){
   // Ensure we have session (router already does, but safe to double-check)
   if (!session?.user){ session = await ensureSession(); }
 
-  if (!session?.permissions?.can_settings) {
-    document.body.innerHTML = '<section class="tile"><strong>Access denied.</strong></section>';
-    return;
-  }
-
   // Hard guard: prevent accidental native submit
   $('userForm').onsubmit = (e) => e.preventDefault();
 
