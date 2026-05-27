@@ -1,10 +1,10 @@
 import { api } from '/assets/js/api.js';
 import { ensureSession } from '/assets/js/auth.js';
 
-export default { load };
+
 const $ = (id) => document.getElementById(id);
 
-async function load(){
+export async function init(){
   const session = await ensureSession();
   if (!session?.permissions?.can_settings) {
     document.body.innerHTML = '<section class="tile"><strong>Access denied.</strong></section>';

@@ -52,10 +52,11 @@ function renderTable(users){
       <td>${u.active ? 'Yes' : 'No'}</td>
       <td>
         <div class="btn-group">
-          <button class="btn btn-sm btn-ghost" data-edit="${u.id || ''}">Edit</button>
+          <button class="btn btn-sm btn-ghost" data-edit="${u.user_id || ''}">Edit</button>
+          <button class="btn btn-sm btn-danger" data-delete="${u.user_id || ''}">Delete</button>
           ${u.active
-            ? `<button class="btn btn-sm btn-danger" data-toggle="${u.id}">Deactivate</button>`
-            : `<button class="btn btn-sm btn-primary" data-toggle="${u.id}">Activate</button>`
+            ? `<button class="btn btn-sm btn-danger" data-toggle="${u.user_id || ''}">Deactivate</button>`
+            : `<button class="btn btn-sm btn-primary" data-toggle="${u.user_id || ''}">Activate</button>`
           }
         </div>
       </td>
@@ -77,6 +78,9 @@ function renderTable(users){
   setTimeout(() => {
     document.querySelectorAll('#usersTable [data-toggle]').forEach(b => {
       b.onclick = () => toggleActive(b.dataset.toggle);
+    });
+    document.querySelectorAll('#usersTable [data-delete]').forEach(b => {
+      b.onclick = () => deleteUser(b.dataset.delete);
     });
     // Optional: Edit click hook (placeholder)
     document.querySelectorAll('#usersTable [data-edit]').forEach(b => {
@@ -100,9 +104,19 @@ async function toggleActive(user_id) {
   }
 }
 
+async function deleteUser(user_id) {
+  const sure = confirm('Delete this user? This removes their membership and may permanently delete the user record.');
+  if (!sure) return;
+  try {
+    await api('/api/settings/users/delete', { method: 'POST', body: { user_id } });
+    refresh();
+  } catch (e) {
+    alert(`Delete failed${e?.data?.error ? `: ${e.data.error}` : ''}.`);
+  }
+}
+
 function escapeHtml(s) {
   return String(s ?? '').replace(/[&<>"']/g, c => ({
     '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'
   }[c]));
 }
-

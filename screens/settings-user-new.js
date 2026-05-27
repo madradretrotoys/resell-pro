@@ -1,27 +1,17 @@
 import { api } from '/assets/js/api.js';
 import { ensureSession } from '/assets/js/auth.js';
 
-export default { load };
-const $ = (id) => document.getElementById(id);
+function $(id){ return document.getElementById(id); }
 
-async function load(){
-  const session = await ensureSession();
-  if (!session?.permissions?.can_settings) {
-    document.body.innerHTML = '<section class="tile"><strong>Access denied.</strong></section>';
-    return;
-  }
+// Router expects an `init` entrypoint: mod.init({ container, session })
+export async function init({ container, session }){
+  // Ensure we have session (router already does, but safe to double-check)
+  if (!session?.user){ session = await ensureSession(); }
 
-  // Role gate for creator
-  const actor = (session.membership_role || 'clerk').toLowerCase();
-  const allowed =
-    actor === 'owner'  ? ['owner','admin','manager','clerk'] :
-    actor === 'admin'  ? ['manager','clerk'] :
-    actor === 'manager'? ['clerk'] : [];
-  [...$('role').options].forEach(opt => opt.disabled = !allowed.includes(opt.value));
-  if (allowed.length) $('role').value = allowed[0];
-
+  // Hard guard: prevent accidental native submit
   $('userForm').onsubmit = (e) => e.preventDefault();
 
+  // Save via explicit click handler
   $('save').onclick = async () => {
     const payload = collect();
     if (!payload) return;
@@ -30,8 +20,8 @@ async function load(){
     try {
       await api('/api/settings/users/create', { method:'POST', body: payload });
       location.href = '?page=settings';
-    } catch (e2) {
-      alert(`Save failed${e2?.data?.error ? `: ${e2.data.error}` : ''}.`);
+    } catch (e) {
+      alert(`Save failed${e?.data?.error ? `: ${e.data.error}` : ''}.`);
     } finally {
       $('save').disabled = false; $('save').textContent = 'Save';
     }
