@@ -1,5 +1,6 @@
 import { api } from '/assets/js/api.js';
 import { ensureSession } from '/assets/js/auth.js';
+import { showToast } from '/assets/js/ui.js';
 
 export default { load };
 const $ = (id) => document.getElementById(id);
@@ -31,7 +32,9 @@ async function load(){
       await api('/api/settings/users/create', { method:'POST', body: payload });
       location.href = '?page=settings';
     } catch (e2) {
-      alert(`Save failed${e2?.data?.error ? `: ${e2.data.error}` : ''}.`);
+      const errorCode = e2?.data?.error ? ` (${e2.data.error})` : '';
+      const detail = e2?.data?.message ? ` ${e2.data.message}` : '';
+      showToast(`Save failed${errorCode}.${detail}`, 5000);
     } finally {
       $('save').disabled = false; $('save').textContent = 'Save';
     }
@@ -45,10 +48,10 @@ function collect(){
   const role = $('role').value;
   const discount = $('discount_max').value;
 
-  if (!name || !email || !login_id) { alert('Please complete name, email and login.'); return null; }
+  if (!name || !email || !login_id) { showToast('Please complete name, email and login.', 4000); return null; }
   const discount_max = discount === '' ? null : Number(discount);
   if (discount_max !== null && (isNaN(discount_max) || discount_max < 0 || discount_max > 100)) {
-    alert('Max discount must be between 0 and 100, or blank for unlimited.'); return null;
+    showToast('Max discount must be between 0 and 100, or blank for unlimited.', 5000); return null;
   }
 
   return {
