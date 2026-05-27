@@ -2,40 +2,28 @@ import { api } from '/assets/js/api.js';
 import { ensureSession } from '/assets/js/auth.js';
 import { applyButtonGroupColors } from '/assets/js/ui.js';
 
-const $ = (id) => document.getElementById(id);
+const els = {};
+function $(id){ return document.getElementById(id); }
 
-export async function init(){
-  const session = await ensureSession();
-  if (!session?.permissions?.can_settings) {
-    document.body.innerHTML = '<section class="tile"><strong>Access denied.</strong></section>';
-    return;
-  }
+// Router expects an `init` entrypoint: mod.init({ container, session })
+export async function init({ container, session }){
+  // Ensure we have session (router already does, but safe to double-check)
+  if (!session?.user){ session = await ensureSession(); }
 
-  // Role gate for creator
-  const actor = (session.membership_role || 'clerk').toLowerCase();
-  const allowed =
-    actor === 'owner'  ? ['owner','admin','manager','clerk'] :
-    actor === 'admin'  ? ['manager','clerk'] :
-    actor === 'manager'? ['clerk'] : [];
-  [...$('role').options].forEach(opt => opt.disabled = !allowed.includes(opt.value));
-  if (allowed.length) $('role').value = allowed[0];
+  // Bind elements (IDs must exist in settings-users.html)
+  els.table = $('usersTable');
+  const btnInvite = $('btnInvite');
+  const btnRefresh = $('btnRefresh');
 
-  $('userForm').onsubmit = (e) => e.preventDefault();
+  if (btnInvite){ btnInvite.onclick = () => alert('Email invite will be added in a later phase.'); }
 
-  $('save').onclick = async () => {
-    const payload = collect();
-    if (!payload) return;
+  // Permission gate handled server-side by /api/settings/users/list.
+  // Proceed and show a friendly message only if the API returns 403.
 
-    $('save').disabled = true; $('save').textContent = 'Saving…';
-    try {
-      await api('/api/settings/users/create', { method:'POST', body: payload });
-      location.href = '?page=settings';
-    } catch (e2) {
-      alert(`Save failed${e2?.data?.error ? `: ${e2.data.error}` : ''}.`);
-    } finally {
-      $('save').disabled = false; $('save').textContent = 'Save';
-    }
-  };
+  if (btnRefresh) btnRefresh.onclick = refresh;
+
+  // Initial load
+  await refresh();
 }
 
 function collect(){
