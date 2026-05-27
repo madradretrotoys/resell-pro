@@ -1,20 +1,40 @@
+import { neon } from "@neondatabase/serverless";
+import { requireSessionActor, getTenantActor, canManageTenantSettings } from "../../../_shared/auth";
+
+const json = (data: any, status = 200) =>
+  new Response(JSON.stringify(data), {
+    status,
+    headers: { "content-type": "application/json", "cache-control": "no-store" },
+  });
+
 export const onRequestPost: PagesFunction<Env> = async (ctx) => {
-  const { request, env } = ctx;
-  const { sql, session } = await getAuthedCtx(env, request);
-  if (!session.permissions?.can_settings) return json({ ok:false, error:'forbidden' }, 403);
+  try {
+    const { request, env } = ctx;
+    const auth = await requireSessionActor(request, env, json);
+    if (auth.error) return auth.error;
 
-  const body = await request.json();
-  const name = String(body.name||'').trim();
-  const email = String(body.email||'').trim().toLowerCase();
-  const login_id = String(body.login_id||'').trim();
-  const role = String(body.role||'clerk').toLowerCase() as 'owner'|'admin'|'manager'|'clerk';
+    const tenant_id = request.headers.get("x-tenant-id");
+    if (!tenant_id) return json({ ok: false, error: "missing_tenant" }, 400);
 
-  // Role gate
-  const actorRole = session.membership_role; // 'owner' | 'admin' | 'manager' | 'clerk'
-  const allowed = (actorRole === 'owner') ||
-                  (actorRole === 'admin'   && ['manager','clerk'].includes(role)) ||
-                  (actorRole === 'manager' && role === 'clerk');
-  if (!allowed) return json({ ok:false, error:'insufficient_role' }, 403);
+    const sql = neon(String(env.DATABASE_URL));
+    const actor = await getTenantActor(sql, tenant_id, auth.actor_user_id);
+    if (!actor || actor.active === false || !canManageTenantSettings(actor)) {
+      return json({ ok: false, error: "forbidden" }, 403);
+    }
+
+    const body = await request.json();
+    const name = String(body.name || "").trim();
+    const email = String(body.email || "").trim().toLowerCase();
+    const login_id = String(body.login_id || "").trim();
+    const role = String(body.role || "clerk").toLowerCase() as "owner" | "admin" | "manager" | "clerk";
+
+    // Role gate
+    const actorRole = actor.role; // owner | admin | manager | clerk
+    const allowed =
+      actorRole === "owner" ||
+      (actorRole === "admin" && ["manager", "clerk"].includes(role)) ||
+      (actorRole === "manager" && role === "clerk");
+    if (!allowed) return json({ ok: false, error: "insufficient_role" }, 403);
 
   // Create user
   const [u] = await sql/*sql*/`
@@ -27,7 +47,7 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
   // Link to tenant with role + active=true
   await sql/*sql*/`
     INSERT INTO app.memberships (tenant_id, user_id, role, active)
-    VALUES (${session.tenant_id}, ${u.user_id}, ${role}, true)
+    VALUES (${tenant_id}, ${u.user_id}, ${role}, true)
     ON CONFLICT (tenant_id, user_id) DO UPDATE SET role=EXCLUDED.role, active=true
   `;
 
@@ -61,5 +81,8 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
       updated_at=now()
   `;
 
-  return json({ ok:true, user_id: u.user_id });
+    return json({ ok: true, user_id: u.user_id });
+  } catch (e: any) {
+    return json({ ok: false, error: "server_error", message: e?.message || String(e) }, 500);
+  }
 };
