@@ -1,5 +1,6 @@
 import { api } from '/assets/js/api.js';
 import { ensureSession } from '/assets/js/auth.js';
+import { applyButtonGroupColors } from '/assets/js/ui.js';
 
 const $ = (id) => document.getElementById(id);
 
