@@ -21,24 +21,33 @@ async function load(){
   [...$('role').options].forEach(opt => opt.disabled = !allowed.includes(opt.value));
   if (allowed.length) $('role').value = allowed[0];
 
-  $('userForm').onsubmit = (e) => e.preventDefault();
+  const form = $('userForm');
+  const saveBtn = $('save');
+  if (!form || !saveBtn) {
+    notify('Unable to initialize Add User form controls.');
+    return;
+  }
 
-  $('save').onclick = async () => {
-    const payload = collect();
-    if (!payload) return;
-
-    $('save').disabled = true; $('save').textContent = 'Saving…';
+  const onSave = async (e) => {
+    if (e) e.preventDefault();
     try {
+      const payload = collect();
+      if (!payload) return;
+
+      saveBtn.disabled = true; saveBtn.textContent = 'Saving…';
       await api('/api/settings/users/create', { method:'POST', body: payload });
       location.href = '?page=settings';
     } catch (e2) {
       const errorCode = e2?.data?.error ? ` (${e2.data.error})` : '';
       const detail = e2?.data?.message ? ` ${e2.data.message}` : '';
-      showToast(`Save failed${errorCode}.${detail}`, 5000);
+      notify(`Save failed${errorCode}.${detail}`);
     } finally {
-      $('save').disabled = false; $('save').textContent = 'Save';
+      saveBtn.disabled = false; saveBtn.textContent = 'Save';
     }
   };
+
+  form.addEventListener('submit', onSave);
+  saveBtn.addEventListener('click', onSave);
 }
 
 function collect(){
@@ -48,10 +57,10 @@ function collect(){
   const role = $('role').value;
   const discount = $('discount_max').value;
 
-  if (!name || !email || !login_id) { showToast('Please complete name, email and login.', 4000); return null; }
+  if (!name || !email || !login_id) { notify('Please complete name, email and login.'); return null; }
   const discount_max = discount === '' ? null : Number(discount);
   if (discount_max !== null && (isNaN(discount_max) || discount_max < 0 || discount_max > 100)) {
-    showToast('Max discount must be between 0 and 100, or blank for unlimited.', 5000); return null;
+    notify('Max discount must be between 0 and 100, or blank for unlimited.'); return null;
   }
 
   return {
@@ -76,4 +85,19 @@ function collect(){
     },
     discount_max
   };
+}
+
+function notify(message){
+  try {
+    showToast(message, 5000);
+  } catch {
+    const el = document.createElement('div');
+    el.textContent = message;
+    Object.assign(el.style, {
+      position: 'fixed', bottom: '16px', left: '50%', transform: 'translateX(-50%)',
+      background: '#222', color: '#fff', padding: '8px 12px', borderRadius: '8px', zIndex: '9999'
+    });
+    document.body.appendChild(el);
+    setTimeout(() => el.remove(), 5000);
+  }
 }
