@@ -45,6 +45,8 @@ async function onSave(e) {
     return;
   }
   if (!body.desired_pay_amount) delete body.desired_pay_amount;
+  if (!body.desired_pay_period) delete body.desired_pay_period;
+  else body.desired_pay_period = String(body.desired_pay_period).trim().toLowerCase();
 
   try {
     await api('/api/job-applications/save', { method: 'POST', body });
