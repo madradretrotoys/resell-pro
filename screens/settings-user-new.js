@@ -83,7 +83,7 @@ function notify(message){
 async function submitNewUser(e){
   if (e) e.preventDefault();
   if (saving) return;
-  const saveBtn = $('save');
+  const saveBtn = $('save_user_btn');
   try {
     const payload = collect();
     if (!payload) return;
@@ -102,7 +102,7 @@ async function submitNewUser(e){
 }
 
 function onDocClick(e){
-  const btn = e.target?.closest?.('#save');
+  const btn = e.target?.closest?.('#save_user_btn');
   if (!btn) return;
   const form = $('userForm');
   if (!form || !form.contains(btn)) return;
