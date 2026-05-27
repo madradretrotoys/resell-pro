@@ -1,4 +1,5 @@
 import { neon } from "@neondatabase/serverless";
+import bcrypt from "bcryptjs";
 import { canManageTenantSettings, getTenantActor, requireSessionActor } from "../../../_shared/auth";
 
 const json = (data: any, status = 200) =>
@@ -25,6 +26,7 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
     const name = String((body as any).name || "").trim();
     const email = String((body as any).email || "").trim().toLowerCase();
     const login_id = String((body as any).login_id || "").trim();
+    const temp_password = String((body as any).temp_password || "").trim();
     const role = String((body as any).role || "clerk").trim().toLowerCase() as "owner" | "admin" | "manager" | "clerk";
 
     if (!name || !email || !login_id) return json({ ok: false, error: "missing_required_fields" }, 400);
@@ -38,9 +40,12 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
       (actorRole === "manager" && role === "clerk");
     if (!allowed) return json({ ok: false, error: "insufficient_role" }, 403);
 
+    const generatedPassword = temp_password || crypto.randomUUID().replace(/-/g, "").slice(0, 12);
+    const password_hash = await bcrypt.hash(generatedPassword, 10);
+
     const [u] = await sql/*sql*/`
-      INSERT INTO app.users (email, name, login_id)
-      VALUES (${email}, ${name}, ${login_id})
+      INSERT INTO app.users (email, name, login_id, password_hash)
+      VALUES (${email}, ${name}, ${login_id}, ${password_hash})
       ON CONFLICT (email) DO UPDATE SET
         name=EXCLUDED.name,
         login_id=EXCLUDED.login_id
@@ -97,7 +102,7 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
         updated_at=now()
     `;
 
-    return json({ ok: true, user_id: u.user_id });
+    return json({ ok: true, user_id: u.user_id, temp_password_generated: !temp_password });
   } catch (e: any) {
     return json({ ok: false, error: "server_error", message: e?.message || String(e) }, 500);
   }
