@@ -1,17 +1,31 @@
 import { api } from '/assets/js/api.js';
 import { ensureSession } from '/assets/js/auth.js';
-import { applyButtonGroupColors } from '/assets/js/ui.js';
 
-const els = {};
 function $(id){ return document.getElementById(id); }
 
 // Router expects an `init` entrypoint: mod.init({ container, session })
 export async function init({ container, session }){
- // Ensure we have session (router already does, but safe to double-check)
+  // Ensure we have session (router already does, but safe to double-check)
   if (!session?.user){ session = await ensureSession(); }
 
-  // Bind elements (IDs must exist in settings-users.html)
-  els.table = $('usersTable');
+  // Hard guard: prevent accidental native submit
+  $('userForm').onsubmit = (e) => e.preventDefault();
+
+  // Save via explicit click handler
+  $('save').onclick = async () => {
+    const payload = collect();
+    if (!payload) return;
+
+    $('save').disabled = true; $('save').textContent = 'Saving…';
+    try {
+      await api('/api/settings/users/create', { method:'POST', body: payload });
+      location.href = '?page=settings';
+    } catch (e) {
+      alert(`Save failed${e?.data?.error ? `: ${e.data.error}` : ''}.`);
+    } finally {
+      $('save').disabled = false; $('save').textContent = 'Save';
+    }
+  };
 }
 
 function collect(){
