@@ -1,7 +1,13 @@
 import { api } from '/assets/js/api.js';
 import { ensureSession } from '/assets/js/auth.js';
 
-export default { load };
+// Router calls mod.init({ container, session }) for each screen module.
+// Keep load() as the internal implementation and expose init() to wire events.
+export async function init() {
+  await load();
+}
+
+export default { init };
 const $ = (id) => document.getElementById(id);
 
 async function load(){
