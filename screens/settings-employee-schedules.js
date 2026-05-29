@@ -30,6 +30,8 @@ function wire() {
   els['sch-load-week']?.addEventListener('click', loadWeek);
   els['sch-week-start-date']?.addEventListener('change', loadWeek);
   els['sch-week-body']?.addEventListener('click', handleWeekBodyClick);
+  els['sch-week-body']?.addEventListener('change', handleWeekBodyChange);
+  els['sch-week-body']?.addEventListener('input', handleWeekBodyInput);
   els['sch-save-week']?.addEventListener('click', saveWeek);
   els['sch-clear-week']?.addEventListener('click', () => {
     clearWeekInputs();
@@ -147,40 +149,39 @@ function buildWeekRows() {
     `;
   }).join('');
 
-  body.querySelectorAll('tr').forEach((tr) => {
-    const work = tr.querySelector('.sch-work');
-    const start = tr.querySelector('.sch-start');
-    const end = tr.querySelector('.sch-end');
-    const lunch = tr.querySelector('.sch-lunch');
+  recalcTotals();
+}
 
-    work?.addEventListener('change', () => {
-      const isWorking = !!work.checked;
-      start.disabled = !isWorking;
-      end.disabled = !isWorking;
-      lunch.disabled = !isWorking;
-      if (!isWorking) {
-        start.value = '';
-        end.value = '';
-        lunch.value = '0';
-      } else {
-        maybeApplyDefaultLunch(tr);
-      }
-      recalcTotals();
-    });
+function handleWeekBodyChange(event) {
+  const target = event.target;
+  if (!target?.classList) return;
 
-    start?.addEventListener('input', () => {
-      maybeApplyDefaultLunch(tr);
-      recalcTotals();
-    });
+  if (target.classList.contains('sch-work')) {
+    const row = target.closest('tr');
+    if (!row) return;
 
-    end?.addEventListener('input', () => {
-      maybeApplyDefaultLunch(tr);
-      recalcTotals();
-    });
+    setRowWorking(row, !!target.checked);
+    if (target.checked) maybeApplyDefaultLunch(row);
+    recalcTotals();
+    return;
+  }
 
-    lunch?.addEventListener('input', recalcTotals);
+  handleWeekBodyInput(event);
+}
 
-  });
+function handleWeekBodyInput(event) {
+  const target = event.target;
+  if (!target?.classList) return;
+
+  const isScheduleTimeInput = target.classList.contains('sch-start') || target.classList.contains('sch-end');
+  const isLunchInput = target.classList.contains('sch-lunch');
+  if (!isScheduleTimeInput && !isLunchInput) return;
+
+  const row = target.closest('tr');
+  if (!row) return;
+
+  if (isScheduleTimeInput) maybeApplyDefaultLunch(row);
+  recalcTotals();
 }
 
 function handleWeekBodyClick(event) {
