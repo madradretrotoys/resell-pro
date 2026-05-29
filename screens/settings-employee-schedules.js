@@ -12,7 +12,7 @@ export async function init() {
   bind();
   wire();
   setWeekStartDateToTodayWeek();
-  await Promise.all([loadUsers(), loadDrawers(), loadWeekConfig()]);
+  await Promise.allSettled([loadUsers(), loadDrawers(), loadWeekConfig()]);
   buildWeekRows();
   await loadWeek();
 }
@@ -80,11 +80,22 @@ function localDateToYmd(d) {
 }
 
 async function loadUsers() {
-  const resp = await api('/api/settings/users/list');
-  users = Array.isArray(resp?.users) ? resp.users.filter((u) => u?.active !== false) : [];
+  try {
+    const resp = await api('/api/settings/employee-schedules/users');
+    users = Array.isArray(resp?.users) ? resp.users.filter((u) => u?.active !== false) : [];
+  } catch {
+    users = [];
+    banner('Unable to load employees for scheduling.', 'error');
+  }
+
   const sel = els['sch-user'];
   if (!sel) return;
-  sel.innerHTML = users.map((u) => `<option value="${u.user_id}">${esc(u.name || u.login_id || u.email || u.user_id)}</option>`).join('');
+  sel.innerHTML = users.length
+    ? users.map((u) => `<option value="${u.user_id}">${esc(u.name || u.login_id || u.email || u.user_id)}</option>`).join('')
+    : '<option value="">No employees available</option>';
+  sel.disabled = users.length === 0;
+  if (els['sch-save-week']) els['sch-save-week'].disabled = users.length === 0;
+  if (els['sch-load-week']) els['sch-load-week'].disabled = users.length === 0;
   refreshCloneUserOptions();
 }
 

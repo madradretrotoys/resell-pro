@@ -7,7 +7,7 @@ const json = (data: any, status = 200) =>
     headers: { "content-type": "application/json", "cache-control": "no-store" },
   });
 
-export const onRequestPost: PagesFunction = async ({ request, env }) => {
+export const onRequestGet: PagesFunction = async ({ request, env }) => {
   try {
     const auth = await requireSessionActor(request, env, json);
     if ("error" in auth) return auth.error;
@@ -21,17 +21,21 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
       return json({ ok: false, error: "forbidden" }, 403);
     }
 
-    const body = await request.json().catch(() => ({}));
-    const schedule_id = String((body as any).schedule_id || "").trim();
-    if (!schedule_id) return json({ ok: false, error: "schedule_id_required" }, 400);
-
-    await sql/*sql*/`
-      DELETE FROM app.employee_schedules
-      WHERE tenant_id = ${tenant_id}::uuid
-        AND schedule_id = ${schedule_id}::uuid
+    const rows = await sql/*sql*/`
+      SELECT
+        u.user_id,
+        u.email,
+        u.name,
+        u.login_id,
+        m.role,
+        m.active
+      FROM app.memberships m
+      JOIN app.users u ON u.user_id = m.user_id
+      WHERE m.tenant_id = ${tenant_id}::uuid
+      ORDER BY lower(COALESCE(NULLIF(u.name, ''), NULLIF(u.login_id, ''), NULLIF(u.email, ''), u.user_id::text))
     `;
 
-    return json({ ok: true });
+    return json({ ok: true, users: rows });
   } catch (e: any) {
     return json({ ok: false, error: "server_error", message: e?.message || String(e) }, 500);
   }
