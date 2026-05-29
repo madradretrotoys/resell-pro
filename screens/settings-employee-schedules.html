@@ -1,21 +1,21 @@
 <section class="screen" data-screen="settings-employee-schedules">
   <header class="screen-header">
     <h1>Settings · Employee Schedules</h1>
-    <p class="subtitle">Build one employee week at a time with daily hours.</p>
+    <p class="subtitle">Static schedules load regardless of selected week; non-static schedules are built week by week.</p>
   </header>
 
   <div id="sch-banner" class="banner" hidden></div>
 
   <div class="card">
     <h3>Week Builder</h3>
-    <div class="grid grid-4" style="gap:10px; align-items:end;">
+    <div class="grid grid-4" style="display:grid; grid-template-columns:minmax(260px,1.35fr) minmax(150px,.8fr) minmax(150px,.8fr) auto; gap:12px; align-items:end;">
       <label>
         <span>Employee</span>
-        <select id="sch-user" class="input"></select>
+        <select id="sch-user" class="input input-full"></select>
       </label>
       <label>
         <span>Week Starts On</span>
-        <select id="sch-week-start-day" class="input">
+        <select id="sch-week-start-day" class="input input-full">
           <option value="0">Sunday</option>
           <option value="1">Monday</option>
           <option value="2">Tuesday</option>
@@ -27,7 +27,7 @@
       </label>
       <label>
         <span>Week Start Date</span>
-        <input id="sch-week-start-date" type="date" class="input" />
+        <input id="sch-week-start-date" type="date" class="input input-full" />
       </label>
       <label>
         <span>Static Schedule?</span>
@@ -40,7 +40,7 @@
       <div style="grid-column: 1 / -1; height:8px;"></div>
       <label>
         <span>Clone From Employee</span>
-        <select id="sch-clone-user" class="input"></select>
+        <select id="sch-clone-user" class="input input-full"></select>
       </label>
       <div class="actions" style="justify-content:flex-start;">
         <button id="sch-clone-week" class="btn btn--neutral">Clone Week</button>
@@ -49,7 +49,7 @@
       <div style="grid-column: 1 / -1; height:8px;"></div>
       <label>
         <span>Status</span>
-        <select id="sch-status" class="input">
+        <select id="sch-status" class="input input-full">
           <option value="draft">Draft</option>
           <option value="published">Published</option>
           <option value="confirmed">Confirmed</option>
@@ -59,11 +59,11 @@
       </label>
       <label>
         <span>Preferred Drawer</span>
-        <select id="sch-drawer" class="input"><option value="">None</option></select>
+        <select id="sch-drawer" class="input input-full"><option value="">None</option></select>
       </label>
       <label style="grid-column: span 2;">
         <span>Notes (applies to saved rows)</span>
-        <input id="sch-notes" class="input" maxlength="2000" />
+        <input id="sch-notes" class="input input-full" maxlength="2000" />
       </label>
     </div>
 

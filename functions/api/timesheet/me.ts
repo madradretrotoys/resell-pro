@@ -107,64 +107,64 @@ export const onRequestGet: PagesFunction = async ({ request, env }) => {
       endIso: localDayBounds(tzOffsetMinutes, currentWeekEnd).endIso,
     };
 
-    let scheduleRows = await sql/*sql*/`
-      SELECT
-        es.business_date,
-        es.shift_start_at,
-        es.shift_end_at,
-        es.break_minutes,
-        es.static_schedule,
-        es.preferred_drawer_id,
-        td.drawer_name AS preferred_drawer_name,
-        td.drawer_code AS preferred_drawer_code
-      FROM app.employee_schedules es
-      LEFT JOIN app.tenant_drawers td ON td.drawer_id = es.preferred_drawer_id
-      WHERE es.tenant_id = ${actor.tenant_id}::uuid
-        AND es.user_id = ${actor.actor_user_id}::uuid
-        AND es.shift_start_at >= ${currentWeekBounds.startIso}::timestamptz
-        AND es.shift_start_at <= ${currentWeekBounds.endIso}::timestamptz
-      ORDER BY es.shift_start_at ASC
-    `;
-
+    let scheduleRows: any[] = [];
     let effectiveWeekStart = currentWeekStart;
-    if (!scheduleRows.length) {
-      const latestStaticRows = await sql/*sql*/`
-        SELECT business_date
-        FROM app.employee_schedules
-        WHERE tenant_id = ${actor.tenant_id}::uuid
-          AND user_id = ${actor.actor_user_id}::uuid
-          AND static_schedule = true
-        ORDER BY business_date DESC NULLS LAST, shift_start_at DESC
-        LIMIT 1
+
+    const latestStaticRows = await sql/*sql*/`
+      SELECT business_date
+      FROM app.employee_schedules
+      WHERE tenant_id = ${actor.tenant_id}::uuid
+        AND user_id = ${actor.actor_user_id}::uuid
+        AND static_schedule = true
+      ORDER BY business_date DESC NULLS LAST, shift_start_at DESC
+      LIMIT 1
+    `;
+    const latestStaticDate = String(latestStaticRows?.[0]?.business_date || '').slice(0, 10);
+    if (latestStaticDate) {
+      effectiveWeekStart = weekStartForDateYmd(latestStaticDate, weekStartsOn);
+      const staticWeekEnd = addDaysYmd(effectiveWeekStart, 6);
+      const staticWeekBounds = {
+        startIso: localDayBounds(tzOffsetMinutes, effectiveWeekStart).startIso,
+        endIso: localDayBounds(tzOffsetMinutes, staticWeekEnd).endIso,
+      };
+      scheduleRows = await sql/*sql*/`
+        SELECT
+          es.business_date,
+          es.shift_start_at,
+          es.shift_end_at,
+          es.break_minutes,
+          es.static_schedule,
+          es.preferred_drawer_id,
+          td.drawer_name AS preferred_drawer_name,
+          td.drawer_code AS preferred_drawer_code
+        FROM app.employee_schedules es
+        LEFT JOIN app.tenant_drawers td ON td.drawer_id = es.preferred_drawer_id
+        WHERE es.tenant_id = ${actor.tenant_id}::uuid
+          AND es.user_id = ${actor.actor_user_id}::uuid
+          AND es.static_schedule = true
+          AND es.shift_start_at >= ${staticWeekBounds.startIso}::timestamptz
+          AND es.shift_start_at <= ${staticWeekBounds.endIso}::timestamptz
+        ORDER BY es.shift_start_at ASC
       `;
-      const latestStaticDate = String(latestStaticRows?.[0]?.business_date || '').slice(0, 10);
-      if (latestStaticDate) {
-        effectiveWeekStart = weekStartForDateYmd(latestStaticDate, weekStartsOn);
-        const staticWeekEnd = addDaysYmd(effectiveWeekStart, 6);
-        const staticWeekBounds = {
-          startIso: localDayBounds(tzOffsetMinutes, effectiveWeekStart).startIso,
-          endIso: localDayBounds(tzOffsetMinutes, staticWeekEnd).endIso,
-        };
-        scheduleRows = await sql/*sql*/`
-          SELECT
-            es.business_date,
-            es.shift_start_at,
-            es.shift_end_at,
-            es.break_minutes,
-            es.static_schedule,
-            es.preferred_drawer_id,
-            td.drawer_name AS preferred_drawer_name,
-            td.drawer_code AS preferred_drawer_code
-          FROM app.employee_schedules es
-          LEFT JOIN app.tenant_drawers td ON td.drawer_id = es.preferred_drawer_id
-          WHERE es.tenant_id = ${actor.tenant_id}::uuid
-            AND es.user_id = ${actor.actor_user_id}::uuid
-            AND es.static_schedule = true
-            AND es.shift_start_at >= ${staticWeekBounds.startIso}::timestamptz
-            AND es.shift_start_at <= ${staticWeekBounds.endIso}::timestamptz
-          ORDER BY es.shift_start_at ASC
-        `;
-      }
+    } else {
+      scheduleRows = await sql/*sql*/`
+        SELECT
+          es.business_date,
+          es.shift_start_at,
+          es.shift_end_at,
+          es.break_minutes,
+          es.static_schedule,
+          es.preferred_drawer_id,
+          td.drawer_name AS preferred_drawer_name,
+          td.drawer_code AS preferred_drawer_code
+        FROM app.employee_schedules es
+        LEFT JOIN app.tenant_drawers td ON td.drawer_id = es.preferred_drawer_id
+        WHERE es.tenant_id = ${actor.tenant_id}::uuid
+          AND es.user_id = ${actor.actor_user_id}::uuid
+          AND es.shift_start_at >= ${currentWeekBounds.startIso}::timestamptz
+          AND es.shift_start_at <= ${currentWeekBounds.endIso}::timestamptz
+        ORDER BY es.shift_start_at ASC
+      `;
     }
 
     const hasSchedule = scheduleRows.length > 0;

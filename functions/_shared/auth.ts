@@ -46,8 +46,12 @@ export async function requireSessionActor(request: Request, env: any, json: (dat
 }
 
 export async function getTenantActor(sql: Sql, tenant_id: string, actor_user_id: string) {
-  const rows = await sql<{ role: string; active: boolean; can_settings: boolean }[]>`
-    SELECT m.role, m.active, COALESCE(p.can_settings, false) AS can_settings
+  const rows = await sql<{ role: string; active: boolean; can_settings: boolean; can_timekeeping: boolean }[]>`
+    SELECT
+      m.role,
+      m.active,
+      COALESCE(p.can_settings, false) AS can_settings,
+      COALESCE(p.can_timekeeping, false) AS can_timekeeping
     FROM app.memberships m
     LEFT JOIN app.permissions p ON p.user_id = m.user_id
     WHERE m.tenant_id = ${tenant_id} AND m.user_id = ${actor_user_id}
@@ -59,4 +63,9 @@ export async function getTenantActor(sql: Sql, tenant_id: string, actor_user_id:
 export function canManageTenantSettings(actor: { role: string; can_settings: boolean } | null) {
   if (!actor) return false;
   return actor.role === "owner" || actor.role === "admin" || actor.role === "manager" || !!actor.can_settings;
+}
+
+export function canManageEmployeeSchedules(actor: { role: string; can_settings?: boolean; can_timekeeping?: boolean } | null) {
+  if (!actor) return false;
+  return actor.role === "owner" || actor.role === "admin" || actor.role === "manager" || !!actor.can_settings || !!actor.can_timekeeping;
 }
