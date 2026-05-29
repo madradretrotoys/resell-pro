@@ -29,6 +29,7 @@ function bind() {
 function wire() {
   els['sch-load-week']?.addEventListener('click', loadWeek);
   els['sch-week-start-date']?.addEventListener('change', loadWeek);
+  els['sch-week-body']?.addEventListener('click', handleWeekBodyClick);
   els['sch-save-week']?.addEventListener('click', saveWeek);
   els['sch-clear-week']?.addEventListener('click', () => {
     clearWeekInputs();
@@ -141,12 +142,12 @@ function buildWeekRows() {
         <td><input type="time" class="input sch-end" disabled /></td>
         <td><input type="number" min="0" step="1" class="input sch-lunch" value="0" disabled /></td>
         <td class="sch-paid">0.00</td>
-        <td><button class="btn btn--neutral btn--sm sch-copy-prev">Copy Prev</button></td>
+        <td><button type="button" class="btn btn--neutral btn--sm sch-copy-prev">Copy Prev</button></td>
       </tr>
     `;
   }).join('');
 
-  body.querySelectorAll('tr').forEach((tr, idx) => {
+  body.querySelectorAll('tr').forEach((tr) => {
     const work = tr.querySelector('.sch-work');
     const start = tr.querySelector('.sch-start');
     const end = tr.querySelector('.sch-end');
@@ -179,30 +180,64 @@ function buildWeekRows() {
 
     lunch?.addEventListener('input', recalcTotals);
 
-    tr.querySelector('.sch-copy-prev')?.addEventListener('click', () => {
-      if (idx === 0) return;
-      const rows = Array.from(body.querySelectorAll('tr'));
-      let prev = null;
-      for (let i = idx - 1; i >= 0; i -= 1) {
-        const candidate = rows[i];
-        const isWorking = !!candidate.querySelector('.sch-work')?.checked;
-        const hasTimes = !!candidate.querySelector('.sch-start')?.value && !!candidate.querySelector('.sch-end')?.value;
-        if (isWorking && hasTimes) {
-          prev = candidate;
-          break;
-        }
-      }
-      if (!prev) return;
-      tr.querySelector('.sch-work').checked = true;
-      tr.querySelector('.sch-start').value = prev.querySelector('.sch-start').value;
-      tr.querySelector('.sch-end').value = prev.querySelector('.sch-end').value;
-      tr.querySelector('.sch-lunch').value = prev.querySelector('.sch-lunch').value;
-      tr.querySelector('.sch-start').disabled = false;
-      tr.querySelector('.sch-end').disabled = false;
-      tr.querySelector('.sch-lunch').disabled = false;
-      recalcTotals();
-    });
   });
+}
+
+function handleWeekBodyClick(event) {
+  const btn = event.target?.closest?.('.sch-copy-prev');
+  if (!btn) return;
+  event.preventDefault();
+
+  const row = btn.closest('tr');
+  const body = els['sch-week-body'];
+  if (!row || !body) return;
+
+  const rows = Array.from(body.querySelectorAll('tr'));
+  const idx = rows.indexOf(row);
+  if (idx <= 0) {
+    banner('No previous schedule row to copy.', 'info');
+    return;
+  }
+
+  let prev = null;
+  for (let i = idx - 1; i >= 0; i -= 1) {
+    const candidate = rows[i];
+    const isWorking = !!candidate.querySelector('.sch-work')?.checked;
+    const hasTimes = !!candidate.querySelector('.sch-start')?.value && !!candidate.querySelector('.sch-end')?.value;
+    if (isWorking && hasTimes) {
+      prev = candidate;
+      break;
+    }
+  }
+
+  if (!prev) {
+    banner('No previous working shift with start and end times to copy.', 'info');
+    return;
+  }
+
+  setRowWorking(row, true);
+  row.querySelector('.sch-start').value = prev.querySelector('.sch-start')?.value || '';
+  row.querySelector('.sch-end').value = prev.querySelector('.sch-end')?.value || '';
+  row.querySelector('.sch-lunch').value = prev.querySelector('.sch-lunch')?.value || '0';
+  recalcTotals();
+}
+
+function setRowWorking(row, isWorking) {
+  const work = row.querySelector('.sch-work');
+  const start = row.querySelector('.sch-start');
+  const end = row.querySelector('.sch-end');
+  const lunch = row.querySelector('.sch-lunch');
+
+  if (work) work.checked = !!isWorking;
+  if (start) start.disabled = !isWorking;
+  if (end) end.disabled = !isWorking;
+  if (lunch) lunch.disabled = !isWorking;
+
+  if (!isWorking) {
+    if (start) start.value = '';
+    if (end) end.value = '';
+    if (lunch) lunch.value = '0';
+  }
 }
 
 function weekDateForDow(targetDow) {
