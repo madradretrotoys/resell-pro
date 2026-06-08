@@ -2,7 +2,6 @@
   <style>
     .rp-timesheet{max-width:1100px}
     .card{border:1px solid #e5e7eb;border-radius:10px;padding:12px;margin:10px 0;background:#fff;overflow:hidden}
-    .card{border:1px solid #e5e7eb;border-radius:10px;padding:12px;margin:10px 0;background:#fff}
     .row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
     .btn{padding:9px 13px;border-radius:8px;border:1px solid #d1d5db;background:#fff;cursor:pointer;font-weight:600}
     .btn:disabled{opacity:.55;cursor:not-allowed}
@@ -16,7 +15,6 @@
     th,td{border:1px solid #e5e7eb;padding:8px;text-align:left}
     th{background:#f9fafb}
     input,select{padding:8px;border:1px solid #d1d5db;border-radius:8px;max-width:100%}
-    input,select{padding:8px;border:1px solid #d1d5db;border-radius:8px}
     .busy{display:none;position:fixed;inset:0;background:rgba(255,255,255,.7);z-index:9999;align-items:center;justify-content:center}
     .busy.show{display:flex}
     .busy span{padding:10px 14px;background:#fff;border:1px solid #e5e7eb;border-radius:10px}
@@ -26,6 +24,36 @@
     #myTable{min-width:unset}
     #adminTable input[type="datetime-local"]{min-width:170px;width:100%}
     #adminTable select{min-width:110px}
+    .admin-tools{margin-top:24px}
+    .admin-tools-heading{margin-bottom:4px}
+    .admin-tools-heading h3{font-size:18px;margin:0 0 4px}
+    .admin-tools-heading p{margin:0}
+    .admin-card{padding:0;margin:12px 0 16px}
+    .admin-card-header{display:flex;gap:16px;align-items:flex-start;justify-content:space-between;padding:16px;border-bottom:1px solid #e5e7eb}
+    .admin-card-title{display:flex;gap:12px;align-items:flex-start;min-width:220px}
+    .admin-card-marker{display:grid;place-items:center;flex:0 0 auto;min-height:28px;padding:0 8px;border-radius:999px;background:#eff6ff;color:#1d4ed8;font-size:11px;font-weight:700;letter-spacing:.04em}
+    .admin-card--edit .admin-card-marker{background:#fff7ed;color:#c2410c}
+    .admin-card-title strong{display:block;font-size:16px;margin:1px 0 3px}
+    .admin-card-title .muted{font-size:13px}
+    .admin-card-controls{justify-content:flex-end}
+    .admin-card-body{padding:0 16px 16px}
+    .admin-card--report{border-left:4px solid #2563eb}
+    .admin-card--edit{border-left:4px solid #d97706}
+    .admin-card--edit .admin-card-header{background:#fffbeb}
+    .admin-edit-note{margin:12px 0 0;font-size:13px}
+    .admin-create{margin-top:14px;padding:14px;border:1px solid #fed7aa;border-radius:10px;background:#fffaf3}
+    .admin-create h4{margin:0 0 4px;font-size:15px}
+    .admin-create-grid{display:grid;grid-template-columns:repeat(3,minmax(190px,1fr));gap:12px;margin-top:12px}
+    .admin-create-grid label{display:flex;flex-direction:column;gap:5px;font-size:13px;font-weight:600}
+    .admin-create-notes{grid-column:span 2}
+    .admin-create-actions{display:flex;align-items:flex-end}
+    .admin-create-actions .btn{width:100%}
+    @media (max-width:760px){
+      .admin-card-header{display:block}
+      .admin-card-controls{justify-content:flex-start;margin-top:14px}
+      .admin-create-grid{grid-template-columns:1fr}
+      .admin-create-notes{grid-column:auto}
+    }
   </style>
 
   <div id="busy" class="busy"><span>Working…</span></div>
@@ -65,26 +93,86 @@
     <div class="table-wrap"><table id="reportTable"></table></div>
   </div>
 
-  <div class="card" id="adminCard" style="display:none">
-    <div class="row" style="justify-content:space-between">
-      <strong>Edit Entries (Tenant)</strong>
-      <div class="row">
-        <input id="adminDate" type="date" />
-        <button id="btnAdminLoad" class="btn">Load</button>
+  <section class="admin-tools" id="adminCard" style="display:none">
+    <div class="admin-tools-heading">
+      <h3>Team Timekeeping</h3>
+      <p class="muted">Review team hours or correct an individual daily entry.</p>
+    </div>
+
+    <div class="card admin-card admin-card--report">
+      <div class="admin-card-header">
+        <div class="admin-card-title">
+          <span class="admin-card-marker" aria-hidden="true">REPORT</span>
+          <div>
+            <strong>Team Timesheet Report</strong>
+            <div class="muted">View hours across a date range. This report is read-only.</div>
+          </div>
+        </div>
+        <div class="row admin-card-controls">
+          <label>From <input id="adminReportFrom" type="date" /></label>
+          <label>To <input id="adminReportTo" type="date" /></label>
+          <label>Employee
+            <select id="adminReportUser"><option value="">All Employees</option></select>
+          </label>
+          <button id="btnAdminReportLoad" class="btn">Run Timesheet Report</button>
+        </div>
+      </div>
+      <div class="admin-card-body">
+        <div id="adminReportTotal" class="muted" style="margin-top:12px"></div>
+        <div class="table-wrap"><table id="adminReportTable"></table></div>
       </div>
     </div>
-    <div class="row" style="margin-top:8px">
-        <label>From <input id="adminReportFrom" type="date" /></label>
-        <label>To <input id="adminReportTo" type="date" /></label>
-        <label>Employee
-          <select id="adminReportUser"><option value="">All Employees</option></select>
-        </label>
-        <button id="btnAdminReportLoad" class="btn">Run Timesheet Report</button>
+
+    <div class="card admin-card admin-card--edit">
+      <div class="admin-card-header">
+        <div class="admin-card-title">
+          <span class="admin-card-marker" aria-hidden="true">EDIT</span>
+          <div>
+            <strong>Edit Daily Entries</strong>
+            <div class="muted">Load one day to correct employee punches or status.</div>
+          </div>
+        </div>
+        <div class="row admin-card-controls">
+          <label>Date <input id="adminDate" type="date" /></label>
+          <button id="btnAdminLoad" class="btn">Load Entries</button>
+        </div>
       </div>
-      <div id="adminReportTotal" class="muted" style="margin-top:8px"></div>
-      <div class="table-wrap"><table id="adminReportTable"></table></div>
-      <div class="table-wrap"><table id="adminTable"></table></div>
-  </div>
+      <div class="admin-card-body">
+        <div class="admin-create">
+          <h4>Add a Missed Time Entry</h4>
+          <div class="muted">Create an entry for an employee who forgot to clock in on a previous day.</div>
+          <div class="admin-create-grid">
+            <label>Employee
+              <select id="adminCreateUser"><option value="">Select employee</option></select>
+            </label>
+            <label>Date
+              <input id="adminCreateDate" type="date" />
+            </label>
+            <label>Clock In
+              <input id="adminCreateClockIn" type="time" />
+            </label>
+            <label>Lunch Out <span class="muted">(optional)</span>
+              <input id="adminCreateLunchOut" type="time" />
+            </label>
+            <label>Lunch In <span class="muted">(optional)</span>
+              <input id="adminCreateLunchIn" type="time" />
+            </label>
+            <label>Clock Out <span class="muted">(optional)</span>
+              <input id="adminCreateClockOut" type="time" />
+            </label>
+            <label class="admin-create-notes">Notes <span class="muted">(optional)</span>
+              <input id="adminCreateNotes" type="text" maxlength="500" placeholder="Reason for manual entry" />
+            </label>
+            <div class="admin-create-actions">
+              <button id="btnAdminCreate" class="btn btn-warning" type="button">Add Time Entry</button>
+            </div>
+          </div>
+        </div>
+        <p class="muted admin-edit-note">Existing changes are saved one employee row at a time.</p>
+        <div class="table-wrap"><table id="adminTable"></table></div>
+      </div>
+    </div>
+  </section>
 
   <div id="logs" class="log" style="margin-top:10px"></div>
 </section>

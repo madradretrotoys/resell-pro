@@ -9,6 +9,7 @@ let state = {
   canEdit: false,
   reportEntries: [],
   reportTotalHours: 0,
+  adminUsers: [],
 };
 
 export async function init({ container }) {
@@ -36,6 +37,14 @@ function bind(container) {
     adminCard: container.querySelector('#adminCard'),
     adminDate: container.querySelector('#adminDate'),
     btnAdminLoad: container.querySelector('#btnAdminLoad'),
+    adminCreateUser: container.querySelector('#adminCreateUser'),
+    adminCreateDate: container.querySelector('#adminCreateDate'),
+    adminCreateClockIn: container.querySelector('#adminCreateClockIn'),
+    adminCreateLunchOut: container.querySelector('#adminCreateLunchOut'),
+    adminCreateLunchIn: container.querySelector('#adminCreateLunchIn'),
+    adminCreateClockOut: container.querySelector('#adminCreateClockOut'),
+    adminCreateNotes: container.querySelector('#adminCreateNotes'),
+    btnAdminCreate: container.querySelector('#btnAdminCreate'),
     adminReportFrom: container.querySelector('#adminReportFrom'),
     adminReportTo: container.querySelector('#adminReportTo'),
     adminReportUser: container.querySelector('#adminReportUser'),
@@ -54,6 +63,7 @@ function wire() {
   els.btnLunchIn?.addEventListener('click', () => punch('lunch_in'));
   els.btnClockOut?.addEventListener('click', () => punch('clock_out'));
   els.btnAdminLoad?.addEventListener('click', loadAdmin);
+  els.btnAdminCreate?.addEventListener('click', createAdminEntry);
   els.btnAdminReportLoad?.addEventListener('click', loadAdminReport);
   els.btnReportLoad?.addEventListener('click', loadReport);
 }
@@ -64,6 +74,12 @@ function setBanner() {
     els.today.textContent = `Today is ${now.toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })}.`;
   }
   if (els.adminDate) els.adminDate.value = isoDate(now);
+  const yesterday = new Date(now);
+  yesterday.setDate(yesterday.getDate() - 1);
+  if (els.adminCreateDate) {
+    els.adminCreateDate.value = isoDate(yesterday);
+    els.adminCreateDate.max = isoDate(yesterday);
+  }
   if (els.reportTo) els.reportTo.value = isoDate(now);
   if (els.reportFrom) {
     const from = new Date(now);
@@ -286,12 +302,72 @@ async function loadAdmin() {
   try {
     const q = els.adminDate?.value ? `?date=${encodeURIComponent(els.adminDate.value)}` : '';
     const data = await api(`/api/timesheet/admin-list${q}`);
+    state.adminUsers = data.users || [];
+    renderAdminCreateUsers();
     renderAdminTable(data.entries || []);
   } catch (e) {
     showToast('Unable to load tenant entries.');
     log(`loadAdmin failed: ${e?.data?.error || e?.message || e}`);
   } finally {
     setBusy(false);
+  }
+}
+
+
+function renderAdminCreateUsers() {
+  if (!els.adminCreateUser) return;
+  const selected = els.adminCreateUser.value;
+  els.adminCreateUser.innerHTML = ['<option value="">Select employee</option>']
+    .concat(state.adminUsers.map((user) => `<option value="${escapeHtml(user.login_id)}">${escapeHtml(user.name || user.login_id)} (${escapeHtml(user.login_id)})</option>`))
+    .join('');
+  if (state.adminUsers.some((user) => user.login_id === selected)) els.adminCreateUser.value = selected;
+}
+
+async function createAdminEntry() {
+  const loginId = String(els.adminCreateUser?.value || '').trim();
+  const date = String(els.adminCreateDate?.value || '').trim();
+  const clockIn = String(els.adminCreateClockIn?.value || '').trim();
+  const lunchOut = String(els.adminCreateLunchOut?.value || '').trim();
+  const lunchIn = String(els.adminCreateLunchIn?.value || '').trim();
+  const clockOut = String(els.adminCreateClockOut?.value || '').trim();
+
+  if (!loginId || !date || !clockIn) {
+    showToast('Select an employee, date, and clock-in time.');
+    return;
+  }
+  if (!!lunchOut !== !!lunchIn) {
+    showToast('Enter both lunch times or leave both blank.');
+    return;
+  }
+
+  const payload = {
+    login_id: loginId,
+    date,
+    clock_in: localDateTimeIso(date, clockIn),
+    lunch_out: localDateTimeIso(date, lunchOut),
+    lunch_in: localDateTimeIso(date, lunchIn),
+    clock_out: localDateTimeIso(date, clockOut),
+    notes: String(els.adminCreateNotes?.value || '').trim() || null,
+  };
+
+  setBusy(true);
+  try {
+    await api('/api/timesheet/admin-create', { method: 'POST', body: payload });
+    if (els.adminDate) els.adminDate.value = date;
+    clearAdminCreateTimes();
+    showToast('Time entry added.');
+    await Promise.all([loadAdmin(), loadAdminReport(), loadReport()]);
+  } catch (e) {
+    showToast(e?.data?.error ? `Unable: ${e.data.error}` : 'Unable to add time entry.');
+    log(`createAdminEntry failed: ${e?.data?.error || e?.message || e}`);
+  } finally {
+    setBusy(false);
+  }
+}
+
+function clearAdminCreateTimes() {
+  for (const input of [els.adminCreateClockIn, els.adminCreateLunchOut, els.adminCreateLunchIn, els.adminCreateClockOut, els.adminCreateNotes]) {
+    if (input) input.value = '';
   }
 }
 
@@ -367,5 +443,6 @@ function fmtHours(v) { return v == null || v === '' ? '—' : Number(v).toFixed(
 function isoDate(d) { return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; }
 function dtLocal(v) { if (!v) return ''; const d = new Date(v); d.setMinutes(d.getMinutes() - d.getTimezoneOffset()); return d.toISOString().slice(0, 16); }
 function fromLocal(v) { return v ? new Date(v).toISOString() : null; }
+function localDateTimeIso(date, time) { return date && time ? new Date(`${date}T${time}:00`).toISOString() : null; }
 function log(msg) { if (els.logs) els.logs.textContent = `[${new Date().toLocaleTimeString()}] ${msg}\n${els.logs.textContent || ''}`.trim(); }
 function escapeHtml(s) { return String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }

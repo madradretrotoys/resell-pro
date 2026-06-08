@@ -26,7 +26,17 @@ export const onRequestGet: PagesFunction = async ({ request, env }) => {
       ORDER BY COALESCE(te.user_name, te.login_id), te.clock_in
     `;
 
-    return json({ ok: true, date: bounds.date, entries: rows });
+    const users = await sql/*sql*/`
+      SELECT u.login_id, u.name
+      FROM app.memberships m
+      JOIN app.users u ON u.user_id = m.user_id
+      WHERE m.tenant_id = ${actor.tenant_id}
+        AND COALESCE(m.active, true) = true
+        AND COALESCE(u.is_active, true) = true
+      ORDER BY u.name, u.login_id
+    `;
+
+    return json({ ok: true, date: bounds.date, entries: rows, users });
   } catch (e: any) {
     return json({ ok: false, error: 'server_error', message: e?.message || String(e) }, 500);
   }
