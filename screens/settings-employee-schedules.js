@@ -12,7 +12,7 @@ export async function init() {
   bind();
   wire();
   setWeekStartDateToTodayWeek();
-  await Promise.all([loadUsers(), loadDrawers(), loadWeekConfig()]);
+  await Promise.allSettled([loadUsers(), loadDrawers(), loadWeekConfig()]);
   buildWeekRows();
   await loadWeek();
 }
@@ -28,6 +28,10 @@ function bind() {
 
 function wire() {
   els['sch-load-week']?.addEventListener('click', loadWeek);
+  els['sch-week-start-date']?.addEventListener('change', loadWeek);
+  els['sch-week-body']?.addEventListener('click', handleWeekBodyClick);
+  els['sch-week-body']?.addEventListener('change', handleWeekBodyChange);
+  els['sch-week-body']?.addEventListener('input', handleWeekBodyInput);
   els['sch-save-week']?.addEventListener('click', saveWeek);
   els['sch-clear-week']?.addEventListener('click', () => {
     clearWeekInputs();
@@ -39,10 +43,10 @@ function wire() {
     syncStaticScheduleToggle();
     banner(staticScheduleSet ? 'Static schedule set to Yes.' : 'Static schedule set to No.', 'info');
   });
-  els['sch-user']?.addEventListener('change', () => {
+  els['sch-user']?.addEventListener('change', async () => {
     clearWeekInputs();
     refreshCloneUserOptions();
-    banner('Switched employee. Builder cleared for a fresh schedule.', 'info');
+    await loadWeek();
   });
   els['sch-week-start-day']?.addEventListener('change', async () => {
     await saveWeekConfig();
@@ -79,11 +83,22 @@ function localDateToYmd(d) {
 }
 
 async function loadUsers() {
-  const resp = await api('/api/settings/users/list');
-  users = Array.isArray(resp?.users) ? resp.users.filter((u) => u?.active !== false) : [];
+  try {
+    const resp = await api('/api/settings/employee-schedules/users');
+    users = Array.isArray(resp?.users) ? resp.users.filter((u) => u?.active !== false) : [];
+  } catch {
+    users = [];
+    banner('Unable to load employees for scheduling.', 'error');
+  }
+
   const sel = els['sch-user'];
   if (!sel) return;
-  sel.innerHTML = users.map((u) => `<option value="${u.user_id}">${esc(u.name || u.login_id || u.email || u.user_id)}</option>`).join('');
+  sel.innerHTML = users.length
+    ? users.map((u) => `<option value="${u.user_id}">${esc(u.name || u.login_id || u.email || u.user_id)}</option>`).join('')
+    : '<option value="">No employees available</option>';
+  sel.disabled = users.length === 0;
+  if (els['sch-save-week']) els['sch-save-week'].disabled = users.length === 0;
+  if (els['sch-load-week']) els['sch-load-week'].disabled = users.length === 0;
   refreshCloneUserOptions();
 }
 
@@ -129,68 +144,101 @@ function buildWeekRows() {
         <td><input type="time" class="input sch-end" disabled /></td>
         <td><input type="number" min="0" step="1" class="input sch-lunch" value="0" disabled /></td>
         <td class="sch-paid">0.00</td>
-        <td><button class="btn btn--neutral btn--sm sch-copy-prev">Copy Prev</button></td>
+        <td><button type="button" class="btn btn--neutral btn--sm sch-copy-prev">Copy Prev</button></td>
       </tr>
     `;
   }).join('');
 
-  body.querySelectorAll('tr').forEach((tr, idx) => {
-    const work = tr.querySelector('.sch-work');
-    const start = tr.querySelector('.sch-start');
-    const end = tr.querySelector('.sch-end');
-    const lunch = tr.querySelector('.sch-lunch');
+  recalcTotals();
+}
 
-    work?.addEventListener('change', () => {
-      const isWorking = !!work.checked;
-      start.disabled = !isWorking;
-      end.disabled = !isWorking;
-      lunch.disabled = !isWorking;
-      if (!isWorking) {
-        start.value = '';
-        end.value = '';
-        lunch.value = '0';
-      } else {
-        maybeApplyDefaultLunch(tr);
-      }
-      recalcTotals();
-    });
+function handleWeekBodyChange(event) {
+  const target = event.target;
+  if (!target?.classList) return;
 
-    start?.addEventListener('input', () => {
-      maybeApplyDefaultLunch(tr);
-      recalcTotals();
-    });
+  if (target.classList.contains('sch-work')) {
+    const row = target.closest('tr');
+    if (!row) return;
 
-    end?.addEventListener('input', () => {
-      maybeApplyDefaultLunch(tr);
-      recalcTotals();
-    });
+    setRowWorking(row, !!target.checked);
+    if (target.checked) maybeApplyDefaultLunch(row);
+    recalcTotals();
+    return;
+  }
 
-    lunch?.addEventListener('input', recalcTotals);
+  handleWeekBodyInput(event);
+}
 
-    tr.querySelector('.sch-copy-prev')?.addEventListener('click', () => {
-      if (idx === 0) return;
-      const rows = Array.from(body.querySelectorAll('tr'));
-      let prev = null;
-      for (let i = idx - 1; i >= 0; i -= 1) {
-        const candidate = rows[i];
-        const isWorking = !!candidate.querySelector('.sch-work')?.checked;
-        const hasTimes = !!candidate.querySelector('.sch-start')?.value && !!candidate.querySelector('.sch-end')?.value;
-        if (isWorking && hasTimes) {
-          prev = candidate;
-          break;
-        }
-      }
-      if (!prev) return;
-      tr.querySelector('.sch-work').checked = true;
-      tr.querySelector('.sch-start').value = prev.querySelector('.sch-start').value;
-      tr.querySelector('.sch-end').value = prev.querySelector('.sch-end').value;
-      tr.querySelector('.sch-lunch').value = prev.querySelector('.sch-lunch').value;
-      tr.querySelector('.sch-start').disabled = false;
-      tr.querySelector('.sch-end').disabled = false;
-      tr.querySelector('.sch-lunch').disabled = false;
-      recalcTotals();
-    });
-  });
+function handleWeekBodyInput(event) {
+  const target = event.target;
+  if (!target?.classList) return;
+
+  const isScheduleTimeInput = target.classList.contains('sch-start') || target.classList.contains('sch-end');
+  const isLunchInput = target.classList.contains('sch-lunch');
+  if (!isScheduleTimeInput && !isLunchInput) return;
+
+  const row = target.closest('tr');
+  if (!row) return;
+
+  if (isScheduleTimeInput) maybeApplyDefaultLunch(row);
+  recalcTotals();
+}
+
+function handleWeekBodyClick(event) {
+  const btn = event.target?.closest?.('.sch-copy-prev');
+  if (!btn) return;
+  event.preventDefault();
+
+  const row = btn.closest('tr');
+  const body = els['sch-week-body'];
+  if (!row || !body) return;
+
+  const rows = Array.from(body.querySelectorAll('tr'));
+  const idx = rows.indexOf(row);
+  if (idx <= 0) {
+    banner('No previous schedule row to copy.', 'info');
+    return;
+  }
+
+  let prev = null;
+  for (let i = idx - 1; i >= 0; i -= 1) {
+    const candidate = rows[i];
+    const isWorking = !!candidate.querySelector('.sch-work')?.checked;
+    const hasTimes = !!candidate.querySelector('.sch-start')?.value && !!candidate.querySelector('.sch-end')?.value;
+    if (isWorking && hasTimes) {
+      prev = candidate;
+      break;
+    }
+  }
+
+  if (!prev) {
+    banner('No previous working shift with start and end times to copy.', 'info');
+    return;
+  }
+
+  setRowWorking(row, true);
+  row.querySelector('.sch-start').value = prev.querySelector('.sch-start')?.value || '';
+  row.querySelector('.sch-end').value = prev.querySelector('.sch-end')?.value || '';
+  row.querySelector('.sch-lunch').value = prev.querySelector('.sch-lunch')?.value || '0';
+  recalcTotals();
+}
+
+function setRowWorking(row, isWorking) {
+  const work = row.querySelector('.sch-work');
+  const start = row.querySelector('.sch-start');
+  const end = row.querySelector('.sch-end');
+  const lunch = row.querySelector('.sch-lunch');
+
+  if (work) work.checked = !!isWorking;
+  if (start) start.disabled = !isWorking;
+  if (end) end.disabled = !isWorking;
+  if (lunch) lunch.disabled = !isWorking;
+
+  if (!isWorking) {
+    if (start) start.value = '';
+    if (end) end.value = '';
+    if (lunch) lunch.value = '0';
+  }
 }
 
 function weekDateForDow(targetDow) {
@@ -228,11 +276,7 @@ async function saveWeek() {
 
     const week_start = els['sch-week-start-date']?.value || '';
     const existingRows = await fetchRowsForUser(user_id, week_start);
-    const existingByDate = new Map();
-    existingRows.forEach((r) => {
-      const ymd = String(r.business_date || '').slice(0, 10);
-      if (ymd) existingByDate.set(ymd, r);
-    });
+    const existingLookups = buildRowLookups(existingRows);
 
     const trs = Array.from(els['sch-week-body']?.querySelectorAll('tr') || []);
     let saved = 0;
@@ -241,7 +285,7 @@ async function saveWeek() {
     for (const tr of trs) {
       const dow = Number(tr.getAttribute('data-dow'));
       const ymd = weekDateForDow(dow);
-      const existing = existingByDate.get(ymd);
+      const existing = rowForScheduleDay(existingLookups, ymd, dow);
       const work = !!tr.querySelector('.sch-work')?.checked;
       const startTime = tr.querySelector('.sch-start')?.value || '';
       const endTime = tr.querySelector('.sch-end')?.value || '';
@@ -332,26 +376,44 @@ function refreshCloneUserOptions() {
 }
 
 async function fetchRowsForUser(userId, weekStart) {
-  const q = new URLSearchParams({ week_start: weekStart });
+  const q = new URLSearchParams({ week_start: weekStart, user_id: userId });
   const resp = await api(`/api/settings/employee-schedules/list?${q.toString()}`);
   return Array.isArray(resp?.rows) ? resp.rows.filter((r) => r.user_id === userId) : [];
 }
 
-function applyRowsToWeek(rows, options = {}) {
-  const { preserveLoadedRows = false } = options;
-  if (!preserveLoadedRows) {
-    loadedRowsByDate = new Map();
-    rows.forEach((r) => {
-      const ymd = String(r.business_date || '').slice(0, 10);
-      if (ymd) loadedRowsByDate.set(ymd, r);
-    });
-  }
+function rowBusinessDow(row) {
+  const ymd = String(row?.business_date || '').slice(0, 10);
+  if (!ymd) return null;
+  const date = new Date(`${ymd}T00:00:00.000Z`);
+  if (Number.isNaN(date.getTime())) return null;
+  return date.getUTCDay();
+}
 
-  const rowsByDate = new Map();
+function buildRowLookups(rows) {
+  const byDate = new Map();
+  const byDow = new Map();
   rows.forEach((r) => {
     const ymd = String(r.business_date || '').slice(0, 10);
-    if (ymd) rowsByDate.set(ymd, r);
+    if (ymd) byDate.set(ymd, r);
+
+    if (r.static_schedule) {
+      const dow = rowBusinessDow(r);
+      if (dow !== null) byDow.set(dow, r);
+    }
   });
+  return { byDate, byDow };
+}
+
+function rowForScheduleDay(lookups, ymd, dow) {
+  return lookups.byDate.get(ymd) || lookups.byDow.get(dow) || null;
+}
+
+function applyRowsToWeek(rows, options = {}) {
+  const { preserveLoadedRows = false } = options;
+  const lookups = buildRowLookups(rows);
+  if (!preserveLoadedRows) {
+    loadedRowsByDate = lookups.byDate;
+  }
 
   const firstRow = rows[0] || null;
   if (els['sch-status']) els['sch-status'].value = firstRow?.status || 'draft';
@@ -362,7 +424,7 @@ function applyRowsToWeek(rows, options = {}) {
   trs.forEach((tr) => {
     const dow = Number(tr.getAttribute('data-dow'));
     const ymd = weekDateForDow(dow);
-    const row = rowsByDate.get(ymd);
+    const row = rowForScheduleDay(lookups, ymd, dow);
     tr.querySelector('.sch-work').checked = !!row;
     tr.querySelector('.sch-start').value = row ? isoToLocalTime(row.shift_start_at) : '';
     tr.querySelector('.sch-end').value = row ? isoToLocalTime(row.shift_end_at) : '';

@@ -1,5 +1,5 @@
 import { neon } from "@neondatabase/serverless";
-import { canManageTenantSettings, getTenantActor, requireSessionActor } from "../../../_shared/auth";
+import { canManageEmployeeSchedules, getTenantActor, requireSessionActor } from "../../../_shared/auth";
 
 const json = (data: any, status = 200) =>
   new Response(JSON.stringify(data), {
@@ -7,10 +7,26 @@ const json = (data: any, status = 200) =>
     headers: { "content-type": "application/json", "cache-control": "no-store" },
   });
 
+function addDaysYmd(ymd: string, days: number) {
+  const d = new Date(`${ymd}T00:00:00.000Z`);
+  d.setUTCDate(d.getUTCDate() + days);
+  const y = d.getUTCFullYear();
+  const m = String(d.getUTCMonth() + 1).padStart(2, "0");
+  const day = String(d.getUTCDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
+function weekStartForDateYmd(dateYmd: string, weekStartsOn: number) {
+  const d = new Date(`${dateYmd}T00:00:00.000Z`);
+  const dow = d.getUTCDay();
+  const delta = (dow - weekStartsOn + 7) % 7;
+  return addDaysYmd(dateYmd, -delta);
+}
+
 function weekRangeUtc(weekStartsOn: number, weekStartDate?: string | null) {
   let start: Date;
   if (weekStartDate && /^\d{4}-\d{2}-\d{2}$/.test(weekStartDate)) {
-    const [y, m, d] = weekStartDate.split('-').map((x) => Number(x));
+    const [y, m, d] = weekStartDate.split("-").map((x) => Number(x));
     start = new Date(Date.UTC(y, m - 1, d, 0, 0, 0, 0));
   } else {
     const now = new Date();
@@ -34,7 +50,7 @@ export const onRequestGet: PagesFunction = async ({ request, env }) => {
 
     const sql = neon(String(env.DATABASE_URL));
     const actor = await getTenantActor(sql, tenant_id, auth.actor_user_id);
-    if (!actor || actor.active === false || !canManageTenantSettings(actor)) {
+    if (!actor || actor.active === false || !canManageEmployeeSchedules(actor)) {
       return json({ ok: false, error: "forbidden" }, 403);
     }
 
@@ -60,9 +76,56 @@ export const onRequestGet: PagesFunction = async ({ request, env }) => {
 
     const url = new URL(request.url);
     const week_start = url.searchParams.get("week_start");
+    const user_id = String(url.searchParams.get("user_id") || "").trim() || null;
     const defaults = weekRangeUtc(week_starts_on, week_start);
     const from = String(url.searchParams.get("from") || defaults.from);
     const to = String(url.searchParams.get("to") || defaults.to);
+
+    if (user_id) {
+      const latestStaticRows = await sql/*sql*/`
+        SELECT business_date
+        FROM app.employee_schedules
+        WHERE tenant_id = ${tenant_id}::uuid
+          AND user_id = ${user_id}::uuid
+          AND static_schedule = true
+        ORDER BY business_date DESC NULLS LAST, shift_start_at DESC
+        LIMIT 1
+      `;
+      const latestStaticDate = String(latestStaticRows?.[0]?.business_date || "").slice(0, 10);
+      if (latestStaticDate) {
+        const staticWeekStart = weekStartForDateYmd(latestStaticDate, week_starts_on);
+        const staticWeekEnd = addDaysYmd(staticWeekStart, 6);
+        const staticRange = weekRangeUtc(week_starts_on, staticWeekStart);
+        const rows = await sql/*sql*/`
+          SELECT
+            es.schedule_id,
+            es.user_id,
+            u.name AS user_name,
+            u.login_id AS user_login_id,
+            es.business_date,
+            es.shift_start_at,
+            es.shift_end_at,
+            es.break_minutes,
+            es.static_schedule,
+            es.status,
+            es.preferred_drawer_id,
+            td.drawer_name AS preferred_drawer_name,
+            es.notes,
+            es.updated_at
+          FROM app.employee_schedules es
+          JOIN app.users u ON u.user_id = es.user_id
+          LEFT JOIN app.tenant_drawers td ON td.drawer_id = es.preferred_drawer_id
+          WHERE es.tenant_id = ${tenant_id}::uuid
+            AND es.user_id = ${user_id}::uuid
+            AND es.static_schedule = true
+            AND es.shift_start_at >= ${staticRange.from}::timestamptz
+            AND es.shift_start_at <= ${staticRange.to}::timestamptz
+          ORDER BY es.shift_start_at, u.name
+        `;
+
+        return json({ ok: true, from, to, week_starts_on, static_week_start: staticWeekStart, static_week_end: staticWeekEnd, rows });
+      }
+    }
 
     const rows = await sql/*sql*/`
       SELECT
@@ -86,6 +149,7 @@ export const onRequestGet: PagesFunction = async ({ request, env }) => {
       WHERE es.tenant_id = ${tenant_id}::uuid
         AND es.shift_start_at >= ${from}::timestamptz
         AND es.shift_start_at <= ${to}::timestamptz
+        AND (${user_id}::uuid IS NULL OR es.user_id = ${user_id}::uuid)
       ORDER BY es.shift_start_at, u.name
     `;
 

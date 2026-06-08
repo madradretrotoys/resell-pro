@@ -1,5 +1,5 @@
 import { neon } from "@neondatabase/serverless";
-import { canManageTenantSettings, getTenantActor, requireSessionActor } from "../../../_shared/auth";
+import { canManageEmployeeSchedules, getTenantActor, requireSessionActor } from "../../../_shared/auth";
 
 const json = (data: any, status = 200) =>
   new Response(JSON.stringify(data), {
@@ -17,7 +17,7 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
 
     const sql = neon(String(env.DATABASE_URL));
     const actor = await getTenantActor(sql, tenant_id, auth.actor_user_id);
-    if (!actor || actor.active === false || !canManageTenantSettings(actor)) {
+    if (!actor || actor.active === false || !canManageEmployeeSchedules(actor)) {
       return json({ ok: false, error: "forbidden" }, 403);
     }
 
