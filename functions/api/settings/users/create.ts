@@ -44,11 +44,12 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
     const password_hash = await bcrypt.hash(generatedPassword, 10);
 
     const [u] = await sql/*sql*/`
-      INSERT INTO app.users (email, name, login_id, password_hash)
-      VALUES (${email}, ${name}, ${login_id}, ${password_hash})
+      INSERT INTO app.users (email, name, login_id, password_hash, is_active)
+      VALUES (${email}, ${name}, ${login_id}, ${password_hash}, true)
       ON CONFLICT (email) DO UPDATE SET
         name=EXCLUDED.name,
-        login_id=EXCLUDED.login_id
+        login_id=EXCLUDED.login_id,
+        is_active=true
       RETURNING user_id, email, name, login_id
     `;
 
