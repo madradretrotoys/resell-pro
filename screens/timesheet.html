@@ -41,9 +41,18 @@
     .admin-card--edit{border-left:4px solid #d97706}
     .admin-card--edit .admin-card-header{background:#fffbeb}
     .admin-edit-note{margin:12px 0 0;font-size:13px}
+    .admin-create{margin-top:14px;padding:14px;border:1px solid #fed7aa;border-radius:10px;background:#fffaf3}
+    .admin-create h4{margin:0 0 4px;font-size:15px}
+    .admin-create-grid{display:grid;grid-template-columns:repeat(3,minmax(190px,1fr));gap:12px;margin-top:12px}
+    .admin-create-grid label{display:flex;flex-direction:column;gap:5px;font-size:13px;font-weight:600}
+    .admin-create-notes{grid-column:span 2}
+    .admin-create-actions{display:flex;align-items:flex-end}
+    .admin-create-actions .btn{width:100%}
     @media (max-width:760px){
       .admin-card-header{display:block}
       .admin-card-controls{justify-content:flex-start;margin-top:14px}
+      .admin-create-grid{grid-template-columns:1fr}
+      .admin-create-notes{grid-column:auto}
     }
   </style>
 
@@ -129,7 +138,37 @@
         </div>
       </div>
       <div class="admin-card-body">
-        <p class="muted admin-edit-note">Changes are saved one employee row at a time.</p>
+        <div class="admin-create">
+          <h4>Add a Missed Time Entry</h4>
+          <div class="muted">Create an entry for an employee who forgot to clock in on a previous day.</div>
+          <div class="admin-create-grid">
+            <label>Employee
+              <select id="adminCreateUser"><option value="">Select employee</option></select>
+            </label>
+            <label>Date
+              <input id="adminCreateDate" type="date" />
+            </label>
+            <label>Clock In
+              <input id="adminCreateClockIn" type="time" />
+            </label>
+            <label>Lunch Out <span class="muted">(optional)</span>
+              <input id="adminCreateLunchOut" type="time" />
+            </label>
+            <label>Lunch In <span class="muted">(optional)</span>
+              <input id="adminCreateLunchIn" type="time" />
+            </label>
+            <label>Clock Out <span class="muted">(optional)</span>
+              <input id="adminCreateClockOut" type="time" />
+            </label>
+            <label class="admin-create-notes">Notes <span class="muted">(optional)</span>
+              <input id="adminCreateNotes" type="text" maxlength="500" placeholder="Reason for manual entry" />
+            </label>
+            <div class="admin-create-actions">
+              <button id="btnAdminCreate" class="btn btn-warning" type="button">Add Time Entry</button>
+            </div>
+          </div>
+        </div>
+        <p class="muted admin-edit-note">Existing changes are saved one employee row at a time.</p>
         <div class="table-wrap"><table id="adminTable"></table></div>
       </div>
     </div>
