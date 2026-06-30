@@ -37,6 +37,11 @@ export async function init(ctx) {
       if (e.key === "Enter" || e.key === " ") routeToUsers();
     });
 
+    $("#goto-tenant-settings")?.addEventListener("click", routeToTenants);
+    $("#goto-tenant-settings")?.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" || e.key === " ") routeToTenants();
+    });
+
     $("#goto-marketplace-settings")?.addEventListener("click", routeToMarketplaces);
     $("#goto-marketplace-settings")?.addEventListener("keydown", (e) => {
       if (e.key === "Enter" || e.key === " ") routeToMarketplaces();
@@ -78,6 +83,10 @@ export async function init(ctx) {
   function routeToUsers() {
     // Your router uses '?page=<key>' keys (see router.js)
     window.router?.go?.("?page=settings-users") || (window.location.href = "?page=settings-users");
+  }
+
+  function routeToTenants() {
+    window.router?.go?.("?page=settings-tenants") || (window.location.href = "?page=settings-tenants");
   }
 
   function routeToMarketplaces() {
