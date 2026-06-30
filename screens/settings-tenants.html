@@ -1,19 +1,30 @@
 <section class="tile" data-screen="settings-tenants">
-  <h2>Tenants</h2>
-  <p class="text-muted">Create tenants for ResellPro Employees or other separate workspaces. The creator is added as the owner of each new tenant.</p>
+  <h2>Tenants / Workspaces</h2>
+  <p class="text-muted">Create tenant workspaces and optionally place them under an Organization and Business. Tenant-level behavior remains the operational workspace/location boundary.</p>
 
   <div id="tenantBanner" class="banner" hidden></div>
 
   <form id="tenantForm" class="tile" style="margin:12px 0 16px; max-width:720px;">
-    <h3>Add tenant</h3>
+    <h3>Add tenant workspace</h3>
     <div class="grid grid-2">
       <label>
-        Tenant name
-        <input id="tenantName" name="name" type="text" autocomplete="organization" placeholder="ResellPro Employees" required>
+        Organization
+        <input id="tenantOrganizationName" name="organization_name" type="text" autocomplete="organization" placeholder="JNM Industries">
+      </label>
+      <label>
+        Business
+        <input id="tenantBusinessName" name="business_name" type="text" autocomplete="organization-title" placeholder="Mad Rad Retro Toys">
+      </label>
+    </div>
+    <p class="text-muted">Use Organization for the umbrella account and Business for the operating brand. Leave both blank only for legacy/internal standalone workspaces.</p>
+    <div class="grid grid-2">
+      <label>
+        Tenant workspace name
+        <input id="tenantName" name="name" type="text" autocomplete="organization" placeholder="Mad Rad Retro Toys Wheat Ridge" required>
       </label>
       <label>
         Slug
-        <input id="tenantSlug" name="slug" type="text" autocomplete="off" placeholder="resellpro-employees">
+        <input id="tenantSlug" name="slug" type="text" autocomplete="off" placeholder="mad-rad-retro-toys-wheat-ridge">
       </label>
     </div>
     <div class="grid grid-3">
@@ -46,7 +57,7 @@
         <input id="tenantLogo" name="logo" type="file" accept="image/*">
       </label>
     </div>
-    <p class="text-muted">The slug is used as the tenant's unique short name. Leave it blank to generate one from the tenant name. Logos are uploaded to Cloudflare R2 under Tenant Logos/.</p>
+    <p class="text-muted">The slug is used as the tenant workspace's unique short name. Leave it blank to generate one from the tenant name. Logos are uploaded to Cloudflare R2 under Tenant Logos/.</p>
     <div class="flex" style="gap:10px; flex-wrap:wrap; margin-top:12px;">
       <button id="btnCreateTenant" class="btn btn--primary btn--sm" type="submit">Create tenant</button>
       <button id="btnRefreshTenants" class="btn btn--neutral btn--sm" type="button">Refresh</button>

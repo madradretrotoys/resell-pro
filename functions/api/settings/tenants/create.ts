@@ -41,6 +41,65 @@ function slugify(value: string) {
     .slice(0, 80);
 }
 
+async function ensureOrganizationAndBusiness(sql: ReturnType<typeof neon>, actorUserId: string, body: any) {
+  const organizationName = cleanOptionalText(body.organization_name, 255);
+  const businessName = cleanOptionalText(body.business_name, 255);
+
+  if (!organizationName && !businessName) return null;
+  if (!organizationName) throw new Error("missing_organization_name");
+  if (!businessName) throw new Error("missing_business_name");
+
+  const requestedOrganizationSlug = cleanOptionalText(body.organization_slug, 80);
+  const organizationSlug = slugify(requestedOrganizationSlug || organizationName);
+  const requestedBusinessSlug = cleanOptionalText(body.business_slug, 80);
+  const businessSlug = slugify(requestedBusinessSlug || businessName);
+
+  if (!organizationSlug) throw new Error("invalid_organization_slug");
+  if (!businessSlug) throw new Error("invalid_business_slug");
+
+  const [organization] = await sql/*sql*/`
+    INSERT INTO app.organizations (name, slug, created_by_user_id, updated_by_user_id)
+    VALUES (${organizationName}, ${organizationSlug}, ${actorUserId}, ${actorUserId})
+    ON CONFLICT (slug) DO UPDATE SET
+      name = EXCLUDED.name,
+      status = 'active',
+      updated_by_user_id = EXCLUDED.updated_by_user_id,
+      updated_at = now()
+    RETURNING organization_id, name, slug
+  `;
+
+  await sql/*sql*/`
+    INSERT INTO app.organization_memberships (organization_id, user_id, role, active)
+    VALUES (${organization.organization_id}, ${actorUserId}, 'owner', true)
+    ON CONFLICT (organization_id, user_id) DO UPDATE SET
+      role = EXCLUDED.role,
+      active = true,
+      updated_at = now()
+  `;
+
+  const [business] = await sql/*sql*/`
+    INSERT INTO app.businesses (organization_id, name, slug, created_by_user_id, updated_by_user_id)
+    VALUES (${organization.organization_id}, ${businessName}, ${businessSlug}, ${actorUserId}, ${actorUserId})
+    ON CONFLICT (organization_id, slug) DO UPDATE SET
+      name = EXCLUDED.name,
+      status = 'active',
+      updated_by_user_id = EXCLUDED.updated_by_user_id,
+      updated_at = now()
+    RETURNING business_id, organization_id, name, slug
+  `;
+
+  await sql/*sql*/`
+    INSERT INTO app.business_memberships (business_id, user_id, role, active)
+    VALUES (${business.business_id}, ${actorUserId}, 'owner', true)
+    ON CONFLICT (business_id, user_id) DO UPDATE SET
+      role = EXCLUDED.role,
+      active = true,
+      updated_at = now()
+  `;
+
+  return { organization, business };
+}
+
 export const onRequestPost: PagesFunction = async ({ request, env }) => {
   try {
     const auth = await requireSessionActor(request, env, json);
@@ -99,6 +158,8 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
     if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return json({ ok: false, error: "invalid_email" }, 400);
     if (logoFile && !/^image\//i.test(logoFile.type || "")) return json({ ok: false, error: "logo_not_image" }, 400);
 
+    const hierarchy = await ensureOrganizationAndBusiness(sql, auth.actor_user_id, body);
+
     let logoBytes: ArrayBuffer | null = null;
     let logoContentType = "";
     let logoSha256Hex = "";
@@ -114,9 +175,9 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
 
     const [created] = await sql/*sql*/`
       WITH new_tenant AS (
-        INSERT INTO app.tenants (name, slug, "Street Address", "City", "State", "Zip", "Phone", email)
-        VALUES (${name}, ${slug}, ${streetAddress}, ${city}, ${state}, ${zip}, ${phone}, ${email})
-        RETURNING tenant_id, name, slug, "Street Address" AS street_address, "City" AS city, "State" AS state, "Zip" AS zip, "Phone" AS phone, email, created_at
+        INSERT INTO app.tenants (name, slug, business_id, "Street Address", "City", "State", "Zip", "Phone", email)
+        VALUES (${name}, ${slug}, ${hierarchy?.business?.business_id || null}, ${streetAddress}, ${city}, ${state}, ${zip}, ${phone}, ${email})
+        RETURNING tenant_id, name, slug, business_id, "Street Address" AS street_address, "City" AS city, "State" AS state, "Zip" AS zip, "Phone" AS phone, email, created_at
       ), new_membership AS (
         INSERT INTO app.memberships (tenant_id, user_id, role, active)
         SELECT tenant_id, ${auth.actor_user_id}, 'owner', true
@@ -128,7 +189,7 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
         FROM new_tenant
         ON CONFLICT (tenant_id) DO NOTHING
       )
-      SELECT tenant_id, name, slug, street_address, city, state, zip, phone, email, created_at
+      SELECT tenant_id, name, slug, business_id, street_address, city, state, zip, phone, email, created_at
       FROM new_tenant
     `;
 
@@ -147,10 +208,14 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
       logo = insertedLogo;
     }
 
-    return json({ ok: true, tenant: created, logo });
+    return json({ ok: true, tenant: created, organization: hierarchy?.organization || null, business: hierarchy?.business || null, logo });
   } catch (e: any) {
     const message = e?.message || String(e);
     if (message.includes("tenants_slug_key")) return json({ ok: false, error: "slug_exists" }, 409);
+    if (message === "missing_organization_name") return json({ ok: false, error: message }, 400);
+    if (message === "missing_business_name") return json({ ok: false, error: message }, 400);
+    if (message === "invalid_organization_slug") return json({ ok: false, error: message }, 400);
+    if (message === "invalid_business_slug") return json({ ok: false, error: message }, 400);
     return json({ ok: false, error: "server_error", message }, 500);
   }
 };

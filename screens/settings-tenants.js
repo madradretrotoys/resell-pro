@@ -9,6 +9,8 @@ export async function init({ session }) {
 
   els.banner = $('tenantBanner');
   els.form = $('tenantForm');
+  els.organizationName = $('tenantOrganizationName');
+  els.businessName = $('tenantBusinessName');
   els.name = $('tenantName');
   els.slug = $('tenantSlug');
   els.streetAddress = $('tenantStreetAddress');
@@ -53,11 +55,18 @@ async function createTenant(event) {
   event.preventDefault();
   const name = els.name?.value.trim() || '';
   const slug = slugify(els.slug?.value || name);
+  const organizationName = els.organizationName?.value.trim() || '';
+  const businessName = els.businessName?.value.trim() || '';
   if (!name) return showBanner('Tenant name is required.', 'error');
+  if ((organizationName && !businessName) || (!organizationName && businessName)) {
+    return showBanner('Enter both Organization and Business, or leave both blank for a standalone workspace.', 'error');
+  }
 
   const body = new FormData();
   body.set('name', name);
   body.set('slug', slug);
+  body.set('organization_name', organizationName);
+  body.set('business_name', businessName);
   body.set('street_address', els.streetAddress?.value.trim() || '');
   body.set('city', els.city?.value.trim() || '');
   body.set('state', els.state?.value.trim() || '');
@@ -78,6 +87,8 @@ async function createTenant(event) {
     const error = e?.data?.error;
     const message = error === 'slug_exists'
       ? 'That slug is already in use. Choose another slug.'
+      : error === 'missing_organization_name' || error === 'missing_business_name'
+        ? 'Enter both Organization and Business, or leave both blank for a standalone workspace.'
       : error === 'forbidden'
         ? 'You do not have permission to create tenants.'
         : error === 'invalid_email'
@@ -97,6 +108,8 @@ function renderTable(tenants) {
   if (!tenants.length) return '<div class="muted">No tenants yet.</div>';
   const rows = tenants.map((tenant) => `
     <tr>
+      <td>${escapeHtml(tenant.organization_name || '—')}</td>
+      <td>${escapeHtml(tenant.business_name || '—')}</td>
       <td>${escapeHtml(tenant.name)}</td>
       <td>${escapeHtml(tenant.slug)}</td>
       <td>${escapeHtml(formatLocation(tenant))}</td>
@@ -111,7 +124,7 @@ function renderTable(tenants) {
   return `
     <table class="table">
       <thead>
-        <tr><th>Name</th><th>Slug</th><th>Location</th><th>Phone</th><th>Email</th><th>Logo</th><th>Your role</th><th>Your access active</th><th>Created</th></tr>
+        <tr><th>Organization</th><th>Business</th><th>Tenant workspace</th><th>Slug</th><th>Location</th><th>Phone</th><th>Email</th><th>Logo</th><th>Your role</th><th>Your access active</th><th>Created</th></tr>
       </thead>
       <tbody>${rows}</tbody>
     </table>
