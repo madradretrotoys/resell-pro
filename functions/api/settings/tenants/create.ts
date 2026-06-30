@@ -87,6 +87,7 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
     const name = String(body.name || "").trim();
     const requestedSlug = String(body.slug || "").trim();
     const slug = slugify(requestedSlug || name);
+    const streetAddress = cleanOptionalText(body.street_address, 255);
     const city = cleanOptionalText(body.city, 100);
     const state = cleanOptionalText(body.state, 50);
     const zip = cleanDigitsText(body.zip, 16);
@@ -113,9 +114,9 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
 
     const [created] = await sql/*sql*/`
       WITH new_tenant AS (
-        INSERT INTO app.tenants (name, slug, "City", "State", "Zip", "Phone", email)
-        VALUES (${name}, ${slug}, ${city}, ${state}, ${zip}, ${phone}, ${email})
-        RETURNING tenant_id, name, slug, "City" AS city, "State" AS state, "Zip" AS zip, "Phone" AS phone, email, created_at
+        INSERT INTO app.tenants (name, slug, "Street Address", "City", "State", "Zip", "Phone", email)
+        VALUES (${name}, ${slug}, ${streetAddress}, ${city}, ${state}, ${zip}, ${phone}, ${email})
+        RETURNING tenant_id, name, slug, "Street Address" AS street_address, "City" AS city, "State" AS state, "Zip" AS zip, "Phone" AS phone, email, created_at
       ), new_membership AS (
         INSERT INTO app.memberships (tenant_id, user_id, role, active)
         SELECT tenant_id, ${auth.actor_user_id}, 'owner', true
@@ -127,7 +128,7 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
         FROM new_tenant
         ON CONFLICT (tenant_id) DO NOTHING
       )
-      SELECT tenant_id, name, slug, city, state, zip, phone, email, created_at
+      SELECT tenant_id, name, slug, street_address, city, state, zip, phone, email, created_at
       FROM new_tenant
     `;
 

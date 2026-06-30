@@ -11,6 +11,7 @@ export async function init({ session }) {
   els.form = $('tenantForm');
   els.name = $('tenantName');
   els.slug = $('tenantSlug');
+  els.streetAddress = $('tenantStreetAddress');
   els.city = $('tenantCity');
   els.state = $('tenantState');
   els.zip = $('tenantZip');
@@ -57,6 +58,7 @@ async function createTenant(event) {
   const body = new FormData();
   body.set('name', name);
   body.set('slug', slug);
+  body.set('street_address', els.streetAddress?.value.trim() || '');
   body.set('city', els.city?.value.trim() || '');
   body.set('state', els.state?.value.trim() || '');
   body.set('zip', els.zip?.value.trim() || '');
@@ -97,7 +99,7 @@ function renderTable(tenants) {
     <tr>
       <td>${escapeHtml(tenant.name)}</td>
       <td>${escapeHtml(tenant.slug)}</td>
-      <td>${escapeHtml([tenant.city, tenant.state, tenant.zip].filter(Boolean).join(', ') || '—')}</td>
+      <td>${escapeHtml(formatLocation(tenant))}</td>
       <td>${escapeHtml(tenant.phone || '—')}</td>
       <td>${escapeHtml(tenant.email || '—')}</td>
       <td>${tenant.logo_url ? `<img src="${escapeHtml(tenant.logo_url)}" alt="${escapeHtml(tenant.name)} logo" style="max-height:32px; max-width:80px; object-fit:contain;">` : '—'}</td>
@@ -114,6 +116,11 @@ function renderTable(tenants) {
       <tbody>${rows}</tbody>
     </table>
   `;
+}
+
+function formatLocation(tenant) {
+  const cityStateZip = [tenant.city, tenant.state, tenant.zip].filter(Boolean).join(', ');
+  return [tenant.street_address, cityStateZip].filter(Boolean).join(' • ') || '—';
 }
 
 function slugify(value) {

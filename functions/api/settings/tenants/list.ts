@@ -40,6 +40,7 @@ export const onRequestGet: PagesFunction = async ({ request, env }) => {
 
     const tenants = await sql/*sql*/`
       SELECT t.tenant_id, t.name, t.slug, t.created_at,
+             t."Street Address" AS street_address,
              t."City" AS city, t."State" AS state, t."Zip" AS zip, t."Phone" AS phone, t.email,
              tl.cdn_url AS logo_url,
              COALESCE(m.role::text, '') AS actor_role,
