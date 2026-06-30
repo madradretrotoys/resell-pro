@@ -145,8 +145,10 @@ function renderStructure(tenants) {
   const editPanelHtml = renderActiveTenantEditor();
   const orgHtml = organizations.map((org) => {
     const orgBusinesses = businesses.filter((b) => b.organization_id === org.organization_id);
-    const businessHtml = orgBusinesses.length ? orgBusinesses.map((business) => renderBusiness(business, tenants)).join('') : '<div class="muted" style="margin:8px 0 0 16px;">No businesses yet.</div>';
-    return `<section class="tile" style="margin:12px 0;"><h3>${escapeHtml(org.name)}</h3><p class="text-muted">Organization slug: ${escapeHtml(org.slug)}</p>${businessHtml}</section>`;
+    if (!orgBusinesses.length) {
+      return `<section class="tile" style="margin:10px 0;"><h3 style="margin:0;">${escapeHtml(org.name)}</h3><div class="muted" style="margin-top:8px;">No businesses yet.</div></section>`;
+    }
+    return orgBusinesses.map((business) => renderBusiness(org, business, tenants)).join('');
   }).join('');
   const unassigned = tenants.filter((t) => !t.business_id);
   const unassignedHtml = unassigned.length
@@ -155,9 +157,9 @@ function renderStructure(tenants) {
   return editPanelHtml + orgHtml + unassignedHtml;
 }
 
-function renderBusiness(business, tenants) {
+function renderBusiness(org, business, tenants) {
   const businessTenants = tenants.filter((t) => t.business_id === business.business_id);
-  return `<div style="margin:12px 0 0 16px;"><h4>${escapeHtml(business.name)}</h4><p class="text-muted">Business slug: ${escapeHtml(business.slug)}</p>${businessTenants.length ? renderTenantTable(businessTenants) : '<div class="muted">No tenants/locations yet.</div>'}</div>`;
+  return `<section class="tile" style="margin:10px 0;"><h3 style="margin:0 0 10px;">${escapeHtml(org.name)} / ${escapeHtml(business.name)}</h3>${businessTenants.length ? renderTenantTable(businessTenants) : '<div class="muted">No tenants/locations yet.</div>'}</section>`;
 }
 
 
