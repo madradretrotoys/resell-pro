@@ -8,6 +8,10 @@ function slugify(value: string) {
   return value.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 80);
 }
 
+function isUuid(value: string) {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
+}
+
 export const onRequestGet: PagesFunction = async ({ request, env }) => {
   try {
     const auth = await requireSessionActor(request, env, json);
@@ -49,12 +53,72 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
     if ("error" in auth) return auth.error;
     const body: any = await request.json().catch(() => ({}));
     const type = String(body.type || "").trim();
+
+    const sql = neon(String(env.DATABASE_URL));
+
+    if (type === "tenant_business") {
+      const tenantId = String(body.tenant_id || "").trim();
+      const businessId = String(body.business_id || "").trim();
+      if (!isUuid(tenantId)) return json({ ok: false, error: "invalid_tenant" }, 400);
+      if (businessId && !isUuid(businessId)) return json({ ok: false, error: "invalid_business" }, 400);
+
+      const [access] = await sql<{ ok: boolean }[]>`
+        SELECT (
+          EXISTS (
+            SELECT 1
+            FROM app.memberships m
+            WHERE m.tenant_id = ${tenantId}::uuid
+              AND m.user_id = ${auth.actor_user_id}
+              AND m.active = true
+              AND m.role IN ('owner','admin','manager')
+          )
+          OR EXISTS (
+            SELECT 1
+            FROM app.permissions p
+            WHERE p.user_id = ${auth.actor_user_id}
+              AND COALESCE(p.can_add_tenant, false) = true
+          )
+        ) AS ok
+      `;
+      if (!access?.ok) return json({ ok: false, error: "forbidden" }, 403);
+
+      if (businessId) {
+        const [businessAccess] = await sql<{ ok: boolean }[]>`
+          SELECT (
+            EXISTS (
+              SELECT 1
+              FROM app.business_memberships bm
+              WHERE bm.business_id = ${businessId}::uuid
+                AND bm.user_id = ${auth.actor_user_id}
+                AND bm.active = true
+                AND bm.role IN ('owner','admin','manager')
+            )
+            OR EXISTS (
+              SELECT 1
+              FROM app.permissions p
+              WHERE p.user_id = ${auth.actor_user_id}
+                AND COALESCE(p.can_add_tenant, false) = true
+            )
+          ) AS ok
+        `;
+        if (!businessAccess?.ok) return json({ ok: false, error: "forbidden_business" }, 403);
+      }
+
+      const [updated] = await sql/*sql*/`
+        UPDATE app.tenants
+        SET business_id = ${businessId || null}::uuid
+        WHERE tenant_id = ${tenantId}::uuid
+        RETURNING tenant_id, business_id, name, slug
+      `;
+      if (!updated) return json({ ok: false, error: "tenant_not_found" }, 404);
+      return json({ ok: true, tenant: updated });
+    }
+
     const name = String(body.name || "").trim();
     const slug = slugify(String(body.slug || name));
     if (!name) return json({ ok: false, error: "missing_name" }, 400);
     if (!slug) return json({ ok: false, error: "invalid_slug" }, 400);
 
-    const sql = neon(String(env.DATABASE_URL));
     if (type === "organization") {
       const [created] = await sql/*sql*/`
         WITH new_org AS (

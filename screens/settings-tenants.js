@@ -26,6 +26,7 @@ export async function init({ session }) {
   els.businessForm?.addEventListener('submit', createBusiness);
   els.form?.addEventListener('submit', createTenant);
   els.refreshButton?.addEventListener('click', refresh);
+  els.table?.addEventListener('click', handleTenantTableClick);
 
   await refresh();
 }
@@ -158,9 +159,56 @@ function renderBusiness(business, tenants) {
 
 function renderTenantTable(items) {
   const rows = items.map((tenant) => `
-    <tr><td>${escapeHtml(tenant.name)}</td><td>${escapeHtml(tenant.slug)}</td><td>${escapeHtml(formatLocation(tenant))}</td><td>${escapeHtml(tenant.phone || '—')}</td><td>${escapeHtml(tenant.email || '—')}</td><td>${tenant.logo_url ? `<img src="${escapeHtml(tenant.logo_url)}" alt="${escapeHtml(tenant.name)} logo" style="max-height:32px; max-width:80px; object-fit:contain;">` : '—'}</td><td>${formatDate(tenant.created_at)}</td></tr>
+    <tr>
+      <td>${escapeHtml(tenant.name)}</td>
+      <td>${escapeHtml(tenant.slug)}</td>
+      <td>${escapeHtml(formatLocation(tenant))}</td>
+      <td>${escapeHtml(tenant.phone || '—')}</td>
+      <td>${escapeHtml(tenant.email || '—')}</td>
+      <td>${tenant.logo_url ? `<img src="${escapeHtml(tenant.logo_url)}" alt="${escapeHtml(tenant.name)} logo" style="max-height:32px; max-width:80px; object-fit:contain;">` : '—'}</td>
+      <td>${formatDate(tenant.created_at)}</td>
+      <td>${renderTenantBusinessEditor(tenant)}</td>
+    </tr>
   `).join('');
-  return `<table class="table"><thead><tr><th>Tenant/location</th><th>Slug</th><th>Location</th><th>Phone</th><th>Email</th><th>Logo</th><th>Created</th></tr></thead><tbody>${rows}</tbody></table>`;
+  return `<table class="table"><thead><tr><th>Tenant/location</th><th>Slug</th><th>Location</th><th>Phone</th><th>Email</th><th>Logo</th><th>Created</th><th>Business assignment</th></tr></thead><tbody>${rows}</tbody></table>`;
+}
+
+function renderTenantBusinessEditor(tenant) {
+  const options = ['<option value="">Unassigned</option>'].concat(
+    businesses.map((business) => {
+      const selected = tenant.business_id === business.business_id ? ' selected' : '';
+      return `<option value="${escapeHtml(business.business_id)}"${selected}>${escapeHtml(orgName(business.organization_id))} / ${escapeHtml(business.name)}</option>`;
+    })
+  ).join('');
+  return `
+    <div class="flex" style="gap:8px; align-items:center; flex-wrap:wrap;">
+      <select data-tenant-business="${escapeHtml(tenant.tenant_id)}" style="min-width:220px;">${options}</select>
+      <button class="btn btn--neutral btn--sm" type="button" data-assign-tenant="${escapeHtml(tenant.tenant_id)}">Save</button>
+    </div>
+  `;
+}
+
+async function handleTenantTableClick(event) {
+  const button = event.target?.closest?.('[data-assign-tenant]');
+  if (!button) return;
+  const tenant_id = button.dataset.assignTenant || '';
+  const select = els.table?.querySelector?.(`[data-tenant-business="${cssEscape(tenant_id)}"]`);
+  if (!tenant_id || !select) return;
+
+  button.disabled = true;
+  try {
+    await api('/api/settings/tenants/structure', {
+      method: 'POST',
+      body: { type: 'tenant_business', tenant_id, business_id: select.value || '' },
+    });
+    showBanner('Tenant business assignment updated.', 'success');
+    await refresh();
+  } catch (e) {
+    const error = e?.data?.error;
+    showBanner(error === 'forbidden_business' ? 'You do not have permission to assign tenants to that business.' : 'Tenant business assignment failed.', 'error');
+  } finally {
+    button.disabled = false;
+  }
 }
 
 function orgName(id) { return organizations.find((o) => o.organization_id === id)?.name || 'Unassigned organization'; }
@@ -168,4 +216,5 @@ function formatLocation(tenant) { const cityStateZip = [tenant.city, tenant.stat
 function slugify(value) { return String(value || '').trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 80); }
 function formatDate(value) { const date = new Date(value); return value && !Number.isNaN(date.getTime()) ? date.toLocaleString() : '—'; }
 function showBanner(message, tone = 'info') { if (!els.banner) return; els.banner.textContent = message; els.banner.className = `banner ${tone}`; els.banner.hidden = false; }
+function cssEscape(value) { return window.CSS?.escape ? window.CSS.escape(value) : String(value).replace(/[^a-zA-Z0-9_-]/g, '\\$&'); }
 function escapeHtml(s) { return String(s ?? '').replace(/[&<>"']/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c])); }
