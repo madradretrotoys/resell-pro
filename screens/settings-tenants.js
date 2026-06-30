@@ -173,15 +173,15 @@ function renderTenantTable(items) {
         <td style="width:190px;">${escapeHtml(tenant.email || '—')}</td>
         <td style="width:90px; text-align:center;">${tenant.logo_url ? `<img src="${escapeHtml(tenant.logo_url)}" alt="${escapeHtml(tenant.name)} logo" style="max-height:32px; max-width:64px; object-fit:contain;">` : '—'}</td>
         <td style="width:140px;">${formatDate(tenant.created_at)}</td>
-        <td style="width:360px;">${renderTenantActions(tenant, isEditing)}</td>
+        <td style="width:130px;">${renderTenantActions(tenant, isEditing)}</td>
       </tr>
     `;
   }).join('');
   return `
     <div style="overflow-x:auto; max-width:100%; padding-bottom:10px;" aria-label="Tenant assignments table scroll area">
-      <table class="table" style="min-width:1355px; width:1355px; table-layout:fixed;">
+      <table class="table" style="min-width:1125px; width:1125px; table-layout:fixed;">
         <thead>
-          <tr><th style="width:150px;">Tenant/location</th><th style="width:120px;">Slug</th><th style="width:180px;">Location</th><th style="width:125px;">Phone</th><th style="width:190px;">Email</th><th style="width:90px;">Logo</th><th style="width:140px;">Created</th><th style="width:360px;">Actions</th></tr>
+          <tr><th style="width:150px;">Tenant/location</th><th style="width:120px;">Slug</th><th style="width:180px;">Location</th><th style="width:125px;">Phone</th><th style="width:190px;">Email</th><th style="width:90px;">Logo</th><th style="width:140px;">Created</th><th style="width:130px;">Actions</th></tr>
         </thead>
         <tbody>${rows}</tbody>
       </table>
@@ -190,18 +190,8 @@ function renderTenantTable(items) {
 }
 
 function renderTenantActions(tenant, isEditing = false) {
-  const options = ['<option value="">Unassigned</option>'].concat(
-    businesses.map((business) => {
-      const selected = tenant.business_id === business.business_id ? ' selected' : '';
-      return `<option value="${escapeHtml(business.business_id)}"${selected}>${escapeHtml(orgName(business.organization_id))} / ${escapeHtml(business.name)}</option>`;
-    })
-  ).join('');
   return `
-    <div class="flex" style="gap:8px; align-items:center; flex-wrap:wrap; max-width:340px;">
-      <button class="btn btn--neutral btn--sm" type="button" data-edit-tenant="${escapeHtml(tenant.tenant_id)}">${isEditing ? 'Editing fields' : 'Edit fields'}</button>
-      <select data-tenant-business="${escapeHtml(tenant.tenant_id)}" style="width:220px; max-width:100%;" aria-label="Business assignment for ${escapeHtml(tenant.name)}">${options}</select>
-      <button class="btn btn--neutral btn--sm" type="button" data-assign-tenant="${escapeHtml(tenant.tenant_id)}">Save assignment</button>
-    </div>
+    <button class="btn btn--neutral btn--sm" type="button" data-edit-tenant="${escapeHtml(tenant.tenant_id)}">${isEditing ? 'Editing' : 'Edit fields'}</button>
   `;
 }
 
@@ -256,26 +246,6 @@ async function handleTenantTableClick(event) {
     return;
   }
 
-  const button = event.target?.closest?.('[data-assign-tenant]');
-  if (!button) return;
-  const tenant_id = button.dataset.assignTenant || '';
-  const select = els.table?.querySelector?.(`[data-tenant-business="${cssEscape(tenant_id)}"]`);
-  if (!tenant_id || !select) return;
-
-  button.disabled = true;
-  try {
-    await api('/api/settings/tenants/structure', {
-      method: 'POST',
-      body: { type: 'tenant_business', tenant_id, business_id: select.value || '' },
-    });
-    showBanner('Tenant business assignment updated.', 'success');
-    await refresh();
-  } catch (e) {
-    const error = e?.data?.error;
-    showBanner(error === 'forbidden_business' ? 'You do not have permission to assign tenants to that business.' : 'Tenant business assignment failed.', 'error');
-  } finally {
-    button.disabled = false;
-  }
 }
 
 function startTenantEdit(tenantId) {
