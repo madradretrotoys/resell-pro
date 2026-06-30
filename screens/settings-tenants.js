@@ -160,17 +160,26 @@ function renderBusiness(business, tenants) {
 function renderTenantTable(items) {
   const rows = items.map((tenant) => `
     <tr>
-      <td>${escapeHtml(tenant.name)}</td>
-      <td>${escapeHtml(tenant.slug)}</td>
-      <td>${escapeHtml(formatLocation(tenant))}</td>
-      <td>${escapeHtml(tenant.phone || '—')}</td>
-      <td>${escapeHtml(tenant.email || '—')}</td>
-      <td>${tenant.logo_url ? `<img src="${escapeHtml(tenant.logo_url)}" alt="${escapeHtml(tenant.name)} logo" style="max-height:32px; max-width:80px; object-fit:contain;">` : '—'}</td>
-      <td>${formatDate(tenant.created_at)}</td>
-      <td>${renderTenantBusinessEditor(tenant)}</td>
+      <td style="width:150px;">${escapeHtml(tenant.name)}</td>
+      <td style="width:120px;">${escapeHtml(tenant.slug)}</td>
+      <td style="width:180px;">${escapeHtml(formatLocation(tenant))}</td>
+      <td style="width:125px;">${escapeHtml(tenant.phone || '—')}</td>
+      <td style="width:190px;">${escapeHtml(tenant.email || '—')}</td>
+      <td style="width:90px; text-align:center;">${tenant.logo_url ? `<img src="${escapeHtml(tenant.logo_url)}" alt="${escapeHtml(tenant.name)} logo" style="max-height:32px; max-width:64px; object-fit:contain;">` : '—'}</td>
+      <td style="width:140px;">${formatDate(tenant.created_at)}</td>
+      <td style="width:290px;">${renderTenantBusinessEditor(tenant)}</td>
     </tr>
   `).join('');
-  return `<table class="table"><thead><tr><th>Tenant/location</th><th>Slug</th><th>Location</th><th>Phone</th><th>Email</th><th>Logo</th><th>Created</th><th>Business assignment</th></tr></thead><tbody>${rows}</tbody></table>`;
+  return `
+    <div style="overflow-x:auto; max-width:100%; padding-bottom:10px;" aria-label="Tenant assignments table scroll area">
+      <table class="table" style="min-width:1285px; width:1285px; table-layout:fixed;">
+        <thead>
+          <tr><th style="width:150px;">Tenant/location</th><th style="width:120px;">Slug</th><th style="width:180px;">Location</th><th style="width:125px;">Phone</th><th style="width:190px;">Email</th><th style="width:90px;">Logo</th><th style="width:140px;">Created</th><th style="width:290px;">Business assignment</th></tr>
+        </thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </div>
+  `;
 }
 
 function renderTenantBusinessEditor(tenant) {
@@ -181,8 +190,8 @@ function renderTenantBusinessEditor(tenant) {
     })
   ).join('');
   return `
-    <div class="flex" style="gap:8px; align-items:center; flex-wrap:wrap;">
-      <select data-tenant-business="${escapeHtml(tenant.tenant_id)}" style="min-width:220px;">${options}</select>
+    <div class="flex" style="gap:8px; align-items:center; flex-wrap:wrap; max-width:270px;">
+      <select data-tenant-business="${escapeHtml(tenant.tenant_id)}" style="width:220px; max-width:100%;">${options}</select>
       <button class="btn btn--neutral btn--sm" type="button" data-assign-tenant="${escapeHtml(tenant.tenant_id)}">Save</button>
     </div>
   `;
