@@ -27,7 +27,7 @@ export async function init(){
   $('role').value = u.role || 'clerk';
 
   ['can_pos','can_cash_drawer','can_cash_payouts','can_item_research','can_inventory',
-   'can_inventory_intake','can_drop_off_form','can_estimates_buy_tickets','can_timekeeping','clockin_required','can_settings',
+   'can_inventory_intake','can_drop_off_form','can_estimates_buy_tickets','can_timekeeping','clockin_required','can_settings','can_add_tenant',
    'notify_cash_drawer','notify_daily_sales_summary'].forEach(k => { $(k).checked = !!u[k]; });
 
   $('discount_max').value = (u.discount_max ?? '');
@@ -81,7 +81,8 @@ function collect(){
       can_estimates_buy_tickets: $('can_estimates_buy_tickets').checked,
       can_timekeeping: $('can_timekeeping').checked,
       clockin_required: $('clockin_required').checked,
-      can_settings: $('can_settings').checked
+      can_settings: $('can_settings').checked,
+      can_add_tenant: $('can_add_tenant').checked
     },
     notifications: {
       notify_cash_drawer: $('notify_cash_drawer').checked,

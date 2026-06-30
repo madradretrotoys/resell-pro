@@ -84,7 +84,7 @@ function renderTable(users){
     });
     // Optional: Edit click hook (placeholder)
     document.querySelectorAll('#usersTable [data-edit]').forEach(b => {
-      b.onclick = () => alert('Edit user will be added in a later phase.');
+      b.onclick = () => { location.href = `?page=settings-user-edit&user_id=${encodeURIComponent(b.dataset.edit)}`; };
     });
     // Normalize button roles within each btn-group
     document.querySelectorAll('#usersTable .btn-group').forEach(g => applyButtonGroupColors(g));
