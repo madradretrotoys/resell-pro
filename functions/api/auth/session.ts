@@ -25,30 +25,52 @@ export const onRequestGet: PagesFunction = async ({ request, env }) => {
       email: (payload as any).email ?? null,
     };
 
-    // Read active tenant from secure cookie if present; if missing, auto-select
-    // a single active membership and set cookie once (self-heal).
+    // Read active tenant from secure cookie. If it is missing/stale, select an
+    // active tenant membership so tenant-scoped screens can keep sending
+    // x-tenant-id even after users gain additional tenant memberships.
+    const sql = neon(String(env.DATABASE_URL));
     let active_tenant_id = readCookie(cookieHeader, "__Host-rp_tenant") || null;
     let setCookieHeader: string | null = null;
-    
+
+    if (active_tenant_id) {
+      if (!isUuid(active_tenant_id)) {
+        dbg.push("session:tenant-cookie:malformed");
+        active_tenant_id = null;
+      } else {
+        const validRows = await sql/*sql*/`
+          SELECT 1
+          FROM app.memberships
+          WHERE tenant_id = ${active_tenant_id}::uuid
+            AND user_id = ${user.user_id}
+            AND active = true
+          LIMIT 1
+        `;
+        if (validRows.length === 0) {
+          dbg.push("session:tenant-cookie:invalid");
+          active_tenant_id = null;
+        } else {
+          dbg.push("session:tenant-cookie:valid");
+        }
+      }
+    }
+
     if (!active_tenant_id) {
-      const sql = neon(String(env.DATABASE_URL));
       const rows = await sql/*sql*/`
         SELECT tenant_id
         FROM app.memberships
         WHERE user_id = ${user.user_id} AND active = true
-        LIMIT 2
+        ORDER BY created_at DESC
+        LIMIT 1
       `;
       if (rows.length === 1) {
         active_tenant_id = String(rows[0].tenant_id);
-        setCookieHeader = `__Host-rp_tenant=${encodeURIComponent(
-          active_tenant_id
-        )}; Path=/; Secure; HttpOnly; SameSite=Lax; Max-Age=2592000`;
+        setCookieHeader = tenantCookie(active_tenant_id);
         dbg.push("session:auto-tenant:set");
       } else {
-        dbg.push("session:auto-tenant:skipped");
+        dbg.push("session:auto-tenant:none");
       }
     }
-    
+
     dbg.push("session:done:200");
     return send(200, { user, active_tenant_id }, setCookieHeader);
   } catch (e: any) {
@@ -57,16 +79,27 @@ export const onRequestGet: PagesFunction = async ({ request, env }) => {
     return send(401, { reason });
   }
 
-  function send(status: number, body: Record<string, any>) {
+  function send(status: number, body: Record<string, any>, setCookieHeader: string | null = null) {
     const headers = new Headers({
       "content-type": "application/json",
       "cache-control": "no-store",
       "vary": "Cookie",
       "x-rp-debug": dbg.join("|"),
     });
+    if (setCookieHeader) headers.append("set-cookie", setCookieHeader);
     return new Response(JSON.stringify({ ...body, debug: dbg }), { status, headers });
   }
 };
+
+function tenantCookie(tenant_id: string) {
+  return `__Host-rp_tenant=${encodeURIComponent(
+    tenant_id
+  )}; Path=/; Secure; HttpOnly; SameSite=Lax; Max-Age=2592000`;
+}
+
+function isUuid(value: string) {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
+}
 
 function readCookie(header: string, name: string): string | null {
   if (!header) return null;

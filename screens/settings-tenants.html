@@ -1,52 +1,47 @@
 <section class="tile" data-screen="settings-tenants">
-  <h2>Tenants</h2>
-  <p class="text-muted">Create tenants for ResellPro Employees or other separate workspaces. The creator is added as the owner of each new tenant.</p>
+  <h2>Organization Settings</h2>
+  <p class="text-muted">Create organizations, add businesses under each organization, then add tenant locations under each business.</p>
 
   <div id="tenantBanner" class="banner" hidden></div>
 
-  <form id="tenantForm" class="tile" style="margin:12px 0 16px; max-width:720px;">
-    <h3>Add tenant</h3>
+  <form id="organizationForm" class="tile" style="margin:12px 0 16px; max-width:720px;">
+    <h3>1. Add organization</h3>
     <div class="grid grid-2">
-      <label>
-        Tenant name
-        <input id="tenantName" name="name" type="text" autocomplete="organization" placeholder="ResellPro Employees" required>
-      </label>
-      <label>
-        Slug
-        <input id="tenantSlug" name="slug" type="text" autocomplete="off" placeholder="resellpro-employees">
-      </label>
+      <label>Organization name<input id="organizationName" name="name" type="text" autocomplete="organization" placeholder="JNM Industries" required></label>
+      <label>Slug<input id="organizationSlug" name="slug" type="text" autocomplete="off" placeholder="jnm-industries"></label>
+    </div>
+    <p class="text-muted">Use this for the corporate or parent company level.</p>
+    <button id="btnCreateOrganization" class="btn btn--primary btn--sm" type="submit">Create organization</button>
+  </form>
+
+  <form id="businessForm" class="tile" style="margin:12px 0 16px; max-width:720px;">
+    <h3>2. Add business</h3>
+    <div class="grid grid-3">
+      <label>Organization<select id="businessOrganization" name="organization_id" required></select></label>
+      <label>Business name<input id="businessName" name="name" type="text" autocomplete="organization" placeholder="Mad Rad Retro Toys" required></label>
+      <label>Slug<input id="businessSlug" name="slug" type="text" autocomplete="off" placeholder="mad-rad-retro-toys"></label>
+    </div>
+    <p class="text-muted">Use this for divisions, brands, districts, or business lines below the organization.</p>
+    <button id="btnCreateBusiness" class="btn btn--primary btn--sm" type="submit">Create business</button>
+  </form>
+
+  <form id="tenantForm" class="tile" style="margin:12px 0 16px; max-width:720px;">
+    <h3>3. Add tenant / location</h3>
+    <div class="grid grid-2">
+      <label>Business<select id="tenantBusiness" name="business_id"></select></label>
+      <label>Tenant/location name<input id="tenantName" name="name" type="text" autocomplete="organization" placeholder="Mad Rad Retro Toys Lakewood" required></label>
+      <label>Slug<input id="tenantSlug" name="slug" type="text" autocomplete="off" placeholder="mad-rad-retro-toys-lakewood"></label>
     </div>
     <div class="grid grid-3">
-      <label>
-        Street Address
-        <input id="tenantStreetAddress" name="street_address" type="text" autocomplete="street-address" placeholder="123 Main St">
-      </label>
-      <label>
-        City
-        <input id="tenantCity" name="city" type="text" autocomplete="address-level2" placeholder="Clemency">
-      </label>
-      <label>
-        State
-        <input id="tenantState" name="state" type="text" autocomplete="address-level1" placeholder="CO">
-      </label>
-      <label>
-        Zip
-        <input id="tenantZip" name="zip" type="text" inputmode="numeric" autocomplete="postal-code" placeholder="81234">
-      </label>
-      <label>
-        Phone #
-        <input id="tenantPhone" name="phone" type="tel" autocomplete="tel" placeholder="5551234567">
-      </label>
-      <label>
-        Email
-        <input id="tenantEmail" name="email" type="email" autocomplete="email" placeholder="store@example.com">
-      </label>
-      <label>
-        Logo
-        <input id="tenantLogo" name="logo" type="file" accept="image/*">
-      </label>
+      <label>Street Address<input id="tenantStreetAddress" name="street_address" type="text" autocomplete="street-address" placeholder="123 Main St"></label>
+      <label>City<input id="tenantCity" name="city" type="text" autocomplete="address-level2" placeholder="Clemency"></label>
+      <label>State<input id="tenantState" name="state" type="text" autocomplete="address-level1" placeholder="CO"></label>
+      <label>Zip<input id="tenantZip" name="zip" type="text" inputmode="numeric" autocomplete="postal-code" placeholder="81234"></label>
+      <label>Phone #<input id="tenantPhone" name="phone" type="tel" autocomplete="tel" placeholder="5551234567"></label>
+      <label>Email<input id="tenantEmail" name="email" type="email" autocomplete="email" placeholder="store@example.com"></label>
+      <label>Logo<input id="tenantLogo" name="logo" type="file" accept="image/*"></label>
     </div>
-    <p class="text-muted">The slug is used as the tenant's unique short name. Leave it blank to generate one from the tenant name. Logos are uploaded to Cloudflare R2 under Tenant Logos/.</p>
+    <p class="text-muted">The tenant creation flow remains compatible with existing tenant logic. Select a business to attach this location to the new organization structure.</p>
     <div class="flex" style="gap:10px; flex-wrap:wrap; margin-top:12px;">
       <button id="btnCreateTenant" class="btn btn--primary btn--sm" type="submit">Create tenant</button>
       <button id="btnRefreshTenants" class="btn btn--neutral btn--sm" type="button">Refresh</button>

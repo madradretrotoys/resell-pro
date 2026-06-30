@@ -49,16 +49,33 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
     const sql = neon(String(env.DATABASE_URL));
     const [access] = await sql<{ has_active_membership: boolean; can_add_tenant: boolean }[]>`
       SELECT
-        EXISTS (
-          SELECT 1
-          FROM app.memberships m
-          WHERE m.user_id = ${auth.actor_user_id} AND m.active = true
+        (
+          EXISTS (
+            SELECT 1
+            FROM app.memberships m
+            WHERE m.user_id = ${auth.actor_user_id} AND m.active = true
+          )
+          OR EXISTS (
+            SELECT 1
+            FROM app.organization_memberships om
+            WHERE om.user_id = ${auth.actor_user_id} AND om.active = true
+          )
+          OR EXISTS (
+            SELECT 1
+            FROM app.business_memberships bm
+            WHERE bm.user_id = ${auth.actor_user_id} AND bm.active = true
+          )
         ) AS has_active_membership,
         (
           EXISTS (
             SELECT 1
             FROM app.memberships m
             WHERE m.user_id = ${auth.actor_user_id} AND m.active = true AND m.role = 'owner'
+          )
+          OR EXISTS (
+            SELECT 1
+            FROM app.business_memberships bm
+            WHERE bm.user_id = ${auth.actor_user_id} AND bm.active = true AND bm.role IN ('owner','admin','manager')
           )
           OR EXISTS (
             SELECT 1
@@ -93,11 +110,26 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
     const zip = cleanDigitsText(body.zip, 16);
     const phone = cleanDigitsText(body.phone, 32);
     const email = cleanOptionalText(body.email, 255);
+    const businessId = cleanOptionalText(body.business_id, 80);
 
     if (!name) return json({ ok: false, error: "missing_name" }, 400);
     if (!slug) return json({ ok: false, error: "invalid_slug" }, 400);
     if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return json({ ok: false, error: "invalid_email" }, 400);
     if (logoFile && !/^image\//i.test(logoFile.type || "")) return json({ ok: false, error: "logo_not_image" }, 400);
+
+    if (businessId) {
+      const [businessAccess] = await sql<{ ok: boolean }[]>`
+        SELECT EXISTS (
+          SELECT 1
+          FROM app.business_memberships bm
+          WHERE bm.business_id = ${businessId}::uuid
+            AND bm.user_id = ${auth.actor_user_id}
+            AND bm.active = true
+            AND bm.role IN ('owner','admin','manager')
+        ) AS ok
+      `;
+      if (!businessAccess?.ok) return json({ ok: false, error: "forbidden_business" }, 403);
+    }
 
     let logoBytes: ArrayBuffer | null = null;
     let logoContentType = "";
@@ -114,9 +146,9 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
 
     const [created] = await sql/*sql*/`
       WITH new_tenant AS (
-        INSERT INTO app.tenants (name, slug, "Street Address", "City", "State", "Zip", "Phone", email)
-        VALUES (${name}, ${slug}, ${streetAddress}, ${city}, ${state}, ${zip}, ${phone}, ${email})
-        RETURNING tenant_id, name, slug, "Street Address" AS street_address, "City" AS city, "State" AS state, "Zip" AS zip, "Phone" AS phone, email, created_at
+        INSERT INTO app.tenants (name, slug, "Street Address", "City", "State", "Zip", "Phone", email, business_id)
+        VALUES (${name}, ${slug}, ${streetAddress}, ${city}, ${state}, ${zip}, ${phone}, ${email}, ${businessId || null}::uuid)
+        RETURNING tenant_id, business_id, name, slug, "Street Address" AS street_address, "City" AS city, "State" AS state, "Zip" AS zip, "Phone" AS phone, email, created_at
       ), new_membership AS (
         INSERT INTO app.memberships (tenant_id, user_id, role, active)
         SELECT tenant_id, ${auth.actor_user_id}, 'owner', true
@@ -128,7 +160,7 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
         FROM new_tenant
         ON CONFLICT (tenant_id) DO NOTHING
       )
-      SELECT tenant_id, name, slug, street_address, city, state, zip, phone, email, created_at
+      SELECT tenant_id, business_id, name, slug, street_address, city, state, zip, phone, email, created_at
       FROM new_tenant
     `;
 

@@ -45,7 +45,7 @@ const SCREENS = {
   'settings-tenants': {
     html: '/screens/settings-tenants.html',
     js:   '/screens/settings-tenants.js',
-    title: 'Settings · Tenants',
+    title: 'Settings · Organization',
   },
 
   // Settings → Marketplaces (new)

@@ -15,16 +15,33 @@ export const onRequestGet: PagesFunction = async ({ request, env }) => {
     const sql = neon(String(env.DATABASE_URL));
     const [access] = await sql<{ has_active_membership: boolean; can_add_tenant: boolean }[]>`
       SELECT
-        EXISTS (
-          SELECT 1
-          FROM app.memberships m
-          WHERE m.user_id = ${auth.actor_user_id} AND m.active = true
+        (
+          EXISTS (
+            SELECT 1
+            FROM app.memberships m
+            WHERE m.user_id = ${auth.actor_user_id} AND m.active = true
+          )
+          OR EXISTS (
+            SELECT 1
+            FROM app.organization_memberships om
+            WHERE om.user_id = ${auth.actor_user_id} AND om.active = true
+          )
+          OR EXISTS (
+            SELECT 1
+            FROM app.business_memberships bm
+            WHERE bm.user_id = ${auth.actor_user_id} AND bm.active = true
+          )
         ) AS has_active_membership,
         (
           EXISTS (
             SELECT 1
             FROM app.memberships m
             WHERE m.user_id = ${auth.actor_user_id} AND m.active = true AND m.role = 'owner'
+          )
+          OR EXISTS (
+            SELECT 1
+            FROM app.business_memberships bm
+            WHERE bm.user_id = ${auth.actor_user_id} AND bm.active = true AND bm.role IN ('owner','admin','manager')
           )
           OR EXISTS (
             SELECT 1
@@ -39,13 +56,16 @@ export const onRequestGet: PagesFunction = async ({ request, env }) => {
     }
 
     const tenants = await sql/*sql*/`
-      SELECT t.tenant_id, t.name, t.slug, t.created_at,
+      SELECT t.tenant_id, t.business_id, b.organization_id, t.name, t.slug, t.created_at,
              t."Street Address" AS street_address,
              t."City" AS city, t."State" AS state, t."Zip" AS zip, t."Phone" AS phone, t.email,
              tl.cdn_url AS logo_url,
+             b.name AS business_name, o.name AS organization_name,
              COALESCE(m.role::text, '') AS actor_role,
              COALESCE(m.active, false) AS actor_member_active
       FROM app.tenants t
+      LEFT JOIN app.businesses b ON b.business_id = t.business_id
+      LEFT JOIN app.organizations o ON o.organization_id = b.organization_id
       LEFT JOIN app.memberships m
         ON m.tenant_id = t.tenant_id AND m.user_id = ${auth.actor_user_id}
       LEFT JOIN app.tenant_logos tl
