@@ -4,6 +4,8 @@ import { ensureSession } from '/assets/js/auth.js';
 const els = {};
 let organizations = [];
 let businesses = [];
+let tenants = [];
+let editingTenantId = null;
 function $(id) { return document.getElementById(id); }
 
 export async function init({ session }) {
@@ -16,7 +18,7 @@ export async function init({ session }) {
     businessForm: $('businessForm'), businessOrg: $('businessOrganization'), businessName: $('businessName'), businessSlug: $('businessSlug'), businessButton: $('btnCreateBusiness'),
     form: $('tenantForm'), business: $('tenantBusiness'), name: $('tenantName'), slug: $('tenantSlug'),
     streetAddress: $('tenantStreetAddress'), city: $('tenantCity'), state: $('tenantState'), zip: $('tenantZip'), phone: $('tenantPhone'), email: $('tenantEmail'), logo: $('tenantLogo'),
-    table: $('tenantsTable'), createButton: $('btnCreateTenant'), refreshButton: $('btnRefreshTenants'),
+    table: $('tenantsTable'), createButton: $('btnCreateTenant'), cancelButton: $('btnCancelTenantEdit'), refreshButton: $('btnRefreshTenants'),
   });
 
   wireSlug(els.orgName, els.orgSlug);
@@ -24,8 +26,9 @@ export async function init({ session }) {
   wireSlug(els.name, els.slug);
   els.orgForm?.addEventListener('submit', createOrganization);
   els.businessForm?.addEventListener('submit', createBusiness);
-  els.form?.addEventListener('submit', createTenant);
+  els.form?.addEventListener('submit', saveTenant);
   els.refreshButton?.addEventListener('click', refresh);
+  els.cancelButton?.addEventListener('click', resetTenantForm);
   els.table?.addEventListener('click', handleTenantTableClick);
 
   await refresh();
@@ -52,8 +55,9 @@ async function refresh() {
     ]);
     organizations = structure.organizations || [];
     businesses = structure.businesses || [];
+    tenants = data.tenants || [];
     renderSelects();
-    els.table.innerHTML = renderStructure(data.tenants || []);
+    els.table.innerHTML = renderStructure(tenants);
   } catch (e) {
     els.table.innerHTML = e?.status === 403
       ? 'Access denied. Ask an owner to grant Can add Tenant permission.'
@@ -106,7 +110,7 @@ async function createStructure(type, payload, button, success, form, slugEl) {
   }
 }
 
-async function createTenant(event) {
+async function saveTenant(event) {
   event.preventDefault();
   const name = els.name?.value.trim() || '';
   const slug = slugify(els.slug?.value || name);
@@ -121,16 +125,18 @@ async function createTenant(event) {
   const logoFile = els.logo?.files?.[0];
   if (logoFile) body.set('logo', logoFile);
 
+  if (editingTenantId) body.set('tenant_id', editingTenantId);
+
   els.createButton.disabled = true;
   try {
-    await api('/api/settings/tenants/create', { method: 'POST', body });
-    showBanner('Tenant/location created successfully.', 'success');
-    els.form.reset();
-    if (els.slug) delete els.slug.dataset.touched;
+    const endpoint = editingTenantId ? '/api/settings/tenants/update' : '/api/settings/tenants/create';
+    await api(endpoint, { method: 'POST', body });
+    showBanner(editingTenantId ? 'Tenant/location updated successfully.' : 'Tenant/location created successfully.', 'success');
+    resetTenantForm();
     await refresh();
   } catch (e) {
     const error = e?.data?.error;
-    const message = error === 'slug_exists' ? 'That slug is already in use. Choose another slug.' : error === 'forbidden' || error === 'forbidden_business' ? 'You do not have permission to create tenants for that business.' : error === 'invalid_email' ? 'Enter a valid tenant email address.' : error === 'invalid_phone_integer_range' ? 'Phone # cannot be saved until the tenant Phone column is migrated to text.' : error === 'logo_not_image' ? 'Choose an image file for the tenant logo.' : 'Tenant creation failed.';
+    const message = error === 'slug_exists' ? 'That slug is already in use. Choose another slug.' : error === 'forbidden' || error === 'forbidden_business' ? 'You do not have permission to save tenants for that business.' : error === 'invalid_email' ? 'Enter a valid tenant email address.' : error === 'invalid_phone_integer_range' ? 'Phone # cannot be saved until the tenant Phone column is migrated to text.' : error === 'logo_not_image' ? 'Choose an image file for the tenant logo.' : 'Tenant save failed.';
     showBanner(message, 'error');
   } finally {
     els.createButton.disabled = false;
@@ -167,14 +173,14 @@ function renderTenantTable(items) {
       <td style="width:190px;">${escapeHtml(tenant.email || '—')}</td>
       <td style="width:90px; text-align:center;">${tenant.logo_url ? `<img src="${escapeHtml(tenant.logo_url)}" alt="${escapeHtml(tenant.name)} logo" style="max-height:32px; max-width:64px; object-fit:contain;">` : '—'}</td>
       <td style="width:140px;">${formatDate(tenant.created_at)}</td>
-      <td style="width:290px;">${renderTenantBusinessEditor(tenant)}</td>
+      <td style="width:360px;">${renderTenantActions(tenant)}</td>
     </tr>
   `).join('');
   return `
     <div style="overflow-x:auto; max-width:100%; padding-bottom:10px;" aria-label="Tenant assignments table scroll area">
-      <table class="table" style="min-width:1285px; width:1285px; table-layout:fixed;">
+      <table class="table" style="min-width:1355px; width:1355px; table-layout:fixed;">
         <thead>
-          <tr><th style="width:150px;">Tenant/location</th><th style="width:120px;">Slug</th><th style="width:180px;">Location</th><th style="width:125px;">Phone</th><th style="width:190px;">Email</th><th style="width:90px;">Logo</th><th style="width:140px;">Created</th><th style="width:290px;">Business assignment</th></tr>
+          <tr><th style="width:150px;">Tenant/location</th><th style="width:120px;">Slug</th><th style="width:180px;">Location</th><th style="width:125px;">Phone</th><th style="width:190px;">Email</th><th style="width:90px;">Logo</th><th style="width:140px;">Created</th><th style="width:360px;">Actions</th></tr>
         </thead>
         <tbody>${rows}</tbody>
       </table>
@@ -182,7 +188,7 @@ function renderTenantTable(items) {
   `;
 }
 
-function renderTenantBusinessEditor(tenant) {
+function renderTenantActions(tenant) {
   const options = ['<option value="">Unassigned</option>'].concat(
     businesses.map((business) => {
       const selected = tenant.business_id === business.business_id ? ' selected' : '';
@@ -190,14 +196,21 @@ function renderTenantBusinessEditor(tenant) {
     })
   ).join('');
   return `
-    <div class="flex" style="gap:8px; align-items:center; flex-wrap:wrap; max-width:270px;">
-      <select data-tenant-business="${escapeHtml(tenant.tenant_id)}" style="width:220px; max-width:100%;">${options}</select>
-      <button class="btn btn--neutral btn--sm" type="button" data-assign-tenant="${escapeHtml(tenant.tenant_id)}">Save</button>
+    <div class="flex" style="gap:8px; align-items:center; flex-wrap:wrap; max-width:340px;">
+      <button class="btn btn--neutral btn--sm" type="button" data-edit-tenant="${escapeHtml(tenant.tenant_id)}">Edit fields</button>
+      <select data-tenant-business="${escapeHtml(tenant.tenant_id)}" style="width:220px; max-width:100%;" aria-label="Business assignment for ${escapeHtml(tenant.name)}">${options}</select>
+      <button class="btn btn--neutral btn--sm" type="button" data-assign-tenant="${escapeHtml(tenant.tenant_id)}">Save assignment</button>
     </div>
   `;
 }
 
 async function handleTenantTableClick(event) {
+  const editButton = event.target?.closest?.('[data-edit-tenant]');
+  if (editButton) {
+    startTenantEdit(editButton.dataset.editTenant || '');
+    return;
+  }
+
   const button = event.target?.closest?.('[data-assign-tenant]');
   if (!button) return;
   const tenant_id = button.dataset.assignTenant || '';
@@ -218,6 +231,34 @@ async function handleTenantTableClick(event) {
   } finally {
     button.disabled = false;
   }
+}
+
+function startTenantEdit(tenantId) {
+  const tenant = tenants.find((item) => item.tenant_id === tenantId);
+  if (!tenant) return showBanner('Tenant could not be found. Refresh and try again.', 'error');
+  editingTenantId = tenantId;
+  if (els.business) els.business.value = tenant.business_id || '';
+  if (els.name) els.name.value = tenant.name || '';
+  if (els.slug) { els.slug.value = tenant.slug || ''; els.slug.dataset.touched = 'true'; }
+  if (els.streetAddress) els.streetAddress.value = tenant.street_address || '';
+  if (els.city) els.city.value = tenant.city || '';
+  if (els.state) els.state.value = tenant.state || '';
+  if (els.zip) els.zip.value = tenant.zip || '';
+  if (els.phone) els.phone.value = tenant.phone || '';
+  if (els.email) els.email.value = tenant.email || '';
+  if (els.logo) els.logo.value = '';
+  if (els.createButton) els.createButton.textContent = 'Update tenant';
+  if (els.cancelButton) els.cancelButton.hidden = false;
+  els.form?.scrollIntoView?.({ behavior: 'smooth', block: 'start' });
+  showBanner(`Editing ${tenant.name}. Update the fields above, then save.`, 'info');
+}
+
+function resetTenantForm() {
+  editingTenantId = null;
+  els.form?.reset();
+  if (els.slug) delete els.slug.dataset.touched;
+  if (els.createButton) els.createButton.textContent = 'Create tenant';
+  if (els.cancelButton) els.cancelButton.hidden = true;
 }
 
 function orgName(id) { return organizations.find((o) => o.organization_id === id)?.name || 'Unassigned organization'; }

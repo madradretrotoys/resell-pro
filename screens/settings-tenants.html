@@ -26,7 +26,7 @@
   </form>
 
   <form id="tenantForm" class="tile" style="margin:12px 0 16px; max-width:720px;">
-    <h3>3. Add tenant / location</h3>
+    <h3>3. Add or edit tenant / location</h3>
     <div class="grid grid-2">
       <label>Business<select id="tenantBusiness" name="business_id"></select></label>
       <label>Tenant/location name<input id="tenantName" name="name" type="text" autocomplete="organization" placeholder="Mad Rad Retro Toys Lakewood" required></label>
@@ -41,9 +41,10 @@
       <label>Email<input id="tenantEmail" name="email" type="email" autocomplete="email" placeholder="store@example.com"></label>
       <label>Logo<input id="tenantLogo" name="logo" type="file" accept="image/*"></label>
     </div>
-    <p class="text-muted">The tenant creation flow remains compatible with existing tenant logic. Select a business to attach this location to the new organization structure.</p>
+    <p class="text-muted">Create a tenant/location or use Edit fields in the table below to update an existing tenant. Select a business to attach this location to the organization structure.</p>
     <div class="flex" style="gap:10px; flex-wrap:wrap; margin-top:12px;">
       <button id="btnCreateTenant" class="btn btn--primary btn--sm" type="submit">Create tenant</button>
+      <button id="btnCancelTenantEdit" class="btn btn--neutral btn--sm" type="button" hidden>Cancel edit</button>
       <button id="btnRefreshTenants" class="btn btn--neutral btn--sm" type="button">Refresh</button>
     </div>
   </form>
