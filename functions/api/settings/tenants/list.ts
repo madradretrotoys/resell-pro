@@ -40,11 +40,15 @@ export const onRequestGet: PagesFunction = async ({ request, env }) => {
 
     const tenants = await sql/*sql*/`
       SELECT t.tenant_id, t.name, t.slug, t.created_at,
+             t."City" AS city, t."State" AS state, t."Zip" AS zip, t."Phone" AS phone, t.email,
+             tl.cdn_url AS logo_url,
              COALESCE(m.role::text, '') AS actor_role,
              COALESCE(m.active, false) AS actor_member_active
       FROM app.tenants t
       LEFT JOIN app.memberships m
         ON m.tenant_id = t.tenant_id AND m.user_id = ${auth.actor_user_id}
+      LEFT JOIN app.tenant_logos tl
+        ON tl.tenant_id = t.tenant_id AND tl.is_active = true
       ORDER BY t.created_at DESC, t.name ASC
     `;
 

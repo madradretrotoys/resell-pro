@@ -11,6 +11,12 @@ export async function init({ session }) {
   els.form = $('tenantForm');
   els.name = $('tenantName');
   els.slug = $('tenantSlug');
+  els.city = $('tenantCity');
+  els.state = $('tenantState');
+  els.zip = $('tenantZip');
+  els.phone = $('tenantPhone');
+  els.email = $('tenantEmail');
+  els.logo = $('tenantLogo');
   els.table = $('tenantsTable');
   els.createButton = $('btnCreateTenant');
   els.refreshButton = $('btnRefreshTenants');
@@ -48,9 +54,20 @@ async function createTenant(event) {
   const slug = slugify(els.slug?.value || name);
   if (!name) return showBanner('Tenant name is required.', 'error');
 
+  const body = new FormData();
+  body.set('name', name);
+  body.set('slug', slug);
+  body.set('city', els.city?.value.trim() || '');
+  body.set('state', els.state?.value.trim() || '');
+  body.set('zip', els.zip?.value.trim() || '');
+  body.set('phone', els.phone?.value.trim() || '');
+  body.set('email', els.email?.value.trim() || '');
+  const logoFile = els.logo?.files?.[0];
+  if (logoFile) body.set('logo', logoFile);
+
   els.createButton.disabled = true;
   try {
-    await api('/api/settings/tenants/create', { method: 'POST', body: { name, slug } });
+    await api('/api/settings/tenants/create', { method: 'POST', body });
     showBanner('Tenant created successfully.', 'success');
     els.form.reset();
     if (els.slug) delete els.slug.dataset.touched;
@@ -61,7 +78,13 @@ async function createTenant(event) {
       ? 'That slug is already in use. Choose another slug.'
       : error === 'forbidden'
         ? 'You do not have permission to create tenants.'
-        : 'Tenant creation failed.';
+        : error === 'invalid_email'
+          ? 'Enter a valid tenant email address.'
+          : error === 'invalid_phone_integer_range'
+            ? 'Phone # is too large for the current tenant phone database column.'
+            : error === 'logo_not_image'
+              ? 'Choose an image file for the tenant logo.'
+              : 'Tenant creation failed.';
     showBanner(message, 'error');
   } finally {
     els.createButton.disabled = false;
@@ -74,6 +97,10 @@ function renderTable(tenants) {
     <tr>
       <td>${escapeHtml(tenant.name)}</td>
       <td>${escapeHtml(tenant.slug)}</td>
+      <td>${escapeHtml([tenant.city, tenant.state, tenant.zip].filter(Boolean).join(', ') || '—')}</td>
+      <td>${escapeHtml(tenant.phone || '—')}</td>
+      <td>${escapeHtml(tenant.email || '—')}</td>
+      <td>${tenant.logo_url ? `<img src="${escapeHtml(tenant.logo_url)}" alt="${escapeHtml(tenant.name)} logo" style="max-height:32px; max-width:80px; object-fit:contain;">` : '—'}</td>
       <td>${escapeHtml(tenant.actor_role || '—')}</td>
       <td>${tenant.actor_member_active ? 'Yes' : 'No'}</td>
       <td>${formatDate(tenant.created_at)}</td>
@@ -82,7 +109,7 @@ function renderTable(tenants) {
   return `
     <table class="table">
       <thead>
-        <tr><th>Name</th><th>Slug</th><th>Your role</th><th>Your access active</th><th>Created</th></tr>
+        <tr><th>Name</th><th>Slug</th><th>Location</th><th>Phone</th><th>Email</th><th>Logo</th><th>Your role</th><th>Your access active</th><th>Created</th></tr>
       </thead>
       <tbody>${rows}</tbody>
     </table>
