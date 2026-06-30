@@ -42,6 +42,11 @@ const SCREENS = {
     js:   '/screens/settings-user-edit.js',
     title: 'Settings · Edit User',
   },
+  'settings-tenants': {
+    html: '/screens/settings-tenants.html',
+    js:   '/screens/settings-tenants.js',
+    title: 'Settings · Tenants',
+  },
 
   // Settings → Marketplaces (new)
   'settings-marketplaces': {

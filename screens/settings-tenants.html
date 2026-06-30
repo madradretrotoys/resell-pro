@@ -1,0 +1,27 @@
+<section class="tile" data-screen="settings-tenants">
+  <h2>Tenants</h2>
+  <p class="text-muted">Create tenants for ResellPro Employees or other separate workspaces. The creator is added as the owner of each new tenant.</p>
+
+  <div id="tenantBanner" class="banner" hidden></div>
+
+  <form id="tenantForm" class="tile" style="margin:12px 0 16px; max-width:720px;">
+    <h3>Add tenant</h3>
+    <div class="grid grid-2">
+      <label>
+        Tenant name
+        <input id="tenantName" name="name" type="text" autocomplete="organization" placeholder="ResellPro Employees" required>
+      </label>
+      <label>
+        Slug
+        <input id="tenantSlug" name="slug" type="text" autocomplete="off" placeholder="resellpro-employees">
+      </label>
+    </div>
+    <p class="text-muted">The slug is used as the tenant's unique short name. Leave it blank to generate one from the tenant name.</p>
+    <div class="flex" style="gap:10px; flex-wrap:wrap; margin-top:12px;">
+      <button id="btnCreateTenant" class="btn btn--primary btn--sm" type="submit">Create tenant</button>
+      <button id="btnRefreshTenants" class="btn btn--neutral btn--sm" type="button">Refresh</button>
+    </div>
+  </form>
+
+  <div id="tenantsTable" class="tile" style="overflow:auto; min-height:48px;"></div>
+</section>
