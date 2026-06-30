@@ -7,6 +7,31 @@ const json = (data: any, status = 200) =>
     headers: { "content-type": "application/json", "cache-control": "no-store" },
   });
 
+function cleanOptionalText(value: unknown, max = 255) {
+  const text = String(value ?? "").trim();
+  return text ? text.slice(0, max) : null;
+}
+
+function cleanDigitsText(value: unknown, max = 32) {
+  const digits = String(value ?? "").replace(/\D+/g, "");
+  return digits ? digits.slice(0, max) : null;
+}
+
+function safeFilename(value: string) {
+  return (value || "logo.bin").replace(/[^a-zA-Z0-9._-]+/g, "_").slice(0, 120) || "logo.bin";
+}
+
+async function getImageDimensions(bytes: ArrayBuffer, contentType: string) {
+  try {
+    // @ts-ignore - ImageDecoder is available in the Cloudflare Workers runtime.
+    const dec = new ImageDecoder({ data: new Uint8Array(bytes), type: contentType });
+    const frame = await dec.decode();
+    return { width_px: frame.image.displayWidth as number, height_px: frame.image.displayHeight as number };
+  } catch {
+    return { width_px: null, height_px: null };
+  }
+}
+
 function slugify(value: string) {
   return value
     .trim()
@@ -47,19 +72,51 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
       return json({ ok: false, error: "forbidden" }, 403);
     }
 
-    const body = await request.json().catch(() => ({} as any));
-    const name = String((body as any).name || "").trim();
-    const requestedSlug = String((body as any).slug || "").trim();
+    const requestContentType = request.headers.get("content-type") || "";
+    let body: any = {};
+    let logoFile: File | null = null;
+    if (requestContentType.startsWith("multipart/form-data")) {
+      const form = await request.formData();
+      body = Object.fromEntries(form.entries());
+      const file = form.get("logo");
+      if (file && (file as any).arrayBuffer && (file as File).size > 0) logoFile = file as File;
+    } else {
+      body = await request.json().catch(() => ({} as any));
+    }
+
+    const name = String(body.name || "").trim();
+    const requestedSlug = String(body.slug || "").trim();
     const slug = slugify(requestedSlug || name);
+    const streetAddress = cleanOptionalText(body.street_address, 255);
+    const city = cleanOptionalText(body.city, 100);
+    const state = cleanOptionalText(body.state, 50);
+    const zip = cleanDigitsText(body.zip, 16);
+    const phone = cleanDigitsText(body.phone, 32);
+    const email = cleanOptionalText(body.email, 255);
 
     if (!name) return json({ ok: false, error: "missing_name" }, 400);
     if (!slug) return json({ ok: false, error: "invalid_slug" }, 400);
+    if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return json({ ok: false, error: "invalid_email" }, 400);
+    if (logoFile && !/^image\//i.test(logoFile.type || "")) return json({ ok: false, error: "logo_not_image" }, 400);
+
+    let logoBytes: ArrayBuffer | null = null;
+    let logoContentType = "";
+    let logoSha256Hex = "";
+    let logoDimensions: { width_px: number | null; height_px: number | null } | null = null;
+    if (logoFile) {
+      logoBytes = await logoFile.arrayBuffer();
+      if (logoBytes.byteLength < 128) return json({ ok: false, error: "logo_empty_or_too_small" }, 400);
+      logoContentType = logoFile.type || "application/octet-stream";
+      const shaBuf = await crypto.subtle.digest("SHA-256", logoBytes);
+      logoSha256Hex = Array.from(new Uint8Array(shaBuf)).map((b) => b.toString(16).padStart(2, "0")).join("");
+      logoDimensions = await getImageDimensions(logoBytes, logoContentType);
+    }
 
     const [created] = await sql/*sql*/`
       WITH new_tenant AS (
-        INSERT INTO app.tenants (name, slug)
-        VALUES (${name}, ${slug})
-        RETURNING tenant_id, name, slug, created_at
+        INSERT INTO app.tenants (name, slug, "Street Address", "City", "State", "Zip", "Phone", email)
+        VALUES (${name}, ${slug}, ${streetAddress}, ${city}, ${state}, ${zip}, ${phone}, ${email})
+        RETURNING tenant_id, name, slug, "Street Address" AS street_address, "City" AS city, "State" AS state, "Zip" AS zip, "Phone" AS phone, email, created_at
       ), new_membership AS (
         INSERT INTO app.memberships (tenant_id, user_id, role, active)
         SELECT tenant_id, ${auth.actor_user_id}, 'owner', true
@@ -71,11 +128,26 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
         FROM new_tenant
         ON CONFLICT (tenant_id) DO NOTHING
       )
-      SELECT tenant_id, name, slug, created_at
+      SELECT tenant_id, name, slug, street_address, city, state, zip, phone, email, created_at
       FROM new_tenant
     `;
 
-    return json({ ok: true, tenant: created });
+    let logo = null;
+    if (logoFile && logoBytes && logoDimensions) {
+      const r2_key = `Tenant Logos/${created.tenant_id}/${crypto.randomUUID()}__${safeFilename(logoFile.name)}`;
+      // @ts-ignore - R2 binding is provided by Cloudflare Pages.
+      await env.R2_IMAGES.put(r2_key, logoBytes, { httpMetadata: { contentType: logoContentType } });
+      const base = env.IMG_BASE_URL || "";
+      const cdn_url = base ? `${base}/${r2_key}` : "";
+      const [insertedLogo] = await sql/*sql*/`
+        INSERT INTO app.tenant_logos (tenant_id, r2_key, content_type, bytes, width_px, height_px, sha256_hex, cdn_url, is_active)
+        VALUES (${created.tenant_id}, ${r2_key}, ${logoContentType}, ${logoBytes.byteLength}, ${logoDimensions.width_px}, ${logoDimensions.height_px}, ${logoSha256Hex}, ${cdn_url}, true)
+        RETURNING logo_id, tenant_id, r2_key, content_type, bytes, width_px, height_px, sha256_hex, cdn_url, is_active, created_at
+      `;
+      logo = insertedLogo;
+    }
+
+    return json({ ok: true, tenant: created, logo });
   } catch (e: any) {
     const message = e?.message || String(e);
     if (message.includes("tenants_slug_key")) return json({ ok: false, error: "slug_exists" }, 409);
