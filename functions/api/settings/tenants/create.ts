@@ -12,12 +12,9 @@ function cleanOptionalText(value: unknown, max = 255) {
   return text ? text.slice(0, max) : null;
 }
 
-function cleanInteger(value: unknown) {
+function cleanDigitsText(value: unknown, max = 32) {
   const digits = String(value ?? "").replace(/\D+/g, "");
-  if (!digits) return null;
-  const n = Number(digits);
-  if (!Number.isSafeInteger(n) || n > 2147483647) return { error: "integer_out_of_range" } as const;
-  return n;
+  return digits ? digits.slice(0, max) : null;
 }
 
 function safeFilename(value: string) {
@@ -92,14 +89,12 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
     const slug = slugify(requestedSlug || name);
     const city = cleanOptionalText(body.city, 100);
     const state = cleanOptionalText(body.state, 50);
-    const zip = cleanInteger(body.zip);
-    const phone = cleanInteger(body.phone);
+    const zip = cleanDigitsText(body.zip, 16);
+    const phone = cleanDigitsText(body.phone, 32);
     const email = cleanOptionalText(body.email, 255);
 
     if (!name) return json({ ok: false, error: "missing_name" }, 400);
     if (!slug) return json({ ok: false, error: "invalid_slug" }, 400);
-    if (zip && typeof zip === "object") return json({ ok: false, error: "invalid_zip" }, 400);
-    if (phone && typeof phone === "object") return json({ ok: false, error: "invalid_phone_integer_range" }, 400);
     if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return json({ ok: false, error: "invalid_email" }, 400);
     if (logoFile && !/^image\//i.test(logoFile.type || "")) return json({ ok: false, error: "logo_not_image" }, 400);
 
@@ -119,7 +114,7 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
     const [created] = await sql/*sql*/`
       WITH new_tenant AS (
         INSERT INTO app.tenants (name, slug, "City", "State", "Zip", "Phone", email)
-        VALUES (${name}, ${slug}, ${city}, ${state}, ${zip as number | null}, ${phone as number | null}, ${email})
+        VALUES (${name}, ${slug}, ${city}, ${state}, ${zip}, ${phone}, ${email})
         RETURNING tenant_id, name, slug, "City" AS city, "State" AS state, "Zip" AS zip, "Phone" AS phone, email, created_at
       ), new_membership AS (
         INSERT INTO app.memberships (tenant_id, user_id, role, active)

@@ -81,7 +81,7 @@ async function createTenant(event) {
         : error === 'invalid_email'
           ? 'Enter a valid tenant email address.'
           : error === 'invalid_phone_integer_range'
-            ? 'Phone # is too large for the current tenant phone database column.'
+            ? 'Phone # cannot be saved until the tenant Phone column is migrated to text.'
             : error === 'logo_not_image'
               ? 'Choose an image file for the tenant logo.'
               : 'Tenant creation failed.';
