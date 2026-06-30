@@ -5,19 +5,27 @@ import { ensureSession } from '/assets/js/auth.js';
 const $ = (id) => document.getElementById(id);
 
 export async function init(){
-  const session = await ensureSession();
-  if (!session?.permissions?.can_settings) {
-    document.body.innerHTML = '<section class="tile"><strong>Access denied.</strong></section>';
-    return;
-  }
+  // Keep session/tenant initialization in one place, but do not duplicate
+  // settings authorization here. /api/settings/users/list applies the
+  // authoritative Owner/Admin/Manager/can_settings policy.
+  await ensureSession();
 
   const params = new URL(location.href).searchParams;
   const uid = params.get('user_id');
   if (!uid) { location.href='?page=settings'; return; }
 
-  const data = await api('/api/settings/users/list');
+  let data;
+  try {
+    data = await api('/api/settings/users/list');
+  } catch (e) {
+    document.body.innerHTML = (e && e.status === 403)
+      ? '<section class="tile"><strong>Access denied.</strong></section>'
+      : '<section class="tile"><strong>Unable to load user.</strong></section>';
+    return;
+  }
+
   const u = (data.users||[]).find(x => x.user_id === uid);
-  if (!u) { alert('User not found.'); location.href='?page=settings'; return; }
+  if (!u) { alert('User not found.'); location.href='?page=settings-users'; return; }
 
   // prefill
   $('user_id').value = uid;
@@ -27,7 +35,7 @@ export async function init(){
   $('role').value = u.role || 'clerk';
 
   ['can_pos','can_cash_drawer','can_cash_payouts','can_item_research','can_inventory',
-   'can_inventory_intake','can_drop_off_form','can_estimates_buy_tickets','can_timekeeping','clockin_required','can_settings',
+   'can_inventory_intake','can_drop_off_form','can_estimates_buy_tickets','can_timekeeping','clockin_required','can_settings','can_add_tenant',
    'notify_cash_drawer','notify_daily_sales_summary'].forEach(k => { $(k).checked = !!u[k]; });
 
   $('discount_max').value = (u.discount_max ?? '');
@@ -44,7 +52,7 @@ export async function init(){
     try {
       // Upsert: backend should treat presence of user_id as "update"
       await api('/api/settings/users/create', { method:'POST', body: payload });
-      location.href = '?page=settings'; // back to list after success
+      location.href = '?page=settings-users'; // back to list after success
     } catch (e2) {
       alert(`Save failed${e2?.data?.error ? `: ${e2.data.error}` : ''}.`);
     } finally {
@@ -81,7 +89,8 @@ function collect(){
       can_estimates_buy_tickets: $('can_estimates_buy_tickets').checked,
       can_timekeeping: $('can_timekeeping').checked,
       clockin_required: $('clockin_required').checked,
-      can_settings: $('can_settings').checked
+      can_settings: $('can_settings').checked,
+      can_add_tenant: $('can_add_tenant').checked
     },
     notifications: {
       notify_cash_drawer: $('notify_cash_drawer').checked,

@@ -65,6 +65,48 @@ export function canManageTenantSettings(actor: { role: string; can_settings: boo
   return actor.role === "owner" || actor.role === "admin" || actor.role === "manager" || !!actor.can_settings;
 }
 
+export type TenantRole = "owner" | "admin" | "manager" | "clerk";
+
+export function normalizeTenantRole(role: string | null | undefined): TenantRole | null {
+  const normalized = String(role || "").toLowerCase();
+  return ["owner", "admin", "manager", "clerk"].includes(normalized) ? (normalized as TenantRole) : null;
+}
+
+export function canAccessSettingsUsers(actor: { role: string } | null) {
+  const actorRole = normalizeTenantRole(actor?.role);
+  return actorRole === "owner" || actorRole === "admin" || actorRole === "manager";
+}
+
+export function canAssignSettingsUserRole(actor: { role: string } | null, targetRole: string | null | undefined) {
+  const actorRole = normalizeTenantRole(actor?.role);
+  const normalizedTargetRole = normalizeTenantRole(targetRole);
+  if (!actorRole || !normalizedTargetRole) return false;
+
+  return (
+    actorRole === "owner" ||
+    (actorRole === "admin" && ["manager", "clerk"].includes(normalizedTargetRole)) ||
+    (actorRole === "manager" && normalizedTargetRole === "clerk")
+  );
+}
+
+export function canAccessSettingsUser(
+  actor: { role: string } | null,
+  actorUserId: string | null | undefined,
+  target: { role: string; user_id: string } | null
+) {
+  const actorRole = normalizeTenantRole(actor?.role);
+  const targetRole = normalizeTenantRole(target?.role);
+  const targetUserId = String(target?.user_id || "");
+  const actorId = String(actorUserId || "");
+  if (!actorRole || !targetRole || !targetUserId || !actorId) return false;
+
+  if (actorRole === "owner") return true;
+  if (targetUserId === actorId) return false;
+  if (actorRole === "admin") return ["manager", "clerk"].includes(targetRole);
+  if (actorRole === "manager") return targetRole === "clerk";
+  return false;
+}
+
 export function canManageEmployeeSchedules(actor: { role: string; can_settings?: boolean; can_timekeeping?: boolean } | null) {
   if (!actor) return false;
   return actor.role === "owner" || actor.role === "admin" || actor.role === "manager" || !!actor.can_settings || !!actor.can_timekeeping;
