@@ -18,7 +18,7 @@ export async function init({ session }) {
     businessForm: $('businessForm'), businessOrg: $('businessOrganization'), businessName: $('businessName'), businessSlug: $('businessSlug'), businessButton: $('btnCreateBusiness'),
     form: $('tenantForm'), business: $('tenantBusiness'), name: $('tenantName'), slug: $('tenantSlug'),
     streetAddress: $('tenantStreetAddress'), city: $('tenantCity'), state: $('tenantState'), zip: $('tenantZip'), phone: $('tenantPhone'), email: $('tenantEmail'), logo: $('tenantLogo'),
-    table: $('tenantsTable'), createButton: $('btnCreateTenant'), cancelButton: $('btnCancelTenantEdit'), refreshButton: $('btnRefreshTenants'),
+    table: $('tenantsTable'), createButton: $('btnCreateTenant'), cancelButton: $('btnCancelTenantEdit'), editNotice: $('tenantEditNotice'), refreshButton: $('btnRefreshTenants'),
   });
 
   wireSlug(els.orgName, els.orgSlug);
@@ -197,7 +197,7 @@ function renderTenantActions(tenant) {
   ).join('');
   return `
     <div class="flex" style="gap:8px; align-items:center; flex-wrap:wrap; max-width:340px;">
-      <button class="btn btn--neutral btn--sm" type="button" data-edit-tenant="${escapeHtml(tenant.tenant_id)}">Edit fields</button>
+      <button class="btn btn--neutral btn--sm" type="button" data-edit-tenant="${escapeHtml(tenant.tenant_id)}">Load into form</button>
       <select data-tenant-business="${escapeHtml(tenant.tenant_id)}" style="width:220px; max-width:100%;" aria-label="Business assignment for ${escapeHtml(tenant.name)}">${options}</select>
       <button class="btn btn--neutral btn--sm" type="button" data-assign-tenant="${escapeHtml(tenant.tenant_id)}">Save assignment</button>
     </div>
@@ -249,8 +249,10 @@ function startTenantEdit(tenantId) {
   if (els.logo) els.logo.value = '';
   if (els.createButton) els.createButton.textContent = 'Update tenant';
   if (els.cancelButton) els.cancelButton.hidden = false;
-  els.form?.scrollIntoView?.({ behavior: 'smooth', block: 'start' });
-  showBanner(`Editing ${tenant.name}. Update the fields above, then save.`, 'info');
+  setEditNotice(`Editing ${tenant.name}. Make changes in this form, then click Update tenant to save.`);
+  els.form?.scrollIntoView?.({ behavior: 'smooth', block: 'center' });
+  els.name?.focus?.();
+  showBanner(`Editing ${tenant.name}. No network request is sent until you click Update tenant.`, 'info');
 }
 
 function resetTenantForm() {
@@ -259,6 +261,13 @@ function resetTenantForm() {
   if (els.slug) delete els.slug.dataset.touched;
   if (els.createButton) els.createButton.textContent = 'Create tenant';
   if (els.cancelButton) els.cancelButton.hidden = true;
+  setEditNotice('');
+}
+
+function setEditNotice(message) {
+  if (!els.editNotice) return;
+  els.editNotice.textContent = message;
+  els.editNotice.hidden = !message;
 }
 
 function orgName(id) { return organizations.find((o) => o.organization_id === id)?.name || 'Unassigned organization'; }

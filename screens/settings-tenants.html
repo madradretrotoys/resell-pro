@@ -41,7 +41,8 @@
       <label>Email<input id="tenantEmail" name="email" type="email" autocomplete="email" placeholder="store@example.com"></label>
       <label>Logo<input id="tenantLogo" name="logo" type="file" accept="image/*"></label>
     </div>
-    <p class="text-muted">Create a tenant/location or use Edit fields in the table below to update an existing tenant. Select a business to attach this location to the organization structure.</p>
+    <p class="text-muted">Create a tenant/location or use Load into form in the table below to update an existing tenant. Load into form loads the tenant into this form; click Update tenant to save changes.</p>
+    <div id="tenantEditNotice" class="banner info" hidden></div>
     <div class="flex" style="gap:10px; flex-wrap:wrap; margin-top:12px;">
       <button id="btnCreateTenant" class="btn btn--primary btn--sm" type="submit">Create tenant</button>
       <button id="btnCancelTenantEdit" class="btn btn--neutral btn--sm" type="button" hidden>Cancel edit</button>
