@@ -1,5 +1,5 @@
 import { neon } from "@neondatabase/serverless";
-import { canManageTenantSettings, getTenantActor, requireSessionActor } from "../../../_shared/auth";
+import { canAccessSettingsUser, canManageTenantSettings, getTenantActor, requireSessionActor } from "../../../_shared/auth";
 
 const json = (data: any, status = 200) =>
   new Response(JSON.stringify(data), {
@@ -24,6 +24,17 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
     const body = await request.json().catch(() => ({} as any));
     const user_id = String((body as any).user_id || "").trim();
     if (!user_id) return json({ ok: false, error: "missing_user_id" }, 400);
+
+    const [target] = await sql<{ user_id: string; role: string }[]>`
+      SELECT user_id, role
+      FROM app.memberships
+      WHERE tenant_id = ${tenant_id} AND user_id = ${user_id}
+      LIMIT 1
+    `;
+    if (!target) return json({ ok: false, error: "not_found" }, 404);
+    if (!canAccessSettingsUser(actor, auth.actor_user_id, target)) {
+      return json({ ok: false, error: "insufficient_role" }, 403);
+    }
 
     const [row] = await sql/*sql*/`
       UPDATE app.memberships m

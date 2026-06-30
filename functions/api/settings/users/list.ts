@@ -1,5 +1,6 @@
 // functions/api/settings/users/list.ts
 import { neon } from "@neondatabase/serverless";
+import { canAccessSettingsUsers } from "../../../_shared/auth";
 
 // Minimal JSON responder (pattern: admin/schema.ts)
 const json = (data: any, status = 200) =>
@@ -80,12 +81,11 @@ export const onRequestGet: PagesFunction = async ({ request, env }) => {
       return json({ ok: false, error: "forbidden" }, 403);
     }
 
-    // Server-side access policy:
-    // Owner/Admin/Manager may access Settings (list users). Clerk: denied.
+    // Server-side Users policy: owners can view everyone; admins can view
+    // managers/clerks except themselves; managers can view clerks; clerks cannot
+    // view the Users settings list even when they have general Settings access.
     const role = actor[0].role;
-    const allowSettings =
-      role === "owner" || role === "admin" || role === "manager" || !!actor[0].can_settings;
-    if (!allowSettings) {
+    if (!canAccessSettingsUsers(actor[0])) {
       return json({ ok: false, error: "forbidden" }, 403);
     }
 
@@ -102,6 +102,11 @@ export const onRequestGet: PagesFunction = async ({ request, env }) => {
       JOIN app.users u ON u.user_id = m.user_id
       LEFT JOIN app.permissions p ON p.user_id = u.user_id
       WHERE m.tenant_id = ${tenant_id}
+        AND (
+          ${role} = 'owner'
+          OR (${role} = 'admin' AND m.role IN ('manager', 'clerk') AND m.user_id <> ${actor_user_id})
+          OR (${role} = 'manager' AND m.role = 'clerk' AND m.user_id <> ${actor_user_id})
+        )
       ORDER BY lower(u.name)
     `;
 

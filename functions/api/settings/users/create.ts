@@ -1,6 +1,6 @@
 import { neon } from "@neondatabase/serverless";
 import bcrypt from "bcryptjs";
-import { canManageTenantSettings, getTenantActor, requireSessionActor } from "../../../_shared/auth";
+import { canAccessSettingsUser, canAssignSettingsUserRole, canManageTenantSettings, getTenantActor, requireSessionActor } from "../../../_shared/auth";
 
 const json = (data: any, status = 200) =>
   new Response(JSON.stringify(data), {
@@ -23,6 +23,7 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
     }
 
     const body = await request.json().catch(() => ({} as any));
+    const user_id = String((body as any).user_id || "").trim();
     const name = String((body as any).name || "").trim();
     const email = String((body as any).email || "").trim().toLowerCase();
     const login_id = String((body as any).login_id || "").trim();
@@ -32,34 +33,57 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
     if (!name || !email || !login_id) return json({ ok: false, error: "missing_required_fields" }, 400);
     if (!["owner", "admin", "manager", "clerk"].includes(role)) return json({ ok: false, error: "invalid_role" }, 400);
 
-    // Role gate: owner can create any role, admin can create manager/clerk, manager can create clerk.
-    const actorRole = actor.role;
-    const allowed =
-      actorRole === "owner" ||
-      (actorRole === "admin" && ["manager", "clerk"].includes(role)) ||
-      (actorRole === "manager" && role === "clerk");
-    if (!allowed) return json({ ok: false, error: "insufficient_role" }, 403);
+    if (!canAssignSettingsUserRole(actor, role)) return json({ ok: false, error: "insufficient_role" }, 403);
 
-    const generatedPassword = temp_password || crypto.randomUUID().replace(/-/g, "").slice(0, 12);
-    const password_hash = await bcrypt.hash(generatedPassword, 10);
+    let u: { user_id: string; email: string; name: string; login_id: string };
+    let tempPasswordGenerated = false;
 
-    const [u] = await sql/*sql*/`
-      INSERT INTO app.users (email, name, login_id, password_hash, is_active)
-      VALUES (${email}, ${name}, ${login_id}, ${password_hash}, true)
-      ON CONFLICT (email) DO UPDATE SET
-        name=EXCLUDED.name,
-        login_id=EXCLUDED.login_id,
-        is_active=true
-      RETURNING user_id, email, name, login_id
-    `;
+    if (user_id) {
+      const [target] = await sql<{ user_id: string; role: string }[]>`
+        SELECT user_id, role
+        FROM app.memberships
+        WHERE tenant_id = ${tenant_id} AND user_id = ${user_id}
+        LIMIT 1
+      `;
+      if (!target) return json({ ok: false, error: "not_found" }, 404);
+      if (!canAccessSettingsUser(actor, auth.actor_user_id, target)) {
+        return json({ ok: false, error: "insufficient_role" }, 403);
+      }
 
-    await sql/*sql*/`
-      INSERT INTO app.memberships (tenant_id, user_id, role, active)
-      VALUES (${tenant_id}, ${u.user_id}, ${role}, true)
-      ON CONFLICT (tenant_id, user_id) DO UPDATE SET
-        role=EXCLUDED.role,
-        active=true
-    `;
+      const [updated] = await sql/*sql*/`
+        UPDATE app.users
+        SET email = ${email}, name = ${name}, login_id = ${login_id}, is_active = true
+        WHERE user_id = ${user_id}
+        RETURNING user_id, email, name, login_id
+      `;
+      if (!updated) return json({ ok: false, error: "not_found" }, 404);
+      u = updated as typeof u;
+
+      await sql/*sql*/`
+        UPDATE app.memberships
+        SET role = ${role}
+        WHERE tenant_id = ${tenant_id} AND user_id = ${u.user_id}
+      `;
+    } else {
+      const generatedPassword = temp_password || crypto.randomUUID().replace(/-/g, "").slice(0, 12);
+      const password_hash = await bcrypt.hash(generatedPassword, 10);
+      tempPasswordGenerated = !temp_password;
+
+      const [created] = await sql/*sql*/`
+        INSERT INTO app.users (email, name, login_id, password_hash, is_active)
+        VALUES (${email}, ${name}, ${login_id}, ${password_hash}, true)
+        RETURNING user_id, email, name, login_id
+      `;
+      u = created as typeof u;
+
+      await sql/*sql*/`
+        INSERT INTO app.memberships (tenant_id, user_id, role, active)
+        VALUES (${tenant_id}, ${u.user_id}, ${role}, true)
+        ON CONFLICT (tenant_id, user_id) DO UPDATE SET
+          role=EXCLUDED.role,
+          active=true
+      `;
+    }
 
     const perms = (body as any).permissions || {};
     const notes = (body as any).notifications || {};
@@ -104,7 +128,7 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
         updated_at=now()
     `;
 
-    return json({ ok: true, user_id: u.user_id, temp_password_generated: !temp_password });
+    return json({ ok: true, user_id: u.user_id, temp_password_generated: tempPasswordGenerated });
   } catch (e: any) {
     return json({ ok: false, error: "server_error", message: e?.message || String(e) }, 500);
   }
