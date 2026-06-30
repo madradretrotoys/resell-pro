@@ -1,11 +1,11 @@
 <section class="tile" data-screen="settings-tenants">
   <h2>Tenants / Workspaces</h2>
-  <p class="text-muted">Create tenant workspaces and optionally place them under an Organization and Business. Tenant-level behavior remains the operational workspace/location boundary.</p>
+  <p class="text-muted">Create Organizations and Businesses first, then tenant workspaces can be mapped to those records in the next step. Tenant-level behavior remains the operational workspace/location boundary.</p>
 
   <div id="tenantBanner" class="banner" hidden></div>
 
-  <form id="tenantForm" class="tile" style="margin:12px 0 16px; max-width:720px;">
-    <h3>Add tenant workspace</h3>
+  <form id="organizationForm" class="tile" style="margin:12px 0 16px; max-width:720px;">
+    <h3>Add organization and business</h3>
     <div class="grid grid-2">
       <label>
         Organization
@@ -16,7 +16,17 @@
         <input id="tenantBusinessName" name="business_name" type="text" autocomplete="organization-title" placeholder="Mad Rad Retro Toys">
       </label>
     </div>
-    <p class="text-muted">Use Organization for the umbrella account and Business for the operating brand. Leave both blank only for legacy/internal standalone workspaces.</p>
+    <p class="text-muted">Use Organization for the umbrella account and Business for the operating brand. This does not change existing tenant/location behavior yet.</p>
+    <div class="flex" style="gap:10px; flex-wrap:wrap; margin-top:12px;">
+      <button id="btnCreateOrganization" class="btn btn--primary btn--sm" type="submit">Create organization/business</button>
+      <button id="btnRefreshOrganizations" class="btn btn--neutral btn--sm" type="button">Refresh organizations</button>
+    </div>
+  </form>
+
+  <div id="organizationsTable" class="tile" style="overflow:auto; min-height:48px; margin-bottom:16px;"></div>
+
+  <form id="tenantForm" class="tile" style="margin:12px 0 16px; max-width:720px;">
+    <h3>Add tenant workspace</h3>
     <div class="grid grid-2">
       <label>
         Tenant workspace name

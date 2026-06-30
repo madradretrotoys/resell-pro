@@ -8,6 +8,7 @@ export async function init({ session }) {
   if (!session?.user) session = await ensureSession();
 
   els.banner = $('tenantBanner');
+  els.organizationForm = $('organizationForm');
   els.form = $('tenantForm');
   els.organizationName = $('tenantOrganizationName');
   els.businessName = $('tenantBusinessName');
@@ -20,7 +21,10 @@ export async function init({ session }) {
   els.phone = $('tenantPhone');
   els.email = $('tenantEmail');
   els.logo = $('tenantLogo');
+  els.organizationsTable = $('organizationsTable');
   els.table = $('tenantsTable');
+  els.createOrganizationButton = $('btnCreateOrganization');
+  els.refreshOrganizationsButton = $('btnRefreshOrganizations');
   els.createButton = $('btnCreateTenant');
   els.refreshButton = $('btnRefreshTenants');
 
@@ -32,10 +36,30 @@ export async function init({ session }) {
     els.slug.dataset.touched = 'true';
     els.slug.value = slugify(els.slug.value);
   });
+  els.organizationForm?.addEventListener('submit', createOrganizationBusiness);
+  els.refreshOrganizationsButton?.addEventListener('click', refreshOrganizations);
   els.form?.addEventListener('submit', createTenant);
   els.refreshButton?.addEventListener('click', refresh);
 
+  await refreshOrganizations();
   await refresh();
+}
+
+async function refreshOrganizations() {
+  if (!els.organizationsTable) return;
+  els.organizationsTable.innerHTML = 'Loading organizations…';
+  try {
+    const data = await api('/api/settings/organizations/list');
+    if (data.hierarchy_schema_missing) {
+      els.organizationsTable.innerHTML = '<div class="muted">Organization tables are not installed yet. Apply the organizations/businesses migration first.</div>';
+      return;
+    }
+    els.organizationsTable.innerHTML = renderOrganizations(data.organizations || []);
+  } catch (e) {
+    els.organizationsTable.innerHTML = e?.status === 403
+      ? 'Access denied. Ask an owner to grant Can add Tenant permission.'
+      : 'Failed to load organizations.';
+  }
 }
 
 async function refresh() {
@@ -51,22 +75,47 @@ async function refresh() {
   }
 }
 
+async function createOrganizationBusiness(event) {
+  event.preventDefault();
+  const organizationName = els.organizationName?.value.trim() || '';
+  const businessName = els.businessName?.value.trim() || '';
+  if (!organizationName) return showBanner('Organization name is required.', 'error');
+  if (!businessName) return showBanner('Business name is required.', 'error');
+
+  els.createOrganizationButton.disabled = true;
+  try {
+    await api('/api/settings/organizations/create', {
+      method: 'POST',
+      body: {
+        organization_name: organizationName,
+        business_name: businessName,
+      },
+    });
+    showBanner('Organization and business created successfully.', 'success');
+    els.organizationForm.reset();
+    await refreshOrganizations();
+  } catch (e) {
+    const error = e?.data?.error;
+    const message = error === 'hierarchy_schema_missing'
+      ? 'Apply the organizations/businesses migration before creating organizations and businesses.'
+      : error === 'forbidden'
+        ? 'You do not have permission to create organizations and businesses.'
+        : 'Organization/business creation failed.';
+    showBanner(message, 'error');
+  } finally {
+    els.createOrganizationButton.disabled = false;
+  }
+}
+
 async function createTenant(event) {
   event.preventDefault();
   const name = els.name?.value.trim() || '';
   const slug = slugify(els.slug?.value || name);
-  const organizationName = els.organizationName?.value.trim() || '';
-  const businessName = els.businessName?.value.trim() || '';
   if (!name) return showBanner('Tenant name is required.', 'error');
-  if ((organizationName && !businessName) || (!organizationName && businessName)) {
-    return showBanner('Enter both Organization and Business, or leave both blank for a standalone workspace.', 'error');
-  }
 
   const body = new FormData();
   body.set('name', name);
   body.set('slug', slug);
-  body.set('organization_name', organizationName);
-  body.set('business_name', businessName);
   body.set('street_address', els.streetAddress?.value.trim() || '');
   body.set('city', els.city?.value.trim() || '');
   body.set('state', els.state?.value.trim() || '');
@@ -87,8 +136,6 @@ async function createTenant(event) {
     const error = e?.data?.error;
     const message = error === 'slug_exists'
       ? 'That slug is already in use. Choose another slug.'
-      : error === 'missing_organization_name' || error === 'missing_business_name'
-        ? 'Enter both Organization and Business, or leave both blank for a standalone workspace.'
       : error === 'forbidden'
         ? 'You do not have permission to create tenants.'
         : error === 'invalid_email'
@@ -102,6 +149,43 @@ async function createTenant(event) {
   } finally {
     els.createButton.disabled = false;
   }
+}
+
+function renderOrganizations(organizations) {
+  if (!organizations.length) return '<div class="muted">No organizations or businesses yet.</div>';
+  const rows = organizations.flatMap((organization) => {
+    const businesses = organization.businesses || [];
+    if (!businesses.length) {
+      return [`
+        <tr>
+          <td>${escapeHtml(organization.name)}</td>
+          <td>${escapeHtml(organization.slug)}</td>
+          <td>—</td>
+          <td>—</td>
+          <td>${formatDate(organization.created_at)}</td>
+        </tr>
+      `];
+    }
+
+    return businesses.map((business) => `
+      <tr>
+        <td>${escapeHtml(organization.name)}</td>
+        <td>${escapeHtml(organization.slug)}</td>
+        <td>${escapeHtml(business.name)}</td>
+        <td>${escapeHtml(business.slug)}</td>
+        <td>${formatDate(business.created_at || organization.created_at)}</td>
+      </tr>
+    `);
+  }).join('');
+
+  return `
+    <table class="table">
+      <thead>
+        <tr><th>Organization</th><th>Org slug</th><th>Business</th><th>Business slug</th><th>Created</th></tr>
+      </thead>
+      <tbody>${rows}</tbody>
+    </table>
+  `;
 }
 
 function renderTable(tenants) {
