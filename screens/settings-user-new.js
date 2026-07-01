@@ -68,7 +68,9 @@ function refreshAssignmentControls() {
     ? roles.map((role) => `<option value="${escapeHtml(role)}">${escapeHtml(labelRole(role))}</option>`).join('')
     : '<option value="">No roles available</option>';
 
-  $('assignment_entity_wrap').hidden = scope === 'platform';
+  const entityWrap = $('assignment_entity_wrap');
+  entityWrap.hidden = scope === 'platform';
+  entityWrap.style.display = scope === 'platform' ? 'none' : '';
   let entities = [];
   if (scope === 'organization') entities = options.organizations || [];
   if (scope === 'business') entities = options.businesses || [];
@@ -79,14 +81,13 @@ function refreshAssignmentControls() {
 
   const disabled = roles.length === 0 || (scope !== 'platform' && entities.length === 0);
   $('assignment_role').disabled = disabled;
-  $('assignment_entity').disabled = disabled;
+  $('assignment_entity').disabled = scope === 'platform' || disabled;
 }
 
 function collect(){
   const name = $('name').value.trim();
   const email = $('email').value.trim();
   const login_id = $('login_id').value.trim();
-  const role = $('role').value;
   const discount = $('discount_max').value;
 
   if (!name || !email || !login_id) { alert('Please complete name, email and login.'); return null; }
@@ -97,6 +98,7 @@ function collect(){
 
   const assignment = collectAssignment();
   if (assignment === false) return null;
+  const role = deriveLegacyRole(assignment);
 
   return {
     name, email, login_id, role,
@@ -145,4 +147,12 @@ function escapeHtml(s) {
 
 function labelRole(value) {
   return String(value || '').replace(/^platform_/, 'platform ').replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
+function deriveLegacyRole(assignment) {
+  const role = String(assignment?.role || '').toLowerCase();
+  if (['owner', 'admin', 'manager', 'clerk'].includes(role)) return role;
+  if (role === 'platform_owner') return 'owner';
+  if (role === 'platform_admin' || role === 'platform_support') return 'admin';
+  return 'clerk';
 }
