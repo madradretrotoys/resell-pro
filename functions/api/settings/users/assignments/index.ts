@@ -17,10 +17,45 @@ function isUuid(value: string) {
 
 async function canManageAccess(sql: ReturnType<typeof neon>, tenantId: string | null, actorUserId: string) {
   const platformActor = await getPlatformActor(sql, actorUserId).catch(() => null);
-  if (canManagePlatform(platformActor)) return { ok: true, platform: true };
-  if (!tenantId) return { ok: false, platform: false };
+  if (canManagePlatform(platformActor)) return { ok: true, platform: true, platformRole: platformActor?.role || null, tenantActor: null as any };
+  if (!tenantId) return { ok: false, platform: false, platformRole: null, tenantActor: null as any };
   const tenantActor = await getTenantActor(sql, tenantId, actorUserId);
-  return { ok: !!tenantActor && tenantActor.active !== false && canManageTenantSettings(tenantActor), platform: false };
+  return {
+    ok: !!tenantActor && tenantActor.active !== false && canManageTenantSettings(tenantActor),
+    platform: false,
+    platformRole: null,
+    tenantActor,
+  };
+}
+
+function roleOptionsForAccess(access: { platform: boolean; platformRole?: string | null; tenantActor?: any }) {
+  if (access.platform) {
+    const platformRoles = access.platformRole === "platform_owner"
+      ? PLATFORM_ROLES
+      : ["platform_admin", "platform_support", "platform_readonly"];
+    return {
+      platform: platformRoles,
+      organization: TENANT_ROLES,
+      business: TENANT_ROLES,
+      tenant: TENANT_ROLES,
+    };
+  }
+
+  const actorRole = String(access.tenantActor?.role || "").toLowerCase();
+  if (actorRole === "owner") {
+    return { platform: [], organization: TENANT_ROLES, business: TENANT_ROLES, tenant: TENANT_ROLES };
+  }
+  if (actorRole === "admin") {
+    return { platform: [], organization: ["manager", "clerk"], business: ["manager", "clerk"], tenant: ["manager", "clerk"] };
+  }
+  if (actorRole === "manager") {
+    return { platform: [], organization: [], business: [], tenant: ["clerk"] };
+  }
+  return { platform: [], organization: [], business: [], tenant: [] };
+}
+
+function canAssignRequestedRole(access: { platform: boolean; platformRole?: string | null; tenantActor?: any }, scope: string, role: string) {
+  return (roleOptionsForAccess(access) as any)[scope]?.includes(role) === true;
 }
 
 async function loadAssignment(sql: ReturnType<typeof neon>, scope: string, userId: string, entityId: string) {
@@ -272,7 +307,14 @@ export const onRequestGet: PagesFunction = async ({ request, env }) => {
       can_manage_platform: access.platform,
       assignments: [...platformAssignments, ...organizationAssignments, ...businessAssignments, ...tenantAssignments],
       effective_tenants: effectiveTenants,
-      options: { organizations, businesses, tenants, tenant_roles: TENANT_ROLES, platform_roles: PLATFORM_ROLES },
+      options: {
+        organizations,
+        businesses,
+        tenants,
+        tenant_roles: TENANT_ROLES,
+        platform_roles: PLATFORM_ROLES,
+        role_options_by_scope: roleOptionsForAccess(access),
+      },
     });
   } catch (e: any) {
     return json({ ok: false, error: "server_error", message: e?.message || String(e) }, 500);
@@ -304,6 +346,7 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
     const access = await canManageAccess(sql, tenantId, auth.actor_user_id);
     if (!access.ok) return json({ ok: false, error: "forbidden" }, 403);
     if (scope === "platform" && !access.platform) return json({ ok: false, error: "forbidden_platform" }, 403);
+    if (!canAssignRequestedRole(access, scope, role)) return json({ ok: false, error: "insufficient_role_scope" }, 403);
 
     if (!access.platform && scope !== "platform") {
       const [currentTenant] = tenantId ? await sql<{ tenant_id: string; business_id: string | null; organization_id: string | null }[]>`
@@ -344,6 +387,9 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
     }
 
     const beforeAssignment = await loadAssignment(sql, scope, userId, entityId);
+    if (scope === "platform" && access.platformRole !== "platform_owner" && (beforeAssignment as any)?.role === "platform_owner") {
+      return json({ ok: false, error: "platform_owner_required" }, 403);
+    }
 
     if (scope === "platform") {
       if (remove) await sql/*sql*/`DELETE FROM app.platform_memberships WHERE user_id = ${userId}`;

@@ -168,11 +168,16 @@ async function openAccessDialog(userId) {
 
 function configureScopeOptions() {
   const data = accessState.data || {};
-  const canPlatform = !!data.can_manage_platform;
+  const roleOptionsByScope = data.options?.role_options_by_scope || {};
   [...els.accessScope.options].forEach((opt) => {
-    if (opt.value === 'platform') opt.hidden = !canPlatform;
+    const roles = roleOptionsByScope[opt.value] || [];
+    opt.hidden = roles.length === 0;
+    opt.disabled = roles.length === 0;
   });
-  if (els.accessScope.value === 'platform' && !canPlatform) els.accessScope.value = 'organization';
+  if (els.accessScope.selectedOptions?.[0]?.disabled) {
+    const firstAllowed = [...els.accessScope.options].find((opt) => !opt.disabled);
+    if (firstAllowed) els.accessScope.value = firstAllowed.value;
+  }
   els.accessScope.onchange = refreshAccessFormOptions;
   els.btnSaveAccess.onclick = saveAssignment;
   refreshAccessFormOptions();
@@ -182,8 +187,12 @@ function refreshAccessFormOptions() {
   const data = accessState.data || {};
   const scope = els.accessScope.value;
   const options = data.options || {};
-  const roles = scope === 'platform' ? (options.platform_roles || []) : (options.tenant_roles || []);
-  els.accessRole.innerHTML = roles.map((role) => `<option value="${escapeHtml(role)}">${escapeHtml(labelRole(role))}</option>`).join('');
+  const roleOptionsByScope = options.role_options_by_scope || {};
+  const roles = roleOptionsByScope[scope] || [];
+  els.accessRole.innerHTML = roles.length
+    ? roles.map((role) => `<option value="${escapeHtml(role)}">${escapeHtml(labelRole(role))}</option>`).join('')
+    : '<option value="">No roles available</option>';
+  els.btnSaveAccess.disabled = roles.length === 0;
   els.accessEntityWrap.hidden = scope === 'platform';
   let entities = [];
   if (scope === 'organization') entities = options.organizations || [];
@@ -192,6 +201,7 @@ function refreshAccessFormOptions() {
   els.accessEntity.innerHTML = entities.length
     ? entities.map((row) => `<option value="${escapeHtml(row.entity_id)}">${escapeHtml(row.entity_name)}</option>`).join('')
     : '<option value="">No choices available</option>';
+  if (scope !== 'platform' && !entities.length) els.btnSaveAccess.disabled = true;
 }
 
 async function saveAssignment() {
@@ -331,6 +341,8 @@ function accessErrorMessage(error, fallback) {
   if (code === 'last_platform_owner') return 'At least one active platform owner is required. Add another platform owner before changing this assignment.';
   if (code === 'forbidden_scope') return 'You do not have permission to assign that scope.';
   if (code === 'forbidden_platform') return 'Only platform owners/admins can manage platform assignments.';
+  if (code === 'platform_owner_required') return 'Only a platform owner can change another platform owner assignment.';
   if (code === 'invalid_role') return 'That role is not valid for the selected scope.';
+  if (code === 'insufficient_role_scope') return 'Your role cannot grant that access level.';
   return code ? `${fallback} (${code})` : fallback;
 }
