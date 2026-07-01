@@ -6,17 +6,47 @@
     <label> Name <input id="name" required></label>
     <label> Email <input id="email" type="email" required></label>
     <label> Login ID <input id="login_id" required></label>
-    <label> Role
-      <select id="role">
-        <option value="clerk">Clerk</option>
-        <option value="manager">Manager</option>
-        <option value="admin">Admin</option>
-        <option value="owner">Owner</option>
-      </select>
-    </label>
     <label> Temporary password (optional)
       <input id="temp_password" autocomplete="off" placeholder="">
     </label>
+
+    <fieldset style="grid-column:1/-1; border:1px solid var(--border); border-radius:10px; padding:10px;">
+      <legend>Platform / internal role</legend>
+      <p class="text-muted" style="margin-top:0;">Use this only for internal Resell Pro users. Customer visibility is still controlled below.</p>
+      <div style="display:grid; grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); gap:8px; align-items:end;">
+        <label style="display:flex; gap:8px; align-items:center; min-height:42px;">
+          <input id="platform_enabled" type="checkbox"> Internal platform user
+        </label>
+        <label id="platform_role_wrap">Platform role
+          <select id="platform_role"></select>
+        </label>
+      </div>
+      <div id="platform_help" class="text-muted" style="margin-top:8px;"></div>
+    </fieldset>
+
+    <fieldset style="grid-column:1/-1; border:1px solid var(--border); border-radius:10px; padding:10px;">
+      <legend>Customer access assignment</legend>
+      <p class="text-muted" style="margin-top:0;">Choose which customer organization, business, or tenant/location this user can access first.</p>
+      <div style="display:grid; grid-template-columns:repeat(auto-fit,minmax(180px,1fr)); gap:8px; align-items:end;">
+        <label>Scope
+          <select id="assignment_scope">
+            <option value="tenant">Tenant / Location</option>
+            <option value="business">Business</option>
+            <option value="organization">Organization</option>
+          </select>
+        </label>
+        <label id="assignment_entity_wrap">Organization / Business / Tenant
+          <select id="assignment_entity"></select>
+        </label>
+        <label>Access role
+          <select id="assignment_role"></select>
+        </label>
+        <label style="display:flex; gap:8px; align-items:center; min-height:42px;">
+          <input id="assignment_active" type="checkbox" checked> Active
+        </label>
+      </div>
+      <div id="assignment_help" class="text-muted" style="margin-top:8px;"></div>
+    </fieldset>
 
     <fieldset style="grid-column:1/-1; border:1px solid var(--border); border-radius:10px; padding:10px;">
       <legend>Screen access</legend>

@@ -2,6 +2,7 @@
 // Dynamic search/sort/filter based on live schema (no hardcoded column names).
 
 import { neon } from "@neondatabase/serverless";
+import { getEffectiveTenantActor, isPlatformScopedActor } from "../../_shared/auth";
 
 type Role = "owner" | "admin" | "manager" | "clerk";
 type Dir = "asc" | "desc";
@@ -68,16 +69,13 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
 
     const sql = neon(String(env.DATABASE_URL));
 
-    // AuthZ
-    const actor = await sql<{ role: Role; active: boolean; can_inventory: boolean | null }[]>`
-      SELECT m.role, m.active, COALESCE(p.can_inventory, false) AS can_inventory
-      FROM app.memberships m
-      LEFT JOIN app.permissions p ON p.user_id = m.user_id
-      WHERE m.tenant_id = ${tenant_id} AND m.user_id = ${actor_user_id}
-      LIMIT 1
-    `;
-    if (actor.length === 0 || actor[0].active === false) return json({ ok: false, error: "forbidden" }, 403);
-    const allow = ["owner","admin","manager"].includes(actor[0].role) || !!actor[0].can_inventory;
+    // AuthZ — direct tenant access or inherited organization/business/platform access.
+    // Platform/internal users still need explicit Inventory permission.
+    const actor = await getEffectiveTenantActor(sql, tenant_id, actor_user_id);
+    if (!actor || actor.active === false) return json({ ok: false, error: "forbidden" }, 403);
+    const allow = isPlatformScopedActor(actor)
+      ? !!actor.can_inventory
+      : (["owner", "admin", "manager"].includes(actor.role) || !!actor.can_inventory);
     if (!allow) return json({ ok: false, error: "forbidden" }, 403);
 
     // Live schema map

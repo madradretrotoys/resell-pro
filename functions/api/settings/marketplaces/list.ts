@@ -4,6 +4,7 @@
 
 import type { PagesFunction } from "@cloudflare/workers-types";
 import { neon } from "@neondatabase/serverless";
+import { canManageTenantSettings, getEffectiveTenantActor, isPlatformScopedActor } from "../../../_shared/auth";
 
 // Minimal helpers copied from your patterns
 function json(body: any, status = 200): Response {
@@ -60,25 +61,13 @@ export const onRequestGet: PagesFunction = async ({ request, env }) => {
     // --- DB client ---
     const sql = neon(String(env.DATABASE_URL));
 
-    // --- Resolve actor's membership & permissions in this tenant ---
-    const actor = await sql<
-      { role: "owner" | "admin" | "manager" | "clerk"; active: boolean; can_settings: boolean | null }[]
-    >`
-      SELECT m.role, m.active, COALESCE(p.can_settings, false) AS can_settings
-      FROM app.memberships m
-      LEFT JOIN app.permissions p ON p.user_id = m.user_id
-      WHERE m.tenant_id = ${tenant_id} AND m.user_id = ${actor_user_id}
-      LIMIT 1
-    `;
-
-    if (actor.length === 0 || actor[0].active === false) {
+    // --- Resolve effective actor access for this tenant (direct or inherited) ---
+    const actor = await getEffectiveTenantActor(sql, tenant_id, actor_user_id);
+    if (!actor || actor.active === false) {
       return json({ ok: false, error: "forbidden" }, 403);
     }
 
-    // --- Access policy: same as Users ---
-    const role = actor[0].role;
-    const allowSettings =
-      role === "owner" || role === "admin" || role === "manager" || !!actor[0].can_settings;
+    const allowSettings = isPlatformScopedActor(actor) ? !!actor.can_settings : canManageTenantSettings(actor);
     if (!allowSettings) {
       return json({ ok: false, error: "forbidden" }, 403);
     }

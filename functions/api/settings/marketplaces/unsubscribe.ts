@@ -1,5 +1,6 @@
 import type { PagesFunction } from "@cloudflare/workers-types";
 import { neon } from "@neondatabase/serverless";
+import { canManageTenantSettings, getEffectiveTenantActor, isPlatformScopedActor } from "../../../_shared/auth";
 import { onRequestPost as subscribe } from "./subscribe"; // reuse helpers if you prefer (optional)
 
 // Minimal standalone (mirrors subscribe.ts)
@@ -44,16 +45,9 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
     if (!marketplace_id) return json({ ok: false, error: "missing_marketplace_id" }, 400);
 
     const sql = neon(String(env.DATABASE_URL));
-    const actor = await sql<{ role: "owner"|"admin"|"manager"|"clerk"; active: boolean; can_settings: boolean|null }[]>`
-      SELECT m.role, m.active, COALESCE(p.can_settings, false) AS can_settings
-      FROM app.memberships m
-      LEFT JOIN app.permissions p ON p.user_id = m.user_id
-      WHERE m.tenant_id = ${tenant_id} AND m.user_id = ${actor_user_id}
-      LIMIT 1
-    `;
-    if (actor.length === 0 || actor[0].active === false) return json({ ok: false, error: "forbidden" }, 403);
-    const role = actor[0].role;
-    const allowSettings = role === "owner" || role === "admin" || role === "manager" || !!actor[0].can_settings;
+    const actor = await getEffectiveTenantActor(sql, tenant_id, actor_user_id);
+    if (!actor || actor.active === false) return json({ ok: false, error: "forbidden" }, 403);
+    const allowSettings = isPlatformScopedActor(actor) ? !!actor.can_settings : canManageTenantSettings(actor);
     if (!allowSettings) return json({ ok: false, error: "forbidden" }, 403);
 
     await sql/*sql*/`
