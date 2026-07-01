@@ -1,6 +1,7 @@
 // begin functions/api/images/upload.ts
 // functions/api/images/upload.ts
 import { neon } from "@neondatabase/serverless";
+import { getEffectiveTenantActor, isPlatformScopedActor } from "../../_shared/auth";
 
 const json = (data: any, status = 200) =>
   new Response(JSON.stringify(data), { status, headers: { "content-type": "application/json", "cache-control": "no-store" } });
@@ -45,17 +46,13 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
     const tenant_id = request.headers.get("x-tenant-id");
     if (!tenant_id) return json({ ok: false, error: "missing_tenant" }, 400);
 
-    // AuthZ (mirror inventory-intake guard: owner/admin/manager or can_inventory_intake)
-    const sql = neon(String(env.DATABASE_URL));
-    const roleQ = await sql<{ role: string; active: boolean; can_inventory_intake: boolean | null }[]>`
-      SELECT m.role, m.active, COALESCE(p.can_inventory_intake, false) AS can_inventory_intake
-      FROM app.memberships m
-      LEFT JOIN app.permissions p ON p.user_id = m.user_id
-      WHERE m.tenant_id = ${tenant_id} AND m.user_id = ${actor_user_id}
-      LIMIT 1
-    `;
-    if (roleQ.length === 0 || roleQ[0].active === false) return json({ ok: false, error: "forbidden" }, 403);
-    const allow = ["owner", "admin", "manager"].includes(roleQ[0].role) || !!roleQ[0].can_inventory_intake;
+    // AuthZ — direct tenant access or inherited organization/business/platform access.
+    // Platform/internal users still need explicit Inventory Intake permission.
+    const actor = await getEffectiveTenantActor(sql, tenant_id, actor_user_id);
+    if (!actor || actor.active === false) return json({ ok: false, error: "forbidden" }, 403);
+    const allow = isPlatformScopedActor(actor)
+      ? !!actor.can_inventory_intake
+      : (["owner", "admin", "manager"].includes(actor.role) || !!actor.can_inventory_intake);
     if (!allow) return json({ ok: false, error: "forbidden" }, 403);
 
     // Parse body: allow multipart OR raw bytes
