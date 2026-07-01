@@ -51,12 +51,33 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
 
     const sql = neon(String(env.DATABASE_URL));
     const rows = await sql/*sql*/`
+      WITH accessible AS (
+        SELECT t.tenant_id
+        FROM app.platform_memberships pm
+        JOIN app.tenants t ON true
+        WHERE pm.user_id = ${user_id} AND pm.active = true
+        UNION
+        SELECT t.tenant_id
+        FROM app.organization_memberships om
+        JOIN app.businesses b ON b.organization_id = om.organization_id
+        JOIN app.tenants t ON t.business_id = b.business_id
+        WHERE om.user_id = ${user_id} AND om.active = true
+        UNION
+        SELECT t.tenant_id
+        FROM app.business_memberships bm
+        JOIN app.tenants t ON t.business_id = bm.business_id
+        WHERE bm.user_id = ${user_id} AND bm.active = true
+        UNION
+        SELECT m.tenant_id
+        FROM app.memberships m
+        WHERE m.user_id = ${user_id} AND m.active = true
+      )
       SELECT 1
-      FROM app.memberships
-      WHERE tenant_id = ${tenant_id} AND user_id = ${user_id} AND active = true
+      FROM accessible
+      WHERE tenant_id = ${tenant_id}::uuid
       LIMIT 1
     `;
-    if (rows.length === 0) return json({ ok: false, error: "not_a_member" }, 403);
+    if (rows.length === 0) return json({ ok: false, error: "not_allowed_tenant" }, 403);
 
     // Set HttpOnly cookie for active tenant
     const h = new Headers({

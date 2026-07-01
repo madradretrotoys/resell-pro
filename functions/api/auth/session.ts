@@ -37,14 +37,7 @@ export const onRequestGet: PagesFunction = async ({ request, env }) => {
         dbg.push("session:tenant-cookie:malformed");
         active_tenant_id = null;
       } else {
-        const validRows = await sql/*sql*/`
-          SELECT 1
-          FROM app.memberships
-          WHERE tenant_id = ${active_tenant_id}::uuid
-            AND user_id = ${user.user_id}
-            AND active = true
-          LIMIT 1
-        `;
+        const validRows = await accessibleTenantCheck(sql, user.user_id, active_tenant_id, dbg);
         if (validRows.length === 0) {
           dbg.push("session:tenant-cookie:invalid");
           active_tenant_id = null;
@@ -55,13 +48,7 @@ export const onRequestGet: PagesFunction = async ({ request, env }) => {
     }
 
     if (!active_tenant_id) {
-      const rows = await sql/*sql*/`
-        SELECT tenant_id
-        FROM app.memberships
-        WHERE user_id = ${user.user_id} AND active = true
-        ORDER BY created_at DESC
-        LIMIT 1
-      `;
+      const rows = await accessibleTenantDefault(sql, user.user_id, dbg);
       if (rows.length === 1) {
         active_tenant_id = String(rows[0].tenant_id);
         setCookieHeader = tenantCookie(active_tenant_id);
@@ -128,4 +115,82 @@ async function verifyJwt(token: string, secret: string): Promise<Record<string, 
   const payload = JSON.parse(new TextDecoder().decode(base64urlToBytes(p)));
   if ((payload as any)?.exp && Date.now() / 1000 > (payload as any).exp) throw new Error("expired");
   return payload;
+}
+
+async function accessibleTenantCheck(sql: any, userId: string, tenantId: string, dbg: string[]) {
+  try {
+    return await sql/*sql*/`
+      WITH accessible AS (
+        SELECT t.tenant_id
+        FROM app.platform_memberships pm
+        JOIN app.tenants t ON true
+        WHERE pm.user_id = ${userId} AND pm.active = true
+        UNION
+        SELECT t.tenant_id
+        FROM app.organization_memberships om
+        JOIN app.businesses b ON b.organization_id = om.organization_id
+        JOIN app.tenants t ON t.business_id = b.business_id
+        WHERE om.user_id = ${userId} AND om.active = true
+        UNION
+        SELECT t.tenant_id
+        FROM app.business_memberships bm
+        JOIN app.tenants t ON t.business_id = bm.business_id
+        WHERE bm.user_id = ${userId} AND bm.active = true
+        UNION
+        SELECT m.tenant_id
+        FROM app.memberships m
+        WHERE m.user_id = ${userId} AND m.active = true
+      )
+      SELECT 1 FROM accessible WHERE tenant_id = ${tenantId}::uuid LIMIT 1
+    `;
+  } catch (e: any) {
+    dbg.push(`session:accessible-check:fallback:${e?.message || String(e)}`);
+    return await sql/*sql*/`
+      SELECT 1
+      FROM app.memberships
+      WHERE tenant_id = ${tenantId}::uuid AND user_id = ${userId} AND active = true
+      LIMIT 1
+    `;
+  }
+}
+
+async function accessibleTenantDefault(sql: any, userId: string, dbg: string[]) {
+  try {
+    return await sql/*sql*/`
+      WITH accessible AS (
+        SELECT t.tenant_id, t.created_at, 1 AS priority
+        FROM app.platform_memberships pm
+        JOIN app.tenants t ON true
+        WHERE pm.user_id = ${userId} AND pm.active = true
+        UNION
+        SELECT t.tenant_id, t.created_at, 2 AS priority
+        FROM app.organization_memberships om
+        JOIN app.businesses b ON b.organization_id = om.organization_id
+        JOIN app.tenants t ON t.business_id = b.business_id
+        WHERE om.user_id = ${userId} AND om.active = true
+        UNION
+        SELECT t.tenant_id, t.created_at, 3 AS priority
+        FROM app.business_memberships bm
+        JOIN app.tenants t ON t.business_id = bm.business_id
+        WHERE bm.user_id = ${userId} AND bm.active = true
+        UNION
+        SELECT m.tenant_id, m.created_at, 4 AS priority
+        FROM app.memberships m
+        WHERE m.user_id = ${userId} AND m.active = true
+      )
+      SELECT tenant_id
+      FROM accessible
+      ORDER BY priority, created_at DESC
+      LIMIT 1
+    `;
+  } catch (e: any) {
+    dbg.push(`session:accessible-default:fallback:${e?.message || String(e)}`);
+    return await sql/*sql*/`
+      SELECT tenant_id
+      FROM app.memberships
+      WHERE user_id = ${userId} AND active = true
+      ORDER BY created_at DESC
+      LIMIT 1
+    `;
+  }
 }

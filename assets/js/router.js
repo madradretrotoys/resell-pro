@@ -1,5 +1,6 @@
 //Begin router.ts copy
 import { ensureSession, waitForSession } from '/assets/js/auth.js';
+import { api, setActiveTenant } from '/assets/js/api.js';
 import { showToast } from '/assets/js/ui.js';
 import '/assets/js/api.js'; // ensure window.api is available to screens
 
@@ -116,6 +117,57 @@ function updateHeaderUserName(session) {
   node.textContent = `Hi, ${firstName}`;
 }
 
+async function updateTenantSwitcher(session) {
+  const wrap = document.getElementById('tenantSwitcherWrap');
+  const select = document.getElementById('tenantSwitcher');
+  if (!wrap || !select) return;
+  try {
+    const data = await api('/api/auth/tenants');
+    const tenants = Array.isArray(data?.tenants) ? data.tenants : [];
+    if (tenants.length <= 1) {
+      wrap.style.display = 'none';
+      select.innerHTML = '';
+      return;
+    }
+    const activeTenantId = session?.active_tenant_id || data.active_tenant_id || '';
+    select.innerHTML = tenants.map((tenant) => {
+      const org = tenant.organization_name || 'Unassigned organization';
+      const business = tenant.business_name || 'Unassigned business';
+      const label = `${org} / ${business} / ${tenant.tenant_name}`;
+      return `<option value="${escapeHtmlAttr(tenant.tenant_id)}">${escapeHtml(label)}</option>`;
+    }).join('');
+    if (activeTenantId) select.value = activeTenantId;
+    wrap.style.display = 'inline-flex';
+    select.onchange = async () => {
+      const tenantId = select.value;
+      if (!tenantId) return;
+      select.disabled = true;
+      try {
+        await api('/api/auth/active-tenant', { method: 'POST', body: { tenant_id: tenantId } });
+        setActiveTenant(tenantId);
+        showToast('Tenant switched.');
+        await loadScreen(current.name || qs('page') || 'dashboard');
+      } catch (e) {
+        showToast('Unable to switch tenant.');
+      } finally {
+        select.disabled = false;
+      }
+    };
+  } catch (e) {
+    wrap.style.display = 'none';
+  }
+}
+
+function escapeHtml(value) {
+  return String(value ?? '').replace(/[&<>"']/g, (c) => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+  }[c]));
+}
+
+function escapeHtmlAttr(value) {
+  return escapeHtml(value);
+}
+
 async function logout(reason = 'manual') {
   if (logoutInProgress) return;
   logoutInProgress = true;
@@ -187,6 +239,7 @@ export async function loadScreen(name){
   }
   log('auth:ok', { user: session.user });
   updateHeaderUserName(session);
+  await updateTenantSwitcher(session);
   wireIdleTimeout();
 
   // 2) Swap screen
