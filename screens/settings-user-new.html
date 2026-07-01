@@ -19,6 +19,31 @@
     </label>
 
     <fieldset style="grid-column:1/-1; border:1px solid var(--border); border-radius:10px; padding:10px;">
+      <legend>Initial access assignment</legend>
+      <p class="text-muted" style="margin-top:0;">Choose where this user should be assigned immediately after creation.</p>
+      <div style="display:grid; grid-template-columns:repeat(auto-fit,minmax(180px,1fr)); gap:8px; align-items:end;">
+        <label>Scope
+          <select id="assignment_scope">
+            <option value="tenant">Tenant / Location</option>
+            <option value="business">Business</option>
+            <option value="organization">Organization</option>
+            <option value="platform">Platform</option>
+          </select>
+        </label>
+        <label id="assignment_entity_wrap">Organization / Business / Tenant
+          <select id="assignment_entity"></select>
+        </label>
+        <label>Assignment role
+          <select id="assignment_role"></select>
+        </label>
+        <label style="display:flex; gap:8px; align-items:center; min-height:42px;">
+          <input id="assignment_active" type="checkbox" checked> Active
+        </label>
+      </div>
+      <div id="assignment_help" class="text-muted" style="margin-top:8px;"></div>
+    </fieldset>
+
+    <fieldset style="grid-column:1/-1; border:1px solid var(--border); border-radius:10px; padding:10px;">
       <legend>Screen access</legend>
       <div style="display:grid; grid-template-columns:repeat(auto-fit,minmax(180px,1fr)); gap:8px;">
         <label><input type="checkbox" id="can_pos"> POS</label>
