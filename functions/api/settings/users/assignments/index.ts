@@ -115,13 +115,12 @@ export const onRequestGet: PagesFunction = async ({ request, env }) => {
       WHERE b.status = 'active' AND o.status = 'active' AND b.organization_id = ${currentTenant.organization_id}
       ORDER BY lower(o.name), lower(b.name)
     ` : [];
-    const effectiveTenants = await sql/*sql*/`
+    const effectiveTenants = access.platform ? await sql/*sql*/`
       WITH inherited AS (
         SELECT t.tenant_id,
                COALESCE(o.name || ' / ' || b.name || ' / ', '') || t.name AS tenant_name,
                'Platform' AS source_scope,
-               pm.role AS source_role,
-               pm.active
+               pm.role AS source_role
         FROM app.platform_memberships pm
         JOIN app.tenants t ON true
         LEFT JOIN app.businesses b ON b.business_id = t.business_id
@@ -131,8 +130,7 @@ export const onRequestGet: PagesFunction = async ({ request, env }) => {
         SELECT t.tenant_id,
                COALESCE(o.name || ' / ' || b.name || ' / ', '') || t.name AS tenant_name,
                'Organization' AS source_scope,
-               om.role AS source_role,
-               om.active
+               om.role AS source_role
         FROM app.organization_memberships om
         JOIN app.businesses b ON b.organization_id = om.organization_id
         JOIN app.tenants t ON t.business_id = b.business_id
@@ -142,8 +140,7 @@ export const onRequestGet: PagesFunction = async ({ request, env }) => {
         SELECT t.tenant_id,
                COALESCE(o.name || ' / ' || b.name || ' / ', '') || t.name AS tenant_name,
                'Business' AS source_scope,
-               bm.role AS source_role,
-               bm.active
+               bm.role AS source_role
         FROM app.business_memberships bm
         JOIN app.tenants t ON t.business_id = bm.business_id
         LEFT JOIN app.businesses b ON b.business_id = t.business_id
@@ -153,8 +150,44 @@ export const onRequestGet: PagesFunction = async ({ request, env }) => {
         SELECT t.tenant_id,
                COALESCE(o.name || ' / ' || b.name || ' / ', '') || t.name AS tenant_name,
                'Tenant' AS source_scope,
-               m.role::text AS source_role,
-               m.active
+               m.role::text AS source_role
+        FROM app.memberships m
+        JOIN app.tenants t ON t.tenant_id = m.tenant_id
+        LEFT JOIN app.businesses b ON b.business_id = t.business_id
+        LEFT JOIN app.organizations o ON o.organization_id = b.organization_id
+        WHERE m.user_id = ${userId} AND m.active = true
+      )
+      SELECT tenant_id, tenant_name,
+             string_agg(source_scope || ' ' || source_role, ', ' ORDER BY source_scope) AS access_source
+      FROM inherited
+      GROUP BY tenant_id, tenant_name
+      ORDER BY lower(tenant_name)
+    ` : await sql/*sql*/`
+      WITH inherited AS (
+        SELECT t.tenant_id,
+               COALESCE(o.name || ' / ' || b.name || ' / ', '') || t.name AS tenant_name,
+               'Organization' AS source_scope,
+               om.role AS source_role
+        FROM app.organization_memberships om
+        JOIN app.businesses b ON b.organization_id = om.organization_id
+        JOIN app.tenants t ON t.business_id = b.business_id
+        LEFT JOIN app.organizations o ON o.organization_id = b.organization_id
+        WHERE om.user_id = ${userId} AND om.active = true
+        UNION ALL
+        SELECT t.tenant_id,
+               COALESCE(o.name || ' / ' || b.name || ' / ', '') || t.name AS tenant_name,
+               'Business' AS source_scope,
+               bm.role AS source_role
+        FROM app.business_memberships bm
+        JOIN app.tenants t ON t.business_id = bm.business_id
+        LEFT JOIN app.businesses b ON b.business_id = t.business_id
+        LEFT JOIN app.organizations o ON o.organization_id = b.organization_id
+        WHERE bm.user_id = ${userId} AND bm.active = true
+        UNION ALL
+        SELECT t.tenant_id,
+               COALESCE(o.name || ' / ' || b.name || ' / ', '') || t.name AS tenant_name,
+               'Tenant' AS source_scope,
+               m.role::text AS source_role
         FROM app.memberships m
         JOIN app.tenants t ON t.tenant_id = m.tenant_id
         LEFT JOIN app.businesses b ON b.business_id = t.business_id
