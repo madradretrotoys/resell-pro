@@ -8,6 +8,18 @@
     <button id="btnInvite" class="btn btn--ghost btn--sm" title="Coming soon">Send invite (email)</button>
   </div>
 
+  <div class="tile" style="margin:0 0 16px;">
+    <h3 style="margin-top:0;">Find existing user</h3>
+    <p class="text-muted">Search by name, email, or login ID, then open Access to assign the user to an organization, business, or tenant.</p>
+    <div style="display:flex; gap:10px; flex-wrap:wrap; align-items:end;">
+      <label style="min-width:260px; flex:1;">User search
+        <input id="userSearchQuery" type="search" placeholder="Email, login ID, or name">
+      </label>
+      <button id="btnUserSearch" class="btn btn--neutral btn--sm" type="button">Search users</button>
+    </div>
+    <div id="userSearchResults" style="margin-top:12px;"></div>
+  </div>
+
   <div id="usersTable" class="tile" style="overflow:auto; min-height:48px;"></div>
 
   <dialog id="accessDialog" style="border:1px solid var(--border); border-radius:14px; padding:0; max-width:980px; width:calc(100vw - 36px);">
@@ -46,6 +58,11 @@
         <section>
           <h4>Current assignments</h4>
           <div id="assignmentsTable" style="overflow:auto;"></div>
+        </section>
+        <section>
+          <h4>Effective tenant/location access</h4>
+          <p class="text-muted">This shows direct tenant assignments plus access inherited from platform, organization, and business assignments.</p>
+          <div id="effectiveTenantsTable" style="overflow:auto;"></div>
         </section>
       </div>
     </form>

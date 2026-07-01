@@ -23,6 +23,10 @@ export async function init({ container, session }){
   els.accessRole = $('accessRole');
   els.accessActive = $('accessActive');
   els.btnSaveAccess = $('btnSaveAccess');
+  els.userSearchQuery = $('userSearchQuery');
+  els.btnUserSearch = $('btnUserSearch');
+  els.userSearchResults = $('userSearchResults');
+  els.effectiveTenantsTable = $('effectiveTenantsTable');
   const btnInvite = $('btnInvite');
   const btnRefresh = $('btnRefresh');
 
@@ -32,6 +36,10 @@ export async function init({ container, session }){
   // Proceed and show a friendly message only if the API returns 403.
 
   if (btnRefresh) btnRefresh.onclick = refresh;
+  if (els.btnUserSearch) els.btnUserSearch.onclick = searchUsers;
+  if (els.userSearchQuery) els.userSearchQuery.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter') { event.preventDefault(); searchUsers(); }
+  });
 
   // Initial load
   await refresh();
@@ -149,6 +157,7 @@ async function openAccessDialog(userId) {
     els.accessSubtitle.textContent = `${data.user?.email || ''} · Assign this user to organizations, businesses, and tenant locations.`;
     configureScopeOptions();
     renderAssignments(data.assignments || []);
+    renderEffectiveTenants(data.effective_tenants || []);
   } catch (e) {
     els.assignmentsTable.innerHTML = `<div class="banner banner--error">Unable to load assignments${e?.data?.error ? `: ${escapeHtml(e.data.error)}` : ''}.</div>`;
   }
@@ -240,4 +249,59 @@ async function removeAssignment(raw) {
 
 function labelRole(value) {
   return String(value || '').replace(/^platform_/, 'platform ').replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
+
+async function searchUsers() {
+  const q = els.userSearchQuery?.value?.trim() || '';
+  if (q.length < 2) {
+    els.userSearchResults.innerHTML = '<div class="muted">Enter at least 2 characters.</div>';
+    return;
+  }
+  els.userSearchResults.innerHTML = '<div class="muted">Searching…</div>';
+  try {
+    const data = await api(`/api/settings/users/search?q=${encodeURIComponent(q)}`);
+    renderUserSearchResults(data.users || []);
+  } catch (e) {
+    els.userSearchResults.innerHTML = `<div class="banner banner--error">Unable to search users${e?.data?.error ? `: ${escapeHtml(e.data.error)}` : ''}.</div>`;
+  }
+}
+
+function renderUserSearchResults(users) {
+  if (!users.length) {
+    els.userSearchResults.innerHTML = '<div class="muted">No users found. Try an exact email or login ID for users outside the current organization.</div>';
+    return;
+  }
+  els.userSearchResults.innerHTML = `
+    <table class="table">
+      <thead><tr><th>Name</th><th>Email</th><th>Login</th><th>Match</th><th></th></tr></thead>
+      <tbody>${users.map((u) => `
+        <tr>
+          <td>${escapeHtml(u.name)}</td>
+          <td>${escapeHtml(u.email)}</td>
+          <td>${escapeHtml(u.login_id)}</td>
+          <td>${escapeHtml(u.match_source || '')}</td>
+          <td><button class="btn btn-sm btn-primary" data-search-access="${escapeHtml(u.user_id)}">Access</button></td>
+        </tr>`).join('')}</tbody>
+    </table>`;
+  document.querySelectorAll('[data-search-access]').forEach((btn) => {
+    btn.onclick = () => openAccessDialog(btn.dataset.searchAccess || '');
+  });
+}
+
+function renderEffectiveTenants(rows) {
+  if (!els.effectiveTenantsTable) return;
+  if (!rows.length) {
+    els.effectiveTenantsTable.innerHTML = '<div class="muted">No active tenant/location access.</div>';
+    return;
+  }
+  els.effectiveTenantsTable.innerHTML = `
+    <table class="table">
+      <thead><tr><th>Tenant / Location</th><th>Access source</th></tr></thead>
+      <tbody>${rows.map((row) => `
+        <tr>
+          <td>${escapeHtml(row.tenant_name)}</td>
+          <td>${escapeHtml(row.access_source)}</td>
+        </tr>`).join('')}</tbody>
+    </table>`;
 }

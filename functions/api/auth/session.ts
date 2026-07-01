@@ -38,11 +38,32 @@ export const onRequestGet: PagesFunction = async ({ request, env }) => {
         active_tenant_id = null;
       } else {
         const validRows = await sql/*sql*/`
+          WITH accessible_tenants AS (
+            SELECT t.tenant_id
+            FROM app.tenants t
+            WHERE EXISTS (
+              SELECT 1 FROM app.platform_memberships pm
+              WHERE pm.user_id = ${user.user_id} AND pm.active = true
+            )
+            UNION
+            SELECT t.tenant_id
+            FROM app.organization_memberships om
+            JOIN app.businesses b ON b.organization_id = om.organization_id
+            JOIN app.tenants t ON t.business_id = b.business_id
+            WHERE om.user_id = ${user.user_id} AND om.active = true
+            UNION
+            SELECT t.tenant_id
+            FROM app.business_memberships bm
+            JOIN app.tenants t ON t.business_id = bm.business_id
+            WHERE bm.user_id = ${user.user_id} AND bm.active = true
+            UNION
+            SELECT m.tenant_id
+            FROM app.memberships m
+            WHERE m.user_id = ${user.user_id} AND m.active = true
+          )
           SELECT 1
-          FROM app.memberships
+          FROM accessible_tenants
           WHERE tenant_id = ${active_tenant_id}::uuid
-            AND user_id = ${user.user_id}
-            AND active = true
           LIMIT 1
         `;
         if (validRows.length === 0) {
@@ -56,10 +77,32 @@ export const onRequestGet: PagesFunction = async ({ request, env }) => {
 
     if (!active_tenant_id) {
       const rows = await sql/*sql*/`
+        WITH accessible_tenants AS (
+          SELECT t.tenant_id, t.created_at, 1 AS priority
+          FROM app.tenants t
+          WHERE EXISTS (
+            SELECT 1 FROM app.platform_memberships pm
+            WHERE pm.user_id = ${user.user_id} AND pm.active = true
+          )
+          UNION
+          SELECT t.tenant_id, t.created_at, 2 AS priority
+          FROM app.organization_memberships om
+          JOIN app.businesses b ON b.organization_id = om.organization_id
+          JOIN app.tenants t ON t.business_id = b.business_id
+          WHERE om.user_id = ${user.user_id} AND om.active = true
+          UNION
+          SELECT t.tenant_id, t.created_at, 3 AS priority
+          FROM app.business_memberships bm
+          JOIN app.tenants t ON t.business_id = bm.business_id
+          WHERE bm.user_id = ${user.user_id} AND bm.active = true
+          UNION
+          SELECT m.tenant_id, m.created_at, 4 AS priority
+          FROM app.memberships m
+          WHERE m.user_id = ${user.user_id} AND m.active = true
+        )
         SELECT tenant_id
-        FROM app.memberships
-        WHERE user_id = ${user.user_id} AND active = true
-        ORDER BY created_at DESC
+        FROM accessible_tenants
+        ORDER BY priority, created_at DESC
         LIMIT 1
       `;
       if (rows.length === 1) {
