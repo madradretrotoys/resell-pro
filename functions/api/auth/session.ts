@@ -124,7 +124,7 @@ async function accessibleTenantCheck(sql: any, userId: string, tenantId: string,
         SELECT t.tenant_id
         FROM app.platform_memberships pm
         JOIN app.tenants t ON true
-        WHERE pm.user_id = ${userId} AND pm.active = true
+        WHERE pm.user_id = ${userId} AND pm.active = true AND pm.role IN ('platform_owner', 'platform_admin')
         UNION
         SELECT t.tenant_id
         FROM app.organization_memberships om
@@ -161,7 +161,7 @@ async function accessibleTenantDefault(sql: any, userId: string, dbg: string[]) 
         SELECT t.tenant_id, t.created_at, 1 AS priority
         FROM app.platform_memberships pm
         JOIN app.tenants t ON true
-        WHERE pm.user_id = ${userId} AND pm.active = true
+        WHERE pm.user_id = ${userId} AND pm.active = true AND pm.role IN ('platform_owner', 'platform_admin')
         UNION
         SELECT t.tenant_id, t.created_at, 2 AS priority
         FROM app.organization_memberships om

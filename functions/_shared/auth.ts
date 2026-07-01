@@ -127,3 +127,64 @@ export function canManageEmployeeSchedules(actor: { role: string; can_settings?:
   if (!actor) return false;
   return actor.role === "owner" || actor.role === "admin" || actor.role === "manager" || !!actor.can_settings || !!actor.can_timekeeping;
 }
+
+export async function getEffectiveTenantActor(sql: Sql, tenant_id: string, actor_user_id: string) {
+  const rows = await sql<any[]>`
+    WITH candidates AS (
+      SELECT
+        CASE WHEN pm.role = 'platform_owner' THEN 'owner' ELSE 'admin' END AS role,
+        pm.active,
+        'platform'::text AS access_scope,
+        pm.role::text AS platform_role,
+        1 AS priority
+      FROM app.platform_memberships pm
+      WHERE pm.user_id = ${actor_user_id}
+        AND pm.active = true
+        AND pm.role IN ('platform_owner', 'platform_admin')
+      UNION ALL
+      SELECT om.role::text AS role, om.active, 'organization'::text AS access_scope, pm.role::text AS platform_role, 2 AS priority
+      FROM app.organization_memberships om
+      JOIN app.businesses b ON b.organization_id = om.organization_id
+      JOIN app.tenants t ON t.business_id = b.business_id
+      LEFT JOIN app.platform_memberships pm ON pm.user_id = om.user_id AND pm.active = true
+      WHERE om.user_id = ${actor_user_id} AND om.active = true AND t.tenant_id = ${tenant_id}::uuid
+      UNION ALL
+      SELECT bm.role::text AS role, bm.active, 'business'::text AS access_scope, pm.role::text AS platform_role, 3 AS priority
+      FROM app.business_memberships bm
+      JOIN app.tenants t ON t.business_id = bm.business_id
+      LEFT JOIN app.platform_memberships pm ON pm.user_id = bm.user_id AND pm.active = true
+      WHERE bm.user_id = ${actor_user_id} AND bm.active = true AND t.tenant_id = ${tenant_id}::uuid
+      UNION ALL
+      SELECT m.role::text AS role, m.active, 'tenant'::text AS access_scope, pm.role::text AS platform_role, 4 AS priority
+      FROM app.memberships m
+      LEFT JOIN app.platform_memberships pm ON pm.user_id = m.user_id AND pm.active = true
+      WHERE m.user_id = ${actor_user_id} AND m.active = true AND m.tenant_id = ${tenant_id}::uuid
+    )
+    SELECT
+      c.role,
+      c.active,
+      c.access_scope,
+      c.platform_role,
+      COALESCE(p.can_pos, false) AS can_pos,
+      COALESCE(p.can_cash_drawer, false) AS can_cash_drawer,
+      COALESCE(p.can_cash_payouts, false) AS can_cash_payouts,
+      COALESCE(p.can_item_research, false) AS can_item_research,
+      COALESCE(p.can_inventory, false) AS can_inventory,
+      COALESCE(p.can_inventory_intake, false) AS can_inventory_intake,
+      COALESCE(p.can_drop_off_form, false) AS can_drop_off_form,
+      COALESCE(p.can_estimates_buy_tickets, false) AS can_estimates_buy_tickets,
+      COALESCE(p.can_timekeeping, false) AS can_timekeeping,
+      COALESCE(p.clockin_required, false) AS clockin_required,
+      COALESCE(p.can_settings, false) AS can_settings,
+      COALESCE(p.can_add_tenant, false) AS can_add_tenant
+    FROM candidates c
+    LEFT JOIN app.permissions p ON p.user_id = ${actor_user_id}
+    ORDER BY c.priority
+    LIMIT 1
+  `;
+  return rows[0] || null;
+}
+
+export function isPlatformScopedActor(actor: { platform_role?: string | null } | null) {
+  return !!actor?.platform_role;
+}

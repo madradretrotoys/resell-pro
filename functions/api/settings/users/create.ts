@@ -128,16 +128,18 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
     const temp_password = String((body as any).temp_password || "").trim();
     const role = String((body as any).role || "clerk").trim().toLowerCase() as "owner" | "admin" | "manager" | "clerk";
     const assignment = (body as any).assignment || null;
+    const platformAssignment = (body as any).platform_assignment || null;
+    const assignments = [platformAssignment, assignment].filter(Boolean);
 
     if (!name || !email || !login_id) return json({ ok: false, error: "missing_required_fields" }, 400);
     if (!["owner", "admin", "manager", "clerk"].includes(role)) return json({ ok: false, error: "invalid_role" }, 400);
 
     if (!access.platform && !canAssignSettingsUserRole(actor, role)) return json({ ok: false, error: "insufficient_role" }, 403);
 
-    if (assignment) {
-      const assignmentScope = String(assignment.scope || "").trim().toLowerCase();
-      const assignmentEntityId = String(assignment.entity_id || "").trim();
-      const assignmentRole = String(assignment.role || "").trim().toLowerCase();
+    for (const requestedAssignment of assignments) {
+      const assignmentScope = String(requestedAssignment.scope || "").trim().toLowerCase();
+      const assignmentEntityId = String(requestedAssignment.entity_id || "").trim();
+      const assignmentRole = String(requestedAssignment.role || "").trim().toLowerCase();
       if (!SCOPES.includes(assignmentScope)) return json({ ok: false, error: "invalid_assignment_scope" }, 400);
       if (assignmentScope === "platform" ? !PLATFORM_ROLES.includes(assignmentRole) : !TENANT_ROLES.includes(assignmentRole)) {
         return json({ ok: false, error: "invalid_assignment_role" }, 400);
@@ -190,9 +192,11 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
       `;
       u = created as typeof u;
 
-      if (assignment) {
-        await applyInitialAssignment(sql, assignment, u.user_id);
-        await auditInitialAssignment(sql, auth.actor_user_id, tenant_id, assignment, u.user_id);
+      if (assignments.length > 0) {
+        for (const requestedAssignment of assignments) {
+          await applyInitialAssignment(sql, requestedAssignment, u.user_id);
+          await auditInitialAssignment(sql, auth.actor_user_id, tenant_id, requestedAssignment, u.user_id);
+        }
       } else {
         await sql/*sql*/`
           INSERT INTO app.memberships (tenant_id, user_id, role, active)

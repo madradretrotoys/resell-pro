@@ -20,7 +20,7 @@ export const onRequestGet: PagesFunction = async ({ request, env }) => {
         JOIN app.tenants t ON true
         LEFT JOIN app.businesses b ON b.business_id = t.business_id
         LEFT JOIN app.organizations o ON o.organization_id = b.organization_id
-        WHERE pm.user_id = ${auth.actor_user_id} AND pm.active = true
+        WHERE pm.user_id = ${auth.actor_user_id} AND pm.active = true AND pm.role IN ('platform_owner', 'platform_admin')
         UNION ALL
         SELECT t.tenant_id, t.name AS tenant_name, t.slug AS tenant_slug, t.business_id,
                b.name AS business_name, b.organization_id, o.name AS organization_name,

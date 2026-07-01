@@ -3,6 +3,7 @@
 // - Returns: { ok: true, items: [{ item_id, sku, product_short_title, price, qty, instore_loc, case_bin_shelf, image_url }] }
 
 import { neon } from "@neondatabase/serverless";
+import { getEffectiveTenantActor, isPlatformScopedActor } from "../../_shared/auth";
 
 type Role = "owner" | "admin" | "manager" | "clerk";
 
@@ -58,17 +59,14 @@ export const onRequestGet: PagesFunction = async ({ request, env }) => {
 
     const sql = neon(String(env.DATABASE_URL));
 
-    // AuthZ — same rule as intake
-    const actor = await sql<{ role: Role; active: boolean; can_inventory_intake: boolean | null }[]>`
-      SELECT m.role, m.active, COALESCE(p.can_inventory_intake, false) AS can_inventory_intake
-      FROM app.memberships m
-      LEFT JOIN app.permissions p ON p.user_id = m.user_id
-      WHERE m.tenant_id = ${tenant_id} AND m.user_id = ${actor_user_id}
-      LIMIT 1
-    `;
-     console.log("[pos.search] auth", actor[0] || null); 
-    if (actor.length === 0 || actor[0].active === false) return json({ ok: false, error: "forbidden" }, 403);
-    const allow = ["owner", "admin", "manager"].includes(actor[0].role) || !!actor[0].can_inventory_intake;
+    // AuthZ — direct tenant access or inherited organization/business/platform access.
+    // Platform/internal users still need explicit feature permissions.
+    const actor = await getEffectiveTenantActor(sql, tenant_id, actor_user_id);
+    console.log("[pos.search] auth", actor || null);
+    if (!actor || actor.active === false) return json({ ok: false, error: "forbidden" }, 403);
+    const allow = isPlatformScopedActor(actor)
+      ? (!!actor.can_pos || !!actor.can_inventory_intake)
+      : (["owner", "admin", "manager"].includes(actor.role) || !!actor.can_pos || !!actor.can_inventory_intake);
     if (!allow) return json({ ok: false, error: "forbidden" }, 403);
 
     // Params

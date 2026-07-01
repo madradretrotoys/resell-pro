@@ -55,7 +55,7 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
         SELECT t.tenant_id
         FROM app.platform_memberships pm
         JOIN app.tenants t ON true
-        WHERE pm.user_id = ${user_id} AND pm.active = true
+        WHERE pm.user_id = ${user_id} AND pm.active = true AND pm.role IN ('platform_owner', 'platform_admin')
         UNION
         SELECT t.tenant_id
         FROM app.organization_memberships om

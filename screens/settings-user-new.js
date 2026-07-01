@@ -39,13 +39,29 @@ async function loadAssignmentOptions() {
     const data = await api('/api/settings/users/assignment-options');
     assignmentOptions = data.options || {};
     $('assignment_scope').onchange = refreshAssignmentControls;
+    $('platform_enabled').onchange = refreshPlatformControls;
+    refreshPlatformControls();
     refreshAssignmentControls();
-    help.textContent = 'Select the initial organization, business, tenant, or platform assignment for this user.';
+    help.textContent = 'Select the initial customer organization, business, or tenant/location assignment for this user.';
   } catch (e) {
     assignmentOptions = null;
     help.textContent = 'Assignment options could not be loaded. The user will be created in the current tenant.';
-    ['assignment_scope', 'assignment_entity', 'assignment_role', 'assignment_active'].forEach((id) => { const el = $(id); if (el) el.disabled = true; });
+    ['platform_enabled', 'platform_role', 'assignment_scope', 'assignment_entity', 'assignment_role', 'assignment_active'].forEach((id) => { const el = $(id); if (el) el.disabled = true; });
   }
+}
+
+function refreshPlatformControls() {
+  const roles = assignmentOptions?.role_options_by_scope?.platform || [];
+  const enabled = $('platform_enabled').checked;
+  $('platform_role_wrap').hidden = !enabled;
+  $('platform_role_wrap').style.display = enabled ? '' : 'none';
+  $('platform_role').innerHTML = roles.length
+    ? roles.map((role) => `<option value="${escapeHtml(role)}">${escapeHtml(labelRole(role))}</option>`).join('')
+    : '<option value="">No platform roles available</option>';
+  $('platform_role').disabled = !enabled || roles.length === 0;
+  $('platform_help').textContent = enabled
+    ? 'Platform role identifies the user as internal Resell Pro staff. Customer visibility is still assigned separately.'
+    : 'Leave unchecked for customer-only users.';
 }
 
 function refreshAssignmentControls() {
@@ -68,9 +84,6 @@ function refreshAssignmentControls() {
     ? roles.map((role) => `<option value="${escapeHtml(role)}">${escapeHtml(labelRole(role))}</option>`).join('')
     : '<option value="">No roles available</option>';
 
-  const entityWrap = $('assignment_entity_wrap');
-  entityWrap.hidden = scope === 'platform';
-  entityWrap.style.display = scope === 'platform' ? 'none' : '';
   let entities = [];
   if (scope === 'organization') entities = options.organizations || [];
   if (scope === 'business') entities = options.businesses || [];
@@ -79,9 +92,9 @@ function refreshAssignmentControls() {
     ? entities.map((row) => `<option value="${escapeHtml(row.entity_id)}">${escapeHtml(row.entity_name)}</option>`).join('')
     : '<option value="">No choices available</option>';
 
-  const disabled = roles.length === 0 || (scope !== 'platform' && entities.length === 0);
+  const disabled = roles.length === 0 || entities.length === 0;
   $('assignment_role').disabled = disabled;
-  $('assignment_entity').disabled = scope === 'platform' || disabled;
+  $('assignment_entity').disabled = disabled;
 }
 
 function collect(){
@@ -98,12 +111,15 @@ function collect(){
 
   const assignment = collectAssignment();
   if (assignment === false) return null;
-  const role = deriveLegacyRole(assignment);
+  const platform_assignment = collectPlatformAssignment();
+  if (platform_assignment === false) return null;
+  const role = deriveLegacyRole(assignment, platform_assignment);
 
   return {
     name, email, login_id, role,
     temp_password: $('temp_password').value.trim() || null,
     assignment,
+    platform_assignment,
     permissions: {
       can_pos: $('can_pos').checked,
       can_cash_drawer: $('can_cash_drawer').checked,
@@ -126,14 +142,24 @@ function collect(){
   };
 }
 
+function collectPlatformAssignment() {
+  if (!assignmentOptions || !$('platform_enabled').checked) return null;
+  const role = $('platform_role').value;
+  if (!role) {
+    alert('Select a platform role or uncheck Internal platform user.');
+    return false;
+  }
+  return { scope: 'platform', entity_id: null, role, active: true };
+}
+
 function collectAssignment() {
   if (!assignmentOptions) return null;
   const scope = $('assignment_scope').value;
   const role = $('assignment_role').value;
-  const entity_id = scope === 'platform' ? null : $('assignment_entity').value;
+  const entity_id = $('assignment_entity').value;
   if (!scope || !role) return null;
-  if (scope !== 'platform' && !entity_id) {
-    alert('Select an organization, business, or tenant for the initial assignment.');
+  if (!entity_id) {
+    alert('Select an organization, business, or tenant for the customer access assignment.');
     return false;
   }
   return { scope, entity_id, role, active: $('assignment_active').checked };
@@ -149,8 +175,8 @@ function labelRole(value) {
   return String(value || '').replace(/^platform_/, 'platform ').replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
-function deriveLegacyRole(assignment) {
-  const role = String(assignment?.role || '').toLowerCase();
+function deriveLegacyRole(assignment, platformAssignment) {
+  const role = String(assignment?.role || platformAssignment?.role || '').toLowerCase();
   if (['owner', 'admin', 'manager', 'clerk'].includes(role)) return role;
   if (role === 'platform_owner') return 'owner';
   if (role === 'platform_admin' || role === 'platform_support') return 'admin';

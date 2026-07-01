@@ -1,6 +1,6 @@
 // functions/api/settings/users/list.ts
 import { neon } from "@neondatabase/serverless";
-import { canAccessSettingsUsers } from "../../../_shared/auth";
+import { canManageTenantSettings, getEffectiveTenantActor, isPlatformScopedActor } from "../../../_shared/auth";
 
 // Minimal JSON responder (pattern: admin/schema.ts)
 const json = (data: any, status = 200) =>
@@ -66,28 +66,21 @@ export const onRequestGet: PagesFunction = async ({ request, env }) => {
     // --- DB client ---
     const sql = neon(String(env.DATABASE_URL));
 
-    // --- Resolve actor's membership & permissions in this tenant ---
-    const actor = await sql<
-      { role: "owner" | "admin" | "manager" | "clerk"; active: boolean; can_settings: boolean | null }[]
-    >`
-      SELECT m.role, m.active, COALESCE(p.can_settings, false) AS can_settings
-      FROM app.memberships m
-      LEFT JOIN app.permissions p ON p.user_id = m.user_id
-      WHERE m.tenant_id = ${tenant_id} AND m.user_id = ${actor_user_id}
-      LIMIT 1
-    `;
-
-    if (actor.length === 0 || actor[0].active === false) {
+    // --- Resolve effective actor access for this tenant (direct or inherited) ---
+    const actor = await getEffectiveTenantActor(sql, tenant_id, actor_user_id);
+    if (!actor || actor.active === false) {
       return json({ ok: false, error: "forbidden" }, 403);
     }
 
-    // Server-side Users policy: owners can view everyone; admins can view
-    // managers/clerks except themselves; managers can view clerks; clerks cannot
-    // view the Users settings list even when they have general Settings access.
-    const role = actor[0].role;
-    if (!canAccessSettingsUsers(actor[0])) {
+    // Platform/internal users still need the explicit Settings permission;
+    // tenant users keep the existing owner/admin/manager/can_settings policy.
+    if (isPlatformScopedActor(actor) ? !actor.can_settings : !canManageTenantSettings(actor)) {
       return json({ ok: false, error: "forbidden" }, 403);
     }
+
+    // Server-side Users policy: owner-equivalent actors can view everyone; admins can view
+    // managers/clerks except themselves; managers can view clerks.
+    const role = actor.role;
 
     // --- List users in tenant with memberships + permissions ---
     const rows = await sql/*sql*/`
