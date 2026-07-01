@@ -27,6 +27,7 @@ export async function init({ container, session }){
   els.btnUserSearch = $('btnUserSearch');
   els.userSearchResults = $('userSearchResults');
   els.effectiveTenantsTable = $('effectiveTenantsTable');
+  els.accessBanner = $('accessBanner');
   const btnInvite = $('btnInvite');
   const btnRefresh = $('btnRefresh');
 
@@ -155,11 +156,13 @@ async function openAccessDialog(userId) {
     accessState.data = data;
     els.accessTitle.textContent = `Manage access · ${data.user?.name || 'User'}`;
     els.accessSubtitle.textContent = `${data.user?.email || ''} · Assign this user to organizations, businesses, and tenant locations.`;
+    clearAccessBanner();
     configureScopeOptions();
     renderAssignments(data.assignments || []);
     renderEffectiveTenants(data.effective_tenants || []);
   } catch (e) {
-    els.assignmentsTable.innerHTML = `<div class="banner banner--error">Unable to load assignments${e?.data?.error ? `: ${escapeHtml(e.data.error)}` : ''}.</div>`;
+    showAccessBanner(`Unable to load assignments${e?.data?.error ? `: ${escapeHtml(e.data.error)}` : ''}.`, 'error');
+    els.assignmentsTable.innerHTML = '<div class="muted">Assignments could not be loaded.</div>';
   }
 }
 
@@ -203,8 +206,9 @@ async function saveAssignment() {
       body: { user_id: accessState.userId, scope, entity_id, role: els.accessRole.value, active: els.accessActive.checked }
     });
     await openAccessDialog(accessState.userId);
+    showAccessBanner('Assignment saved.', 'success');
   } catch (e) {
-    alert(`Unable to save assignment${e?.data?.error ? `: ${e.data.error}` : ''}.`);
+    showAccessBanner(accessErrorMessage(e, 'Unable to save assignment.'), 'error');
   } finally {
     els.btnSaveAccess.disabled = false;
     els.btnSaveAccess.textContent = 'Save assignment';
@@ -242,8 +246,9 @@ async function removeAssignment(raw) {
       body: { user_id: accessState.userId, scope, entity_id: entity_id || null, role, remove: true }
     });
     await openAccessDialog(accessState.userId);
+    showAccessBanner('Assignment removed.', 'success');
   } catch (e) {
-    alert(`Unable to remove assignment${e?.data?.error ? `: ${e.data.error}` : ''}.`);
+    showAccessBanner(accessErrorMessage(e, 'Unable to remove assignment.'), 'error');
   }
 }
 
@@ -304,4 +309,28 @@ function renderEffectiveTenants(rows) {
           <td>${escapeHtml(row.access_source)}</td>
         </tr>`).join('')}</tbody>
     </table>`;
+}
+
+
+function showAccessBanner(message, type = 'info') {
+  if (!els.accessBanner) return;
+  els.accessBanner.hidden = false;
+  els.accessBanner.className = `banner banner--${type}`;
+  els.accessBanner.textContent = message;
+}
+
+function clearAccessBanner() {
+  if (!els.accessBanner) return;
+  els.accessBanner.hidden = true;
+  els.accessBanner.textContent = '';
+  els.accessBanner.className = 'banner';
+}
+
+function accessErrorMessage(error, fallback) {
+  const code = error?.data?.error || '';
+  if (code === 'last_platform_owner') return 'At least one active platform owner is required. Add another platform owner before changing this assignment.';
+  if (code === 'forbidden_scope') return 'You do not have permission to assign that scope.';
+  if (code === 'forbidden_platform') return 'Only platform owners/admins can manage platform assignments.';
+  if (code === 'invalid_role') return 'That role is not valid for the selected scope.';
+  return code ? `${fallback} (${code})` : fallback;
 }

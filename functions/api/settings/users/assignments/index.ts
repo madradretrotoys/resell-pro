@@ -23,6 +23,51 @@ async function canManageAccess(sql: ReturnType<typeof neon>, tenantId: string | 
   return { ok: !!tenantActor && tenantActor.active !== false && canManageTenantSettings(tenantActor), platform: false };
 }
 
+async function loadAssignment(sql: ReturnType<typeof neon>, scope: string, userId: string, entityId: string) {
+  if (scope === "platform") {
+    const [row] = await sql/*sql*/`SELECT role, active FROM app.platform_memberships WHERE user_id = ${userId} LIMIT 1`;
+    return row || null;
+  }
+  if (scope === "organization") {
+    const [row] = await sql/*sql*/`SELECT role, active FROM app.organization_memberships WHERE organization_id = ${entityId}::uuid AND user_id = ${userId} LIMIT 1`;
+    return row || null;
+  }
+  if (scope === "business") {
+    const [row] = await sql/*sql*/`SELECT role, active FROM app.business_memberships WHERE business_id = ${entityId}::uuid AND user_id = ${userId} LIMIT 1`;
+    return row || null;
+  }
+  if (scope === "tenant") {
+    const [row] = await sql/*sql*/`SELECT role::text AS role, active FROM app.memberships WHERE tenant_id = ${entityId}::uuid AND user_id = ${userId} LIMIT 1`;
+    return row || null;
+  }
+  return null;
+}
+
+async function wouldRemoveLastPlatformOwner(sql: ReturnType<typeof neon>, userId: string, role: string, active: boolean, remove: boolean) {
+  const [current] = await sql<{ role: string; active: boolean }[]>`
+    SELECT role, active
+    FROM app.platform_memberships
+    WHERE user_id = ${userId}
+    LIMIT 1
+  `;
+  if (!current || current.role !== "platform_owner" || current.active !== true) return false;
+  const wouldNoLongerBeOwner = remove || role !== "platform_owner" || active !== true;
+  if (!wouldNoLongerBeOwner) return false;
+  const [countRow] = await sql<{ count: string }[]>`
+    SELECT count(*)::text AS count
+    FROM app.platform_memberships
+    WHERE role = 'platform_owner' AND active = true
+  `;
+  return Number(countRow?.count || 0) <= 1;
+}
+
+async function writeAccessAudit(sql: ReturnType<typeof neon>, actorUserId: string, tenantId: string | null, meta: Record<string, any>) {
+  await sql/*sql*/`
+    INSERT INTO app.audit_log (tenant_id, user_id, action, meta)
+    VALUES (${tenantId || null}::uuid, ${actorUserId}, 'settings.users.assignment_change', ${JSON.stringify(meta)}::jsonb)
+  `;
+}
+
 export const onRequestGet: PagesFunction = async ({ request, env }) => {
   try {
     const auth = await requireSessionActor(request, env, json);
@@ -294,6 +339,12 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
     const [user] = await sql/*sql*/`SELECT user_id FROM app.users WHERE user_id = ${userId} LIMIT 1`;
     if (!user) return json({ ok: false, error: "user_not_found" }, 404);
 
+    if (scope === "platform" && await wouldRemoveLastPlatformOwner(sql, userId, role, active, remove)) {
+      return json({ ok: false, error: "last_platform_owner" }, 409);
+    }
+
+    const beforeAssignment = await loadAssignment(sql, scope, userId, entityId);
+
     if (scope === "platform") {
       if (remove) await sql/*sql*/`DELETE FROM app.platform_memberships WHERE user_id = ${userId}`;
       else await sql/*sql*/`
@@ -323,6 +374,18 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
         ON CONFLICT (tenant_id, user_id) DO UPDATE SET role = EXCLUDED.role, active = EXCLUDED.active
       `;
     }
+
+    const afterAssignment = await loadAssignment(sql, scope, userId, entityId);
+    await writeAccessAudit(sql, auth.actor_user_id, tenantId, {
+      target_user_id: userId,
+      scope,
+      entity_id: scope === "platform" ? null : entityId,
+      requested_role: role,
+      requested_active: active,
+      removed: remove,
+      before: beforeAssignment,
+      after: afterAssignment,
+    });
 
     return json({ ok: true });
   } catch (e: any) {
