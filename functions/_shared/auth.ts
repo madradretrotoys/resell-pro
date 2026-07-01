@@ -60,6 +60,22 @@ export async function getTenantActor(sql: Sql, tenant_id: string, actor_user_id:
   return rows[0] || null;
 }
 
+
+export async function getPlatformActor(sql: Sql, actor_user_id: string) {
+  const rows = await sql<{ role: string; active: boolean }[]>`
+    SELECT role, active
+    FROM app.platform_memberships
+    WHERE user_id = ${actor_user_id}
+    LIMIT 1
+  `;
+  return rows[0] || null;
+}
+
+export function canManagePlatform(actor: { role: string; active?: boolean } | null) {
+  if (!actor || actor.active === false) return false;
+  return actor.role === "platform_owner" || actor.role === "platform_admin";
+}
+
 export function canManageTenantSettings(actor: { role: string; can_settings: boolean } | null) {
   if (!actor) return false;
   return actor.role === "owner" || actor.role === "admin" || actor.role === "manager" || !!actor.can_settings;

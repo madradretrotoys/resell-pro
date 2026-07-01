@@ -1,7 +1,6 @@
-
 <section class="tile">
-  <h2>Users</h2>
-  <p class="text-muted">Manage users in this tenant. Only authorized roles can add users.</p>
+  <h2>Users & Access</h2>
+  <p class="text-muted">Manage tenant users and assign existing users to organizations, businesses, or tenant locations.</p>
 
   <div class="flex" style="gap:10px; flex-wrap:wrap; margin:10px 0 16px;">
     <button id="btnRefresh" class="btn btn--neutral btn--sm">Refresh</button>
@@ -10,5 +9,45 @@
   </div>
 
   <div id="usersTable" class="tile" style="overflow:auto; min-height:48px;"></div>
-</section>
 
+  <dialog id="accessDialog" style="border:1px solid var(--border); border-radius:14px; padding:0; max-width:980px; width:calc(100vw - 36px);">
+    <form method="dialog" style="margin:0;">
+      <div style="display:flex; justify-content:space-between; gap:12px; align-items:flex-start; padding:16px 18px; border-bottom:1px solid var(--border);">
+        <div>
+          <h3 id="accessTitle" style="margin:0 0 4px;">Manage access</h3>
+          <p id="accessSubtitle" class="text-muted" style="margin:0;">Add organization, business, and tenant assignments.</p>
+        </div>
+        <button class="btn btn--ghost btn--sm" value="cancel" aria-label="Close">Close</button>
+      </div>
+      <div style="padding:16px 18px; display:grid; gap:16px;">
+        <section class="tile" style="margin:0;">
+          <h4 style="margin-top:0;">Add or update assignment</h4>
+          <div style="display:grid; grid-template-columns:repeat(auto-fit,minmax(180px,1fr)); gap:10px; align-items:end;">
+            <label>Scope
+              <select id="accessScope">
+                <option value="organization">Organization</option>
+                <option value="business">Business</option>
+                <option value="tenant">Tenant / Location</option>
+                <option value="platform">Platform</option>
+              </select>
+            </label>
+            <label id="accessEntityWrap">Organization / Business / Tenant
+              <select id="accessEntity"></select>
+            </label>
+            <label>Role
+              <select id="accessRole"></select>
+            </label>
+            <label style="display:flex; gap:8px; align-items:center; min-height:42px;">
+              <input id="accessActive" type="checkbox" checked> Active
+            </label>
+            <button id="btnSaveAccess" class="btn btn--primary btn--sm" type="button">Save assignment</button>
+          </div>
+        </section>
+        <section>
+          <h4>Current assignments</h4>
+          <div id="assignmentsTable" style="overflow:auto;"></div>
+        </section>
+      </div>
+    </form>
+  </dialog>
+</section>
